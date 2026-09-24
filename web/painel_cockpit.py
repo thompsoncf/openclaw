@@ -6590,7 +6590,10 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
                f"<div class=d>{k['ganhos']} negócio(s) · {conv} de conversão</div></div>"
              + f"<div class=kpi><div class=v>{k['novos']}</div><div class=l>Leads novos</div>"
                "<div class=d>no período</div></div>"
-             + f"<div class=kpi><div class=v>{k['com_ia'] + k['com_vend']}</div><div class=l>Em atendimento</div>"
+             # "Em atendimento" dizia 423 na Prime — a carteira aberta inteira, com
+             # lead que ninguém encosta há semanas dentro. O número é útil; a
+             # palavra é que prometia atendimento acontecendo.
+             + f"<div class=kpi><div class=v>{k['com_ia'] + k['com_vend']}</div><div class=l>Na carteira</div>"
                f"<div class=d>{k['com_ia']} c/ IA · {k['com_vend']} c/ vendedor</div></div></div>"
              + "<div class=eyebrow>Funil do time</div>"
              + f"<div class=bloco><div class=card>{funil}</div></div>"

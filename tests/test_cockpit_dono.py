@@ -19,6 +19,9 @@ from tests.test_cockpit import _BASE_SQL
 _SQL = _BASE_SQL + """
 create table orcamentos (id bigserial primary key, conta_id bigint, empresa text, criado_por text,
   canal text, status text, setup_centavos bigint default 0, mensal_centavos bigint default 0,
+  -- o valor que vira TÍTULO (`coalesce(primeiro_ano, setup)`): é ele que o placar
+  -- e o "fechado no período" somam desde 24/09/2026
+  primeiro_ano_centavos bigint,
   criado_em timestamptz default now());
 """
 
@@ -179,3 +182,134 @@ def test_reatribuir_e_pausar(pool):
     cd.pausar(pool, conta, v1, False)
     with pool.connection() as c:
         assert c.execute("select cockpit_pausado from membros where id=%s", (v1,)).fetchone()[0] is False
+
+
+# ------------------------------------------------------- o dinheiro que o gestor lê
+# Medido na Prime em 24/09/2026: o cockpit do gestor dizia "Fechado no período:
+# R$ 0" com OITO contratos assinados na semana. Ele somava
+# `prospeccao.valor_estimado_centavos` — o palpite que o vendedor digita na ficha,
+# zerado na base inteira (a mesma razão pela qual o relatório de leads e o portal
+# não mostram total). Os oito tinham orçamento fechado e títulos gerados, somando
+# R$ 55.490 pela fórmula que gera os títulos.
+
+def _ganho_com_orcamento(c, conta, vend, *, primeiro_ano=750000, setup=1205000, estimado=0):
+    o = c.execute("insert into orcamentos (conta_id,empresa,status,setup_centavos,primeiro_ano_centavos) "
+                  "values (%s,'Casamento','fechado',%s,%s) returning id",
+                  (conta, setup, primeiro_ano)).fetchone()[0]
+    lid = c.execute("insert into prospeccao (conta_id,vendedor_id,empresa,status,estagio,"
+                    "valor_estimado_centavos,orcamento_id) "
+                    "values (%s,%s,'Casamento','ganho','lead',%s,%s) returning id",
+                    (conta, vend, estimado, o)).fetchone()[0]
+    c.commit()
+    return lid, o
+
+
+def test_o_fechado_vem_do_ORCAMENTO_e_nao_do_palpite(pool):
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Dinheiro")
+        # zera o palpite do seed pra sobrar só o contrato de verdade
+        c.execute("update prospeccao set valor_estimado_centavos=0 where conta_id=%s", (conta,))
+        _ganho_com_orcamento(c, conta, v1)
+    v = cd.visao(pool, conta, "mes")
+    assert v["kpis"]["ganhos"] == 2
+    carlos = next(x for x in cd.placar(pool, conta) if x["nome"] == "Carlos")
+    # 7.500 do primeiro ano (o que vira título), e não os 12.050 do setup nem R$ 0
+    assert carlos["rs_centavos"] == 750000, carlos
+    assert v["kpis"]["ganhos_rs"] != "R$ 0"
+
+
+def test_sem_orcamento_o_palpite_ainda_vale(pool):
+    """Conta que trabalha sem orçamento não pode perder o número que tinha."""
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Palpite")
+    carlos = next(x for x in cd.placar(pool, conta) if x["nome"] == "Carlos")
+    assert carlos["rs_centavos"] == 800000      # o valor_estimado do seed
+
+
+def test_o_orcamento_sem_primeiro_ano_cai_no_setup(pool):
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Setup")
+        c.execute("update prospeccao set valor_estimado_centavos=0 where conta_id=%s", (conta,))
+        _ganho_com_orcamento(c, conta, v1, primeiro_ano=None, setup=1205000)
+    carlos = next(x for x in cd.placar(pool, conta) if x["nome"] == "Carlos")
+    assert carlos["rs_centavos"] == 1205000
+
+
+# ------------------------------------------------------- o funil com o nome da conta
+
+def _funil_da_prime(c, conta):
+    for chave, rot, ordem in [("novo", "Novo", 0), ("contatado", "Contatado", 10),
+                              ("qualificado", "Agendado Visita", 30),
+                              ("proposta", "Negociação", 50),
+                              ("evento_realizado", "ORCAMENTO ASSINADO", 70),
+                              ("ganho", "CONTRATO ASSINADO", 900),
+                              ("perdido", "Perdido", 910)]:
+        c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem, fase) values (%s,%s,%s,%s,%s)",
+                  (conta, chave, rot, ordem, "fechamento" if chave in ("ganho", "perdido") else "venda"))
+    c.commit()
+
+
+def test_o_funil_do_time_usa_as_etapas_DA_CONTA(pool):
+    """O mesmo defeito que a aba Leads corrigiu em 17/09/2026 continuava aqui, na
+    tela de cima: quatro chaves fixas com os rótulos de fábrica."""
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Funil")
+        _funil_da_prime(c, conta)
+    rot = [f["rotulo"] for f in cd.visao(pool, conta, "mes")["funil"]]
+    assert rot == ["Novo", "Contatado", "Agendado Visita", "Negociação", "ORCAMENTO ASSINADO"], rot
+    # ganho e perdido não são etapa de funil aberto
+    assert "CONTRATO ASSINADO" not in rot and "Perdido" not in rot
+
+
+def test_conta_sem_funil_cadastrado_nao_fica_sem_tela(pool):
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "SemFunil")
+    rot = [f["rotulo"] for f in cd.visao(pool, conta, "mes")["funil"]]
+    assert rot == ["Novo", "Contatado", "Qualificado", "Proposta"]
+
+
+# ------------------------------------------------------- parados: o que é "contato"
+
+def test_parados_olha_a_CONVERSA_e_nao_so_o_campo(pool):
+    """`ultimo_contato_em` só é escrito por quem move o lead na mão no painel — na
+    Prime, 34 dos 423 leads abertos. "Parados há +3 dias" virava "cadastrados há
+    mais de 3 dias": 363 leads, 118 deles com mensagem nossa nos últimos 3 dias."""
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Parados")
+        c.execute("update prospeccao set criado_em=now() - interval '10 days', ultimo_contato_em=null "
+                  "where conta_id=%s", (conta,))
+        c.commit()
+        assert cd.visao(pool, conta, "mes")["atencao"]["parados"] == 2, "os dois abertos estão parados"
+        # falamos com um deles ontem, pelo WhatsApp da empresa
+        cv = c.execute("select id from conversas where prospeccao_id=%s", (ab,)).fetchone()[0]
+        c.execute("insert into mensagens (conversa_id, direcao, criado_em) values (%s,'out',now() - interval '1 day')",
+                  (cv,))
+        c.commit()
+    assert cd.visao(pool, conta, "mes")["atencao"]["parados"] == 1
+
+
+def test_quente_que_recebeu_mensagem_hoje_sai_do_alerta(pool):
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Quentes")
+        c.execute("update prospeccao set criado_em=now() - interval '10 days', ultimo_contato_em=null "
+                  "where conta_id=%s", (conta,))
+        cv = c.execute("insert into conversas (conta_id,prospeccao_id) values (%s,%s) returning id",
+                       (conta, an)).fetchone()[0]
+        c.commit()
+        assert cd.visao(pool, conta, "mes")["atencao"]["quentes"] == 1
+        c.execute("insert into mensagens (conversa_id, direcao) values (%s,'out')", (cv,))
+        c.commit()
+    assert cd.visao(pool, conta, "mes")["atencao"]["quentes"] == 0
+
+
+def test_a_mensagem_que_ENTROU_nao_apaga_o_parado(pool):
+    """Cliente que escreve e não é respondido continua parado — senão o alerta some
+    justamente quando alguém está esperando."""
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "SoEntrada")
+        c.execute("update prospeccao set criado_em=now() - interval '10 days', ultimo_contato_em=null "
+                  "where conta_id=%s", (conta,))
+        cv = c.execute("select id from conversas where prospeccao_id=%s", (ab,)).fetchone()[0]
+        c.execute("insert into mensagens (conversa_id, direcao) values (%s,'in')", (cv,))
+        c.commit()
+    assert cd.visao(pool, conta, "mes")["atencao"]["parados"] == 2

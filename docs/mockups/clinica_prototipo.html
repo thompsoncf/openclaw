@@ -16,6 +16,7 @@
   --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --pag:1180px;
+  --faixa:34px; /* altura fixa da faixa do protótipo: menu, main, gaveta e modal começam abaixo dela */
   --card:var(--surface);--card-2:var(--bg-2);--borda:var(--line);--txt:var(--text);--txt-mut:var(--text-dim);--verde:var(--neon);
 }
 *{box-sizing:border-box}
@@ -25,27 +26,47 @@ button{font:inherit;cursor:pointer}
 a{color:inherit}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
-/* ---------- faixa do protótipo ---------- */
-.proto{position:fixed;top:0;left:0;right:0;z-index:90;background:#241C0F;border-bottom:1px solid var(--ambar-borda);color:#F4D29A;font-size:.74rem;padding:.3rem .8rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+/* ---------- faixa do protótipo: sempre UMA linha, altura --faixa ---------- */
+.proto{position:fixed;top:0;left:0;right:0;height:var(--faixa);z-index:90;background:#241C0F;border-bottom:1px solid var(--ambar-borda);color:#F4D29A;font-size:.74rem;padding:0 .8rem;display:flex;gap:.5rem;align-items:center;white-space:nowrap}
 .proto b{color:#FFE7B8}
-.proto .tour{margin-left:auto;display:flex;gap:.3rem;flex-wrap:wrap}
-.proto .tour button{background:#3A2C12;border:1px solid var(--ambar-borda);color:#F4D29A;border-radius:99px;padding:.1rem .55rem;font-size:.7rem}
+.proto .pf-tit{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.proto .pf-ctl{margin-left:auto;display:flex;gap:.4rem;align-items:center;flex:0 0 auto}
+.proto button{background:#3A2C12;border:1px solid var(--ambar-borda);color:#F4D29A;border-radius:99px;padding:.12rem .6rem;font-size:.7rem;line-height:1.45}
+.proto button.on{background:var(--ambar);border-color:var(--ambar);color:#1d1406;font-weight:700}
+.proto .pf-seg{display:inline-flex;border:1px solid var(--ambar-borda);border-radius:99px;overflow:hidden;background:#3A2C12}
+.proto .pf-seg button{border:0;border-radius:0;background:none}
+.proto .pf-seg button.on{background:var(--ambar);color:#1d1406}
+.pf-curto{display:none}
+.demo-pan{display:none;position:fixed;top:calc(var(--faixa) + 4px);right:8px;z-index:94;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - var(--faixa) - 16px);overflow-y:auto;background:var(--card);border:1px solid var(--ambar-borda);border-radius:12px;padding:.45rem;box-shadow:0 14px 36px rgba(0,0,0,.55)}
+.demo-pan.on{display:block}
+.demo-pan .dp-h{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:#F4D29A;padding:.3rem .45rem .4rem}
+.demo-pan .dp-i{display:grid;grid-template-columns:24px 1fr;gap:.55rem;align-items:start;width:100%;text-align:left;background:none;border:0;border-radius:8px;color:var(--txt);padding:.42rem .45rem;font-size:.84rem}
+.demo-pan .dp-i:hover{background:var(--card-2)}
+.demo-pan .dp-i.on{background:var(--ambar-fundo)}
+.demo-pan .dp-i small{display:block;color:var(--txt-mut);font-size:.72rem;margin-top:1px}
+.demo-pan .dp-n{width:22px;height:22px;border-radius:50%;border:1px solid var(--ambar-borda);color:#F4D29A;font-family:var(--mono);font-size:.7rem;display:flex;align-items:center;justify-content:center}
+.demo-pan .dp-pe{border-top:1px solid var(--borda);margin-top:.35rem;padding:.5rem .45rem .2rem;font-size:.72rem;color:var(--txt-mut);line-height:1.45}
+/* modo apresentação: some tudo que é nota de desenvolvedor */
+body.apresenta .dev{display:none!important}
 
 /* ---------- menu lateral (cópia do painel) ---------- */
-.side{position:fixed;left:0;top:28px;bottom:0;width:216px;background:var(--card);border-right:1px solid var(--borda);padding:1rem .7rem;overflow-y:auto;z-index:40;display:flex;flex-direction:column}
+.side{position:fixed;left:0;top:var(--faixa);bottom:0;width:216px;background:var(--card);border-right:1px solid var(--borda);padding:1rem .7rem;overflow-y:auto;z-index:40;display:flex;flex-direction:column}
 .side-logo{font-weight:600;color:var(--txt);font-size:1.1rem;padding:.2rem .6rem .3rem;display:flex;align-items:center;gap:.5rem;font-family:var(--display)}
 .side-conta{font-size:.72rem;color:var(--txt-mut);padding:0 .6rem .7rem;line-height:1.3}
 .side-grp{font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#6a6a66;padding:.7rem .6rem .25rem}
+button.side-grp{display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:0;text-align:left;font-family:inherit;border-radius:6px}
+button.side-grp:hover{color:var(--txt-mut)}
 .nav-i{display:flex;align-items:center;gap:.65rem;padding:.5rem .6rem;border-radius:8px;color:var(--txt-mut);text-decoration:none;font-size:.88rem;cursor:pointer;border:0;background:none;width:100%;text-align:left}
 .nav-i:hover{background:var(--card-2);color:var(--txt)}
 .nav-i.on{background:rgba(29,158,117,.16);color:var(--neon)}
 .nav-ic{width:19px;height:19px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nav-i>span:nth-child(2){flex:1;min-width:0}
 .nav-i .novo{margin-left:auto;font-size:.56rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--sobre-verde);background:var(--neon);border-radius:99px;padding:1px 6px}
 .nav-i .nvb{margin-left:auto;background:var(--neon);color:var(--sobre-verde);border-radius:999px;min-width:18px;height:18px;padding:0 5px;font-size:.7rem;font-weight:600;display:inline-flex;align-items:center;justify-content:center}
 .nav-i .nvb.amb{background:var(--ambar)}
 
 /* ---------- área ---------- */
-main{padding:46px 22px 60px 238px;max-width:calc(var(--pag) + 260px)}
+main{padding:calc(var(--faixa) + 16px) 22px 60px 238px;max-width:calc(var(--pag) + 260px)}
 .pg-h{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin:0 0 1rem}
 .pg-h h1{font-size:1.45rem;font-weight:600;margin:0}
 .pg-h .sub{color:var(--txt-mut);font-size:.84rem;margin-top:.15rem}
@@ -100,8 +121,15 @@ main{padding:46px 22px 60px 238px;max-width:calc(var(--pag) + 260px)}
 .ag-top{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem}
 .ag-top .dia{font-family:var(--display);font-size:1.05rem;font-weight:600;margin:0 .4rem}
 .ag-leg{display:flex;gap:.7rem;flex-wrap:wrap;font-size:.72rem;color:var(--txt-mut);margin:.2rem 0 .7rem}
-.ag{display:grid;grid-template-columns:56px repeat(3,minmax(180px,1fr));border:1px solid var(--borda);border-radius:12px;overflow:hidden;background:var(--card-2)}
-.ag .h{background:var(--card);padding:.5rem .6rem;border-left:1px solid var(--borda);border-bottom:1px solid var(--borda);font-weight:600;font-size:.84rem;position:sticky;top:28px;z-index:2}
+/* a moldura (borda, canto, fundo) fica no .ag-rolo, que rola na horizontal;
+   o .ag não corta nada (sem overflow:hidden), então a semana rola dentro dele */
+.ag-rolo{overflow-x:auto;border:1px solid var(--borda);border-radius:12px;background:var(--card-2);-webkit-overflow-scrolling:touch}
+.ag{display:grid;grid-template-columns:56px repeat(3,minmax(180px,1fr));min-width:min-content}
+.ag .h{background:var(--card);padding:.5rem .6rem;border-left:1px solid var(--borda);border-bottom:1px solid var(--borda);font-weight:600;font-size:.84rem}
+.ag-abas{display:none}
+.ag-abas button{flex:1 1 0;min-width:0;background:var(--card-2);border:1px solid var(--borda);border-radius:10px;color:var(--txt-mut);padding:.4rem .5rem;font-size:.8rem;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ag-abas button.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--txt);font-weight:600}
+.ag-abas small{display:block;font-size:.66rem;color:var(--txt-mut);font-weight:400}
 .ag .h small{display:block;font-weight:400;color:var(--txt-mut);font-size:.7rem}
 .ag .h .oc{float:right;font-family:var(--mono);font-size:.72rem;color:var(--neon)}
 .ag .hr{font-family:var(--mono);font-size:.68rem;color:var(--text-faint);padding:.25rem .4rem;border-bottom:1px solid #16201b;height:44px}
@@ -126,9 +154,11 @@ main{padding:46px 22px 60px 238px;max-width:calc(var(--pag) + 260px)}
 /* ---------- gaveta ---------- */
 .veu{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;display:none}
 .veu.on{display:block}
-.gav{position:fixed;top:28px;right:0;bottom:0;width:min(440px,100%);background:var(--card);border-left:1px solid var(--borda);z-index:81;transform:translateX(100%);transition:transform .22s;overflow-y:auto;padding:1rem 1.1rem 2rem}
+.gav{position:fixed;top:var(--faixa);right:0;bottom:0;width:min(440px,100%);background:var(--card);border-left:1px solid var(--borda);z-index:81;transform:translateX(100%);transition:transform .22s;overflow-y:auto;padding:1rem 1.1rem 2rem}
 .gav.on{transform:none}
-.gav .fechar{float:right;background:none;border:0;color:var(--txt-mut);font-size:1.2rem}
+/* ✕ da gaveta e do modal: fica grudado no topo ao rolar, com área de toque de 38px */
+.gav .fechar,.modal .fechar{position:sticky;top:0;float:right;z-index:3;width:38px;height:38px;margin:-.4rem -.5rem .3rem .6rem;border-radius:50%;background:var(--card-2);border:1px solid var(--borda);color:var(--txt);font-size:1rem;line-height:1;display:flex;align-items:center;justify-content:center}
+.gav .fechar:hover,.modal .fechar:hover{border-color:var(--neon-borda)}
 .gav h2{font-size:1.15rem;margin:.1rem 0 .15rem}
 .gav .sec{border-top:1px solid var(--borda);margin-top:.8rem;padding-top:.8rem}
 .gav .sec h4{margin:0 0 .45rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-family:var(--body);font-weight:600}
@@ -195,22 +225,40 @@ main{padding:46px 22px 60px 238px;max-width:calc(var(--pag) + 260px)}
 @keyframes sobe{from{transform:translateY(10px);opacity:0}}
 
 /* ---------- modal ---------- */
-.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.97);width:min(560px,94vw);max-height:88vh;overflow-y:auto;background:var(--card);border:1px solid var(--borda);border-radius:16px;padding:1.1rem 1.2rem;z-index:82;display:none}
+.modal{position:fixed;left:50%;top:calc(50% + var(--faixa) / 2);transform:translate(-50%,-50%) scale(.97);width:min(560px,94vw);max-height:calc(100vh - var(--faixa) - 24px);max-height:calc(100dvh - var(--faixa) - 24px);overflow-y:auto;background:var(--card);border:1px solid var(--borda);border-radius:16px;padding:1.1rem 1.2rem;z-index:82;display:none}
 .modal.on{display:block;transform:translate(-50%,-50%)}
 .modal h2{margin:0 0 .2rem;font-size:1.15rem}
 
+/* barra de baixo do celular: a regra base vem ANTES da media query, senão o display:none vence */
+.mobnav{display:none;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--borda);z-index:60;padding-bottom:env(safe-area-inset-bottom,0px)}
+.mobnav button{flex:1 1 0;min-width:0;background:none;border:0;color:var(--txt-mut);font-size:.64rem;padding:.45rem .1rem;display:flex;flex-direction:column;align-items:center;gap:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mobnav button.on{color:var(--neon)}
+
 @media (max-width:900px){
   .side{display:none}
-  main{padding:44px 12px 60px}
+  body.menu-on .side{display:flex;z-index:85;width:min(290px,86vw);box-shadow:10px 0 36px rgba(0,0,0,.55)}
+  main{padding:calc(var(--faixa) + 12px) 12px calc(76px + env(safe-area-inset-bottom,0px))}
   .kpis{grid-template-columns:repeat(2,1fr)}
   .grid2,.grid3{grid-template-columns:1fr}
   .cid{grid-template-columns:1fr auto}
   .cid .bar,.cid .mb{display:none}
   .mobnav{display:flex}
+  /* faixa: só ícone + controles curtos; o roteiro abre num painel */
+  .proto{padding:0 .5rem;gap:.35rem}
+  .proto .pf-ctl{gap:.3rem}
+  .pf-longo,.pf-prox{display:none}
+  .pf-curto{display:inline}
+  /* gaveta deixa uma faixa do véu à esquerda para fechar tocando fora */
+  .gav{width:calc(100% - 36px)}
+  .toasts{left:12px;right:12px;bottom:calc(66px + env(safe-area-inset-bottom,0px));max-width:none}
+  /* agenda do dia: um profissional por vez, escolhido nas abas */
+  .ag-abas{display:flex;gap:.35rem;margin-bottom:.6rem}
+  .ag.ag-dia{grid-template-columns:48px minmax(0,1fr)!important}
+  .ag.ag-dia .fora-mob{display:none}
+  /* tabela larga rola dentro dela mesma, não a página */
+  .tb{display:block;overflow-x:auto;max-width:100%}
 }
-.mobnav{display:none;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--borda);z-index:60;overflow-x:auto}
-.mobnav button{flex:1;background:none;border:0;color:var(--txt-mut);font-size:.62rem;padding:.45rem .3rem;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:64px}
-.mobnav button.on{color:var(--neon)}
+@media (max-width:420px){.pf-curto.pf-sem-texto{display:none}}
 
 /* ---------- ficha do paciente ---------- */
 .pc-top{display:grid;grid-template-columns:64px 1fr auto;gap:1rem;align-items:center;margin-bottom:.8rem}
@@ -351,20 +399,16 @@ main{padding:46px 22px 60px 238px;max-width:calc(var(--pag) + 260px)}
 <symbol id="ic-pacote" viewBox="0 0 24 24"><rect x="3.5" y="7" width="17" height="13" rx="2"/><path d="M3.5 11h17M12 7v13M8 7c-2-3 2-5 4 0M16 7c2-3-2-5-4 0"/></symbol>
 <symbol id="ic-medico" viewBox="0 0 24 24"><circle cx="12" cy="7" r="3.5"/><path d="M5 21c0-4 3-6.5 7-6.5s7 2.5 7 6.5"/><path d="M12 14.5v3M10.5 16h3"/></symbol>
 <symbol id="ic-zap" viewBox="0 0 24 24"><path d="M4 20l1.3-3.8A8 8 0 1112 20a8 8 0 01-3.9-1z"/></symbol>
+<symbol id="ic-hoje" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></symbol>
+<symbol id="ic-raiox" viewBox="0 0 24 24"><path d="M4 8.5V5.5a1.5 1.5 0 011.5-1.5h3M15.5 4h3A1.5 1.5 0 0120 5.5v3M20 15.5v3a1.5 1.5 0 01-1.5 1.5h-3M8.5 20h-3A1.5 1.5 0 014 18.5v-3"/><path d="M7 12h2.4l1.4-3 2.4 6 1.4-3H17"/></symbol>
+<symbol id="ic-ajustes" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></symbol>
+<symbol id="ic-equipe" viewBox="0 0 24 24"><rect x="4.5" y="3" width="15" height="18" rx="2"/><circle cx="12" cy="10.5" r="2.6"/><path d="M8 17.5c.6-2 2.1-3 4-3s3.4 1 4 3M10 6h4"/></symbol>
+<symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16"/></symbol>
 </defs></svg>
 
-<div class="proto"><span>🧪 <b>Protótipo</b> da clínica no Zaq · dados fictícios · nada é salvo</span>
-  <span class="tour"><span style="opacity:.8">Roteiro de demonstração:</span>
-    <button onclick="ir('conversas')">0 · Conversas</button>
-    <button onclick="ir('agenda')">1 · Agenda</button>
-    <button onclick="ir('funil')">2 · Funil</button>
-    <button onclick="ir('roteiro')">3 · Roteiro</button>
-    <button onclick="ir('vagas')">4 · Vagas</button>
-    <button onclick="ir('pacientes')">5 · Pacientes</button>
-    <button onclick="ir('planos')">6 · Planos</button>
-    <button onclick="ir('raiox')">7 · Raio-X</button>
-    <button onclick="ir('config')">8 · Configurar</button>
-  </span></div>
+<!-- faixa do protótipo: o conteúdo é montado por faixa() (papel, modo apresentação, roteiro) -->
+<div class="proto" id="faixa"><span class="pf-tit">🧪 <b>Protótipo</b> da clínica no Zaq · nada é salvo nem enviado</span></div>
+<div class="demo-pan" id="demoPan" role="menu" aria-label="Roteiro de demonstração"></div>
 
 <nav class="side" id="side"></nav>
 <main id="main"></main>
@@ -419,7 +463,7 @@ let EV = [
 let FUNIL = {
   'Novo':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s','g']]},{n:'Tiago Reis',s:'Indicação da Carla',t:[['parado desde ontem','r']]},{n:'Fernanda Luz',s:'Google · depilação a laser',t:[['Codó · fila da cidade','b']]}],
   'Recebeu o preço':[{n:'Sônia Pires',s:'Consulta · R$ 500 · há 1 dia',t:[['lembrete com horários hoje 10h','a']]},{n:'Renata Dias',s:'Consulta · R$ 500 · há 6 dias',t:[['sem resposta','r'],['2º toque enviado','']]},{n:'Márcio Luz',s:'Consulta · R$ 500 · há 13 dias',t:[['nunca chamado de novo','r']]},{n:'Joice Prado',s:'Consulta · R$ 500 · há 1 dia',t:[['respondeu: "vou ver e te falo"','a']]}],
-  'Follow-up':[{n:'Joana Prado',s:'Consulta',t:[['faltou 16/09 · remarcar','r']]},{n:'Heitor Lima',s:'Consulta social',t:[['esfriando','a']]}],
+  'Voltar a chamar':[{n:'Joana Prado',s:'Consulta',t:[['faltou 16/09 · remarcar','r']]},{n:'Heitor Lima',s:'Consulta social',t:[['esfriando','a']]}],
   'Consulta agendada':[{n:'Marcos Teixeira',s:'Consulta · Dr. Manoel',t:[['qua 09:30 · segurado','a']]},{n:'Paula Viana',s:'Procedimento estético',t:[['qui 13:30','']]},{n:'Beatriz Souza',s:'Avaliação · Juliana',t:[['qua 15:00','']]}],
   'Plano de tratamento':[{n:'Rogério Alves',s:'Botox · R$ 1.600',t:[['proposta há 3 dias','a']]},{n:'Bianca Lemos',s:'Laser 10 sessões · R$ 2.400',t:[['vence amanhã','r']]},{n:'Fernando Sá',s:'Criolipólise · 4 sessões · R$ 3.200',t:[['visualizou hoje','']]}],
 };
@@ -430,49 +474,136 @@ const CIDADES = [
 ];
 
 /* =================================================================
-   MENU (cópia do painel, com o que muda para clínica)
+   MENU · PAPÉIS · MODO APRESENTAÇÃO · FAIXA DO PROTÓTIPO
+   - Ver como: VER_COMO='recepcao' deixa só as telas do dia a dia, sem
+     Raio-X, Roteiro nem faturamento da clínica (desconto até 10%);
+     VER_COMO='dono' vê tudo (padrão).
+   - Modo apresentação (APRESENTA, desligado por padrão): esconde tudo que
+     tem a classe .dev (notas de desenvolvedor, etiquetas "novo"/"muda") e
+     troca jargão por palavra simples no texto da tela (ver SIMPLES).
+   - Os ids de rota não mudam: 'funil' é o Funil (antes Prospecção) e
+     'planos' é Tratamentos.
    ================================================================= */
 const MENU = [
-  ['Principal'],
-  ['caixa','Caixa','caixa'],['produtos','Produtos','produtos'],['pacientes','Pacientes','clientes'],['financeiro','Financeiro','financeiro'],
-  ['Clínica'],
-  ['conversas','Conversas','zap','novo'],['agenda','Agenda','agenda','novo-layout'],['funil','Prospecção','prospeccao'],['roteiro','Roteiro','mapa','novo'],
-  ['vagas','Vagas liberadas','raio','novo'],['planos','Planos e pacotes','pacote','novo'],['raiox','Raio-X','relatorios'],
-  ['empresa','Empresa','empresa'],['relatorios','Relatórios','relatorios'],
-  ['Configurar'],
-  ['config','Profissionais e horários','medico','novo'],['equipe','Equipe','clientes'],
-  ['Sistema'],['novidades','Novidades','novidades'],
+  {itens:[
+    ['hoje','Hoje','hoje','novo'],['conversas','Conversas','zap','novo'],['agenda','Agenda','agenda','muda'],
+    ['pacientes','Pacientes','clientes','muda'],['funil','Funil','prospeccao','muda'],['planos','Tratamentos','pacote','novo'],
+    ['roteiro','Roteiro','mapa','novo'],['vagas','Vagas','raio','novo'],['raiox','Raio-X','raiox','muda'],
+  ]},
+  {nome:'Configurar',itens:[['config','Clínica e agente','ajustes','novo']]},
+  {nome:'Outras telas do Zaq',recolhe:true,itens:[
+    ['caixa','Caixa','caixa'],['produtos','Produtos','produtos'],['financeiro','Financeiro','financeiro'],['empresa','Empresa','empresa'],
+    ['relatorios','Relatórios','relatorios'],['equipe','Equipe','equipe'],['novidades','Novidades','novidades'],
+  ]},
 ];
-let ROTA = 'agenda';
+const MOB_PRINC=['hoje','conversas','agenda','pacientes','funil']; // barra de baixo do celular (+ "Mais")
+const DA_RECEPCAO=['hoje','conversas','agenda','pacientes','paciente','funil','planos'];
+/* roteiro de demonstração: [rota, nome, o que mostrar] */
+const DEMO=[
+  ['hoje','Hoje','o que fazer primeiro ao abrir o sistema'],
+  ['conversas','Conversas','paciente separado de conversa interna'],
+  ['agenda','Agenda','o dia de cada profissional; toque num horário'],
+  ['funil','Funil','do "quanto custa?" ao pós-venda'],
+  ['roteiro','Roteiro','quem espera o médico em cada cidade'],
+  ['vagas','Vagas','cancelou, o horário é oferecido na hora'],
+  ['pacientes','Pacientes','a ficha: conversa, dinheiro e próximos passos'],
+  ['planos','Tratamentos','a consulta vira tratamento'],
+  ['raiox','Raio-X','o dinheiro parado e o que fazer esta semana'],
+  ['config','Configurar','clínica, profissionais e agente'],
+];
+let ROTA='hoje', VER_COMO='dono', APRESENTA=false, MENU_OUTRAS=false;
+const ehDono=()=>VER_COMO==='dono';
+const pode=r=>ehDono()||DA_RECEPCAO.includes(r);
+const itemMenu=id=>{for(const g of MENU)for(const it of g.itens)if(it[0]===id)return it;return null};
+function aplicarModo(){const b=document.body;if(!b||!b.classList)return;b.classList.toggle('apresenta',APRESENTA);b.classList.toggle('recepcao',!ehDono())}
 function menu(){
+  aplicarModo();
+  const atual = ROTA==='paciente'?'pacientes':ROTA;
   const s = document.getElementById('side');
   let h = `<div class="side-logo"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</div>
-  <div class="side-conta">Espaço Pelle Clínica Dermatológica<br><span class="faint">dono</span></div>`;
-  for(const m of MENU){
-    if(m.length===1){h+=`<div class="side-grp">${m[0]}</div>`;continue}
-    const [id,lb,ic,flag] = m;
-    const extra = flag==='novo'?'<span class="novo">novo</span>':flag==='novo-layout'?'<span class="novo" style="background:var(--azul)">muda</span>':
-      id==='vagas'?'':'';
-    const badge = id==='vagas'?'<span class="nvb amb">2</span>':id==='novidades'?'<span class="nvb">1</span>':'';
-    h+=`<button class="nav-i ${ROTA===id||(ROTA==='paciente'&&id==='pacientes')?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${ic}"/></svg><span>${lb}</span>${badge||extra}</button>`;
+  <div class="side-conta">Espaço Pelle Clínica Dermatológica<br><span class="faint">${ehDono()?'dono':'recepção'}</span></div>`;
+  for(const g of MENU){
+    const vis=g.itens.filter(it=>pode(it[0]));
+    if(!vis.length)continue;
+    let aberto=true;
+    if(g.recolhe){
+      aberto=MENU_OUTRAS||vis.some(it=>it[0]===atual);
+      h+=`<button class="side-grp" onclick="MENU_OUTRAS=!MENU_OUTRAS;menu()" aria-expanded="${aberto}">${g.nome}<span aria-hidden="true">${aberto?'▾':'▸'}</span></button>`;
+    } else if(g.nome) h+=`<div class="side-grp">${g.nome}</div>`;
+    if(!aberto)continue;
+    for(const [id,lb,ic,flag] of vis){
+      const etiqueta = flag==='novo'?'<span class="novo dev">novo</span>':flag==='muda'?'<span class="novo dev" style="background:var(--azul)">muda</span>':'';
+      const badge = id==='vagas'?`<span class="nvb amb">${VAGAS.length}</span>`:id==='novidades'?'<span class="nvb">1</span>':'';
+      h+=`<button class="nav-i ${atual===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${ic}"/></svg><span>${lb}</span>${badge}${etiqueta}</button>`;
+    }
   }
   h+=`<div style="flex:1"></div><button class="nav-i"><svg class="nav-ic"><use href="#ic-sair"/></svg><span>Sair</span></button>`;
   s.innerHTML = h;
   const mob = document.getElementById('mobnav');
-  mob.innerHTML = [['conversas','Conversas','zap'],['agenda','Agenda','agenda'],['funil','Funil','prospeccao'],['roteiro','Roteiro','mapa'],['pacientes','Pacientes','clientes'],['planos','Planos','pacote'],['raiox','Raio-X','relatorios'],['config','Config.','medico']]
-    .map(([id,lb,ic])=>`<button class="${ROTA===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${ic}"/></svg>${lb}</button>`).join('');
+  mob.innerHTML = MOB_PRINC.filter(pode).map(id=>{const it=itemMenu(id);return `<button class="${atual===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${it[2]}"/></svg>${it[1]}</button>`}).join('')
+    + `<button class="${MOB_PRINC.includes(atual)?'':'on'}" onclick="abrirMenu()" aria-label="Mais telas"><svg class="nav-ic"><use href="#ic-mais"/></svg>Mais</button>`;
+  faixa();
 }
-function ir(r){ROTA=r;fecharTudo();menu();render();window.scrollTo(0,0);location.hash=r}
+/* a faixa âmbar: uma linha só; o roteiro de demonstração abre num painel */
+function faixa(){
+  const f=document.getElementById('faixa'), pan=document.getElementById('demoPan');
+  if(!f||!pan)return;
+  const atual=ROTA==='paciente'?'pacientes':ROTA;
+  const passos=DEMO.filter(d=>pode(d[0]));
+  const i=passos.findIndex(d=>d[0]===atual);
+  const prox=passos[(i+1)%passos.length];
+  f.innerHTML=`<span class="pf-tit">${APRESENTA?'🎬 <b class="pf-longo">Demonstração</b>':'🧪 <b class="pf-longo">Protótipo</b>'}<span class="pf-longo"> da clínica no Zaq · nada é salvo nem enviado</span></span>
+    <span class="pf-ctl">
+      <span class="pf-longo" style="opacity:.8">Ver como</span>
+      <span class="pf-seg" role="group" aria-label="Ver como"><button class="${ehDono()?'on':''}" onclick="VER_COMO='dono';trocarPapel()">Dono</button><button class="${ehDono()?'':'on'}" onclick="VER_COMO='recepcao';trocarPapel()">Recepção</button></span>
+      <button class="${APRESENTA?'on':''}" onclick="alternarApresentacao()" title="Esconde as notas internas do protótipo e troca termos técnicos por palavras simples" aria-pressed="${APRESENTA}">🎬<span class="pf-longo"> Modo apresentação</span><span class="pf-curto pf-sem-texto"> Apresentar</span></button>
+      <button onclick="alternarDemo(event)" aria-haspopup="true">▶<span class="pf-longo"> Roteiro de demonstração</span><span class="pf-curto"> Roteiro</span> ▾</button>
+      ${prox?`<button class="pf-prox" onclick="ir('${prox[0]}')">Próximo: ${prox[1]} ›</button>`:''}
+    </span>`;
+  pan.innerHTML=`<div class="dp-h">Roteiro de demonstração${ehDono()?'':' · recepção'}</div>`
+    + passos.map((d,k)=>`<button class="dp-i ${d[0]===atual?'on':''}" onclick="ir('${d[0]}')" role="menuitem"><span class="dp-n">${k}</span><span><b>${d[1]}</b><small>${d[2]}</small></span></button>`).join('')
+    + `<div class="dp-pe">Protótipo: nada é salvo e nenhuma mensagem sai. Número com etiqueta <span class="fonte zap" style="margin-left:0">real</span> ou <span class="fonte amigo" style="margin-left:0">Amigo</span> é da clínica; <span class="fonte ex" style="margin-left:0">exemplo</span> é inventado para mostrar a tela.</div>`;
+}
+function alternarDemo(ev){if(ev&&ev.stopPropagation)ev.stopPropagation();const p=document.getElementById('demoPan');if(p)p.classList.toggle('on')}
+function fecharDemo(){const p=document.getElementById('demoPan');if(p)p.classList.remove('on')}
+function alternarApresentacao(){APRESENTA=!APRESENTA;menu();render();
+  toast(APRESENTA?'Modo apresentação ligado':'Modo apresentação desligado',APRESENTA?'Notas internas escondidas e termos técnicos trocados por palavras simples.':'As notas internas do protótipo voltaram.')}
+function trocarPapel(){if(!pode(ROTA))ROTA='hoje';fecharTudo();fecharDemo();menu();render();location.hash=ROTA;
+  toast(ehDono()?'Vendo como dono':'Vendo como recepção',ehDono()?'Todas as telas e os valores da clínica.':'Só Hoje, Conversas, Agenda, Pacientes, Funil e Tratamentos. Sem Raio-X, Roteiro e faturamento da clínica; desconto até 10%.')}
+function abrirMenu(){document.body.classList.add('menu-on');$('#veu').classList.add('on')}
+function ir(r){ROTA=r;fecharTudo();fecharDemo();menu();render();window.scrollTo(0,0);location.hash=r}
 
 /* =================================================================
    UTIL
    ================================================================= */
 const $ = s=>document.querySelector(s);
 const brl = v=>'R$ '+v.toLocaleString('pt-BR');
-function toast(t,x,amb){const e=document.createElement('div');e.className='toast'+(amb?' a':'');e.innerHTML=`<b>${t}</b>${x||''}`;$('#toasts').appendChild(e);setTimeout(()=>e.remove(),5200)}
-function abrirGav(h){$('#gav').innerHTML='<button class="fechar" onclick="fecharTudo()">✕</button>'+h;$('#gav').classList.add('on');$('#veu').classList.add('on')}
-function abrirModal(h){$('#modal').innerHTML=h;$('#modal').classList.add('on');$('#veu').classList.add('on')}
-function fecharTudo(){$('#gav').classList.remove('on');$('#modal').classList.remove('on');$('#veu').classList.remove('on')}
+function toast(t,x,amb){const e=document.createElement('div');e.className='toast'+(amb?' a':'');e.innerHTML=`<b>${t}</b>${x||''}`;simplificar(e);$('#toasts').appendChild(e);setTimeout(()=>e.remove(),5200)}
+const X_FECHAR='<button class="fechar" onclick="fecharTudo()" aria-label="Fechar" title="Fechar (Esc)">✕</button>';
+function abrirGav(h){const g=$('#gav');g.innerHTML=X_FECHAR+h;g.scrollTop=0;g.classList.add('on');$('#veu').classList.add('on');simplificar(g)}
+function abrirModal(h){const m=$('#modal');m.innerHTML=X_FECHAR+h;m.scrollTop=0;m.classList.add('on');$('#veu').classList.add('on');simplificar(m)}
+function fecharTudo(){$('#gav').classList.remove('on');$('#modal').classList.remove('on');$('#veu').classList.remove('on');if(document.body&&document.body.classList)document.body.classList.remove('menu-on')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){fecharTudo();fecharDemo()}});
+document.addEventListener('click',e=>{const p=document.getElementById('demoPan');if(p&&p.classList.contains('on')&&e.target&&e.target.closest&&!e.target.closest('#demoPan'))p.classList.remove('on')});
+/* Modo apresentação: troca jargão por palavra simples só no TEXTO visível
+   (nunca em onclick/atributo, onde os nomes das colunas são chaves). */
+const SIMPLES=[
+  [/Protótipo:\s*/g,''],[/\b[Nn]o produto,\s*(\S)/g,(_,c)=>c.toUpperCase()],[/\bNo protótipo\b/g,'Nesta demonstração'],[/\(protótipo\)/g,'(demonstração)'],
+  [/fazer o follow-up/gi,'voltar a chamar'],[/\bFollow-up\b/g,'Voltar a chamar'],[/\bfollow-up\b/gi,'voltar a chamar'],
+  [/\bLeads\b/g,'Contatos novos'],[/\bleads\b/g,'contatos novos'],[/\bLead\b/g,'Contato novo'],[/\blead\b/g,'contato novo'],
+  [/[Tt]icket médio/g,m=>m[0]==='T'?'Valor médio':'valor médio'],
+  [/[Oo] motor de ocupação/g,m=>(m[0]==='O'?'O':'o')+' aviso de vaga que abriu'],[/motor de ocupação/g,'aviso de vaga que abriu'],
+  [/[Oo] motor já/g,m=>(m[0]==='O'?'O':'o')+' Zaq já'],[/motor de vagas/g,'aviso de vaga que abriu'],
+  [/lembrete D\+(\d+)/g,'lembrete do $1º dia'],[/\bD\+(\d+)/g,'lembrete do $1º dia'],
+  [/\bmed spa\b/g,'clínicas de estética'],[/\bpela API\b/g,'pela integração'],[/\bda API do Amigo\b/g,'da integração com o Amigo'],[/\bAPI do Amigo\b/g,'integração com o Amigo'],
+  [/\bCards\b/g,'Contatos'],[/\bcards\b/g,'contatos'],[/\bCard\b/g,'Contato'],[/\bcard\b/g,'contato'],
+];
+function simplificar(raiz){
+  if(!APRESENTA||!raiz||!document.createTreeWalker)return;
+  const w=document.createTreeWalker(raiz,4 /* só texto */), ns=[];
+  while(w.nextNode())ns.push(w.currentNode);
+  for(const n of ns){let t=n.nodeValue;const o=t;for(const [re,s] of SIMPLES)t=t.replace(re,s);if(t!==o)n.nodeValue=t}
+}
 function tipo(n){return TIPOS.find(t=>t[0]===n)||TIPOS[0]}
 
 /* =================================================================
@@ -513,7 +644,7 @@ function telaConversas(){
       <div class="faint num" style="font-size:.72rem">${c.q}</div></div>`;
   }
   return h+`</div>
-  <div class="hint">🔕 <b>Conversa interna</b> (equipe, contador, fornecedor) não vira lead, não entra no funil e o agente nunca responde. O sistema <b>sugere</b> (contato salvo como equipe, ou conversa sem nenhuma pergunta de paciente) e a recepção confirma com um clique. No último mês, <b>27 das 84 conversas</b> do número da clínica eram internas.</div>`;
+  <div class="hint">🔕 <b>Conversa interna</b> (equipe, contador, fornecedor) não vira contato novo, não entra no funil e o agente nunca responde. O sistema <b>sugere</b> (contato salvo como equipe, ou conversa sem nenhuma pergunta de paciente) e a recepção confirma com um clique. No último mês, <b>27 das 84 conversas</b> do número da clínica eram internas.</div>`;
 }
 function abrirConv(id){
   const c=CONV.find(x=>x.id===id); const interna=c.tipo.includes('interna');
@@ -523,7 +654,7 @@ function abrirConv(id){
   <div class="sec"><h4>Esta conversa é</h4><div class="acoes">
     <button class="btn ${interna?'sec':''}" onclick="marcarConv(${id},'paciente')">Paciente</button>
     <button class="btn ${interna?'':'sec'}" onclick="marcarConv(${id},'interna')">Interna (equipe / fornecedor)</button></div>
-    <div class="faint" style="font-size:.76rem;margin-top:.4rem">${interna?'Não entra no funil e o agente não responde. Continua visível aqui para a equipe.':'Entra no funil e o agente pode responder e fazer o follow-up.'}</div></div>
+    <div class="faint" style="font-size:.76rem;margin-top:.4rem">${interna?'Não entra no funil e o agente não responde. Continua visível aqui para a equipe.':'Entra no funil e o agente pode responder e voltar a chamar.'}</div></div>
   <div class="sec"><h4>Quem responde</h4><div class="acoes"><button class="btn sec">Eu assumo</button><button class="btn sec">Devolver ao agente</button>${interna?'':`<button class="btn sec" onclick="ir('funil')">Ver no funil</button>`}</div></div>`);
 }
 function marcarConv(id,tipo){
@@ -553,7 +684,7 @@ function telaAgenda(){
   const hoje = doDia(HOJE);
   const livres = (p)=>HORAS.filter(h=>atende(p,HOJE,h)&&!hoje.some(e=>e.p===p&&cobre(e,h))).length;
   let h = `<div class="pg-h"><div><h1>Agenda</h1><div class="sub">Uma coluna por profissional · clique num horário livre para agendar, num agendamento para mudar o status</div></div>
-    <div style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="btn sec" onclick="ir('vagas')">⚡ 2 vagas liberadas hoje</button><button class="btn" onclick="novoAg('manoel','10:30')">+ Agendar</button></div></div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="btn sec" onclick="ir(pode('vagas')?'vagas':'hoje')">⚡ 2 vagas liberadas hoje</button><button class="btn" onclick="novoAg('manoel','10:30')">+ Agendar</button></div></div>
   <div class="ag-top"><button class="btn sec min">‹</button><span class="dia">${AG_VISTA==='dia'?'Quarta, 23 de setembro':'Semana de 21 a 26 de setembro'}</span><button class="btn sec min">›</button>
     <div class="seg" style="margin-left:.5rem"><button class="${AG_VISTA==='dia'?'on':''}" onclick="AG_VISTA='dia';render()">Dia</button><button class="${AG_VISTA==='semana'?'on':''}" onclick="AG_VISTA='semana';render()">Semana</button></div>
     ${AG_VISTA==='dia'?`<select class="inp" style="width:auto;min-height:32px;padding:.2rem .5rem;margin-left:auto"><option>Local: Espaço Pelle · Pedreiras</option><option>Bacabal · qui 15/10</option></select>`:''}</div>`;
@@ -564,24 +695,29 @@ function telaAgenda(){
     <div class="kpi amb"><b>${hoje.filter(e=>e.st==='segurado').length}</b><span>segurados pelo agente, esperando você</span></div>
     <div class="kpi ruim"><b>${hoje.filter(e=>e.st==='faltou').length}</b><span>faltas hoje</span></div>
   </div>${legenda()}`;
-  h += `<div style="overflow-x:auto"><div class="ag"><div class="h" style="border-left:0"></div>`;
-  for(const p of PROF){h+=`<div class="h" style="cursor:pointer" onclick="AG_PROF='${p.id}';AG_VISTA='semana';render()" title="ver a semana de ${p.nome}"><span class="dot" style="background:${p.cor}"></span>${p.nome}<span class="oc">${livres(p.id)} livres</span><small>${p.esp} · Espaço Pelle · <u>ver semana</u></small></div>`}
+  /* no celular (CSS, até 900px): abas com os nomes e UMA coluna por vez (AG_PROF);
+     as colunas dos outros levam .fora-mob e somem. No computador, as 3 lado a lado. */
+  if(!PROF.some(p=>p.id===AG_PROF)) AG_PROF=PROF[0].id;
+  const fm = p=>p.id===AG_PROF?'':' fora-mob';
+  h += `<div class="ag-abas" role="tablist" aria-label="Profissional">${PROF.map(p=>`<button role="tab" aria-selected="${p.id===AG_PROF}" class="${p.id===AG_PROF?'on':''}" onclick="AG_PROF='${p.id}';render()"><span class="dot" style="background:${p.cor}"></span>${p.nome}<small>${livres(p.id)} livres hoje</small></button>`).join('')}</div>`;
+  h += `<div class="ag-rolo"><div class="ag ag-dia" style="grid-template-columns:56px repeat(${PROF.length},minmax(180px,1fr))"><div class="h" style="border-left:0"></div>`;
+  for(const p of PROF){h+=`<div class="h${fm(p)}" style="cursor:pointer" onclick="AG_PROF='${p.id}';AG_VISTA='semana';render()" title="ver a semana de ${p.nome}"><span class="dot" style="background:${p.cor}"></span>${p.nome}<span class="oc">${livres(p.id)} livres</span><small>${p.esp} · Espaço Pelle · <u>ver semana</u></small></div>`}
   for(const hr of HORAS){
     h+=`<div class="hr">${hr}</div>`;
     for(const p of PROF){
       const e = hoje.find(x=>x.p===p.id&&x.h===hr);
       const coberto = hoje.find(x=>x.p===p.id&&cobre(x,hr)&&x.h!==hr);
       const fora = !atende(p.id,HOJE,hr);
-      if(fora&&!e){h+=`<div class="c off"></div>`;continue}
+      if(fora&&!e){h+=`<div class="c off${fm(p)}"></div>`;continue}
       if(e){
         const alt = 44*e.d-6;
-        h+=`<div class="c"><div class="ev s-${e.st}" style="height:${alt}px" onclick="abrirEv(${e.id})"><b>${e.pac}</b><span class="t">${e.tipo}${e.pac_s?' · '+e.pac_s:''}</span><span class="t">${e.st==='segurado'?'⏳ segurado pelo agente':ST[e.st]}${e.org==='Instagram'&&e.st!=='finalizado'?' · 📷 Instagram':''}</span></div></div>`;
-      } else if(coberto){h+=`<div class="c"></div>`}
-      else h+=`<div class="c livre" onclick="novoAg('${p.id}','${hr}')"></div>`;
+        h+=`<div class="c${fm(p)}"><div class="ev s-${e.st}" style="height:${alt}px" onclick="abrirEv(${e.id})"><b>${e.pac}</b><span class="t">${e.tipo}${e.pac_s?' · '+e.pac_s:''}</span><span class="t">${e.st==='segurado'?'⏳ segurado pelo agente':ST[e.st]}${e.org==='Instagram'&&e.st!=='finalizado'?' · 📷 Instagram':''}</span></div></div>`;
+      } else if(coberto){h+=`<div class="c${fm(p)}"></div>`}
+      else h+=`<div class="c livre${fm(p)}" onclick="novoAg('${p.id}','${hr}')"></div>`;
     }
   }
   return h+`</div></div>
-  <div class="hint">💡 <b>O que muda para a clínica:</b> hoje a agenda do Zaq é de festa (visão de mês). Para clínica ela vira o dia por profissional, com os mesmos sete status do Amigo — e cada status move o funil sozinho.</div>`;
+  <div class="hint dev">💡 <b>O que muda para a clínica:</b> hoje a agenda do Zaq é de festa (visão de mês). Para clínica ela vira o dia por profissional, com os mesmos sete status do Amigo — e cada status move o funil sozinho.</div>`;
 }
 function cobre(e,hr){const i=HORAS.indexOf(e.h),j=HORAS.indexOf(hr);return j>=i&&j<i+e.d}
 /* Os outros dias da semana, gerados dentro da grade de cada profissional.
@@ -633,7 +769,7 @@ function telaSemana(){
     <div class="kpi"><b>${futuros.filter(e=>e.st==='confirmado').length} de ${futuros.filter(e=>!['finalizado','cancelou','faltou'].includes(e.st)).length}</b><span>confirmados, de hoje em diante</span></div>
     <div class="kpi ruim"><b>${evs.filter(e=>e.st==='faltou').length}</b><span>faltas na semana</span></div>
   </div>
-  <div style="overflow-x:auto"><div class="ag" style="grid-template-columns:56px repeat(6,minmax(128px,1fr))"><div class="h" style="border-left:0"></div>`;
+  <div class="ag-rolo"><div class="ag ag-semana" style="grid-template-columns:56px repeat(${DIAS.length},minmax(128px,1fr))"><div class="h" style="border-left:0"></div>`;
   DIAS.forEach(([d,dt],i)=>{
     const v=pct(i);
     h+=`<div class="h" style="${i===HOJE?'box-shadow:inset 0 -2px 0 var(--neon)':''}">${d} ${dt.slice(0,2)}${i===HOJE?' <span class="chip g" style="font-size:.6rem;padding:0 6px">hoje</span>':''}
@@ -655,7 +791,7 @@ function telaSemana(){
     });
   }
   h+=`</div></div>`;
-  h+= piorDia&&piorDia[1]<50 ? `<div class="hint">⚡ <b>${DIAS[piorDia[0]][0]} ${DIAS[piorDia[0]][1]} está em ${piorDia[1]}%.</b> O motor de ocupação já pode oferecer esses horários para quem tem retorno vencido ou plano parado com ${p.nome}. <button class="btn min" style="margin-left:.4rem" onclick="ir('vagas')">Ver quem chamar</button></div>`
+  h+= piorDia&&piorDia[1]<50 ? `<div class="hint">⚡ <b>${DIAS[piorDia[0]][0]} ${DIAS[piorDia[0]][1]} está em ${piorDia[1]}%.</b> O Zaq já pode oferecer esses horários para quem tem retorno vencido ou plano parado com ${p.nome}. <button class="btn min" style="margin-left:.4rem" onclick="ir('vagas')">Ver quem chamar</button></div>`
     : `<div class="hint">A semana de ${p.nome} está bem preenchida. Dias passados aparecem mais escuros; clique num horário livre para agendar.</div>`;
   if(p.id==='manoel') h+=`<div class="hint">📍 Sábado ele atende em <b>Lago da Pedra</b> (grade quinzenal). A coluna mostra o local de cada dia — é assim que a agenda itinerante aparece para a recepção.</div>`;
   return h;
@@ -681,14 +817,14 @@ function abrirEv(id){
       ${e.conf?`<div class="linha"><span>Confirmou</span><span style="color:var(--neon)">${e.conf}</span></div>`:''}
       <div class="acoes"><button class="btn sec min" onclick="ir('paciente')">Abrir ficha</button><button class="btn sec min">💬 Conversa</button></div></div>
     <div class="sec"><h4>O que acontece no funil</h4><div class="mut" style="font-size:.8rem;line-height:1.55">
-      Agendar → card vai para <b>Consulta agendada</b>. Faltou → volta para <b>Follow-up</b> com "remarcar". Finalizou com tratamento proposto → <b>Plano de tratamento</b>.</div></div>
+      Agendar → card vai para <b>Consulta agendada</b>. Faltou → volta para <b>Voltar a chamar</b> com "remarcar". Finalizou com tratamento proposto → <b>Plano de tratamento</b>.</div></div>
     <div class="sec"><h4>Fica no Amigo</h4><div class="faint" style="font-size:.78rem">Prontuário, guia de convênio e nota fiscal deste atendimento continuam no Amigo. O Zaq não guarda diagnóstico.</div></div>`);
 }
 function mudar(id,st,t,x){const e=EV.find(v=>v.id===id);e.st=st;fecharTudo();render();toast(t,x||'')}
 function faltou(id){const e=EV.find(v=>v.id===id);e.st='faltou';fecharTudo();render();
-  toast('Faltou · voltou ao funil','Card de '+e.pac+' foi para Follow-up com "faltou, remarcar". O agente manda amanhã: "sentimos sua falta, quer remarcar?"',true)}
+  toast('Faltou · voltou ao funil','Card de '+e.pac+' foi para Voltar a chamar com "faltou, remarcar". O agente manda amanhã: "sentimos sua falta, quer remarcar?"',true)}
 function cancelar(id){const e=EV.find(v=>v.id===id);e.st='cancelou';fecharTudo();render();
-  toast('⚡ Vaga liberada · '+e.h,'O motor já ofereceu para 3 pessoas que cabem nela (retorno vencido, plano parado, pediu "o mais cedo possível"). Primeiro que responder leva.',true);
+  toast('⚡ Vaga liberada · '+e.h,'O Zaq já ofereceu para 3 pessoas que cabem nela (retorno vencido, plano parado, pediu "o mais cedo possível"). Primeiro que responder leva.',true);
   VAGAS.unshift({h:e.h,prof:'Dr. Manoel',tipo:'30 min',min:0,st:'oferecendo',of:[['Carlos Mendes','retorno vencido há 12 dias',96],['Rogério Alves','plano de botox parado há 3 dias',84],['Heitor Lima','pediu "o mais cedo possível"',71]],resp:null})}
 function finalizar(id){const e=EV.find(v=>v.id===id);
   abrirModal(`<h2>Finalizar · ${e.pac}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.8rem">Duas perguntas de um clique. É o único momento em que a recepção alimenta o funil à mão.</div>
@@ -702,7 +838,7 @@ function sel(b,multi){if(!multi)[...b.parentElement.children].forEach(x=>x.class
 function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p); if(dia===undefined)dia=HOJE; const dl=DIAS[dia][0].toLowerCase()+' '+DIAS[dia][1].slice(0,2);
   abrirModal(`<h2>Novo agendamento</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">Só o que a recepção preenche. O resto (fim, valor, local) se calcula.</div>
   <div class="grid2"><div>
-    <div class="field"><label>Paciente</label><input class="inp" placeholder="🔍 nome ou telefone" value="Renata Dias"><div class="faint" style="font-size:.72rem;margin-top:.2rem">Achou no funil: lead do Instagram de ontem</div></div>
+    <div class="field"><label>Paciente</label><input class="inp" placeholder="🔍 nome ou telefone" value="Renata Dias"><div class="faint" style="font-size:.72rem;margin-top:.2rem">Achou no funil: contato novo do Instagram de ontem</div></div>
     <div class="field"><label>Tipo de atendimento</label><select class="inp"><option>Consulta · 30 min · R$ 500</option><option>Retorno · 30 min</option><option>Procedimento estético · 60 min</option></select></div>
     <div class="field"><label>Profissional</label><select class="inp"><option>${pr.nome}</option></select></div>
     <div class="field"><label>Como conheceu</label><div class="opts"><button class="opt on" onclick="sel(this)">Instagram</button><button class="opt" onclick="sel(this)">Indicação</button><button class="opt" onclick="sel(this)">Google</button><button class="opt" onclick="sel(this)">Já é paciente</button></div></div>
@@ -760,11 +896,17 @@ function cardPos(col,c,i){
 }
 function telaFunil(){
   const venda = FU_FASE!=='pos', pos = FU_FASE!=='venda';
-  let h=`<div class="pg-h"><div><h1>Prospecção</h1><div class="sub">A jornada inteira do paciente: do primeiro "quanto custa?" até voltar para a manutenção e indicar alguém.</div></div>
+  const W=RX_WA, parados=W.preco.receberam-W.preco.marcaram;
+  let h=`<div class="pg-h"><div><h1>Funil</h1><div class="sub">A jornada inteira do paciente: do primeiro "quanto custa?" até voltar para a manutenção e indicar alguém.</div></div>
   <div class="seg">${[['tudo','Jornada inteira'],['venda','Venda'],['pos','Pós-venda']].map(([k,l])=>`<button class="${FU_FASE===k?'on':''}" onclick="FU_FASE='${k}';render()">${l}</button>`).join('')}</div></div>`;
+  /* ver como recepção: sem valor de faturamento da clínica (troca R$ por contagem) */
   h+= FU_FASE==='pos'
-    ? `<div class="kpis"><div class="kpi"><b>4</b><span>em tratamento · 1 parado</span></div><div class="kpi ok"><b>3</b><span>concluíram este mês</span></div><div class="kpi amb"><b>3</b><span>manutenção vencendo</span></div><div class="kpi ok"><b>R$ 2.700</b><span>vieram de indicação</span></div></div>`
-    : `<div class="kpis"><div class="kpi"><b>13 → 3</b><span>receberam o preço → agendaram (último mês, real)</span></div><div class="kpi ruim"><b>R$ 5.000</b><span>em consultas paradas depois do preço</span></div><div class="kpi amb"><b>11</b><span>leads parados em Novo (real)</span></div><div class="kpi ok"><b>2 min</b><span>mediana de resposta da recepção (real)</span></div></div>`;
+    ? `<div class="kpis"><div class="kpi"><b>4</b><span>em tratamento · 1 parado ${rxF('ex')}</span></div><div class="kpi ok"><b>3</b><span>concluíram este mês ${rxF('ex')}</span></div><div class="kpi amb"><b>3</b><span>manutenção vencendo ${rxF('ex')}</span></div>${ehDono()
+      ?`<div class="kpi ok"><b>R$ 2.700</b><span>vieram de indicação ${rxF('ex')}</span></div>`
+      :`<div class="kpi ok"><b>${POS['Indicou'].reduce((s,c)=>s+c.ind,0)}</b><span>indicações que viraram consulta ${rxF('ex')}</span></div>`}</div>`
+    : `<div class="kpis"><div class="kpi"><b>${W.preco.receberam} → ${W.preco.marcaram}</b><span>receberam o preço → agendaram (último mês) ${rxF('wa')}</span></div>${ehDono()
+      ?`<div class="kpi ruim"><b>${brl(parados*500)}</b><span>em consultas paradas depois do preço (${parados} × R$ 500) ${rxF('wa')}</span></div>`
+      :`<div class="kpi ruim"><b>${parados}</b><span>pararam depois do preço · ${W.preco.nuncaChamados} nunca chamados de novo ${rxF('wa')}</span></div>`}<div class="kpi amb"><b>11</b><span>contatos parados em Novo ${rxF('zaq')}</span></div><div class="kpi ok"><b>${W.com.med} min</b><span>mediana de resposta da recepção ${rxF('wa')}</span></div></div>`;
   h+=`<div class="kbrow">`;
   if(venda) for(const [col,cards] of Object.entries(FUNIL)){
     const ex=FUNIL_MAIS[col];
@@ -951,7 +1093,7 @@ function telaPacientes(){
       <span style="display:flex;gap:.25rem;flex-wrap:wrap">${x.sit.map(([t,k])=>`<span class="chip ${k}">${t}</span>`).join('')}</span>
       <span class="num" style="text-align:right">${x.val}</span></div>`;
   }
-  return h+`</div><div class="hint">Cada filtro é uma lista de trabalho: <b>Retorno vencido</b> e <b>Sumidos</b> alimentam o motor de vagas e o roteiro; <b>Parcela atrasada</b> vira cobrança por Pix; <b>Aniversário</b> vem da API do Amigo e o agente manda a mensagem no dia.</div>`;
+  return h+`</div><div class="hint">Cada filtro é uma lista de trabalho: <b>Retorno vencido</b> e <b>Sumidos</b> alimentam as vagas que abrem e o roteiro; <b>Parcela atrasada</b> vira cobrança por Pix; <b>Aniversário</b> vem da API do Amigo e o agente manda a mensagem no dia.</div>`;
 }
 
 let PC_ABA='resumo', TL_F='tudo';
@@ -1124,8 +1266,12 @@ function abasPlanos(){
 function telaPlanos(){
   const aberto=['Enviada','Visualizada','Negociando'].reduce((s,c)=>s+PROPS[c].reduce((a,x)=>a+x.v,0),0);
   const dev=SESS.reduce((s,x)=>s+(x.v-x.f)*PROCS[x.p].preco,0);
-  let h=`<div class="pg-h"><div><h1>Planos e pacotes</h1><div class="sub">Onde a consulta de R$ 500 vira tratamento, e o paciente volta para todas as sessões.</div></div><button class="btn" onclick="PL_ABA='nova';render()">+ Nova proposta</button></div>
-  <div class="kpis"><div class="kpi amb"><b>${brl(aberto)}</b><span>em propostas abertas</span></div><div class="kpi ok"><b>41%</b><span>das propostas viram tratamento</span></div><div class="kpi"><b>R$ 2.480</b><span>ticket médio do plano</span></div><div class="kpi ruim"><b>${brl(dev)}</b><span>em sessões vendidas e ainda não feitas</span></div></div>${abasPlanos()}`;
+  const nAbertas=['Enviada','Visualizada','Negociando'].reduce((s,c)=>s+PROPS[c].length,0);
+  const aFazer=SESS.reduce((s,x)=>s+x.v-x.f,0);
+  let h=`<div class="pg-h"><div><h1>Tratamentos</h1><div class="sub">Propostas, pacotes, tabela de preços e assinaturas: onde a consulta de R$ 500 vira tratamento, e o paciente volta para todas as sessões.</div></div><button class="btn" onclick="PL_ABA='nova';render()">+ Nova proposta</button></div>
+  ${ehDono()
+    ?`<div class="kpis"><div class="kpi amb"><b>${brl(aberto)}</b><span>em propostas abertas ${rxF('ex')}</span></div><div class="kpi ok"><b>41%</b><span>das propostas viram tratamento ${rxF('ex')}</span></div><div class="kpi"><b>R$ 2.480</b><span>valor médio do plano ${rxF('ex')}</span></div><div class="kpi ruim"><b>${brl(dev)}</b><span>em sessões vendidas e ainda não feitas ${rxF('ex')}</span></div></div>`
+    :`<div class="kpis"><div class="kpi amb"><b>${nAbertas}</b><span>propostas abertas ${rxF('ex')}</span></div><div class="kpi ok"><b>41%</b><span>das propostas viram tratamento ${rxF('ex')}</span></div><div class="kpi"><b>${aFazer}</b><span>sessões vendidas e ainda não feitas ${rxF('ex')}</span></div><div class="kpi ruim"><b>${SESS.filter(x=>x.st!=='dia').length}</b><span>pacotes atrasados ou parados ${rxF('ex')}</span></div></div>`}${abasPlanos()}`;
   if(PL_ABA==='propostas') h+=telaPropostas();
   if(PL_ABA==='nova') h+=telaNovaProposta();
   if(PL_ABA==='pacotes') h+=telaPacotes();
@@ -1137,7 +1283,7 @@ function telaPropostas(){
   let h=`<div class="pbrd">`;
   for(const [col,cs] of Object.entries(PROPS)){
     const tot=cs.reduce((a,x)=>a+x.v,0);
-    h+=`<div class="pcol ${col==='Aceita'?'ok':col==='Perdida'?'no':''}"><h4>${col}<span class="kbcnt">${cs.length}</span></h4><div class="tot">${brl(tot)}${col==='Aceita'||col==='Perdida'?' · no mês':''}</div>`+
+    h+=`<div class="pcol ${col==='Aceita'?'ok':col==='Perdida'?'no':''}"><h4>${col}<span class="kbcnt">${cs.length}</span></h4><div class="tot">${ehDono()?brl(tot)+(col==='Aceita'||col==='Perdida'?' · no mês':''):'&nbsp;'}</div>`+
       cs.map((x,i)=>`<div class="pcard" onclick="abrirProp('${col}',${i})"><div class="nm">${x.n}</div><div class="pl">${x.pl} · ${x.d}</div><div style="display:flex;justify-content:space-between;align-items:center;gap:.3rem;flex-wrap:wrap"><span class="vl">${brl(x.v)}</span><span class="chip ${x.fu[1]}">${x.fu[0]}</span></div></div>`).join('')+`</div>`;
   }
   return h+`</div>
@@ -1182,7 +1328,7 @@ function datasSessoes(){
 }
 function telaNovaProposta(){
   const t=propTotais();
-  const aprov=PROP.pag==='pix'&&PROP.desc>10;
+  const aprov=PROP.pag==='pix'&&PROP.desc>10&&!ehDono(); // teto de 10% vale para a recepção; o dono aprova
   const cond = PROP.pag==='pix'?`À vista no Pix: <b>${brl(t.liq)}</b> (−${PROP.desc}%)`
     : PROP.pag==='cartao'?`${PROP.parc}× de <b>${brl2(Math.round(t.bruto/PROP.parc*100)/100)}</b> no cartão, sem juros`
     : `Entrada de <b>${brl2(Math.round(t.bruto/(PROP.parc)*100)/100)}</b> + ${PROP.parc-1}× no Pix`;
@@ -1199,7 +1345,7 @@ function telaNovaProposta(){
       <button class="opt ${PROP.pag==='pix'?'on':''}" onclick="PROP.pag='pix';render()">Pix à vista</button>
       <button class="opt ${PROP.pag==='cartao'?'on':''}" onclick="PROP.pag='cartao';PROP.parc=Math.min(PROP.parc,6);render()">Cartão sem juros</button>
       <button class="opt ${PROP.pag==='entrada'?'on':''}" onclick="PROP.pag='entrada';render()">Entrada + parcelas no Pix</button></div></div>
-    ${PROP.pag==='pix'?`<div class="field"><label>Desconto no Pix · seu teto é 10%</label><div class="opts">${[0,5,8,12].map(d=>`<button class="opt ${PROP.desc===d?'on':''}" onclick="PROP.desc=${d};render()">${d}%${d>10?' · pede aprovação':''}</button>`).join('')}</div></div>`
+    ${PROP.pag==='pix'?`<div class="field"><label>${ehDono()?'Desconto no Pix · a recepção pode dar até 10%; acima disso, pede a você':'Desconto no Pix · seu teto é 10%'}</label><div class="opts">${[0,5,8,12].map(d=>`<button class="opt ${PROP.desc===d?'on':''}" onclick="PROP.desc=${d};render()">${d}%${d>10&&!ehDono()?' · pede aprovação':''}</button>`).join('')}</div></div>`
       :`<div class="field"><label>Parcelas</label><div class="opts">${[2,3,4,5,6].map(n=>`<button class="opt ${PROP.parc===n?'on':''}" onclick="PROP.parc=${n};render()">${n}×</button>`).join('')}</div></div>`}
     <div class="field"><label>Validade</label><div class="opts">${[3,7,15].map(d=>`<button class="opt ${PROP.val===d?'on':''}" onclick="PROP.val=${d};render()">${d} dias</button>`).join('')}</div></div>
     <div class="tot-box">
@@ -1237,11 +1383,11 @@ function telaPacotes(){
   const porProc={}; SESS.forEach(x=>{const o=porProc[x.p]=porProc[x.p]||{v:0,f:0};o.v+=x.v;o.f+=x.f});
   const vis=SESS.filter(x=>PK_F==='todos'||x.st===PK_F);
   return `<div class="grid2"><div class="card"><h3>O que a clínica deve em atendimento</h3>
-    <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:.5rem"><div><div class="mut" style="font-size:.74rem">vendidas</div><div class="num" style="font-size:1.3rem">${vend}</div></div><div><div class="mut" style="font-size:.74rem">feitas</div><div class="num" style="font-size:1.3rem">${feit}</div></div><div><div class="mut" style="font-size:.74rem">a fazer</div><div class="num" style="font-size:1.3rem;color:var(--ambar)">${vend-feit}</div></div><div><div class="mut" style="font-size:.74rem">em reais</div><div class="num" style="font-size:1.3rem;color:var(--coral)">${brl(dev)}</div></div></div>
+    <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:.5rem"><div><div class="mut" style="font-size:.74rem">vendidas</div><div class="num" style="font-size:1.3rem">${vend}</div></div><div><div class="mut" style="font-size:.74rem">feitas</div><div class="num" style="font-size:1.3rem">${feit}</div></div><div><div class="mut" style="font-size:.74rem">a fazer</div><div class="num" style="font-size:1.3rem;color:var(--ambar)">${vend-feit}</div></div>${ehDono()?`<div><div class="mut" style="font-size:.74rem">em reais</div><div class="num" style="font-size:1.3rem;color:var(--coral)">${brl(dev)}</div></div>`:''}</div>
     <div class="bar" style="height:10px"><i style="width:${100*feit/vend}%"></i></div>
     <div class="hint">Dinheiro que entrou, mas ainda não é lucro: é atendimento devido. Paciente que some com pacote pela metade vira pedido de reembolso.</div></div>
-  <div class="card"><h3>Por procedimento</h3><table class="tb"><tr><th>Procedimento</th><th class="r">Feitas</th><th class="r">A fazer</th><th class="r">Em reais</th></tr>
-    ${Object.entries(porProc).map(([n,o])=>`<tr><td>${n}</td><td class="r num">${o.f}/${o.v}</td><td class="r num">${o.v-o.f}</td><td class="r num">${brl((o.v-o.f)*PROCS[n].preco)}</td></tr>`).join('')}</table></div></div>
+  <div class="card"><h3>Por procedimento</h3><table class="tb"><tr><th>Procedimento</th><th class="r">Feitas</th><th class="r">A fazer</th>${ehDono()?'<th class="r">Em reais</th>':''}</tr>
+    ${Object.entries(porProc).map(([n,o])=>`<tr><td>${n}</td><td class="r num">${o.f}/${o.v}</td><td class="r num">${o.v-o.f}</td>${ehDono()?`<td class="r num">${brl((o.v-o.f)*PROCS[n].preco)}</td>`:''}</tr>`).join('')}</table></div></div>
   <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.6rem">${[['todos','Todos'],['dia','Em dia'],['atrasado','Atrasado para marcar'],['parado','Parado · risco'],['vencendo','Vencendo com sobra']].map(([k,l])=>`<button class="opt ${PK_F===k?'on':''}" onclick="PK_F='${k}';render()">${l}${k==='todos'?'':' · '+SESS.filter(x=>x.st===k).length}</button>`).join('')}</div>
   <div class="card"><div style="overflow-x:auto"><table class="tb"><tr><th>Paciente</th><th>Pacote</th><th>Sessões</th><th>Próxima</th><th>Vale até</th><th>Situação</th><th></th></tr>
     ${vis.map(x=>`<tr><td>${x.pac}</td><td>${x.p}</td><td><div style="display:flex;align-items:center;gap:.4rem"><div class="bar" style="width:80px"><i class="${x.st==='parado'?'r':x.st==='dia'?'':'a'}" style="width:${100*x.f/x.v}%"></i></div><span class="num">${x.f}/${x.v}</span></div></td><td>${x.prox||'<span class="faint">sem data</span>'}</td><td class="num">${x.vence}</td>
@@ -1259,7 +1405,7 @@ const ASS=[
   {n:'Eduarda Paz',desde:'02/06',st:['cancelou','']},
 ];
 function telaAssinaturas(){
-  return `<div class="kpis"><div class="kpi ok"><b>R$ 2.682</b><span>entram todo mês · 18 assinantes</span></div><div class="kpi"><b>72%</b><span>usaram a limpeza do mês</span></div><div class="kpi ruim"><b>2</b><span>cobranças que falharam</span></div><div class="kpi amb"><b>1</b><span>cancelou este mês</span></div></div>
+  return `<div class="kpis">${ehDono()?`<div class="kpi ok"><b>R$ 2.682</b><span>entram todo mês · 18 assinantes ${rxF('ex')}</span></div>`:`<div class="kpi ok"><b>18</b><span>assinantes ${rxF('ex')}</span></div>`}<div class="kpi"><b>72%</b><span>usaram a limpeza do mês</span></div><div class="kpi ruim"><b>2</b><span>cobranças que falharam</span></div><div class="kpi amb"><b>1</b><span>cancelou este mês</span></div></div>
   <div class="grid2"><div class="card"><h3>Pele em dia · R$ 149/mês</h3><div class="mut" style="font-size:.84rem">1 limpeza de pele por mês · 15% em procedimentos · 10% em produtos · prioridade nas vagas liberadas</div>
     <div class="acoes"><button class="btn sec min">Editar plano</button><button class="btn sec min">Ver os 18</button></div></div>
     <div class="card" style="border-style:dashed"><h3>Manutenção anual · 12× R$ 249 <span class="chip">rascunho</span></h3><div class="mut" style="font-size:.84rem">2 aplicações de botox por ano + avaliações + 10% em produtos</div>
@@ -1362,13 +1508,13 @@ function telaRaio(){
       <div class="mut" style="font-size:.74rem">Horário vazio ${top.d===HOJE+1?'amanhã':rxDia(top.d)}</div>
       <div class="rx-med" style="color:var(--ambar)">≈ ${rxBRL(top.v)}</div>
       <div class="rx-conta">${rxNome(top.p)} · ${rxDia(top.d)} · ${top.n} meias-horas livres × ${rxBRL(A.vmh[top.p])}</div>
-      <div style="margin-top:.4rem">${rxF('ex')}</div><div class="faint" style="font-size:.68rem;margin-top:.2rem">no produto: horários livres do Amigo</div>
+      <div style="margin-top:.4rem">${rxF('ex')}</div><div class="faint dev" style="font-size:.68rem;margin-top:.2rem">no produto: horários livres do Amigo</div>
     </div>
     <div class="card rx-ex" onclick="abrirConta('faltas')">
       <div class="mut" style="font-size:.74rem">Perdido esta semana em faltas</div>
       <div class="rx-med" style="color:#F08A83">${rxBRL(A.faltasR)}</div>
       <div class="rx-conta">${A.faltas.length} faltas: ${A.faltas.map(e=>tipo(e.tipo)[4]).join(' + ')}${A.faltas.some(e=>!tipo(e.tipo)[4])?' (sessão já paga)':''}</div>
-      <div style="margin-top:.4rem">${rxF('ex')} <a style="font-size:.72rem;color:var(--neon);cursor:pointer" onclick="event.stopPropagation();rxIr('rx-a4')">remarcar → 4</a></div><div class="faint" style="font-size:.68rem;margin-top:.2rem">no produto: status "faltou" do Amigo</div>
+      <div style="margin-top:.4rem">${rxF('ex')} <a style="font-size:.72rem;color:var(--neon);cursor:pointer" onclick="event.stopPropagation();rxIr('rx-a4')">remarcar → 4</a></div><div class="faint dev" style="font-size:.68rem;margin-top:.2rem">no produto: status "faltou" do Amigo</div>
     </div>
   </div>
   <div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;margin-top:.6rem;font-size:.76rem"><span class="mut">Fora da conta em R$, mas parado:</span>
@@ -1493,7 +1639,7 @@ function telaRaio(){
     <div class="card"><div class="rx-lista">
       <span class="nb" style="color:var(--coral)">18</span><div class="tx"><b>retornos pedidos · 0 chamados</b>O médico pediu a volta e ninguém chamou. Fica fora da conta em R$ porque o retorno não é cobrado. <a style="color:var(--neon);cursor:pointer" onclick="PS_SEG='retorno';ir('pacientes')">ver a lista ›</a></div>
       <span class="nb" style="color:var(--coral)">0/5</span><div class="tx"><b>consultas confirmadas</b>Consultas de 22 e 23/09, lidas em 22/09: retrato de antes do Zaq. Na Agenda de exemplo, com o Zaq confirmando, hoje estão ${doDia(HOJE).filter(e=>e.st==='confirmado').length} de ${doDia(HOJE).filter(e=>!['finalizado','cancelou','faltou'].includes(e.st)).length}.</div>
-      <span class="nb" style="color:var(--ambar)">1</span><div class="tx"><b>orçamento lançado no mês</b>Plano que não é escrito, ninguém cobra. A tela Planos mostra como fica com o Zaq registrando (exemplo). <a style="color:var(--neon);cursor:pointer" onclick="PL_ABA='propostas';ir('planos')">ver ›</a></div>
+      <span class="nb" style="color:var(--ambar)">1</span><div class="tx"><b>orçamento lançado no mês</b>Plano que não é escrito, ninguém cobra. A tela Tratamentos mostra como fica com o Zaq registrando (exemplo). <a style="color:var(--neon);cursor:pointer" onclick="PL_ABA='propostas';ir('planos')">ver ›</a></div>
       <span class="nb" style="color:var(--ambar)">58</span><div class="tx"><b>itens de estoque vencidos · 13 abaixo do mínimo</b>Sem R$: pode ser baixa que ninguém lançou. Conferir no Amigo.</div>
       <span class="nb" style="color:var(--ambar)">—</span><div class="tx" style="border-bottom:0"><b>agendamento on-line e robô: não configurados</b>O paciente só marca falando com alguém.</div>
     </div>
@@ -1532,7 +1678,7 @@ function abrirConta(k){
   if(k==='faltas') return abrirGav(`<div class="mut" style="font-size:.76rem">Faltas desta semana · exemplo</div><h2>${rxBRL(A.faltasR)}</h2>
     <div class="sec">${A.faltas.map(e=>`<div class="rank"><span class="n">${rxDia(e.dia)} · ${e.h} · ${rxNome(e.p)}<small>${e.tipo} · ${e.pac}</small></span><span class="num">${tipo(e.tipo)[4]?rxBRL(tipo(e.tipo)[4]):'R$ 0 (já paga)'}</span></div>
       <div style="margin:-.15rem 0 .5rem"><button class="btn sec min" onclick="toast('Nada foi enviado (protótipo)','No produto, o agente oferece 3 horários livres e você aprova antes.')">Oferecer novo horário</button></div>`).join('')||'<div class="mut">Nenhuma falta esta semana.</div>'}</div>
-    <div class="sec">${rxF('ex')} <span class="faint" style="font-size:.74rem">no produto: status "faltou" que o Amigo devolve pela API</span></div>`);
+    <div class="sec">${rxF('ex')} <span class="faint dev" style="font-size:.74rem">no produto: status "faltou" que o Amigo devolve pela API</span></div>`);
 }
 function abrirCelula(p,d,t){
   const c=rxCel(p,d,t), A=rxAgenda('todos');
@@ -1569,7 +1715,7 @@ function abrirOferta(tp,p,d,t){
 let CF_ABA='prof';
 function telaConfig(){
   const abas=`<div class="tabs">${[['prof','Profissionais'],['tipos','Tipos de atendimento'],['locais','Locais'],['grade','Grade de horário']].map(([k,l])=>`<button class="${CF_ABA===k?'on':''}" onclick="CF_ABA='${k}';render()">${l}</button>`).join('')}</div>`;
-  let h=`<div class="pg-h"><div><h1>Profissionais e horários</h1><div class="sub">A base de tudo. Importado do Amigo da clínica: 17 tipos, 5 executantes, 17 unidades — arrumados.</div></div></div>${abas}`;
+  let h=`<div class="pg-h"><div><h1>Clínica e agente</h1><div class="sub">Profissionais, tipos de atendimento, locais e horários: a base de tudo. Importado do Amigo da clínica: 17 tipos, 5 executantes, 17 unidades — arrumados.</div></div></div>${abas}`;
   if(CF_ABA==='prof') h+=`${PROF.map(p=>`<div class="card" style="display:grid;grid-template-columns:44px 1fr auto;gap:.8rem;align-items:center">
     <div style="width:44px;height:44px;border-radius:50%;background:${p.cor};color:var(--sobre-verde);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--display);font-size:1.1rem">${p.nome.replace('Dr. ','')[0]}</div>
     <div><div style="font-weight:600">${p.nome} <span class="mut" style="font-weight:400;font-size:.82rem">· ${p.esp}</span></div><div class="mut" style="font-size:.78rem">${p.grade}</div>
@@ -1593,18 +1739,37 @@ function telaConfig(){
 }
 
 /* =================================================================
+   HOJE — TELA PROVISÓRIA. A lista do dia (mensagens da noite, segurados,
+   confirmações, "vou ver e te falo", vagas, retornos, Pix) entra na etapa 2.
+   ================================================================= */
+function telaHoje(){
+  return `<div class="pg-h"><div><h1>Hoje</h1><div class="sub">Quarta, 23 de setembro · o que fazer primeiro ao abrir o sistema</div></div></div>
+  <div class="card"><h3>A lista do dia</h3>
+    <div class="mut" style="font-size:.84rem;line-height:1.55">Aqui fica, em ordem, o que a ${ehDono()?'clínica':'recepção'} resolve primeiro: mensagens da noite sem resposta, horários que o agente segurou esperando confirmação, quem ainda não confirmou hoje e amanhã, e quem ficou de "ver e falar".</div>
+    <div class="hint dev">Tela provisória: o conteúdo desta lista entra na próxima etapa do protótipo.</div>
+    <div class="acoes"><button class="btn" onclick="ir('conversas')">Abrir Conversas</button><button class="btn sec" onclick="ir('agenda')">Agenda de hoje</button></div></div>`;
+}
+
+/* =================================================================
    telas que existem hoje (só para o menu não quebrar)
    ================================================================= */
-function telaExistente(n){return `<div class="pg-h"><div><h1>${n}</h1><div class="sub">Tela que já existe no Zaq e não muda neste projeto.</div></div></div>
-  <div class="card"><div class="mut">No protótipo, as telas novas estão no menu com a etiqueta <span class="chip g">novo</span>, e a agenda com <span class="chip b">muda</span>.</div>
-  <div class="acoes"><button class="btn" onclick="ir('agenda')">Ir para a Agenda</button></div></div>`}
+function telaExistente(n){return `<div class="pg-h"><div><h1>${n}</h1><div class="sub">${APRESENTA?'Esta tela já existe no Zaq e funciona igual para a clínica.':'<span class="dev">Tela que já existe no Zaq e não muda neste projeto.</span>'}</div></div></div>
+  <div class="card"><div class="mut">${APRESENTA?'Caixa, produtos, financeiro, empresa, relatórios, equipe e novidades continuam como já são no Zaq.':'<span class="dev">No protótipo, as telas novas estão no menu com a etiqueta <span class="chip g">novo</span>, e as que mudam para clínica com <span class="chip b">muda</span>.</span>'}</div>
+  <div class="acoes"><button class="btn" onclick="ir('hoje')">Ir para Hoje</button></div></div>`}
+/* ver como recepção: tela do dono mostra este aviso em vez do conteúdo */
+function telaSoDono(){const it=itemMenu(ROTA==='paciente'?'pacientes':ROTA);
+  return `<div class="pg-h"><div><h1>${it?it[1]:'Esta tela'}</h1><div class="sub">Visível só para o dono.</div></div></div>
+  <div class="card"><div class="mut" style="font-size:.86rem;line-height:1.55">Você está vendo como <b style="color:var(--txt)">recepção</b>. Raio-X, Roteiro, Vagas, configuração e os valores de faturamento da clínica ficam com o dono. A recepção trabalha em Hoje, Conversas, Agenda, Pacientes, Funil e Tratamentos, com desconto até 10%.</div>
+  <div class="acoes"><button class="btn" onclick="ir('hoje')">Ir para Hoje</button><button class="btn sec" onclick="VER_COMO='dono';trocarPapel()">Ver como dono</button></div></div>`}
 
 function render(){
-  const T={conversas:telaConversas,agenda:telaAgenda,pacientes:telaPacientes,funil:telaFunil,roteiro:telaRoteiro,vagas:telaVagas,paciente:telaPaciente,planos:telaPlanos,raiox:telaRaio,config:telaConfig};
+  const T={hoje:telaHoje,conversas:telaConversas,agenda:telaAgenda,pacientes:telaPacientes,funil:telaFunil,roteiro:telaRoteiro,vagas:telaVagas,paciente:telaPaciente,planos:telaPlanos,raiox:telaRaio,config:telaConfig};
   const nomes={caixa:'Caixa',produtos:'Produtos',financeiro:'Financeiro',empresa:'Empresa',relatorios:'Relatórios',equipe:'Equipe',novidades:'Novidades'};
-  $('#main').innerHTML = T[ROTA]?T[ROTA]():telaExistente(nomes[ROTA]||ROTA);
+  const m=$('#main');
+  m.innerHTML = !pode(ROTA)?telaSoDono():T[ROTA]?T[ROTA]():telaExistente(nomes[ROTA]||ROTA);
+  simplificar(m);
 }
-ROTA=(location.hash||'#agenda').slice(1)||'agenda';
+ROTA=(location.hash||'#hoje').slice(1)||'hoje';
 gerarSemana();
 menu();render();
 </script>

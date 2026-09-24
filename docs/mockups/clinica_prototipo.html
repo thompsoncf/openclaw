@@ -1108,7 +1108,7 @@ function cvTexto(c){if(c.cid){const cc=rtCid(c.cid);return '[agente] '+rtFilaFra
   if(e.st==='segurado')return '[agente] Reservei '+HJ_DIA_LONGO[e.dia]+' às '+hjH(e.h)+'. A recepção confirma em instantes';
   if(CV_MARCADO.includes(e.st))return '[agente] Prontinho!! ✅ Seu agendamento foi realizado';
   if(e.st==='faltou')return '[agente] Sentimos sua falta hoje. Quer marcar outro horário?';
-  return e.seg?'[agente] Cancelado. Quando quiser outro horário, é só me chamar 🙂':'[agente] Esse horário não deu 🙏 Posso te oferecer outro?'}
+  return e.confH?'[agente] Cancelado. Quando quiser outro horário, é só me chamar 🙂':'[agente] Esse horário não deu 🙏 Posso te oferecer outro?'}   // confH: a reserva chegou a ser confirmada
 /* a etiqueta da conversa segue o horário: recusado ou falta → Voltar a chamar */
 const cvEt=c=>{const e=c.ev&&EV.find(x=>x.id===c.ev);return e&&['cancelou','faltou'].includes(e.st)?'Voltar a chamar':c.et};
 /* o cartão do funil com o mesmo nome (a conversa inteira do paciente novo é a mesma do Funil) */
@@ -1122,7 +1122,7 @@ function abrirConv(id){
   ${cc?`<div class="hint" style="margin-top:.5rem">📍 O agente <b>primeiro ofereceu Pedreiras</b>; como a pessoa preferiu esperar, perguntou se podia avisar, e o “pode avisar” pôs a pessoa na fila de ${c.cid} ${rxF('ex')}. A fila guarda nome, telefone, cidade e o link desta conversa, nunca a frase.<br>
     No mês real, ${hjPl(W.cidades.conversas,'conversa de paciente citou','conversas de paciente citaram')} uma cidade do roteiro (${W.cidades.quais}) e não virou fila: o agente estava desligado ${rxF('wa')}.</div>
     <div class="acoes">${pode('roteiro')?`<button class="btn sec" onclick="RT_CAB='quem';ir('roteiro');abrirCidade('${c.cid}')">Ver a fila de ${c.cid} no Roteiro</button>`:''}</div>`:''}
-  ${ev&&ev.st==='segurado'?`<div class="acoes"><button class="btn" onclick="hjConfirmar(${ev.id});abrirConv(${id})">Confirmar o horário</button><button class="btn sec" onclick="abrirEv(${ev.id})">Ver na Agenda</button></div>`:''}
+  ${ev&&ev.st==='segurado'?`<div class="acoes"><button class="btn" onclick="hjConfirmar(${ev.id});abrirConv(${id})">Confirmar a reserva</button><button class="btn sec" onclick="abrirEv(${ev.id})">Ver na Agenda</button></div>`:''}
   ${fu?`<div class="acoes"><button class="btn sec" onclick="FU_FASE='venda';ir('funil')">Ver no Funil · ${fu[0]}</button></div>`:''}
   <div class="sec"><h4>Esta conversa é</h4><div class="acoes">
     <button class="btn ${interna?'sec':''}" onclick="marcarConv(${id},'paciente')">Paciente</button>
@@ -1325,20 +1325,21 @@ function abrirEv(id){
   const quando=e.dia===HOJE?'hoje':e.dia===HOJE+1?'amanhã':rxDia(e.dia);
   let acoes='';
   if(e.st==='segurado') acoes=`<div class="hint" style="margin-top:0">⏳ <b>O agente segurou este horário</b> no WhatsApp${e.segH?' ('+e.segH+')':''} e disse ao paciente: “Reservei… a recepção confirma em instantes”.<br><span style="color:var(--neon)">✓ O Zaq já conferiu no Amigo que o horário está livre.</span> É só confirmar: o Zaq marca no Amigo e o paciente recebe, automático, “Prontinho!! ✅ Seu agendamento foi realizado”.</div>
-    <div class="acoes"><button class="btn" onclick="fecharTudo();hjConfirmar(${id})">Confirmar</button><button class="btn sec" onclick="evNaoDa(${id})">Não dá, oferecer outro</button><button class="btn sec" onclick="abrirZapEv(${id})">💬 Ver a conversa</button></div>`;
+    <div class="acoes"><button class="btn" onclick="fecharTudo();hjConfirmar(${id})">Confirmar a reserva</button><button class="btn sec" onclick="evNaoDa(${id})">Não dá, oferecer outro</button><button class="btn sec" onclick="abrirZapEv(${id})">💬 Ver a conversa</button></div>`;
   else if(e.st==='sinal') acoes=`<div class="hint" style="margin-top:0">💲 <b>Aguardando o sinal de R$ 50 no Pix até as ${e.prazo} de hoje</b> (${e.motivo}). Pago, vira crédito na consulta e o horário fica marcado. Se o Pix não cair até lá, o horário volta para a agenda e entra em Vagas.</div><div class="acoes"><button class="btn" onclick="hjSinal(${id},'pago')">Simular: Pix pago</button><button class="btn sec" onclick="hjSinal(${id},'venceu')">Simular: deu ${e.prazo} sem Pix</button><button class="btn sec" onclick="abrirSinal(${id})">Ver a mensagem</button></div>`;
-  else if(e.st==='agendado') acoes=(e.seg?`<div class="hint" style="margin-top:0">✓ <b>Reserva aprovada${e.confH?' às '+e.confH:''}</b>: o Zaq marcou no Amigo e o paciente recebeu o “Prontinho!! ✅”. A confirmação de presença sai ${e.dia===HOJE+1?'hoje às 10h, com a de amanhã':'na véspera, às 10h'}.</div>`:'')
-    +`<div class="acoes">${e.seg?'':`<button class="btn" onclick="evMudar(${id},'confirmado')">Confirmou</button>`}<button class="btn sec" onclick="evMandarConf(${id})">Mandar confirmação</button><button class="btn coral" onclick="cancelar(${id})">Cancelou</button></div>
-    ${grava(e.seg?'Cancelou':'Confirmou e Cancelou')}<div class="ag-nota">Cancelou: o horário vai para Vagas e já é oferecido a quem cabe nele.</div>`;
-  else if(e.st==='confirmado') acoes=`<div class="acoes"><button class="btn" onclick="evMudar(${id},'presente')">Chegou</button><button class="btn sec" onclick="cancelar(${id})">Cancelou</button></div>
+  else if(e.st==='agendado') acoes=(e.confH?`<div class="hint" style="margin-top:0">✓ <b>Reserva confirmada às ${e.confH}</b>: o Zaq marcou no Amigo e o paciente recebeu o “Prontinho!! ✅”. A confirmação de presença (responda 1 ou 2) sai ${e.dia===HOJE+1?'hoje às 10h, com a de amanhã':'na véspera, às 10h'}.</div>`:'')
+    +`<div class="acoes">${e.confH?'':`<button class="btn" onclick="evMudar(${id},'confirmado')">Confirmou</button>`}<button class="btn sec" onclick="evMandarConf(${id})">Mandar confirmação</button><button class="btn coral" onclick="cancelar(${id})">Cancelou</button></div>
+    ${grava(e.confH?'Cancelou':'Confirmou e Cancelou')}<div class="ag-nota">Cancelou: o horário vai para Vagas e já é oferecido a quem cabe nele.</div>`;
+  else if(e.st==='confirmado') acoes=(e.confH&&e.dia===HOJE?`<div class="hint" style="margin-top:0">✓ <b>Reserva confirmada às ${e.confH}</b>: o Zaq marcou no Amigo e o paciente recebeu o “Prontinho!! ✅”. Marcou hoje para hoje: não precisa da confirmação da véspera.</div>`:'')
+    +`<div class="acoes"><button class="btn" onclick="evMudar(${id},'presente')">Chegou</button><button class="btn sec" onclick="cancelar(${id})">Cancelou</button></div>
     ${grava('Chegou e Cancelou')}${doAmigo('Faltou',`<button class="btn coral min" onclick="faltou(${id})">Faltou</button>`)}`;
   else if(e.st==='presente') acoes=doAmigo('Em atendimento',`<button class="btn sec" onclick="evMudar(${id},'atendimento')">Iniciar atendimento</button>`);
   else if(e.st==='atendimento') acoes=doAmigo('Finalizado',`<button class="btn" onclick="finalizar(${id})">Finalizar</button>`)
     +`<div class="ag-nota">Quando o Amigo avisa que acabou, o Zaq pergunta aqui só o que o Amigo não sabe: se houve proposta de tratamento, o retorno e onde a consulta foi paga.</div>`;
-  else if(e.st==='finalizado') acoes=`<div class="mut" style="font-size:.82rem">Finalizado no Amigo às ${e.fimH||hmMais(e.h,30*e.d)}.${e.trat==='sim'?' Tratamento proposto: o card foi para Plano de tratamento.':e.trat==='nao'?' Sem tratamento proposto.':''}</div>`
+  else if(e.st==='finalizado') acoes=`<div class="mut" style="font-size:.82rem">Finalizado no Amigo às ${e.fimH||hmMais(e.h,30*e.d)}.${e.trat==='sim'?' Tratamento proposto: o cartão foi para Plano de tratamento, no Funil.':e.trat==='nao'?' Sem tratamento proposto.':''}</div>`
     +(t[2]==='consulta'&&!e.trat?`<div class="field" style="margin-top:.5rem"><label>${Quem} propôs tratamento?</label><div class="acoes" style="margin-top:0"><button class="btn min" onclick="fecharTudo();hjTrat(${id},'sim')">Sim, montar proposta</button><button class="btn sec min" onclick="fecharTudo();hjTrat(${id},'nao')">Não</button></div></div>`:'')
     +(e.trat==='sim'?`<div class="acoes"><button class="btn sec min" onclick="PL_ABA='propostas';ir('planos')">Ver propostas</button></div>`:'');
-  else if(e.st==='faltou') acoes=`<div class="mut" style="font-size:.82rem">O Amigo marcou falta. O card voltou para Voltar a chamar, com “faltou, remarcar”.</div><div class="acoes"><button class="btn sec min" onclick="toast('Nada foi enviado (protótipo)','No produto, o agente oferece 3 horários livres e você aprova antes.')">Oferecer novo horário</button></div>`;
+  else if(e.st==='faltou') acoes=`<div class="mut" style="font-size:.82rem">O Amigo marcou falta. O cartão voltou para Voltar a chamar, com “faltou, remarcar”.</div><div class="acoes"><button class="btn sec min" onclick="toast('Nada foi enviado (protótipo)','No produto, o agente oferece 3 horários livres e você aprova antes.')">Oferecer novo horário</button></div>`;
   else if(e.st==='cancelou'){const vg=e.vaga&&VAGAS.find(x=>x.id===e.vaga), ainda=e.dia>HOJE||(e.dia===HOJE&&e.h>AGORA);
     acoes=`<div class="mut" style="font-size:.82rem">Cancelado, e o Zaq gravou no Amigo. ${vg?vgStatusFrase(vg):ainda?'O horário ficou livre e está em Vagas › Ainda dá para encher.':'O horário ficou livre.'}</div><div class="acoes">${pode('vagas')&&ainda?`<button class="btn sec min" onclick="VG_ABA='hoje';ir('vagas')">Ver em Vagas</button>`:''}${ainda?`<button class="btn sec min" onclick="novoAg('${e.p}','${e.h}',${e.dia})">Marcar à mão</button>`:''}</div>`}
   abrirGav(`<div class="mut" style="font-size:.76rem">${DIAS[e.dia][0]} ${DIAS[e.dia][1]} · ${e.h} · ${30*e.d} min · ${p.nome} · ${localDe(e.p,e.dia)}</div>
@@ -1357,7 +1358,7 @@ function abrirEv(id){
     <div class="sec"><h4>O status e o Amigo</h4><div style="font-size:.8rem;line-height:1.6"><b>Aqui ou no Amigo</b> (o Zaq grava lá): Confirmado, Chegou, Cancelou.<br><b>Só no Amigo</b> (aqui atualiza sozinho): Em atendimento, Finalizado, Faltou.</div>
       <div class="faint" style="font-size:.74rem;margin-top:.25rem">O Amigo não avisa na hora: o Zaq lê a agenda dele a cada 2 minutos.</div></div>
     <div class="sec"><h4>O que acontece no funil</h4><div class="mut" style="font-size:.8rem;line-height:1.55">
-      Agendar → card vai para <b>Consulta agendada</b>. Faltou → volta para <b>Voltar a chamar</b> com "remarcar". Finalizou com tratamento proposto → <b>Plano de tratamento</b>.</div></div>
+      Agendar → o cartão vai para <b>Consulta agendada</b>. Faltou → volta para <b>Voltar a chamar</b> com "remarcar". Finalizou com tratamento proposto → <b>Plano de tratamento</b>.</div></div>
     <div class="sec"><h4>Fica no Amigo</h4><div class="faint" style="font-size:.78rem">Prontuário, guia de convênio e nota fiscal deste atendimento continuam no Amigo. O Zaq não guarda diagnóstico.</div></div>`);
 }
 function mudar(id,st,t,x){const e=EV.find(v=>v.id===id);e.st=st;fecharTudo();render();toast(t,x||'')}
@@ -1381,7 +1382,7 @@ function abrirFicha(n){if(n==='Lúcia Ferraz')return ir('paciente');
   toast('No protótipo, a ficha completa é a da Lúcia Ferraz','A ficha de '+n+' teria a conversa, o dinheiro e os próximos passos. Para ver uma, abra a Lúcia em Pacientes.')}
 const fichaEv=id=>{const e=EV.find(x=>x.id===id);if(e)abrirFicha(e.pac)};
 function faltou(id){const e=EV.find(v=>v.id===id);e.st='faltou';fecharTudo();render();
-  toast('Faltou (veio do Amigo) · voltou ao funil','Card de '+e.pac+' foi para Voltar a chamar com “faltou, remarcar”. O agente manda amanhã: “sentimos sua falta, quer remarcar?”. Não vira vaga: o horário já passou. Da próxima vez, o agente pede sinal de R$ 50 · nada foi enviado (protótipo)',true)}
+  toast('Faltou (veio do Amigo) · voltou ao funil','O cartão de '+e.pac+' foi para Voltar a chamar com “faltou, remarcar”. O agente manda amanhã: “sentimos sua falta, quer remarcar?”. Não vira vaga: o horário já passou. Da próxima vez, o agente pede sinal de R$ 50 · nada foi enviado (protótipo)',true)}
 /* cancelou: o Zaq grava no Amigo e o horário vai para Vagas (vgAbrir acha quem cabe; no 1º mês, a recepção aprova) */
 function cancelar(id){const e=EV.find(v=>v.id===id);if(!e)return;fecharTudo();
   const v=vgAbrir(e,hjPrim(e.pac)+' cancelou às '+AGORA);menu();render();
@@ -1390,7 +1391,7 @@ function cancelar(id){const e=EV.find(v=>v.id===id);if(!e)return;fecharTudo();
   toast('⚡ Horário liberado · '+q,({curta:'Falta menos de 1 h: mensagem não daria tempo. Em Vagas aparece quem já está na clínica, para você oferecer no balcão.',
     'sem-gente':'Ninguém da lista cabe nele agora. Ele entrou em Vagas › Ainda dá para encher.',
     aprovar:hjPl(v.r1.length,'pessoa cabe','pessoas cabem')+' ('+vgNomes(v.r1.map(r=>r[0]))+'). Aprove o envio em Vagas.',
-    oferecendo:'Oferta enviada para '+vgNomes(v.r1.map(r=>r[0]))+', válida até '+v.ate+'.'})[v.st]+' O Zaq gravou “cancelado” no Amigo · nada foi enviado (protótipo)',true)}
+    oferecendo:'No automático, a oferta sairia sozinha para '+vgNomes(v.r1.map(r=>r[0]))+', válida até '+v.ate+'.'})[v.st]+' O Zaq gravou “cancelado” no Amigo · nada foi enviado (protótipo)',true)}
 
 /* a conversa de um horário (botão 💬 da gaveta) */
 function abrirZapEv(id){const e=EV.find(x=>x.id===id);if(!e)return;
@@ -1398,7 +1399,7 @@ function abrirZapEv(id){const e=EV.find(x=>x.id===id);if(!e)return;
   const conf=wa?`<div class="sis">véspera · confirmação automática</div><div class="b">Oi, ${hjPrim(e.pac)}! Amanhã você tem ${palavraMsg(e.tipo)} às ${hjH(e.h)} com ${hjCom(e.p)}. Confirma? Responda <b>1</b> para confirmar ou <b>2</b> para remarcar.<div class="h">10:00 · agente</div></div><div class="b eu">1<div class="h">${(e.conf.match(/\d\d:\d\d/)||['10:12'])[0]}</div></div><div class="b">Confirmado! Até amanhã 🤝<div class="h">agente</div></div>`:'';
   abrirGav(`<div class="mut" style="font-size:.76rem">Conversa · ${viaDe(e)[2]}</div><h2>${e.pac}</h2>
   <div class="zap" style="margin-top:.6rem;max-width:none">${e.via==='agente'||e.via==='vaga'?zapReserva(e):`<div class="sis">marcado pela recepção ${e.via==='amigo'?'no Amigo':'aqui no Zaq'} · sem conversa de agendamento no WhatsApp</div>`}${conf}</div>
-  <div class="acoes">${e.st==='segurado'?`<button class="btn" onclick="hjConfirmar(${id});abrirZapEv(${id})">Confirmar o horário</button>`:''}<button class="btn sec" onclick="abrirEv(${id})">‹ Voltar ao horário</button></div>`)}
+  <div class="acoes">${e.st==='segurado'?`<button class="btn" onclick="hjConfirmar(${id});abrirZapEv(${id})">Confirmar a reserva</button>`:''}<button class="btn sec" onclick="abrirEv(${id})">‹ Voltar ao horário</button></div>`)}
 
 /* ---- a conversa em que o agente marca (modo padrão: segurar, e a recepção confirma) ----
    O agente diz "Reservei… a recepção confirma em instantes". O "Prontinho!! ✅ Seu
@@ -1431,10 +1432,16 @@ function zapReserva(e){
       :`<div class="sis">Pix de R$ 50 recebido · o Zaq marcou no Amigo</div><div class="b">Prontinho!! ✅ Seu agendamento foi realizado 🤝<br><b>${quando}</b> com ${com}, ${loc==='Espaço Pelle'?'na Rua Óscar Galvão, 38':'em '+loc}. Os R$ 50 viraram crédito no atendimento.<div class="h">automática, depois do Pix</div></div>`;
     return h;
   }
+  /* modo "marca direto no Amigo" (Configurar › WhatsApp e agente, com o Amigo conectado): a consulta do Dr. Manoel
+     na sede sai marcada na hora, sem segurar. O que já estava segurado antes de trocar o modo segue o caminho normal. */
+  if(agDireto()&&cons&&e.p==='manoel'&&loc==='Espaço Pelle'&&e.dia>=HOJE&&['agendado','confirmado'].includes(e.st)&&!e.confH)
+    return h+`<div class="sis">o Zaq conferiu no Amigo que o horário está livre e marcou lá · modo “marca direto”</div>
+    <div class="b">Prontinho!! ✅ Seu agendamento foi realizado 🤝<br><b>${quando}</b> com ${com}, na Rua Óscar Galvão, 38. Na véspera eu te mando um lembrete.<div class="h">${t0} · agente</div></div>
+    <div class="sis">→ funil: Consulta agendada</div>`;
   h+=`<div class="b">Reservei <b>${d}, ${DIAS[e.dia][1]}, às ${hjH(e.h)}</b> com ${com} para você 🤝🏽<br>${fora?'A recepção confirma a partir das 8h e eu te aviso aqui.':'A recepção confirma em instantes e eu te aviso aqui.'}<div class="h">${t0}</div></div>
     <div class="sis">o Zaq conferiu no Amigo que o horário está livre · Agenda: segurado pelo agente</div>`;
   if(e.st==='segurado') h+=`<div class="sis" style="color:var(--ambar)">⏳ esperando a recepção confirmar</div>`;
-  else if(e.st==='cancelou'&&!e.seg) h+=`<div class="sis">a recepção não confirmou este horário · o Zaq não marcou no Amigo</div>
+  else if(e.st==='cancelou'&&!e.confH) h+=`<div class="sis">a recepção não confirmou este horário · o Zaq não marcou no Amigo</div>
     <div class="b">Esse horário não deu 🙏 Posso te oferecer outro? Tenho outros dias com ${com} esta semana.<div class="h">agente</div></div><div class="sis">→ funil: Voltar a chamar</div>`;
   else if(e.st!=='cancelou'){const tc=e.confH||(fora?'08:05':hmMais(t0,3));
     h+=`<div class="sis">${tc} · a recepção confirmou · o Zaq marcou no Amigo</div>
@@ -1508,8 +1515,8 @@ let NA_NOVO=false, NA_SEL=null;   // NA_SEL: o horário escolhido no modal ({dia
 /* nome digitado: apóstrofo e aspas viram os tipográficos (D’Ávila), e < > saem. Assim o nome nunca quebra um onclick. */
 function nomeLimpo(s){return String(s==null?'':s).replace(/'/g,'’').replace(/"/g,'”').replace(/[<>]/g,'').replace(/\s+/g,' ').trim()}
 function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p);if(!pr)return; if(dia===undefined)dia=HOJE;
-  /* sem horário, ou horário já ocupado (o Agendar da ficha): abre no primeiro livre desse profissional */
-  if(!hr||rxOcupa(p,dia,hr)){const f=primeirosLivres(p,1,dia)[0];if(f){dia=f.d;hr=f.h}}
+  /* sem horário, horário que já passou, fora da grade ou já ocupado (o Agendar da ficha): abre no primeiro livre desse profissional */
+  if(!hr||dia<HOJE||!DIAS[dia]||!atende(p,dia,hr)||(dia===HOJE&&hr<=AGORA)||rxOcupa(p,dia,hr)){const f=primeirosLivres(p,1,Math.max(HOJE,Math.min(dia,DIAS.length-1)))[0]||primeirosLivres(p,1,HOJE)[0];if(f){dia=f.d;hr=f.h}}
   NA_NOVO=false;NA_SEL={dia,hr};
   const emOf=vgOfertaEm(p,dia,hr), dl=d=>DIAS[d][0].toLowerCase()+' '+DIAS[d][1].slice(0,2);
   /* as outras opções são horários livres de verdade (a conta da Agenda), fora os que estão em oferta */
@@ -1649,12 +1656,12 @@ function telaFunil(){
   if(venda) h+=`<div class="card" style="margin-top:.9rem"><h3>Depois do preço, ninguém fica para trás</h3>
     <div class="mut" style="font-size:.82rem;margin-bottom:.5rem">Medido no WhatsApp da clínica (24/08 a 23/09): de ${W.preco.receberam} pessoas que receberam o preço da consulta, ${W.preco.marcaram} agendaram. Das ${parados} que não agendaram, ${W.preco.nuncaChamados} nunca foram chamadas de novo. A recepção responde rápido — o que falta é voltar a falar. ${rxF('wa')}</div>
     <table class="tb"><tr><th>Quando</th><th>O agente manda</th></tr>
-    <tr><td>Recebeu o preço</td><td>card entra em <span class="chip">Recebeu o preço</span> sozinho (o agente reconhece a mensagem de valor)</td></tr>
+    <tr><td>Recebeu o preço</td><td>o cartão entra em <span class="chip">Recebeu o preço</span> sozinho (o agente reconhece a mensagem de valor)</td></tr>
     ${AGENTE.fu.map((f,i)=>`<tr><td>+${f.d} sem resposta</td><td>${f.on?'':'<span class="chip">desligado em Clínica e agente</span> '}${i===0?'o agente manda os horários livres do dia (todo agendamento real saiu no mesmo dia do preço): ':''}"${rtEsc(cfFill(f.t,cfFuVals('Renata')))}"${f.fim?'; é o último toque: sem resposta, vai para <span class="chip r">Perdido</span> com o motivo "sumiu depois do preço"':''}</td></tr>`).join('')}
-    <tr><td>Respondeu "vou ver"</td><td>sai do automático e aparece para a recepção, com a frase dele no card</td></tr>
+    <tr><td>Respondeu "vou ver"</td><td>sai do automático e aparece para a recepção, com a frase dele no cartão</td></tr>
     </table></div>`;
   if(pos) h+=`<div class="card" style="margin-top:.9rem"><h3>O pós-venda anda sozinho</h3><table class="tb">
-    <tr><th>Quando</th><th>O card vai para</th><th>E o sistema</th></tr>
+    <tr><th>Quando</th><th>O cartão vai para</th><th>E o sistema</th></tr>
     <tr><td>Pagamento do plano aprovado</td><td><span class="chip">Em tratamento</span></td><td>abre o saldo de sessões e oferece a 1ª sessão</td></tr>
     <tr><td>Passou o intervalo e não marcou a próxima</td><td><span class="chip">Em tratamento</span> + alerta</td><td>agente oferece horário; com 45 dias parado, avisa a recepção</td></tr>
     <tr><td>Última sessão finalizada no Amigo</td><td><span class="chip">Concluído</span></td><td>no dia seguinte, pergunta como foi (nota de 0 a 10), só para quem autorizou pesquisa. O link de avaliação no Google vai para todos que responderem, sem escolher pela nota; nota de 0 a 6 também avisa a recepção na hora</td></tr>
@@ -1698,7 +1705,7 @@ function abrirLead(col,i){const c=FUNIL[col][i];if(!c)return;
   abrirGav(`<div class="mut" style="font-size:.76rem">${col}</div><h2>${c.n}</h2><div class="mut" style="font-size:.84rem">${c.s}</div>
   <div class="sec"><h4>Conversa · agente do WhatsApp</h4>
   <div class="zap">${e?zapReserva(e):zapLead(c,col)}</div>
-  ${e&&e.st==='segurado'?`<div class="acoes"><button class="btn" onclick="hjConfirmar(${e.id});abrirLead('${col}',${i})">Confirmar o horário</button><span class="faint" style="font-size:.74rem;align-self:center">o Zaq já conferiu no Amigo que está livre</span></div>`:''}
+  ${e&&e.st==='segurado'?`<div class="acoes"><button class="btn" onclick="hjConfirmar(${e.id});abrirLead('${col}',${i})">Confirmar a reserva</button><span class="faint" style="font-size:.74rem;align-self:center">o Zaq já conferiu no Amigo que está livre</span></div>`:''}
   <div class="hint" style="margin-top:.5rem">📝 Os textos são os que a recepção já usa (a saudação, "investimento de R$ 500,00", "Prontinho!! ✅"). ${agDireto()
     ?'Modo atual: <b>marca direto no Amigo</b> a consulta do Dr. Manoel na sede (escolhido em Configurar › WhatsApp e agente); o resto continua segurado, e o "Prontinho!! ✅" sai quando a recepção confirma.'
     :'O agente só <b>reserva</b>: o "Prontinho!! ✅" sai sozinho quando a recepção confirma. É o modo padrão; em Configurar › WhatsApp e agente dá para passar a marcar direto no Amigo.'}<br>O que muda: <b>não pede foto do RG nem endereço</b> pelo WhatsApp, só nome e nascimento. Para marcar, documento não é necessário, e fica mais seguro conferido no balcão; o Amigo cadastra o paciente só com o nome. Dado sensível é o de saúde (queixa, diagnóstico, foto de pele): esse o agente não pede nem comenta.</div></div>
@@ -2068,7 +2075,7 @@ function abrirPorNaFila(n){
   <div class="faint" style="font-size:.74rem">Fica guardado: nome, telefone, cidade, origem e data. Sem motivo de saúde.</div>
   <div class="acoes"><button class="btn" onclick="rtPorNaFilaOk()">Pôr na fila</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>`)}
 function rtPorNaFilaOk(){const el=document.getElementById('rt-pn-cid'), nm=document.getElementById('rt-pn-nome');
-  const c=rtCid(el&&el.value)||CIDADES[0], nome=(nm&&nm.value&&String(nm.value).trim())||'A pessoa';
+  const c=rtCid(el&&el.value)||CIDADES[0], nome=nomeLimpo(nm&&nm.value)||'A pessoa';   // nome digitado nunca quebra um onclick (D’Ávila)
   const pr=nome.split(' ');rtPessoas(c).push({org:'ped',nome:pr[0]+(pr[1]?' '+pr[pr.length-1][0]+'.':''),desde:'pediu em 23/09 · balcão',f:'recepção'});rtSync(c);fecharTudo();render();
   toast('Na fila de '+c.n,nome+' recebe o aviso quando a data abrir. A fila de '+c.n+' agora tem '+naFila(c)+' · só nesta sessão (protótipo).')}
 
@@ -2379,7 +2386,7 @@ function rtCancelarOk(id){const v=rtV(id);if(!v)return;const r=rtCancelResumo(v)
   if(v.ev)EV.filter(e=>e.p===v.ev.p&&e.dia===v.ev.dia&&rxVivo(e)).forEach(e=>{e.st='cancelou'});
   v.st='cancelada';v.motivo=RT_MOTIVO;if(DIA_ABERTO===id)DIA_ABERTO=null;
   fecharTudo();render();
-  toast('Viagem cancelada · '+v.c+' '+v.dt,(r.marc?r.marc+' pessoas avisadas com o motivo'+(r.pagos?', '+brl(50*r.pagos)+' de sinal devolvidos no Pix':'')+', atendimentos cancelados no Amigo. ':'')+'Todos voltaram ao topo da fila de '+v.c+' · nada foi enviado (protótipo)',true)}
+  toast('Viagem cancelada · '+v.c+' '+v.dt,(r.marc?'No Zaq, '+r.marc+' pessoas seriam avisadas com o motivo'+(r.pagos?', '+brl(50*r.pagos)+' de sinal voltariam no Pix':'')+' e os atendimentos seriam cancelados no Amigo. ':'')+'Todos voltaram ao topo da fila de '+v.c+' · nada foi enviado (protótipo)',true)}
 
 /* =========== 6 · FECHAR A VIAGEM (a conta do dia) =========== */
 function abrirFechar(id){const v=rtV(id);if(!v||!v.plano)return;
@@ -2439,7 +2446,7 @@ function rtFecharOk(){if(!FECH)return;const k=rtFechConta(), v=k.v, c=k.c, dd=v.
     c.aVencer=k.veio.filter(x=>tipo(x.tipo)[3]==='30 dias').map(x=>({org:'ret',nome:x.nome,desde:'atendido '+v.dt+' · retorno vence '+rtFmt(prazo),f:'Amigo',aVencer:true}));c.aVencerEm=rtFmt(prazo);
     if(!VIAGENS.some(x=>x.c===c.n&&x.dt===nd&&rtAtiva(x))){VIAGENS.push({id:rtId(c.n,nd),c:c.n,dt:nd,st:'sugerida',motivo:`antes de vencerem os ${k.consultas} retornos (${rtFmt(prazo)})`});c.sug=nd;v.proxSug=nd;v.prazoRet=rtFmt(prazo)}}
   FECH=null;DIA_ABERTO=null;fecharTudo();render();abrirFechamento(v.id);
-  toast('Viagem fechada · '+v.c+' '+v.dt,'4 despesas ('+brl(k.sai)+') lançadas no Caixa com a etiqueta “Viagem · '+v.c+' '+dd+'”'+(k.falt.length?'; a falta foi para Voltar a chamar':'')+' · nada foi salvo (protótipo)')}
+  toast('Viagem fechada · '+v.c+' '+v.dt,'No Zaq, 4 despesas ('+brl(k.sai)+') iriam para o Caixa com a etiqueta “Viagem · '+v.c+' '+dd+'”'+(k.falt.length?'; a falta foi para Voltar a chamar':'')+' · nada foi salvo (protótipo)')}
 function abrirFechamento(id){const v=rtV(id);if(!v||v.st!=='fechada')return;const c=rtCid(v.c), ent=entrou(v), s=ent-v.sai, dd=v.dt.split(' ')[1];
   RT_GAV=null;
   const ant=rtFechadas(c).filter(x=>rtData(x.dt)<rtData(v.dt)).pop(), qui=rtTurnoDe(v.dt)==='qui';
@@ -2938,7 +2945,7 @@ function abrirVgPorNaLista(){
   <div class="field"><label>Até quando</label><div class="opts"><button class="opt" onclick="sel(this)">15 dias</button><button class="opt on" onclick="sel(this)">30 dias</button><button class="opt" onclick="sel(this)">60 dias</button></div></div>
   <div class="acoes"><button class="btn" onclick="vgPorNaListaOk()">Pôr na lista</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>`)}
 function vgPorNaListaOk(){const g=id=>{const e=document.getElementById(id);return e&&e.value?String(e.value).trim():''};
-  const n=g('vg-pn-nome')||'Paciente novo', p=PROF.find(x=>x.id===g('vg-pn-prof'))||PROF[0];
+  const n=nomeLimpo(g('vg-pn-nome'))||'Paciente novo', p=PROF.find(x=>x.id===g('vg-pn-prof'))||PROF[0];
   ESPERA.push({n,quer:(g('vg-pn-tipo')||'Consulta')+' · '+p.nome,serve:'o que a recepção marcou',desde:'23/09',frase:'pediu no balcão',ofertas:[]});
   fecharTudo();render();toast('Na lista de espera · '+n,'Quando abrir um horário que serve, o Zaq oferece na hora (com a sua aprovação no 1º mês) · só nesta sessão (protótipo).')}
 function abrirVgHist(i){const x=HIST[i];if(!x)return;const dono=ehDono(), nome=rxNome(x.p);
@@ -3449,7 +3456,7 @@ function telaPropostas(){
   }
   return h+`</div>
   <div class="grid2" style="margin-top:.9rem"><div class="card"><h3>A proposta se cobra sozinha</h3><table class="tb">
-    <tr><td>Enviada</td><td>o card aparece aqui e no funil em <span class="chip">Plano de tratamento</span></td></tr>
+    <tr><td>Enviada</td><td>o cartão aparece aqui e no Funil em <span class="chip">Plano de tratamento</span></td></tr>
     <tr><td>+1 dia</td><td>"Viu a proposta? Posso separar os horários das sessões?"</td></tr>
     <tr><td>+3 dias</td><td>lembrete com o parcelamento</td></tr>
     <tr><td>1 dia antes de vencer</td><td>avisa a recepção, que decide se estende</td></tr>
@@ -4092,7 +4099,7 @@ let MSGS=[
   vars:['{nome}','{n}','{total}','{pacote}','{h1}','{h2}','{profissional}'],
   regra:'2º toque em 3 dias · com 45 dias parado, avisa a recepção · pacote de procedimento clínico não vai pelo nome: vira “sua próxima sessão” · os horários são lidos da agenda na hora de mandar',
   prevQuando:'o intervalo de 21 dias do peeling passou',prevHora:'09:00'},
- {id:'retorno',nome:'Retorno pedido pelo médico',on:true,consent:null,exNome:'Pedro Santana',
+ {id:'retorno',nome:'Retorno pedido pelo médico',on:true,consent:null,exNome:'Carla Menezes',   // saiu sem marcar (o Pedro sai do Finalizar com o retorno marcado)
   quando:'7 dias antes da data, se o paciente saiu sem marcar',
   txt:'Oi, {nome}! Aqui é do Centro Dermatológico Dr. Manoel Soares 😊 O Dr. Manoel pediu para te ver de novo por volta de {data}. Qual dia fica melhor para você?',
   vars:['{nome}','{data}'],
@@ -4123,9 +4130,9 @@ const livresDe=(p,dia)=>HORAS.filter(h=>atende(p,dia,h)&&!rxOcupa(p,dia,h)&&(dia
 const primeirosLivres=(p,n,desde)=>{const o=[];for(let d=desde;d<DIAS.length&&o.length<n;d++){if(localDe(p,d)!=='Espaço Pelle')continue;const l=livresDe(p,d);if(l.length)o.push({d,h:l[0]})}return o};
 const ocupSemana=p=>{let a=0,o=0;DIAS.forEach((_,d)=>{a+=HORAS.filter(h=>atende(p,d,h)).length;o+=EV.filter(e=>e.p===p&&e.dia===d&&!['cancelou','faltou'].includes(e.st)).reduce((s,e)=>s+e.d,0)});return a?Math.round(100*o/a):0};
 const cfSegurados=()=>EV.filter(e=>e.st==='segurado').sort(hjOrd);
-function cfConfAmanha(){const ev=EV.filter(e=>e.dia===HOJE+1&&e.st!=='cancelou'), pes=f=>[...new Set(ev.filter(f).map(e=>e.pac))], fora=e=>['segurado','sinal'].includes(e.st);
-  const recebe=pes(e=>!fora(e));
-  return {atend:ev.length,pessoas:pes(()=>true).length,msgs:recebe.length,
+function cfConfAmanha(){const ev=EV.filter(e=>e.dia===HOJE+1&&e.st!=='cancelou').sort(hjOrd), pes=f=>[...new Set(ev.filter(f).map(e=>e.pac))], fora=e=>['segurado','sinal'].includes(e.st);
+  const recebe=pes(e=>!fora(e)), rem=HJ_REM.filter(r=>r.dia===HOJE+1).map(r=>r.pac);   // quem respondeu 2 também recebeu (o horário dele já foi para Vagas)
+  return {atend:ev.length,pessoas:pes(()=>true).length,msgs:new Set([...recebe,...rem]).size,
     duas:pes(e=>!fora(e)&&ev.filter(x=>x.pac===e.pac&&!fora(x)).length>1),
     seg:pes(e=>e.st==='segurado').filter(n=>!recebe.includes(n)),sinal:pes(e=>e.st==='sinal').filter(n=>!recebe.includes(n)),
     sim:pes(e=>e.st==='confirmado'),sem:pes(e=>e.st==='agendado'&&e.vesp==='-'),rem:HJ_REM.filter(r=>r.dia===HOJE+1).map(r=>r.pac)}}
@@ -4373,17 +4380,16 @@ function cfMsgCard(m,i){const ab=MSG_ABERTA===m.id, k='m-'+m.id, t=CF_RASC[k]!=n
     <div class="cf-sub">Agora</div><div class="cf-txt">${cfMsgResultado(m.id)}</div></div>`;
   return h+'</div>'}
 /* a frase da Lúcia na confirmação: dois horários no mesmo dia viram uma mensagem só */
-function cfLuciaFrase(){const ev=EV.filter(e=>e.pac==='Lúcia Ferraz'&&e.dia===HOJE&&rxVivo(e)).sort(hjOrd);
-  return ev.map(e=>{const nm=NOME_NA_MSG.find(n=>String(e.pac_s||'').startsWith(n));return palavraMsg(e.tipo)+(nm?' de '+nm.toLowerCase():'')+' às '+hjH(e.h)+' com '+hjCom(e.p)}).join(' e ')}
+function cfLuciaFrase(){return hjConfFrase(EV.filter(e=>e.pac==='Lúcia Ferraz'&&e.dia===HOJE&&rxVivo(e)).sort(hjOrd))}
 function cfMsgVals(id){const pl=primeirosLivres('juliana',2,HOJE+1).map(x=>HJ_DIA_LONGO[x.d]+' às '+hjH(x.h));
   return ({conf:{nome:'Lúcia',atendimento:'retorno',hora:'9h',profissional:'o Dr. Manoel',local:'Espaço Pelle (Rua Óscar Galvão, 38)'},
     sessao:{nome:'Joana',n:'2',total:'3',pacote:'peeling',h1:pl[0]||'quinta às 9h',h2:pl[1]||'sexta às 8h',profissional:'a Juliana'},
-    retorno:{nome:'Pedro',data:'sexta, 23/10'},pos:{nome:'Rita'},aniv:{nome:'Lúcia'}})[id]||{}}
+    retorno:{nome:'Carla',data:'sexta, 23/10'},pos:{nome:'Rita'},aniv:{nome:'Lúcia'}})[id]||{}}
 const cfPresente=()=>{const m=MSGS.find(x=>x.id==='aniv');return CF_RASC.pres!=null?CF_RASC.pres:(m?m.presente:'')};
 function cfMsgNota(id){const pl=primeirosLivres('juliana',2,HOJE+1);
-  return ({conf:'dois horários no mesmo dia viram uma mensagem só (é a conversa da ficha dela)',
+  return ({conf:'dois horários no mesmo dia viram uma mensagem só<span class="dev"> (é a conversa da ficha dela)</span>',
     sessao:pl.length?'os dois horários são os primeiros livres da Juliana a partir de amanhã, lidos da Agenda':'',
-    retorno:'consulta hoje, retorno de 30 dias: por volta de sex 23/10',
+    retorno:'consulta hoje às 8h, saiu sem marcar o retorno de 30 dias: por volta de sex 23/10',
     pos:'respondeu: recebe o link de avaliação no Google, qualquer que seja a nota',
     aniv:CONSENT.promo?'Lúcia autorizou novidades (10/09): recebe o presente, se houver':'Lúcia não autorizou novidades: vai só o parabéns'})[id]||''}
 function cfMsgBolha(id,t){const m=MSGS.find(x=>x.id===id);if(!m)return '';let txt=String(t||'');
@@ -4394,15 +4400,15 @@ function cfMsgBolha(id,t){const m=MSGS.find(x=>x.id===id);if(!m)return '';let tx
   return `<div class="sis">${m.prevQuando}</div><div class="b">${b}<div class="h">${m.prevHora} · agente</div></div>${m.resp?`<div class="b eu">${m.resp}<div class="h">${m.respHora}</div></div>`:''}${nota?`<div class="sis">${nota}</div>`:''}`}
 function cfMsgResultado(id){const AM=RX_AMIGO, ex=rxF('ex');
   if(id==='conf'){const c=cfConfAmanha();
-    return `Amanhã, ${rxDia(HOJE+1)}: <b>${c.atend} atendimentos de ${c.pessoas} pessoas</b> → ${HJ_LOTE?'saíram':'saem'} hoje às 10:00 <b>${hjPl(c.msgs,'mensagem','mensagens')}</b>${c.duas.length?' ('+c.duas.join(' e ')+' têm 2 horários e recebem uma só)':''}.`
-      +(c.seg.length?' '+c.seg.join(' e ')+(c.seg.length>1?' estão segurados e recebem':' está segurado e recebe')+' depois que a recepção confirmar.':'')
-      +(c.sinal.length?' '+c.sinal.join(' e ')+' espera'+(c.sinal.length>1?'m':'')+' o sinal no Pix: a confirmação vai junto com o “Prontinho”.':'')
-      +(HJ_LOTE?`<br>Respostas às 10h30: ${hjPl(c.sim.length,'pessoa confirmou','pessoas confirmaram')} · ${hjPl(c.rem.length,'pediu','pediram')} para remarcar · sem resposta: ${c.sem.length?c.sem.join(' e '):'ninguém'}.`:' <a class="cf-a" onclick="ir(\'hoje\');rxIr(\'hj-3\')">Ver em Hoje ›</a>')+' '+ex}
+    return `Amanhã, ${rxDia(HOJE+1)}: <b>${c.atend} atendimentos de ${c.pessoas} pessoas</b> → ${HJ_LOTE?'saíram':'saem'} hoje às 10:00 <b>${hjPl(c.msgs,'mensagem','mensagens')}</b>, uma por pessoa${c.duas.length?' ('+hjE(c.duas)+(c.duas.length>1?' têm 2 horários e recebem':' tem 2 horários e recebe')+' uma só)':''}.`
+      +(c.seg.length?' '+hjE(c.seg)+(c.seg.length>1?' estão segurados e recebem':' está segurado e recebe')+' depois que a recepção confirmar.':'')
+      +(c.sinal.length?' '+hjE(c.sinal)+' espera'+(c.sinal.length>1?'m':'')+' o sinal no Pix: a confirmação vai junto com o “Prontinho”.':'')
+      +(HJ_LOTE?`<br>Respostas às 10h30: ${hjPl(c.sim.length,'pessoa confirmou','pessoas confirmaram')} · ${hjPl(c.rem.length,'pediu','pediram')} para remarcar · sem resposta: ${c.sem.length?hjE(c.sem):'ninguém'}.`:' <a class="cf-a" onclick="ir(\'hoje\');rxIr(\'hj-3\')">Ver em Hoje ›</a>')+' '+ex}
   if(id==='sessao'){const n=k=>SESS.filter(x=>x.st===k), p=n('parado');
-    return `${n('dia').length} pacotes em dia · ${n('atrasado').length} atrasado para marcar · ${p.length} parado${p.length?' ('+p.map(x=>x.pac+', '+x.p.toLowerCase()).join('; ')+': já com a recepção)':''} · ${n('vencendo').length} vencendo com sessão sobrando. É a mesma lista de Tratamentos › Pacotes ${ex}`}
-  if(id==='retorno')return `No Amigo: <b>${AM.retornos}</b> retornos pedidos, ${AM.retornosChamados} chamados ${rxF('amigo')}. Hoje ${HJ_RET_OK?'já foram chamados':'vão'} os ${HJ_RET.length} mais atrasados (Hoje › Retornos) ${ex}. De quem sai da consulta daqui para frente, o prazo entra no “Finalizar”.`;
+    return `${n('dia').length} pacotes em dia · ${n('atrasado').length} atrasado para marcar · ${p.length} parado${p.length?' ('+p.map(x=>x.pac+', '+x.p.toLowerCase()).join('; ')+': já com a recepção)':''} · ${n('vencendo').length} vencendo com sessão sobrando ${ex} · <a class="cf-a" onclick="PL_ABA='pacotes';ir('planos')">Ver em Tratamentos ›</a>`}
+  if(id==='retorno'){const R=hjRetLista();return `No Amigo: <b>${AM.retornos}</b> retornos pedidos, ${AM.retornosChamados} chamados ${rxF('amigo')}. Hoje ${HJ_RET_OK?'já foram chamados':'vão'} os ${R.vao.length} mais atrasados (Hoje › Retornos)${R.amanha.length?'; '+vgNomes(R.amanha.map(x=>x[0]))+' fica para amanhã, porque já recebeu mensagem hoje':''} ${ex}. De quem sai da consulta daqui para frente, o prazo entra no “Finalizar”.`}
   if(id==='pos'){const C=POS['Concluído'], M=POS['Manutenção'];
-    return `${hjPl(C.length,'concluiu','concluíram')} este mês: ${C.map(x=>x.n+' ('+x.av[0]+')').join(' · ')} · ${hjPl(M.length,'manutenção vencendo','manutenções vencendo')}. É o mesmo Funil › Pós-venda ${ex}`}
+    return `${hjPl(C.length,'concluiu','concluíram')} este mês: ${C.map(x=>x.n+' ('+x.av[0]+')').join(' · ')} · ${hjPl(M.length,'manutenção vencendo','manutenções vencendo')} ${ex} · <a class="cf-a" onclick="FU_FASE='pos';ir('funil')">Ver no Funil ›</a>`}
   if(id==='aniv')return `Outubro tem 38 aniversariantes que vieram no último ano ${ex}. A lista vem do Amigo às 06:00, depois de conectar.`;
   return ''}
 const cfAvisoSaude=id=>`<div class="acha">⚠ Tem palavra de saúde ou de procedimento: <b>${CF_AVISO[id].join(', ')}</b>. Na tela bloqueada do celular, qualquer pessoa da família lê.
@@ -4735,7 +4741,7 @@ function cfChatResponder(txt){const s=cfNorm(txt), F=k=>rtEsc(AGENTE.frases[k]),
     if(!pd('precoConsulta'))return recep('A recepção já te passa o valor 🙂','preço desligado para o agente');
     const ofe=amigo&&pd('horarios')&&of.length;
     ag(F('saudacao')+'<br>'+F('preco')+(ofe?'<br>Tenho estes horários:<br>'+of.map(([d,h])=>'• '+d+' às '+hjH(h)).join('<br>')+'<br>Algum fica bom?':'<br>A recepção já te passa os horários livres 🙂'));
-    sis('→ Funil: Recebeu o preço'+(ofe?' · os 3 horários são os do Raio-X':amigo?'':' · sem o Amigo conectado, o agente não vê horário livre: a recepção marca'));
+    sis('→ Funil: Recebeu o preço'+(ofe?'<span class="dev"> · os 3 horários são os do Raio-X</span>':amigo?'':' · sem o Amigo conectado, o agente não vê horário livre: a recepção marca'));
     st.etapa=ofe?'ofereceu':'preco';return}
   if(/endereco|onde fica|localizacao|como chego/.test(s)){ag('Ficamos na Rua Óscar Galvão, 38, em Pedreiras 📍');return}
   if(/quando|que dia|atende|funciona|abre/.test(s)){ag('O Dr. Manoel atende em Pedreiras de segunda a sexta, '+cfFaixas('manoel',0).split(' e ').map(x=>'das '+x.replace('–',' às ')).join(' e ')+'. Quer que eu veja um horário?');return}
@@ -4771,6 +4777,12 @@ const HJ_NOITE=[ // exemplo: chegaram de noite e o agente passou para a recepç�
   {n:'Graça Moreira',t:'vocês atendem pelo plano da prefeitura?',q:'qua 06:48',por:'falou de convênio: quem confere é a recepção',r:'Bom dia, Graça! Vou conferir o seu plano e já te respondo por aqui. Se preferir particular, a consulta com o Dr. Manoel é R$ 500,00, no Pix, dinheiro ou cartão.'},
 ];
 const HJ_RET=[['Carlos Mendes',12],['Josué Almeida',9],['Rosângela Sá',7],['Benedito Lima',5],['Irene Castro',3]]; // exemplo: os 5 mais atrasados dos retornos pedidos
+/* os retornos de hoje seguem a regra de 1 mensagem automática por pessoa por dia: quem já recebeu
+   outra hoje (oferta de vaga, convite) fica para amanhã. vgMsgHoje(true) = sem contar os próprios retornos. */
+function hjRetLista(){const ja=vgMsgHoje(true);return {vao:HJ_RET.filter(([n])=>!ja.has(n)),amanha:HJ_RET.filter(([n])=>ja.has(n))}}
+/* por que fica para amanhã (e, se a pessoa vem hoje, que dá para marcar no balcão) */
+function hjRetMotivo(n){const e=EV.filter(x=>x.pac===n&&x.dia===HOJE&&rxVivo(x)).sort(hjOrd)[0];
+  return 'já recebeu uma mensagem automática hoje'+(e?' · vem hoje às '+hjH(e.h)+' com '+hjCom(e.p)+': dá para marcar o retorno no balcão':'')}
 const HJ_PIX=[ // exemplo
   {n:'Fábio Mendes',o:'4ª parcela da criolipólise',v:800,q:'vence hoje',k:'a',nota:'o link de Pix sai sozinho às 9h'},
   {n:'Sônia Pires',o:'assinatura Pele em dia',v:149,q:'cartão recusado',k:'r',nota:'link de Pix mandado ontem, ainda não pago'},
@@ -4783,6 +4795,13 @@ const hjPrim=n=>n.split(' ')[0];
 const hjCom=p=>p==='manoel'?'o Dr. Manoel':'a '+rxNome(p);
 const hjFrase=t=>{const m=t.match(/"([^"]+)"/);return m?m[1]:t};
 const hjPl=(n,um,varios)=>n+' '+(n===1?um:varios);
+const hjE=a=>a.length>1?a.slice(0,-1).join(', ')+' e '+a[a.length-1]:a[0]||'';
+/* a confirmação da véspera é por pessoa: 2 horários no mesmo dia = 1 mensagem (a regra de Configurar › Mensagens) */
+const hjPorPessoa=L=>{const s=new Set();return L.filter(e=>!s.has(e.pac)&&s.add(e.pac))};   // o 1º horário de cada pessoa
+const hjPessoas=L=>new Set(L.map(e=>e.pac)).size;
+const hjDoDia=(e,f)=>EV.filter(x=>x.pac===e.pac&&x.dia===e.dia&&(f?f(x):true)).sort(hjOrd);
+/* a frase da mensagem: palavra comum (e o nome do estético, se for um deles), nunca o procedimento */
+const hjConfFrase=evs=>evs.map(e=>{const nm=NOME_NA_MSG.find(n=>String(e.pac_s||'').startsWith(n));return palavraMsg(e.tipo)+(nm?' de '+nm.toLowerCase():'')+' às '+hjH(e.h)+' com '+hjCom(e.p)}).join(' e ');
 function hjLivre(p,dia,de){return HORAS.find(h=>h>=de&&atende(p,dia,h)&&!EV.some(e=>e.p===p&&e.dia===dia&&cobre(e,h)))}
 
 /* roda uma vez, depois de gerarSemana() */
@@ -4808,52 +4827,63 @@ function abrirNoite(i){const x=HJ_NOITE[i];if(!x)return;
   <div class="acoes"><button class="btn" onclick="hjNoiteOk(${i})">Mandar esta resposta</button>${x.cv?`<button class="btn sec" onclick="abrirConv(${x.cv})">Abrir a conversa</button>`:`<button class="btn sec" onclick="CV_FILTRO='pacientes';ir('conversas')">Abrir Conversas</button>`}</div>
   <div class="faint" style="font-size:.74rem;margin-top:.5rem">O agente não fala de sintoma, não dá desconto e não diz se o convênio cobre: essas mensagens ficam para a recepção.</div>`)}
 function hjNoiteOk(i){const x=HJ_NOITE[i];if(!x)return;x.ok=true;fecharTudo();render();
-  toast('Respondida · '+x.n,'Saiu da lista da noite · nada foi enviado (protótipo)')}
+  toast('Resposta aprovada · '+x.n,'No Zaq, a resposta sairia agora na conversa, e a mensagem sai da lista da noite · nada foi enviado (protótipo)')}
 
 /* 2 · segurados pelo agente */
+/* a recepção confirma a reserva: o Zaq marca no Amigo e sai o "Prontinho!! ✅". e.confH = hora em que a
+   reserva foi confirmada (é o sinal de "reserva confirmada" em Agenda, Conversas e Funil).
+   Marcado para hoje: a véspera já passou, então a reserva confirmada já conta como presença confirmada. */
 function hjConfirmar(id,quieto){const e=EV.find(x=>x.id===id);if(!e||e.st!=='segurado')return;
-  e.st='agendado';e.seg=true;e.confH=e.confH||'08:50'; // confH: hora do "Prontinho!! ✅" na conversa (zapReserva)
+  e.seg=true;e.confH=e.confH||AGORA;
+  if(e.dia===HOJE){e.st='confirmado';e.conf='reserva confirmada às '+e.confH+' (marcou hoje, para hoje)'}else e.st='agendado';
   if(quieto)return;
   render();
   const d=HJ_DIA_LONGO[e.dia];
-  toast('Marcado no Amigo · '+hjQuando(e),'O agente mandou para '+hjPrim(e.pac)+': "Prontinho!! ✅ Seu agendamento foi realizado 🤝 '+d[0].toUpperCase()+d.slice(1)+', '+DIAS[e.dia][1]+', às '+hjH(e.h)+' com '+hjCom(e.p)+'." · nada foi enviado (protótipo)')}
+  toast('Reserva confirmada · '+hjQuando(e),'O Zaq marcaria no Amigo e o agente mandaria para '+hjPrim(e.pac)+': “Prontinho!! ✅ Seu agendamento foi realizado 🤝 '+d[0].toUpperCase()+d.slice(1)+', '+DIAS[e.dia][1]+', às '+hjH(e.h)+' com '+hjCom(e.p)+'.”'+(e.dia===HOJE?' Como é para hoje, já conta como confirmado.':' A confirmação de presença sai na véspera, às 10h.')+' · nada foi enviado (protótipo)')}
 function hjConfirmarTodos(){const ids=EV.filter(e=>e.st==='segurado'&&(e.dia===HOJE||e.dia===HOJE+1)).map(e=>e.id);
   ids.forEach(id=>hjConfirmar(id,true));render();
-  toast(hjPl(ids.length,'horário marcado','horários marcados')+' no Amigo','Cada paciente recebeu "Prontinho!! ✅ Seu agendamento foi realizado" · nada foi enviado (protótipo)')}
+  toast(hjPl(ids.length,'reserva confirmada','reservas confirmadas'),'O Zaq marcaria no Amigo e cada paciente receberia na hora “Prontinho!! ✅ Seu agendamento foi realizado” · nada foi enviado (protótipo)')}
 
 /* 3 · confirmação da véspera */
 function hjLigar(id){const e=EV.find(x=>x.id===id);if(!e)return;
   toast('📞 Ligar para '+e.pac,'No celular, o botão abre o discador com o número salvo. Depois da ligação, toque em "Confirmou" ou "Quer remarcar".')}
-function hjConfirmou(id){const e=EV.find(x=>x.id===id);if(!e||e.st!=='agendado')return;e.st='confirmado';e.conf='por telefone, hoje';render();
-  toast('✓ '+e.pac+' confirmou',hjQuando(e)+' com '+rxNome(e.p)+'. O Zaq grava "confirmado" no Amigo.')}
+/* confirmou: vale para todos os horários da pessoa naquele dia (foi uma mensagem só) */
+function hjConfirmou(id){const e=EV.find(x=>x.id===id);if(!e||e.st!=='agendado')return;
+  const L=hjDoDia(e,x=>x.st==='agendado');L.forEach(x=>{x.st='confirmado';x.conf='por telefone, hoje'});render();
+  toast('✓ '+e.pac+' confirmou',L.map(x=>hjQuando(x)+' com '+rxNome(x.p)).join(' e ')+'. O Zaq grava "confirmado" no Amigo.')}
 function hjRemarcar(id){const e=EV.find(x=>x.id===id);if(!e||e.st==='cancelou')return null;
   const of=[e.dia+1,e.dia+2,e.dia+3].filter(d=>d<DIAS.length&&localDe(e.p,d)===localDe(e.p,e.dia)).map(d=>{const l=rxCel(e.p,d,'dia').livres[0];return l?rxDia(d)+' às '+l:null}).filter(Boolean).slice(0,2);
   const r={pac:e.pac,dia:e.dia,q:hjQuando(e),prof:rxNome(e.p),of:of.length?of.join(' ou '):'horários da semana que vem'};
   HJ_REM.push(r);r.vaga=hjLiberar(e,hjPrim(e.pac)+' pediu para remarcar');return r}
-function hjRemarcarBtn(id){const r=hjRemarcar(id);if(!r)return;render();
+function hjRemarcarBtn(id){const e=EV.find(x=>x.id===id);if(!e)return;
+  const L=hjDoDia(e,x=>x.st==='agendado'&&x!==e), r=hjRemarcar(id);if(!r)return;L.forEach(x=>hjRemarcar(x.id));render();
   toast('↺ '+r.pac+' vai remarcar','O agente ofereceu '+r.of+'. '+(r.vaga&&r.vaga.st!=='sem-gente'?vgStatusFrase(r.vaga).replace('O horário','O horário de '+r.q+' com '+r.prof):'O horário de '+r.q+' com '+r.prof+' ficou livre e entrou em Vagas › Ainda dá para encher.')+' · nada foi enviado (protótipo)',true)}
 function abrirLote(){
-  const alvo=EV.filter(e=>e.dia===HOJE+1&&e.st==='agendado').sort(hjOrd), e=alvo[0];
-  abrirModal(`<h2>Confirmação de amanhã · sai às 10h</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Uma mensagem para cada atendimento de qui 24/09 que ainda não confirmou (${alvo.length}).</div>
-  <div class="zap" style="max-width:none">${e?`<div class="b">Oi, ${hjPrim(e.pac)}! Amanhã, quinta 24/09, você tem ${e.tipo.toLowerCase()} às ${hjH(e.h)} com ${hjCom(e.p)} no Espaço Pelle (Rua Óscar Galvão, 38). Confirma? Responda <b>1</b> para confirmar ou <b>2</b> para remarcar.<div class="h">10:00 · agente</div></div>`:'<div class="sis">ninguém para confirmar</div>'}</div>
+  const alvo=EV.filter(e=>e.dia===HOJE+1&&e.st==='agendado').sort(hjOrd), P=hjPorPessoa(alvo), e=P[0], dele=e?alvo.filter(x=>x.pac===e.pac):[];
+  const duas=P.filter(x=>alvo.filter(y=>y.pac===x.pac).length>1).map(x=>x.pac);
+  abrirModal(`<h2>Confirmação de amanhã · sai às 10h</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Uma mensagem por pessoa, com os horários dela de qui 24/09: <b>${hjPl(P.length,'mensagem','mensagens')} para ${hjPl(alvo.length,'atendimento','atendimentos')}</b> que ainda não confirmaram${duas.length?` (${hjE(duas)} ${duas.length>1?'têm':'tem'} 2 horários)`:''}. A mensagem diz só consulta, retorno, sessão ou atendimento: o celular muitas vezes é da família.</div>
+  <div class="zap" style="max-width:none">${e?`<div class="b">Oi, ${hjPrim(e.pac)}! Amanhã, quinta 24/09, você tem ${hjConfFrase(dele)} no Espaço Pelle (Rua Óscar Galvão, 38). Confirma? Responda <b>1</b> para confirmar ou <b>2</b> para remarcar.<div class="h">10:00 · agente · prévia</div></div>`:'<div class="sis">ninguém para confirmar</div>'}</div>
   <div class="hj-regra"><div><b>Respondeu 1</b>Fica confirmado. O Zaq grava "confirmado" no Amigo.</div><div><b>Respondeu 2</b>O agente oferece outros horários e a vaga vai para Vagas na hora.</div><div><b>Não respondeu</b>O agente manda de novo às 16h. Se ainda não vier, aparece aqui para ligar.</div></div>
   <div class="acoes">${HJ_LOTE?'<span class="chip g">já saiu hoje às 10h</span>':'<button class="btn" onclick="hjLote()">Simular as respostas (10h30)</button>'}<button class="btn sec" onclick="fecharTudo()">Fechar</button></div>`)}
+/* as respostas das 10h30: uma por pessoa (quem tem 2 horários responde uma vez só, pelos dois) */
 function hjLote(){if(HJ_LOTE)return;
-  const alvo=EV.filter(e=>e.dia===HOJE+1&&e.st==='agendado').sort(hjOrd), n=alvo.length, sem=n>=8?3:n>=4?1:0;
+  const alvo=EV.filter(e=>e.dia===HOJE+1&&e.st==='agendado').sort(hjOrd), P=[];
+  alvo.forEach(e=>{let g=P.find(x=>x[0].pac===e.pac);if(!g)P.push(g=[]);g.push(e)});
+  const n=P.length, sem=n>=8?3:n>=4?1:0;
   let um=0, dois=null;
-  alvo.forEach((e,i)=>{
-    if(i===1&&n>=3) dois=hjRemarcar(e.id);
-    else if(i>=n-sem) e.vesp='-';
-    else {e.st='confirmado';e.vesp='1';e.conf='pelo WhatsApp às 10:'+String(3+i*2).padStart(2,'0')+' de hoje';um++}
+  P.forEach((g,i)=>{
+    if(i===1&&n>=3) g.forEach(e=>{const r=hjRemarcar(e.id);dois=dois||r});
+    else if(i>=n-sem) g.forEach(e=>{e.vesp='-'});
+    else {g.forEach(e=>{e.st='confirmado';e.vesp='1';e.conf='pelo WhatsApp às 10:'+String(3+i*2).padStart(2,'0')+' de hoje'});um++}
   });
   HJ_LOTE=true;fecharTudo();render();
-  toast('10h30 · confirmação de amanhã',hjPl(um,'respondeu','responderam')+' 1'+(dois?'; '+hjPrim(dois.pac)+' respondeu 2 e a vaga foi para Vagas':'')+(sem?'; '+hjPl(sem,'ainda não respondeu','ainda não responderam')+' e '+(sem===1?'está':'estão')+' na lista para ligar':'')+'. Simulação · nada foi enviado (protótipo)');
+  toast('10h30 · confirmação de amanhã',hjPl(n,'mensagem saiu','mensagens saíram')+' às 10h, uma por pessoa: '+hjPl(um,'pessoa respondeu','pessoas responderam')+' 1'+(dois?'; '+hjPrim(dois.pac)+' respondeu 2 e a vaga foi para Vagas':'')+(sem?'; '+hjPl(sem,'ainda não respondeu','ainda não responderam')+' e '+(sem===1?'está':'estão')+' na lista para ligar':'')+'. Simulação · nada foi enviado (protótipo)');
 }
 
 /* 4 · finalizados: "propôs tratamento?" */
 function hjTrat(id,v){const e=EV.find(x=>x.id===id);if(!e)return;e.trat=v;
-  if(v==='sim'){propDe(e);PL_ABA='nova';ir('planos');
-    toast('Proposta de '+e.pac,'O card foi para Plano de tratamento no funil. Monte a proposta com o que '+(e.p==='manoel'?'o médico':rxNome(e.p))+' propôs.')}
+  if(v==='sim'){propDe(e);funilPlano(e.pac);PL_ABA='nova';ir('planos');
+    toast('Proposta de '+e.pac,'O cartão foi para Plano de tratamento no Funil. Monte a proposta com o que '+(e.p==='manoel'?'o médico':rxNome(e.p))+' propôs.')}
   else{render();toast('Sem tratamento proposto · '+e.pac,'Fica valendo o retorno que foi pedido no Amigo; o agente lembra 7 dias antes.')}
 }
 
@@ -4874,14 +4904,15 @@ function hjVouVerOk(col,i){const c=(FUNIL[col]||[])[i];if(!c)return;c.hjFeito=tr
 /* 7 · retornos */
 function hjRetHorarios(){return [HOJE+1,HOJE+2].map(d=>rxCel('manoel',d,'tarde').livres.slice(-2).map(h=>rxDia(d)+' às '+h)).reduce((a,b)=>a.concat(b),[]).slice(0,3)}
 function abrirRetornos(){
-  const hs=hjRetHorarios(), n0=HJ_RET[0][0];
-  abrirModal(`<h2>Chamar ${HJ_RET.length} retornos hoje</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Os mais atrasados primeiro. Nada sai sem a sua aprovação.</div>
+  const hs=hjRetHorarios(), R=hjRetLista(), n0=(R.vao[0]||HJ_RET[0])[0];
+  abrirModal(`<h2>Chamar ${hjPl(R.vao.length,'retorno','retornos')} hoje</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Os mais atrasados primeiro. Nada sai sem a sua aprovação.</div>
   <div class="zap" style="max-width:none"><div class="b">Oi, ${hjPrim(n0)}! Aqui é do Centro Dermatológico Dr. Manoel Soares 🤝🏽 O Dr. Manoel pediu o seu retorno. Tenho ${hs.length?hs.join(', ').replace(/, ([^,]*)$/,' ou $1'):'horário esta semana'}. Qual fica melhor? O retorno não é cobrado.<div class="h">agente</div></div></div>
-  <div class="linha" style="margin-top:.6rem"><span>Vai para</span><span style="text-align:right;max-width:70%">${HJ_RET.map(([n])=>n).join(', ')} · só quem autorizou mensagem</span></div>
+  <div class="linha" style="margin-top:.6rem"><span>Vai para</span><span style="text-align:right;max-width:70%">${R.vao.map(([n])=>n).join(', ')||'ninguém hoje'} · só quem autorizou mensagem</span></div>
+  ${R.amanha.map(([n])=>`<div class="linha"><span>Fica para amanhã</span><span style="text-align:right;max-width:70%">${n}: ${hjRetMotivo(n)}. No máximo 1 mensagem automática por pessoa por dia.</span></div>`).join('')}
   <div class="linha"><span>Horários</span><span style="text-align:right;max-width:70%">os que sobram à tarde, depois das consultas</span></div>
-  <div class="acoes">${HJ_RET_OK?'<span class="chip g">já aprovado hoje</span>':`<button class="btn" onclick="hjRetOk()">Aprovar e chamar os ${HJ_RET.length}</button>`}<button class="btn sec" onclick="PS_SEG='retorno';ir('pacientes')">Ver a lista</button></div>`)}
-function hjRetOk(){HJ_RET_OK=true;fecharTudo();render();
-  toast('Aprovado · '+HJ_RET.length+' retornos','O agente chama um por um e segura o horário de quem responder · nada foi enviado (protótipo)')}
+  <div class="acoes">${HJ_RET_OK?'<span class="chip g">já aprovado hoje</span>':R.vao.length?`<button class="btn" onclick="hjRetOk()">Aprovar e chamar os ${R.vao.length}</button>`:''}<button class="btn sec" onclick="PS_SEG='retorno';ir('pacientes')">Ver a lista</button></div>`)}
+function hjRetOk(){const R=hjRetLista();if(!R.vao.length)return;HJ_RET_OK=true;fecharTudo();render();
+  toast('Aprovado · '+hjPl(R.vao.length,'retorno','retornos'),'No Zaq, o agente chamaria um por um e seguraria o horário de quem responder.'+(R.amanha.length?' '+vgNomes(R.amanha.map(x=>x[0]))+' fica para amanhã: já recebeu mensagem hoje.':'')+' · nada foi enviado (protótipo)')}
 
 /* 8 · sinal por Pix e parcelas */
 function hjMsgSinal(e){const loc=localDe(e.p,e.dia), v=tipo(e.tipo)[4];
@@ -4899,9 +4930,9 @@ function abrirSinal(id){const e=EV.find(x=>x.id===id);if(!e)return;
 function hjSinal(id,a){const e=EV.find(x=>x.id===id);if(!e||e.st!=='sinal')return;
   const quando=hjQuando(e)+' com '+rxNome(e.p), v=tipo(e.tipo)[4];
   if(a==='pago'){e.st='agendado';e.credito=50;fecharTudo();render();
-    toast('Sinal pago · '+e.pac,'R$ 50 viraram crédito'+(v>50?': no dia, paga '+brl(v-50):'')+'. '+quando+' ficou marcado no Amigo e o agente mandou "Prontinho!! ✅ Seu agendamento foi realizado" · nada foi enviado (protótipo)')}
+    toast('Sinal pago · '+e.pac,'R$ 50 viraram crédito'+(v>50?': no dia, paga '+brl(v-50):'')+'. '+quando+' ficou marcado no Amigo, e no Zaq o agente mandaria na hora “Prontinho!! ✅ Seu agendamento foi realizado” · simulação, nada foi enviado (protótipo)')}
   else{hjLiberar(e,'sinal não pago até as '+e.prazo);fecharTudo();render();
-    toast('Deu '+e.prazo+' sem Pix · vaga liberada',quando+' voltou para a agenda e entrou em Vagas. O agente avisou '+hjPrim(e.pac)+': "O horário foi liberado. Se ainda quiser, é só me chamar 🙂" · nada foi enviado (protótipo)',true)}
+    toast('Deu '+e.prazo+' sem Pix · vaga liberada',quando+' voltou para a agenda e entrou em Vagas. No Zaq, o agente avisaria '+hjPrim(e.pac)+': “O horário foi liberado. Se ainda quiser, é só me chamar 🙂” · nada foi enviado (protótipo)',true)}
 }
 function hjPixMandar(i){const x=HJ_PIX[i];if(!x)return;
   toast('Pix de '+brl(x.v)+' para '+hjPrim(x.n),'Link de Pix no WhatsApp: '+x.o+' · nada foi enviado (protótipo)')}
@@ -4920,21 +4951,25 @@ function telaHoje(){
   const noite=HJ_NOITE.map((x,i)=>[x,i]).filter(([x])=>!x.ok);
   const segs=EV.filter(e=>e.st==='segurado'&&(e.dia===HOJE||e.dia===HOJE+1)).sort(hjOrd);
   const segDepois=EV.filter(e=>e.st==='segurado'&&e.dia>HOJE+1).length;
-  const dHoje=EV.filter(e=>e.dia===HOJE&&!e.seg);
-  const hj1=dHoje.filter(e=>['confirmado','presente','atendimento','finalizado'].includes(e.st)).length;
-  const hjSem=dHoje.filter(e=>e.st==='agendado').sort(hjOrd);
-  const hj2=HJ_REM.filter(r=>r.dia===HOJE);
+  /* confirmação da véspera: conta pessoas (2 horários no mesmo dia = 1 mensagem). Fica de fora quem foi segurado
+     pelo agente (confirmou a reserva) e quem veio de uma vaga de hoje (respondeu 1 à oferta, não à véspera). */
+  const dHoje=EV.filter(e=>e.dia===HOJE&&!e.seg&&e.via!=='vaga');
+  const hj1=hjPessoas(dHoje.filter(e=>['confirmado','presente','atendimento','finalizado'].includes(e.st)));
+  const hjSem=hjPorPessoa(dHoje.filter(e=>e.st==='agendado').sort(hjOrd));
+  const remP=d=>{const s=new Set();return HJ_REM.filter(r=>r.dia===d&&!s.has(r.pac)&&s.add(r.pac))};
+  const hj2=remP(HOJE);
   const dAm=EV.filter(e=>e.dia===HOJE+1);
-  const amAlvo=dAm.filter(e=>e.st==='agendado').sort(hjOrd);
-  const am1=dAm.filter(e=>e.st==='confirmado').length;
-  const amSem=dAm.filter(e=>e.st==='agendado'&&e.vesp==='-').sort(hjOrd);
-  const amDepois=dAm.filter(e=>e.st==='agendado'&&!e.vesp).length;
-  const am2=HJ_REM.filter(r=>r.dia===HOJE+1);
+  const amAlvo=dAm.filter(e=>e.st==='agendado').sort(hjOrd), amPes=hjPorPessoa(amAlvo);
+  const amDuas=amPes.filter(e=>amAlvo.filter(x=>x.pac===e.pac).length>1).map(e=>e.pac);
+  const am1=hjPessoas(dAm.filter(e=>e.st==='confirmado'));
+  const amSem=hjPorPessoa(dAm.filter(e=>e.st==='agendado'&&e.vesp==='-').sort(hjOrd));
+  const amDepois=hjPessoas(dAm.filter(e=>e.st==='agendado'&&!e.vesp));
+  const am2=remP(HOJE+1);
   const nLigar=hjSem.length+(HJ_LOTE?amSem.length:0);
   const fins=EV.filter(e=>e.st==='finalizado'&&(e.dia===HOJE||e.dia===HOJE-1)&&tipo(e.tipo)[2]==='consulta'&&!e.trat).sort((a,b)=>b.dia-a.dia||(a.h<b.h?-1:1));
   const vv=[];Object.entries(FUNIL).forEach(([col,cs])=>cs.forEach((c,i)=>{const t=c.t.find(([x])=>/vou ver/i.test(x));if(t&&!c.hjFeito)vv.push({col,i,c,fr:hjFrase(t[0])})}));
   const vagasOf=emOferta(), vgPend=VAGAS.filter(v=>['aprovar','curta'].includes(v.st)).length; // em oferta · esperando a recepção
-  const nRet=HJ_RET_OK?0:HJ_RET.length;
+  const RET=hjRetLista(), nRet=HJ_RET_OK?0:RET.vao.length;
   const sinais=EV.filter(e=>e.st==='sinal').sort(hjOrd);
   const pix=HJ_PIX.map((x,i)=>[x,i]).filter(([x])=>!x.pago);
 
@@ -4961,23 +4996,26 @@ function telaHoje(){
 
   /* 2 · segurados pelo agente, esperando a recepção */
   h+=bloco(2,segs.length,cab(2,'Horários segurados pelo agente',segs.length,
-      'O agente reservou e disse ao paciente: "Reservei… a recepção confirma em instantes". Confira e confirme: o Zaq marca no Amigo e o paciente recebe "Prontinho!! ✅ Seu agendamento foi realizado".',rxF('ex'))
-    +(segs.length?segs.map(e=>it(hjQuando(e),e.pac,`${e.tipo} · ${rxNome(e.p)} · o agente segurou ${e.segH||''}`,`<button class="btn min" onclick="hjConfirmar(${e.id})">Confirmar</button><button class="btn sec min" onclick="abrirEv(${e.id})">Ver</button>`)).join(''):feito('Nenhum horário esperando você.'))
-    +`<div class="faint" style="font-size:.74rem;margin-top:.45rem">Lista de hoje e amanhã.${segDepois?` Mais ${segDepois} de sexta e sábado estão na Agenda.`:''} Fora do horário, o agente avisa que a recepção confirma a partir das 8h. Modo atual: <b>segurar, e a recepção confirma</b> (padrão). Em Configurar › WhatsApp e agente dá para passar a marcar direto no Amigo.</div>
-    <div class="acoes">${segs.length>1?`<button class="btn min" onclick="hjConfirmarTodos()">Confirmar os ${segs.length}</button>`:''}<button class="btn sec min" onclick="AG_VISTA='dia';ir('agenda')">Ver na Agenda</button></div>`);
+      'O agente reservou e disse ao paciente: "Reservei… a recepção confirma em instantes". Confira e confirme a reserva: o Zaq marca no Amigo e o paciente recebe "Prontinho!! ✅ Seu agendamento foi realizado". A confirmação de presença é outra: sai na véspera.',rxF('ex'))
+    +(segs.length?segs.map(e=>it(hjQuando(e),e.pac,`${e.tipo} · ${rxNome(e.p)} · o agente segurou ${e.segH||''}`,`<button class="btn min" onclick="hjConfirmar(${e.id})">Confirmar a reserva</button><button class="btn sec min" onclick="abrirEv(${e.id})">Ver</button>`)).join(''):feito('Nenhum horário esperando você.'))
+    +`<div class="faint" style="font-size:.74rem;margin-top:.45rem">Lista de hoje e amanhã.${segDepois?` Mais ${segDepois} de sexta e sábado estão na Agenda.`:''} Fora do horário, o agente avisa que a recepção confirma a partir das 8h. ${agDireto()
+      ?'Modo atual: <b>marca direto no Amigo</b> a consulta do Dr. Manoel na sede (escolhido em Configurar › WhatsApp e agente). O resto continua segurado.'
+      :'Modo atual: <b>segurar, e a recepção confirma</b> (padrão). '+(AGENTE.marca==='direto'?'O “marca direto”, escolhido em Configurar, só vale com o Amigo conectado.':'Em Configurar › WhatsApp e agente dá para passar a marcar direto no Amigo.')}</div>
+    <div class="acoes">${segs.length>1?`<button class="btn min" onclick="hjConfirmarTodos()">Confirmar as ${segs.length} reservas</button>`:''}<button class="btn sec min" onclick="AG_VISTA='dia';ir('agenda')">Ver na Agenda</button></div>`);
 
   /* 3 · confirmação da véspera: 1, 2 e sem resposta */
-  const linLigar=e=>it(hjQuando(e),e.pac,`${e.tipo} · ${rxNome(e.p)} · não respondeu`,`<button class="btn sec min" onclick="hjLigar(${e.id})">📞 Ligar</button><button class="btn min" onclick="hjConfirmou(${e.id})">Confirmou</button><button class="btn sec min" onclick="hjRemarcarBtn(${e.id})">Quer remarcar</button>`);
+  const linLigar=e=>{const mais=hjDoDia(e,x=>x!==e&&x.st==='agendado');
+    return it(hjQuando(e),e.pac,`${e.tipo} · ${rxNome(e.p)}${mais.length?' · também às '+mais.map(x=>hjH(x.h)+' com '+hjCom(x.p)).join(' e ')+' (uma mensagem só)':''} · não respondeu`,`<button class="btn sec min" onclick="hjLigar(${e.id})">📞 Ligar</button><button class="btn min" onclick="hjConfirmou(${e.id})">Confirmou</button><button class="btn sec min" onclick="hjRemarcarBtn(${e.id})">Quer remarcar</button>`)};
   const linRem=r=>it(r.q,r.pac,`respondeu 2 · o agente ofereceu ${r.of} · a vaga foi para Vagas`,`<button class="btn sec min" onclick="${pode('vagas')?"ir('vagas')":"rxIr('hj-6')"}">Ver a vaga</button>`);
-  const cont=(a,b,c)=>`<div class="hj-tags" style="margin:.1rem 0 .35rem"><span class="chip g">✓ ${hjPl(a,'respondeu','responderam')} 1</span><span class="chip b">↺ ${hjPl(b,'respondeu','responderam')} 2</span><span class="chip ${c?'a':''}">☎ ${c} sem resposta</span></div>`;
-  let c3=cab(3,'Confirmação da véspera',nLigar,'Sai sozinha às 10h para os atendimentos do dia seguinte: "Responda 1 para confirmar ou 2 para remarcar". Quem responde 2 recebe outros horários e a vaga vai para Vagas. Quem não responde, a recepção liga.',rxF('ex'));
+  const cont=(a,b,c)=>`<div class="hj-tags" style="margin:.1rem 0 .35rem"><span class="chip g">✓ ${hjPl(a,'pessoa respondeu','pessoas responderam')} 1</span><span class="chip b">↺ ${hjPl(b,'respondeu','responderam')} 2</span><span class="chip ${c?'a':''}">☎ ${c} sem resposta</span></div>`;
+  let c3=cab(3,'Confirmação da véspera',nLigar,'Sai sozinha às 10h, uma mensagem por pessoa com os horários dela do dia seguinte: "Responda 1 para confirmar ou 2 para remarcar". Quem responde 2 recebe outros horários e a vaga vai para Vagas. Quem não responde, a recepção liga.',rxF('ex'));
   c3+=`<div class="hj-sub">Hoje · qua 23/09 · saiu ontem às 10h</div>`+cont(hj1,hj2.length,hjSem.length)+hjSem.map(linLigar).join('')+hj2.map(linRem).join('');
   c3+=`<div class="hj-sub">Amanhã · qui 24/09 · ${HJ_LOTE?'saiu hoje às 10h · respostas até 10h30':'sai hoje às 10h'}</div>`;
-  if(!HJ_LOTE) c3+=`<div style="font-size:.84rem">Vai para <b>${hjPl(amAlvo.length,'atendimento','atendimentos')}</b> de amanhã que ainda não confirmaram${am1?` (${am1} já confirmaram)`:''}.</div>
-    <div class="mut" style="font-size:.76rem;margin:.2rem 0 .1rem">${amAlvo.slice(0,8).map(e=>e.h+' '+hjPrim(e.pac)).join(' · ')}${amAlvo.length>8?' · +'+(amAlvo.length-8):''}</div>
+  if(!HJ_LOTE) c3+=`<div style="font-size:.84rem">Vão <b>${hjPl(amPes.length,'mensagem','mensagens')}</b>, uma por pessoa, para ${hjPl(amAlvo.length,'atendimento','atendimentos')} de amanhã que ainda não confirmaram${amDuas.length?` (${hjE(amDuas)} ${amDuas.length>1?'têm 2 horários e recebem':'tem 2 horários e recebe'} uma só)`:''}${am1?`; ${hjPl(am1,'pessoa já confirmou','pessoas já confirmaram')}`:''}.</div>
+    <div class="mut" style="font-size:.76rem;margin:.2rem 0 .1rem">${amPes.slice(0,8).map(e=>e.h+' '+hjPrim(e.pac)).join(' · ')}${amPes.length>8?' · +'+(amPes.length-8):''}</div>
     <div class="acoes"><button class="btn sec min" onclick="abrirLote()">Ver a mensagem</button><button class="btn min" onclick="hjLote()">Simular as respostas (10h30)</button></div>`;
   else c3+=cont(am1,am2.length,amSem.length)+amSem.map(linLigar).join('')+am2.map(linRem).join('')
-    +(amDepois?`<div class="faint" style="font-size:.74rem;margin-top:.3rem">${hjPl(amDepois,'marcado','marcados')} depois das 10h: a confirmação vai na hora de marcar.</div>`:'');
+    +(amDepois?`<div class="faint" style="font-size:.74rem;margin-top:.3rem">${hjPl(amDepois,'pessoa marcou','pessoas marcaram')} depois das 10h: a confirmação vai na hora de marcar.</div>`:'');
   c3+=`<div class="faint" style="font-size:.74rem;margin-top:.5rem">Sem resposta: o agente manda de novo às 16h; se preferir, ligue antes. No Amigo, em ${AM.lido}, ${AM.confirmadas} de ${AM.consultas} consultas estavam confirmadas. ${rxF('amigo')}</div>`;
   h+=bloco(3,nLigar,c3);
 
@@ -4997,10 +5035,11 @@ function telaHoje(){
     +(pode('vagas')?`<div class="acoes"><button class="btn sec min" onclick="VG_ABA='hoje';ir('vagas')">Ver Vagas</button></div>`:''));
 
   /* 7 · retornos a chamar hoje (dos pedidos no Amigo) */
-  h+=bloco(7,nRet,cab(7,'Retornos a chamar hoje',nRet,`O médico pediu a volta e ninguém chamou: no Amigo, ${AM.retornos} retornos pedidos e ${AM.retornosChamados} chamados. Hoje vão os ${HJ_RET.length} mais atrasados; o resto, nos próximos dias.`,rxF('amigo')+rxF('ex'))
-    +HJ_RET.map(([n,d])=>it('há '+d+' dias',n,'retorno vencido · Dr. Manoel',HJ_RET_OK?'<span class="chip g">chamado</span>':'')).join('')
-    +(HJ_RET_OK?feito(`${HJ_RET.length} chamados agora (só nesta sessão) · faltam ${AM.retornos-HJ_RET.length} para os próximos dias`):'')
-    +`<div class="acoes">${HJ_RET_OK?'':`<button class="btn min" onclick="abrirRetornos()">Ver a mensagem e chamar os ${HJ_RET.length}</button>`}<button class="btn sec min" onclick="PS_SEG='retorno';ir('pacientes')">Ver os ${AM.retornos}</button></div>`);
+  const amanhaRet=new Set(RET.amanha.map(([n])=>n));
+  h+=bloco(7,nRet,cab(7,'Retornos a chamar hoje',nRet,`O médico pediu a volta e ninguém chamou: no Amigo, ${AM.retornos} retornos pedidos e ${AM.retornosChamados} chamados. Hoje ${RET.vao.length===1?'vai o mais atrasado':'vão os '+RET.vao.length+' mais atrasados'}${RET.amanha.length?' ('+vgNomes(RET.amanha.map(x=>x[0]))+' fica para amanhã: 1 mensagem automática por pessoa por dia)':''}; o resto, nos próximos dias.`,rxF('amigo')+rxF('ex'))
+    +HJ_RET.map(([n,d])=>it('há '+d+' dias',n,amanhaRet.has(n)?'retorno vencido · Dr. Manoel · '+hjRetMotivo(n):'retorno vencido · Dr. Manoel',amanhaRet.has(n)?'<span class="chip">amanhã</span>':HJ_RET_OK?'<span class="chip g">chamado</span>':'')).join('')
+    +(HJ_RET_OK?feito(`${RET.vao.length} chamados agora (só nesta sessão) · faltam ${AM.retornos-RET.vao.length} para os próximos dias`):'')
+    +`<div class="acoes">${HJ_RET_OK||!RET.vao.length?'':`<button class="btn min" onclick="abrirRetornos()">Ver a mensagem e chamar os ${RET.vao.length}</button>`}<button class="btn sec min" onclick="PS_SEG='retorno';ir('pacientes')">Ver os ${AM.retornos}</button></div>`);
 
   /* 8 · Pix vencendo: sinais (até 18h) e parcelas */
   let c8=cab(8,'Pix vencendo: sinais e parcelas',sinais.length+pix.length,'O sinal de horário reservado vence hoje às 18h; parcela e assinatura vencem no dia. O link de Pix sai sozinho; aqui fica o que ainda não caiu.',rxF('ex'));

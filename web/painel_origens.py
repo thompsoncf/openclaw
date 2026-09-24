@@ -101,16 +101,24 @@ def painel_origens(request: Request):
     ini, fim = per.intervalo(periodo, de, ate)
     d = og.dados_origens(pool, conta[0], ini, fim,
                          compromisso=perfil["vocab"]["compromisso"])
+    # o porquê de cada anúncio (24/09/2026): não era cliente, fora do horário e os
+    # quatro blocos que abrem na linha. Falhar aqui não derruba a tabela.
+    try:
+        det = og.detalhes_por_codigo(pool, conta[0], ini, fim, perfil["chave"])
+    except Exception:  # noqa: BLE001
+        det = {}
+    nao_cliente_anuncio = sum(v["nao_cliente"] for k, v in det.items() if k)
     convidado = request.session.get("papel", "dono") == "convidado"
     # A tela virou aba de Prospecção — pra quem entra em Prospecção. O convidado
     # tem `vendas: False`, cai aqui como página inicial e não alcança mais nada:
     # pra ele o menu lateral continua acendendo Origens, e a barra de abas nem
     # aparece (ver o `{% if caps.vendas %}` no template). Sem isso, a agência
     # ficaria com uma barra de abas onde não pode clicar em nada.
-    return _render("origens", request, titulo="Origens",
+    return _render("origens", request, titulo="Anúncios",
                    secao_ativa=("origens" if convidado else "prospeccao"),
                    nav_ativo="origens", convidado=convidado,
-                   d=d, periodo=periodo, periodos=per.PERIODOS_ORIGENS,
+                   d=d, det=det, nao_cliente_anuncio=nao_cliente_anuncio,
+                   periodo=periodo, periodos=per.PERIODOS_ORIGENS,
                    # o menu lateral lê `raio_x_perfil` pra decidir o que mostrar
                    raio_x_perfil=perfil,
                    de=de, ate=ate, ini=ini, fim=fim, perfil=perfil,
@@ -163,11 +171,65 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .og-aviso.ambar{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6}
 .og-aviso.azul{background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#8FC9E6}
 .og-vazio{text-align:center;color:var(--txt-mut);padding:2rem 1rem;font-size:.9rem}
+/* o porquê de cada anúncio (24/09/2026): a linha abre embaixo dela */
+.og-tab tr.og-abre{cursor:pointer}
+.og-tab tr.og-abre:hover td{background:var(--card-2)}
+.og-tab tr.og-abre.aberta td{background:var(--card-2)}
+.og-tab td.ruim{color:#F0A79C;font-weight:700}
+.og-tab td.aten{color:var(--amar)}
+.og-seta{color:var(--verde-claro);font-size:.75rem;margin-left:.3rem}
+.og-tab tr.og-det td{white-space:normal;text-align:left;background:var(--bg);padding:.8rem .9rem}
+.og-grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem}
+.og-grade .t{font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);margin-bottom:.35rem}
+.og-hb div{display:grid;grid-template-columns:minmax(8.5rem,1.7fr) minmax(2rem,1fr) 1.6rem;gap:.45rem;align-items:center;
+  font-size:.8rem;padding:.12rem 0}
+.og-hb span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--txt-mut)}
+.og-hb i{display:block;height:7px;border-radius:99px;background:var(--verde)}
+.og-hb i.cinza{background:var(--txt-mut);opacity:.45}
+.og-hb b{text-align:right}
+.og-mini{font-size:.8rem;color:var(--txt-mut);line-height:1.5}
+.og-mini b{color:var(--txt)}
 .og-vazio code{background:var(--card-2);border:1px solid var(--borda);border-radius:5px;padding:.1rem .35rem}
 </style>
 
+{# As duas colunas do porquê. Vermelho a partir de 10% de não-cliente: na Prime,
+   de 1 a 23/09/2026, a casa inteira ficou em 2% dos leads (5 de 219) — um anúncio
+   com 10% traz cinco vezes mais gente que nunca vai comprar. Âmbar a partir de 30%
+   fora do horário (a casa: 25%). #}
+{% macro cols_porque(x) -%}
+  {% if x %}<td class="{{ 'ruim' if x.nao_cliente and x.nao_cliente_pct >= 10 else '' }}">{{ x.nao_cliente }}{% if x.nao_cliente %} · {{ x.nao_cliente_pct }}%{% endif %}</td>
+  <td class="{{ 'aten' if x.fora_pct >= 30 else '' }}">{{ x.fora_pct }}%</td>
+  {% else %}<td>—</td><td>—</td>{% endif %}
+{%- endmacro %}
+{#- `|e` à mão: este Environment NÃO escapa sozinho (o template não tem extensão,
+   e o select_autoescape decide pela extensão). Rótulo de motivo é texto da conta e
+   tipo de festa sai da conversa do cliente. -#}
+{% macro barras(itens) -%}
+  <div class="og-hb">{% for i in itens %}<div><span title="{{ i.rotulo|e }}">{{ i.rotulo|e }}</span><i class="{{ 'cinza' if i.cinza else '' }}" style="width:{{ i.pct }}%"></i><b>{{ i.n }}</b></div>{% endfor %}</div>
+{%- endmacro %}
+{% macro linha_porque(x, id) -%}
+  <tr class="og-det" id="{{ id }}" hidden><td colspan="10"><div class="og-grade">
+    <div><div class="t">Por que perdemos</div>{% if x.perdemos %}{{ barras(x.perdemos) }}{% else %}<div class="og-mini">Nenhum perdido ainda.</div>{% endif %}</div>
+    <div><div class="t">Quem não era cliente</div>{% if x.quem %}{{ barras(x.quem) }}{% else %}<div class="og-mini">{% if x.nao_cliente %}Ainda sem leitura do que queriam.{% else %}Nenhum.{% endif %}</div>{% endif %}</div>
+    <div><div class="t">O que pedem</div><div class="og-mini">{{ (x.pedem or 'Ninguém disse ainda.')|e }}</div></div>
+    <div><div class="t">Quando chegam</div><div class="og-mini">Manhã <b>{{ x.turnos.manha }}</b> · tarde <b>{{ x.turnos.tarde }}</b><br>
+      Noite <b>{{ x.turnos.noite }}</b> · madrugada <b>{{ x.turnos.madrugada }}</b><br>
+      Fora do horário: <b>{{ x.fora }}</b> de {{ x.leads }}</div></div>
+  </div></td></tr>
+{%- endmacro %}
+<script>
+document.addEventListener('click', function (ev) {
+  var tr = ev.target.closest && ev.target.closest('tr.og-abre');
+  if (!tr) return;
+  var alvo = document.getElementById(tr.getAttribute('data-abre'));
+  if (!alvo) return;
+  alvo.hidden = !alvo.hidden;
+  tr.classList.toggle('aberta', !alvo.hidden);
+});
+</script>
+
 <div class="og-topo">
-  <h2 style="margin:0">Origens</h2>
+  <h2 style="margin:0">Anúncios</h2>
   <span class="mut" style="font-size:.82rem">{{ ini.strftime('%d/%m/%Y') }} a {{ fim.strftime('%d/%m/%Y') }}</span>
 </div>
 
@@ -197,6 +259,9 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="og-cx"><span class="r">total da casa</span>
     <span class="v">{{ d.resumo.total }}</span>
     <div class="n">no período</div></div>
+  <div class="og-cx"><span class="r">não era cliente</span>
+    <span class="v">{{ nao_cliente_anuncio }}</span>
+    <div class="n">{% if d.resumo.com_codigo %}{{ pct(nao_cliente_anuncio, d.resumo.com_codigo) }}% dos de anúncio{% else %}dos de anúncio{% endif %}</div></div>
   {# o faturamento aqui é só o das linhas COM código — o convidado pode vê-lo #}
   <div class="og-cx"><span class="r">faturamento</span>
     <span class="v">{{ brl(d.faturamento_centavos) }}</span>
@@ -243,23 +308,27 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
     <thead><tr>
       <th>Origem</th><th>Conversas</th><th>Atendidas</th><th>1ª resposta</th>
       <th>{{ d.compromisso|capitalize }}s</th><th>Compareceu</th><th>Vendas</th><th>Faturamento</th>
+      <th>Não era cliente</th><th>Fora do horário</th>
     </tr></thead>
     <tbody>
-      {% for l in d.linhas %}
-      <tr>
-        <td><span class="og-cod">{{ l.codigo }}</span></td>
+      {% for l in d.linhas %}{% set x = det.get(l.codigo) %}
+      <tr{% if x %} class="og-abre" data-abre="og-{{ loop.index }}"{% endif %}>
+        <td><span class="og-cod">{{ l.codigo }}</span>{% if x %}<span class="og-seta">▾</span>{% endif %}</td>
         <td>{{ l.conversas }}</td><td>{{ l.atendidas }}</td>
         <td>{{ min_txt(l.resposta_mediana_min) }}</td>
         <td>{{ l.marcaram }}</td><td>{{ l.compareceram }}</td><td>{{ l.vendas }}</td>
         <td>{% if l.faturamento_centavos %}{{ brl(l.faturamento_centavos) }}{% else %}—{% endif %}</td>
+        {{ cols_porque(x) }}
       </tr>
+      {% if x %}{{ linha_porque(x, 'og-' ~ loop.index) }}{% endif %}
       {% endfor %}
       {% if d.sem_codigo %}
       {# O convidado (a agência) vê a CONTAGEM desta faixa, porque parte dela é
          anúncio que perdeu o texto e é assim que ele percebe a atribuição
          vazando. O dinheiro que veio de fora do anúncio não é assunto dele. #}
-      <tr class="sem">
-        <td>sem código</td>
+      {% set x = det.get(None) %}
+      <tr class="sem{% if x %} og-abre{% endif %}"{% if x %} data-abre="og-sem"{% endif %}>
+        <td>sem código{% if x %}<span class="og-seta">▾</span>{% endif %}</td>
         <td>{{ d.sem_codigo.conversas }}</td><td>{{ d.sem_codigo.atendidas }}</td>
         <td>{{ min_txt(d.sem_codigo.resposta_mediana_min) }}</td>
         <td>{{ d.sem_codigo.marcaram }}</td><td>{{ d.sem_codigo.compareceram }}</td>
@@ -270,7 +339,9 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <td>{{ d.sem_codigo.vendas }}</td>
         <td>{% if d.sem_codigo.faturamento_centavos %}{{ brl(d.sem_codigo.faturamento_centavos) }}{% else %}—{% endif %}</td>
         {% endif %}
+        {{ cols_porque(x) }}
       </tr>
+      {% if x %}{{ linha_porque(x, 'og-sem') }}{% endif %}
       {% endif %}
     </tbody>
   </table>

@@ -10683,7 +10683,7 @@ def _navbar(active):
             ("radar", "🎯 Quem atacar", "/painel/prospeccao/radar", "gerencia or caps.vendas"),
             # Origens é do dono, do gestor e da agência — o vendedor não tem
             # (`caps.origens` é False pra ele), e a aba some sozinha.
-            ("origens", "📊 Origens", "/painel/origens",
+            ("origens", "📊 Anúncios", "/painel/origens",
              "caps.origens and raio_x_perfil and raio_x_perfil.aplica"),
             ("ia-insta", "✨ IA Insta", "/painel/prospeccao/ia-insta", ""),
             ("regua", "⏱️ Régua", "/painel/prospeccao/regua", ""),

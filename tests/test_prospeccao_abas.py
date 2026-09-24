@@ -199,7 +199,7 @@ def test_o_follow_up_e_o_origens_sao_abas_daqui():
     prospecção, por que está tudo relacionado". A Régua já morava aqui — eram os
     dois únicos parentes ainda no menu lateral."""
     abas = _abas(pp._navbar("funil"))
-    assert "📅 Follow-up" in abas and "📊 Origens" in abas
+    assert "📅 Follow-up" in abas and "📊 Anúncios" in abas
     barra = pp._navbar("funil")
     assert 'href="/painel/follow-up"' in barra and 'href="/painel/origens"' in barra
 

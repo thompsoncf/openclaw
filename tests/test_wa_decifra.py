@@ -65,6 +65,16 @@ def _agora(horas=0):
     return datetime.now(timezone.utc) - timedelta(hours=horas)
 
 
+def _hoje(horas=1):
+    """Um instante de HOJE em Brasília, `horas` atrás se couber no dia. `_agora(1)`
+    virava ONTEM entre 0h e 1h de Brasília, e a suíte falhava toda madrugada
+    (medido em 24/09/2026, 00h12, também na main)."""
+    br = timezone(timedelta(hours=-3))
+    agora = datetime.now(br)
+    meia_noite = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+    return max(agora - timedelta(hours=horas), meia_noite + timedelta(seconds=1)).astimezone(timezone.utc)
+
+
 def _linhas(c):
     return c.execute("""select dia, conta_id, from_me, ocorrencias, ids_distintos,
                                chegaram, nunca_chegaram
@@ -169,7 +179,7 @@ def test_correlacao_separa_o_que_chegou_do_que_se_perdeu(pool):
 def test_o_dia_de_hoje_nao_e_correlacionado(pool):
     """Ainda pode chegar. Fechar hoje contaria como perda o que só está atrasado."""
     with pool.connection() as c:
-        _falha(c, msg_id="HOJE", from_me=False, quando=_agora(1))
+        _falha(c, msg_id="HOJE", from_me=False, quando=_hoje(1))
         c.commit()
         wa_decifra._apurar(c); c.commit()
         assert wa_decifra._correlacionar(c) == 0
@@ -207,7 +217,7 @@ def test_sem_log_a_linha_fecha_sem_inventar_numero(pool):
 def test_rodar_e_o_resumo(pool):
     with pool.connection() as c:
         _falha(c, msg_id="A", from_me=False, quando=_agora(26))
-        _falha(c, msg_id="B", from_me=True, quando=_agora(2))
+        _falha(c, msg_id="B", from_me=True, quando=_hoje(2))
         c.execute("insert into mensagens (conversa_id, provider_sid) values (1,'A')")
         c.commit()
     r = wa_decifra.rodar(pool)

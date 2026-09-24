@@ -1,0 +1,398 @@
+<title>Anúncios da Agência</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f5f4f1; --card: #fff; --linha: #e4e1da; --texto: #23211d; --fraco: #6b675e;
+    --teal: #0f7d73; --teal-fraco: #e2f0ee; --amarelo: #a07000; --amarelo-fraco: #fdf2da;
+    --vermelho: #a8352b; --vermelho-fraco: #fbe8e5; --azul: #2f5fa8; --azul-fraco: #e7eefa;
+    --tela: #101014; --tela-card: #1b1b21; --tela-linha: #2c2c34; --tela-txt: #f2f1ee;
+    --tela-fraco: #9a978f;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #171614; --card: #201e1b; --linha: #35322c; --texto: #ece9e2; --fraco: #9d988c;
+    --teal: #4fc0b3; --teal-fraco: #12302d; --amarelo: #e0b85c; --amarelo-fraco: #332a13;
+    --vermelho: #e58a7e; --vermelho-fraco: #351d19; --azul: #86aeea; --azul-fraco: #17233a;
+  } }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #171614; --card: #201e1b; --linha: #35322c; --texto: #ece9e2; --fraco: #9d988c;
+    --teal: #4fc0b3; --teal-fraco: #12302d; --amarelo: #e0b85c; --amarelo-fraco: #332a13;
+    --vermelho: #e58a7e; --vermelho-fraco: #351d19; --azul: #86aeea; --azul-fraco: #17233a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--texto); font-size: 15px; line-height: 1.55;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 30px 16px 70px; }
+  h1 { font-size: clamp(23px, 5vw, 32px); margin: 0 0 6px; letter-spacing: -.02em; line-height: 1.15; text-wrap: balance; }
+  .sub { color: var(--fraco); margin: 0 0 4px; max-width: 66ch; }
+  .exemplo { display: inline-block; margin-top: 10px; font-size: 12.5px; font-weight: 700; letter-spacing: .04em;
+    color: var(--amarelo); background: var(--amarelo-fraco); padding: 4px 10px; border-radius: 999px; }
+  .duas { display: grid; gap: 18px; grid-template-columns: 330px 1fr; align-items: start; margin-top: 26px; }
+  @media (max-width: 860px) { .duas { grid-template-columns: 1fr; } }
+
+  /* ---------- o celular ---------- */
+  .fone { background: var(--tela); border-radius: 26px; padding: 12px 10px 16px; color: var(--tela-txt);
+    box-shadow: 0 16px 40px rgba(0,0,0,.24); position: sticky; top: 18px; }
+  .fone .topo { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 8px 10px; }
+  .fone .topo b { font-size: 17px; }
+  .fone .topo span { color: var(--tela-fraco); font-size: 12px; }
+  .seg { display: flex; gap: 5px; padding: 0 6px 12px; overflow-x: auto; }
+  .seg a { font-size: 12px; padding: 5px 10px; border-radius: 999px; background: var(--tela-card);
+    color: var(--tela-fraco); border: 1px solid var(--tela-linha); white-space: nowrap; flex: none; }
+  .seg a.on { background: #0f7d73; color: #fff; border-color: #0f7d73; font-weight: 600; }
+  .faixas { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 0 6px; }
+  .cx { background: var(--tela-card); border: 1px solid var(--tela-linha); border-radius: 13px; padding: 9px 11px; }
+  .cx .r { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--tela-fraco); }
+  .cx .v { font-size: 20px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cx .n { font-size: 11px; color: var(--tela-fraco); }
+  .cx.dest { background: #0f2a27; border-color: #1f5a53; }
+  .cx.dest .v { color: #6fe0cf; }
+  .eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--tela-fraco);
+    margin: 14px 8px 7px; display: flex; justify-content: space-between; gap: 6px; }
+  .eyebrow .nv { color: #4fc0b3; letter-spacing: .06em; }
+  .ad { background: var(--tela-card); border: 1px solid var(--tela-linha); border-radius: 14px;
+    margin: 0 6px 7px; padding: 10px 11px; }
+  .ad.alvo { border-color: #7a3a33; }
+  .ad .l1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .cod { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: #0f2a27; color: #6fe0cf;
+    border: 1px solid #1f5a53; border-radius: 5px; padding: 1px 6px; }
+  .ad .rs { font-size: 13px; font-weight: 700; color: #6fe0cf; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ad .rs.zero { color: var(--tela-fraco); font-weight: 500; }
+  .ad .l2 { font-size: 12px; color: var(--tela-fraco); margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .ad .l2 b { color: var(--tela-txt); font-weight: 600; }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+  .chip { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--tela-linha);
+    color: var(--tela-fraco); white-space: nowrap; }
+  .chip.ruim { background: #3a1b17; border-color: #7a3a33; color: #f0a79c; }
+  .chip.aten { background: #33280f; border-color: #5a4617; color: #f0cf85; }
+  .abre { border-top: 1px solid var(--tela-linha); margin-top: 10px; padding-top: 9px; }
+  .abre .t { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--tela-fraco); margin: 8px 0 5px; }
+  .abre .t:first-child { margin-top: 0; }
+  .lido { color: #6fe0cf; text-transform: none; letter-spacing: 0; margin-left: 3px; }
+  .hb { font-size: 12px; }
+  .hb div { display: grid; grid-template-columns: 122px 1fr 22px; gap: 7px; align-items: center; padding: 2px 0; }
+  .hb span { color: #bdbab3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hb i { display: block; height: 7px; border-radius: 99px; background: #0f7d73; }
+  .hb i.ci { background: #55555e; } .hb i.vm { background: #b5574c; } .hb i.am { background: #b88a2e; }
+  .hb b { text-align: right; font-variant-numeric: tabular-nums; }
+  .mini { font-size: 11.5px; color: var(--tela-fraco); margin-top: 3px; }
+  .mini b { color: var(--tela-txt); }
+  .ad.sem { border-style: dashed; }
+  .ad.sem .cod { background: transparent; color: #e0b85c; border-color: #5a4617; font-style: italic; font-family: inherit; }
+  .oculto { font-size: 11px; color: var(--tela-fraco); font-style: italic; }
+  .aviso { background: #13202b; border: 1px solid #22415a; color: #9fcbe8; border-radius: 11px;
+    padding: 9px 10px; font-size: 11.5px; line-height: 1.4; margin: 8px 6px 0; }
+
+  /* ---------- o texto ---------- */
+  .card { background: var(--card); border: 1px solid var(--linha); border-radius: 14px; padding: 17px; }
+  .card + .card { margin-top: 14px; }
+  .card h3 { margin: 0 0 4px; font-size: 16.5px; text-wrap: balance; }
+  .selo { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    padding: 2px 7px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; white-space: nowrap; }
+  .selo.novo { background: var(--teal-fraco); color: var(--teal); }
+  .selo.ja { background: var(--azul-fraco); color: var(--azul); }
+  .selo.perg { background: var(--amarelo-fraco); color: var(--amarelo); }
+  .selo.risco { background: var(--vermelho-fraco); color: var(--vermelho); }
+  .card p { margin: 6px 0 0; color: var(--fraco); font-size: 14px; }
+  .card p b, .card li b { color: var(--texto); }
+  ul, ol { margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: var(--fraco); }
+  li { margin-bottom: 5px; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; background: var(--bg);
+    border: 1px solid var(--linha); border-radius: 5px; padding: 1px 5px; color: var(--texto); }
+  .rolar { overflow-x: auto; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 9px; border-bottom: 1px solid var(--linha); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--fraco); }
+  tr:last-child td { border-bottom: none; }
+  .nota { border-left: 3px solid var(--amarelo); background: var(--amarelo-fraco); border-radius: 0 10px 10px 0;
+    padding: 12px 14px; margin-top: 12px; font-size: 13.8px; }
+  .nota.risco { border-left-color: var(--vermelho); background: var(--vermelho-fraco); }
+  footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--linha); color: var(--fraco); font-size: 13px; }
+  .secao { margin-top: 44px; }
+  .secao > h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--fraco);
+    margin: 0 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--linha); }
+  .secao .duas { margin-top: 0; }
+  .tabs { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin: 14px 4px 0; }
+  .tabs a { text-align: center; font-size: 9px; padding: 7px 0; border-radius: 9px; background: var(--tela-card);
+    color: var(--tela-fraco); border: 1px solid var(--tela-linha); white-space: nowrap; overflow: hidden; }
+  .tabs a.on { color: #6fe0cf; border-color: #0f7d73; }
+  .tabs a.nova { border-style: dashed; border-color: #4fc0b3; color: #4fc0b3; }
+  /* o computador */
+  .tela-pc { background: var(--tela); border-radius: 14px; color: var(--tela-txt); padding: 14px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.2); }
+  .tela-pc .barra { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tela-pc .barra i { width: 9px; height: 9px; border-radius: 50%; background: #3a3a44; display: block; }
+  .tela-pc .cab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tela-pc .cab b { font-size: 17px; }
+  .tela-pc .cab span { font-size: 12px; color: var(--tela-fraco); }
+  .pc-rol { overflow-x: auto; border: 1px solid var(--tela-linha); border-radius: 10px; }
+  .pc-tab { border-collapse: collapse; width: 100%; min-width: 860px; font-size: 12.5px; }
+  .pc-tab th { text-align: right; padding: 8px 9px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--tela-fraco); font-weight: 500; background: #16161b; border-bottom: 1px solid var(--tela-linha); white-space: nowrap; }
+  .pc-tab th.nv { color: #4fc0b3; }
+  .pc-tab th:first-child, .pc-tab td:first-child { text-align: left; }
+  .pc-tab td { text-align: right; padding: 8px 9px; border-bottom: 1px solid var(--tela-linha); white-space: nowrap;
+    font-variant-numeric: tabular-nums; color: var(--tela-txt); }
+  .pc-tab td.v { color: #f0a79c; font-weight: 700; } .pc-tab td.a { color: #f0cf85; }
+  .pc-tab tr.sem td { color: #e0b85c; font-style: italic; }
+  .pc-tab tr.aberta td { background: #1d1416; }
+  .pc-tab tr.det td { background: #17171c; white-space: normal; text-align: left; }
+  .det-grade { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; padding: 4px 2px; }
+  .det-grade .t { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--tela-fraco); margin-bottom: 5px; }
+  .det-grade .hb div { grid-template-columns: 110px 1fr 20px; }
+  .mais { color: #6fe0cf; font-size: 11px; }
+  /* por que perdemos clicável */
+  .hb a { display: grid; grid-template-columns: 122px 1fr 22px 10px; gap: 7px; align-items: center; padding: 4px 0;
+    color: inherit; text-decoration: none; border-bottom: 1px solid var(--tela-linha); }
+  .hb a:last-child { border-bottom: none; }
+  .hb a span { color: #bdbab3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hb a i { display: block; height: 7px; border-radius: 99px; background: #0f7d73; }
+  .hb a i.ci { background: #55555e; } .hb a i.am { background: #b88a2e; }
+  .hb a b { text-align: right; font-variant-numeric: tabular-nums; }
+  .hb a em { color: #6fe0cf; font-style: normal; font-size: 13px; }
+  .hb a.on { background: #0f2a27; border-radius: 8px; padding-inline: 5px; margin-inline: -5px; }
+  .volta { font-size: 12px; color: #6fe0cf; padding: 2px 8px 8px; }
+  .tit2 { font-size: 16px; font-weight: 700; padding: 0 8px; }
+  .tit2 small { display: block; font-size: 11.5px; color: var(--tela-fraco); font-weight: 400; margin-top: 2px; }
+  .datas { display: flex; flex-wrap: wrap; gap: 5px; }
+  .dt { font-size: 11.5px; padding: 4px 8px; border-radius: 8px; background: #2a1f10; border: 1px solid #5a4617; color: #f0cf85;
+    font-variant-numeric: tabular-nums; }
+  .dt b { font-weight: 700; }
+  .lead { background: var(--tela-card); border: 1px solid var(--tela-linha); border-radius: 13px; margin: 0 6px 7px; padding: 10px 11px; }
+  .lead .l1 { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+  .lead .l1 b { font-weight: 600; }
+  .lead .l1 span { color: var(--tela-fraco); font-size: 11.5px; white-space: nowrap; }
+  .lead .fala { font-size: 12.5px; color: #dcdad4; margin-top: 6px; padding-left: 9px; border-left: 2px solid #1f5a53; }
+  .lead .l3 { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 7px; font-size: 11px; color: var(--tela-fraco); }
+  .lead .l3 a { color: #6fe0cf; font-size: 12px; text-decoration: none; white-space: nowrap; }
+  .marca { font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--tela-linha); }
+  .marca.ia { color: #6fe0cf; border-color: #1f5a53; }
+  .corr { font-size: 11px; color: var(--tela-fraco); text-decoration: underline; text-underline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <h1>Origens no app e no computador, e o porquê de cada perda</h1>
+  <p class="sub">Versão 2 do mockup, com o que você pediu: a Origens no app do gestor e no computador, as
+    permissões como estão, e o “Por que perdemos” virando link pro lead. Mais duas ideias no fim.</p>
+  <span class="exemplo">ORIGENS: NÚMEROS DE EXEMPLO · POR QUE PERDEMOS: DADOS REAIS DA PRIME, 1 A 23/09</span>
+
+  <!-- ================= 1. app do gestor ================= -->
+  <section class="secao">
+    <h2>1 · Origens no app do gestor</h2>
+    <div class="duas">
+      <div class="fone" aria-label="Origens no app do gestor">
+        <div class="topo"><b>Origens</b><span>1 a 23 set</span></div>
+        <div class="seg"><a>Hoje</a><a>Semana</a><a class="on">Mês</a><a>Período ▾</a></div>
+        <div class="faixas">
+          <div class="cx dest"><div class="r">com código</div><div class="v">151</div><div class="n">conversas de anúncio</div></div>
+          <div class="cx"><div class="r">sem código</div><div class="v">68</div><div class="n">orgânico e afins</div></div>
+          <div class="cx"><div class="r">não era cliente</div><div class="v">13</div><div class="n">9% dos de anúncio</div></div>
+          <div class="cx"><div class="r">faturamento</div><div class="v">R$ 38,6 mil</div><div class="n">de anúncio</div></div>
+        </div>
+        <div class="eyebrow"><span>Por anúncio</span><span>toque pra abrir</span></div>
+        <div class="ad">
+          <div class="l1"><span class="cod">CAS-VID-01</span><span class="rs">R$ 18.970</span></div>
+          <div class="l2"><b>58</b> conversas · <b>9</b> visitas · <b>3</b> vendas</div>
+          <div class="chips"><span class="chip">1 não era cliente</span><span class="chip">21% fora do horário</span></div>
+        </div>
+        <div class="ad alvo">
+          <div class="l1"><span class="cod">ANIV-STO-01</span><span class="rs zero">sem venda</span></div>
+          <div class="l2"><b>28</b> conversas · <b>2</b> visitas · <b>0</b> vendas</div>
+          <div class="chips"><span class="chip ruim">8 não eram cliente · 29%</span><span class="chip aten">39% fora do horário</span></div>
+        </div>
+        <div class="ad">
+          <div class="l1"><span class="cod">15A-CAR-02</span><span class="rs">R$ 6.490</span></div>
+          <div class="l2"><b>31</b> conversas · <b>5</b> visitas · <b>1</b> venda</div>
+          <div class="chips"><span class="chip">0 não era cliente</span><span class="chip">19% fora do horário</span></div>
+        </div>
+        <div class="ad sem">
+          <div class="l1"><span class="cod">sem código</span><span class="rs zero">68 conversas</span></div>
+          <div class="l2"><b>6</b> visitas · <b>2</b> vendas · <b>3</b> não eram cliente</div>
+        </div>
+        <div class="tabs">
+          <a>Visão</a><a>Agenda</a><a>Placar</a><a>Leads</a><a>Propostas</a><a class="on nova">Origens</a><a>Ativid.</a><a>Perfil</a>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h3>Uma aba nova no app: Origens <span class="selo novo">seu pedido</span></h3>
+          <p>A mesma tela do computador, com cartões no lugar da tabela. As pílulas são as mesmas da Visão
+            (Hoje · Semana · Mês · Período), pra ninguém aprender duas.</p>
+          <p>Fica entre Propostas e Atividade. Com ela o app passa de 7 pra 8 abas. Em 390 px de largura isso dá uns
+            48 px por aba, e “Origens” ocupa uns 40. Cabe numa linha só, mas “Atividade” precisaria virar “Ativid.”. Eu
+            confiro no celular antes de subir.</p>
+        </div>
+        <div class="card">
+          <h3>Tocar num anúncio abre o porquê dele</h3>
+          <p>Abre os mesmos blocos da Visão, só daquele criativo: por que perdemos, quem não era cliente, o que pedem
+            e quando chegam. O anúncio que traz gente que não é cliente fica em vermelho sozinho.</p>
+        </div>
+        <div class="card">
+          <h3>Permissões: fica como está <span class="selo ja">combinado</span></h3>
+          <p>A agência continua como gestor, como você quer, e vê a aba nova no app. Quando você for ajustar as
+            permissões, o papel Convidado já existe e já abre a Origens no computador. Nada disso muda agora.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 2. computador ================= -->
+  <section class="secao">
+    <h2>2 · Origens no computador</h2>
+    <div class="tela-pc" aria-label="Origens no computador">
+      <div class="barra"><i></i><i></i><i></i></div>
+      <div class="cab"><b>Origens</b><span>01/09/2026 a 23/09/2026 · clique num anúncio pra abrir</span></div>
+      <div class="pc-rol">
+        <table class="pc-tab">
+          <thead><tr>
+            <th>Origem</th><th>Conversas</th><th>Atendidas</th><th>1ª resposta</th><th>Visitas</th><th>Compareceu</th>
+            <th>Vendas</th><th>Faturamento</th><th class="nv">Não era cliente</th><th class="nv">Fora do horário</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><span class="cod">CAS-VID-01</span></td><td>58</td><td>57</td><td>22 min</td><td>9</td><td>7</td><td>3</td><td>R$ 18.970,00</td><td>1</td><td>21%</td></tr>
+            <tr><td><span class="cod">15A-CAR-02</span></td><td>31</td><td>31</td><td>35 min</td><td>5</td><td>4</td><td>1</td><td>R$ 6.490,00</td><td>0</td><td>19%</td></tr>
+            <tr class="aberta"><td><span class="cod">ANIV-STO-01</span> <span class="mais">▾</span></td><td>28</td><td>27</td><td>30 min</td><td>2</td><td>1</td><td>0</td><td>—</td><td class="v">8 · 29%</td><td class="a">39%</td></tr>
+            <tr class="det"><td colspan="10">
+              <div class="det-grade">
+                <div><div class="t">Por que perdemos <span class="lido">💬 lido</span></div>
+                  <div class="hb">
+                    <div><span>Não era cliente</span><i class="vm" style="width:100%"></i><b>8</b></div>
+                    <div><span>Não respondeu</span><i class="am" style="width:63%"></i><b>5</b></div>
+                    <div><span>Data indisponível</span><i style="width:25%"></i><b>2</b></div>
+                  </div></div>
+                <div><div class="t">Quem não era cliente</div>
+                  <div class="hb">
+                    <div><span>Procurava emprego</span><i class="ci" style="width:100%"></i><b>4</b></div>
+                    <div><span>Oferecia serviço</span><i class="ci" style="width:50%"></i><b>2</b></div>
+                    <div><span>Aluguel de item</span><i class="ci" style="width:50%"></i><b>2</b></div>
+                  </div></div>
+                <div><div class="t">O que pedem</div>
+                  <div class="mini">Aniversário <b>14</b> · 15 anos <b>3</b><br>Até 100 convidados: <b>12</b> de 13</div></div>
+                <div><div class="t">Quando chegam</div>
+                  <div class="mini">Noite <b>9</b> · tarde <b>12</b><br>Manhã <b>6</b> · madrugada <b>1</b></div></div>
+              </div>
+            </td></tr>
+            <tr><td><span class="cod">FORM-EST-01</span></td><td>22</td><td>21</td><td>41 min</td><td>3</td><td>2</td><td>1</td><td>R$ 7.200,00</td><td>1</td><td>32%</td></tr>
+            <tr><td><span class="cod">BIO-INSTA</span></td><td>12</td><td>12</td><td>18 min</td><td>2</td><td>2</td><td>1</td><td>R$ 5.990,00</td><td>3</td><td>17%</td></tr>
+            <tr class="sem"><td>sem código</td><td>68</td><td>64</td><td>45 min</td><td>6</td><td>5</td><td>2</td><td>R$ 11.480,00</td><td>3</td><td>25%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>A tabela de hoje, com duas colunas a mais e a linha que abre <span class="selo novo">novo</span></h3>
+      <p>As oito colunas de hoje continuam. Entram <b>Não era cliente</b> e <b>Fora do horário</b>, e o clique num
+        anúncio abre os quatro blocos embaixo da linha, sem sair da tela. Pra quem vende serviço recorrente,
+        “Visitas” continua virando “Reuniões”, e “O que pedem” mostra segmento e porte.</p>
+    </div>
+  </section>
+
+  <!-- ================= 3. por que perdemos com link ================= -->
+  <section class="secao">
+    <h2>3 · Por que perdemos, com link pro lead</h2>
+    <div class="duas">
+      <div style="display:grid;gap:14px">
+        <div class="fone" style="position:static" aria-label="O bloco da Visão">
+          <div class="topo"><b>Visão</b><span>1 a 23 set</span></div>
+          <div class="eyebrow"><span>Por que perdemos <span class="lido">💬 8 lidos das conversas</span></span></div>
+          <div class="bloco" style="background:var(--tela-card);border:1px solid var(--tela-linha);border-radius:14px;margin:0 6px;padding:8px 12px">
+            <div class="hb">
+              <a class="on"><span>Data indisponível</span><i class="am" style="width:100%"></i><b>7</b><em>›</em></a>
+              <a><span>Não respondeu</span><i class="am" style="width:86%"></i><b>6</b><em>›</em></a>
+              <a><span>Não era cliente</span><i class="ci" style="width:71%"></i><b>5</b><em>›</em></a>
+              <a><span>Estrutura não atendeu</span><i class="ci" style="width:29%"></i><b>2</b><em>›</em></a>
+              <a><span>Fechou com concorrente</span><i style="width:29%"></i><b>2</b><em>›</em></a>
+              <a><span>Sem conversa</span><i class="ci" style="width:14%"></i><b>1</b><em>›</em></a>
+            </div>
+          </div>
+        </div>
+
+        <div class="fone" style="position:static" aria-label="A lista que abre">
+          <div class="volta">‹ Visão</div>
+          <div class="tit2">Data indisponível · 7 leads<small>perdidos de 1 a 23/09</small></div>
+          <div class="eyebrow"><span>Datas que pediram e não tínhamos</span></div>
+          <div class="bloco" style="background:var(--tela-card);border:1px solid var(--tela-linha);border-radius:14px;margin:0 6px 4px;padding:10px 11px">
+            <div class="datas">
+              <span class="dt">dom <b>20/09</b></span><span class="dt">sáb <b>10/10</b></span><span class="dt">qui <b>19/11</b></span>
+              <span class="dt">sáb <b>28/11</b></span><span class="dt">sex <b>04/12</b></span><span class="dt">sáb <b>19/12</b></span>
+              <span class="dt">sáb <b>23/01</b></span>
+            </div>
+            <div class="mini" style="margin-top:7px">4 das 7 eram sábado · 3 entre 28/11 e 19/12</div>
+          </div>
+          <div class="eyebrow"><span>Os leads</span></div>
+          <div class="lead">
+            <div class="l1"><b>Casamento · 80 convidados</b><span>qui 19/11</span></div>
+            <div class="fala">“Só dá certo mesmo dia 19”</div>
+            <div class="l3"><span><span class="marca">vendedor</span> · perdido 23/09</span><a>Abrir conversa ›</a></div>
+          </div>
+          <div class="lead">
+            <div class="l1"><b>Evento · 100 convidados</b><span>sáb 19/12</span></div>
+            <div class="fala">“as datas não darão certo, agradeço pelo atendimento e retorno”</div>
+            <div class="l3"><span><span class="marca">vendedor</span> · perdido 23/09</span><a>Abrir conversa ›</a></div>
+          </div>
+          <div class="lead">
+            <div class="l1"><b>Aniversário · 35 convidados</b><span>sáb 23/01</span></div>
+            <div class="fala">“😔 só falta a data”</div>
+            <div class="l3"><span><span class="marca ia">💬 lido</span> · <span class="corr">corrigir</span></span><a>Abrir conversa ›</a></div>
+          </div>
+          <div class="lead">
+            <div class="l1"><b>Aniversário · 60 convidados</b><span>dom 20/09</span></div>
+            <div class="fala">“Infelizmente nao consigo no domingo”</div>
+            <div class="l3"><span><span class="marca">vendedor</span></span><a>Abrir conversa ›</a></div>
+          </div>
+          <div class="mini" style="padding:2px 10px">+ 3 leads</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h3>Cada motivo vira um link <span class="selo novo">seu pedido</span></h3>
+          <p>Na Visão e dentro de cada anúncio da Origens, tocar num motivo abre <b>os leads perdidos por ele</b>. Cada
+            lead mostra o que ele pediu, <b>a frase do cliente</b> que explica a perda, quem marcou o motivo (o vendedor
+            ou 💬 a leitura) e o botão <b>Abrir conversa</b>, que leva pra conversa do lead no app.</p>
+          <p>Os números ao lado são os reais da Prime, de 1 a 23/09.</p>
+        </div>
+
+        <div class="card">
+          <h3>Data indisponível vira agenda de procura <span class="selo novo">coisa melhor</span></h3>
+          <p>Em setembro, <b>data indisponível foi o motivo nº 1</b> da Prime: 7 dos 23 perdidos. E os 7 disseram a data.
+            Juntas, as datas mostram onde tem mais gente querendo do que o espaço atende:
+            <b>4 das 7 eram sábado</b>, e <b>3 caem entre 28/11 e 19/12</b>.</p>
+          <p>Isso serve pra decidir preço e segunda data. Também serve pro tráfego, que pode deixar de anunciar
+            “reserve seu dezembro” quando os sábados de dezembro já estão tomados. Só aparece pra conta que vende festa.</p>
+        </div>
+
+        <div class="card">
+          <h3>O gestor corrige a leitura quando ela errar <span class="selo perg">pergunta</span></h3>
+          <p>No lead marcado <b>💬 lido</b> aparece “corrigir”. O gestor escolhe o motivo certo, e ele passa a valer como
+            se o vendedor tivesse marcado. Assim a leitura erra uma vez, e o número da tela não fica errado pra sempre.</p>
+        </div>
+
+        <div class="card">
+          <h3>Duas ideias pra depois <span class="selo perg">pergunta</span></h3>
+          <ol>
+            <li><b>Avisar quando uma data pedida abrir.</b> Se um evento de 19/12 for cancelado, o app avisa: “19/12 abriu,
+              1 lead foi perdido por essa data. Abrir conversa”. É venda que já veio pronta.</li>
+            <li><b>Dizer em que ponto o cliente parou</b>, nos 6 que “não responderam”: antes do preço, depois do preço ou
+              depois da proposta. Parar depois do preço é um problema diferente de sumir antes de ver o valor.</li>
+          </ol>
+        </div>
+
+        <div class="card">
+          <h3>O que preciso que você decida <span class="selo perg">pergunta</span></h3>
+          <ol>
+            <li>O nome da aba: <b>“Origens”</b> ou <b>“Anúncios”</b>?</li>
+            <li>O gestor pode <b>corrigir o motivo</b> lido da conversa?</li>
+            <li>As duas ideias pra depois: <b>entram agora</b>, depois, ou não?</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>Mockup de 23/09/2026. Origens: números de exemplo na escala da Prime, porque nenhum lead chegou com código de
+    anúncio ainda. Por que perdemos e datas: dados reais da Prime, perdidos de 1 a 23/09, sem nome nem telefone.</footer>
+</div>

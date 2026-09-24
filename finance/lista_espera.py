@@ -243,9 +243,7 @@ def sincronizar(pool, conta_id: int, hoje: date | None = None) -> dict:
             # perdido por "data indisponível" continua esperando: o cliente ainda
             # quer aquele dia, e é justamente quem avisar quando abrir
             if not em_jogo and status == "perdido":
-                with pool.connection() as c:
-                    r = c.execute("select perda_motivo from prospeccao where id = %s", (lid,)).fetchone()
-                em_jogo = bool(r and r[0] == "data_indisponivel")
+                em_jogo = _perdido_pela_data(pool, conta_id, lid)
             if tomada and em_jogo and (lid, dia) not in na_lista:
                 if entrar(pool, conta_id, lid, dia):
                     entraram += 1
@@ -259,6 +257,32 @@ def sincronizar(pool, conta_id: int, hoje: date | None = None) -> dict:
     except Exception as e:  # noqa: BLE001
         _log.info("lista_espera: sincronizar falhou (conta %s): %s: %s", conta_id, type(e).__name__, e)
     return {"entraram": entraram, "sairam": saíram}
+
+
+def _perdido_pela_data(pool, conta_id: int, lead_id: int) -> bool:
+    """O lead foi perdido porque a data não estava livre?
+
+    Vale o que o VENDEDOR marcou; quando ele não marcou nada (ou marcou "Outro"),
+    vale o que a leitura da conversa encontrou (`perda_lida`, migração 328) — a
+    mesma precedência da tela "Por que perdemos". Sem isso, o cliente que disse
+    "😔 só falta a data" e ficou sem motivo marcado nunca seria avisado."""
+    try:
+        with pool.connection() as c:
+            try:
+                with c.transaction():
+                    r = c.execute("select perda_motivo, perda_lida from prospeccao "
+                                  "where id = %s and conta_id = %s", (lead_id, conta_id)).fetchone()
+            except Exception:  # noqa: BLE001 — base sem a 328: só o do vendedor
+                r = c.execute("select perda_motivo, null from prospeccao where id = %s and conta_id = %s",
+                              (lead_id, conta_id)).fetchone()
+    except Exception:  # noqa: BLE001
+        return False
+    if not r:
+        return False
+    marcado = (r[0] or "").strip()
+    if marcado and marcado != "outro":
+        return marcado == "data_indisponivel"
+    return r[1] == "data_indisponivel"
 
 
 # ---------------------------------------------------------------- a lista

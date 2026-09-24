@@ -52,7 +52,11 @@ def test_hora_de_lixo_nao_estoura():
 # ------------------------------------------------------------- a tarja do dia
 
 def test_hoje_e_ontem_tem_nome():
-    assert pc._dia_br(_quando(hours=-1)) == "HOJE"
+    # "uma hora atrás" era ONTEM entre 0h e 1h de Brasília, e o teste falhava toda
+    # madrugada (24/09/2026). O instante de hoje não pode cruzar a meia-noite.
+    agora = _quando()
+    hoje = max(agora - timedelta(hours=1), agora.replace(hour=0, minute=0, second=1, microsecond=0))
+    assert pc._dia_br(hoje) == "HOJE"
     assert pc._dia_br(_quando(days=-1)) == "ONTEM"
 
 

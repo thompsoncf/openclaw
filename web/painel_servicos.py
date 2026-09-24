@@ -2759,6 +2759,93 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 .sv-wrap .oc-step button{height:30px; width:30px; min-height:0; border-radius:99px; font-size:.95rem}
 /* o número grande do recorrente: a mensalidade, com o "/mês" pequeno ao lado */
 .oc-total .oc-per{font-size:.8rem; font-weight:500; color:var(--txt-mut)}
+
+/* ================= ACABAMENTO DAS LINHAS (24/09/2026) =================
+   Mockup docs/mockups/prime_servicos_linhas.html (v2), aprovado pelo dono: a
+   estrutura fica como estava — mesma ordem, mesma linha, mesmos campos — e muda
+   só o acabamento. Quase tudo aqui desfaz o `button{min-height:48px}` global do
+   painel, que esticava pílula, interruptor e ✎/⊘ pra 48px. */
+/* Cobrar | Incluso: inteiro, 30px, texto no meio */
+.oc-cob{height:30px; width:132px; background:var(--bg)}
+.oc-cob button{min-height:0; height:100%; line-height:1; display:flex; align-items:center;
+  justify-content:center; font-size:.74rem; font-weight:600; background:transparent}
+.oc-cob button.on.inc{background:#10241d; color:var(--verde-claro);
+  box-shadow:inset 0 0 0 1px var(--neon-borda); border-radius:99px}
+/* a linha: mesma altura, linha fina embaixo, acende de leve no mouse */
+.sv-wrap .oc-mod{padding:.8rem .2rem; position:relative}
+.sv-wrap .oc-mod:hover{background:rgba(255,255,255,.018)}
+.oc-mod.avulso{grid-template-columns:132px minmax(0,1fr) 64px 128px 150px 116px 30px}
+.sv-wrap.oc-margin .oc-mod.avulso{grid-template-columns:132px minmax(0,1fr) 64px 128px 104px 150px 116px 30px}
+/* as caixas: o rótulo EM CIMA e fora da caixa; a caixa com 38px e o número no
+   meio (era 74px, com o rótulo dentro, no canto) */
+.oc-mod.avulso .oc-num,.oc-mod.rec .oc-num{border:0; background:transparent; padding:0; gap:.2rem}
+.oc-mod .oc-num > span{font-size:.6rem; letter-spacing:.07em; opacity:.8}
+.oc-mod .oc-num > input,.oc-mod .oc-num .oc-rsin,.oc-mod .oc-desc-col .oc-dpar{height:38px;
+  border:1px solid var(--borda); border-radius:9px; background:var(--bg); box-sizing:border-box}
+.oc-mod .oc-num > input{text-align:center; padding:0 .4rem}
+.oc-mod .oc-num .oc-rsin{padding:0 .6rem}
+.oc-mod .oc-desc-col .oc-dpar{padding:0 .3rem 0 .6rem}
+.oc-mod .oc-num .oc-rsin input,.oc-mod .oc-desc-col .oc-dpar > input{padding:0; height:100%}
+/* o nome como está no catálogo, sem o extra-negrito; o longo corta com … */
+.oc-mod .oc-nome b{display:block; font-size:.92rem; font-weight:600; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis}
+/* subtotal: valor em branco no cobrado; no incluso, a palavra e a tabela riscada */
+.oc-mod .oc-sub b{color:var(--txt); font-variant-numeric:tabular-nums}
+.oc-mod .oc-sub b.incl{color:var(--verde-claro); line-height:1.2}
+.oc-sub-tab{display:block; font-size:.7rem; font-weight:400; color:var(--txt-mut); text-decoration:line-through}
+.oc-mod .oc-rowacts{align-self:end; padding-bottom:4px}
+/* recorrente: as caixas alinhadas pelo TOPO — o "= R$ …/mês" embaixo do desconto
+   alonga só aquela coluna, e centralizado ele subia o rótulo "Desconto" */
+@media(min-width:701px){
+  .oc-mod.rec{align-items:start}
+  .oc-mod.rec .oc-nome{align-self:center}
+  .oc-mod.rec .oc-rowacts{align-self:start; padding-top:1.35rem; padding-bottom:0}
+}
+/* a pílula na altura das caixas (o rótulo em cima delas as empurra 18px pra baixo) */
+@media(min-width:701px){.oc-mod.avulso > .oc-cob{align-self:end; margin-bottom:4px}}
+.sv-wrap .oc-ic{min-height:0; width:30px; height:30px; margin:0}
+/* EVENTO: o cobrado aparece mais, sem mudar a ordem; o incluso fica quieto */
+.oc-mod.avulso:not(.incluso)::before{content:""; position:absolute; left:-.8rem; top:12px; bottom:12px;
+  width:3px; border-radius:0 3px 3px 0; background:var(--verde)}
+.oc-mod.incluso .oc-num > input,.oc-mod.incluso .oc-rsin{background:transparent}
+.oc-mod.incluso input{color:var(--txt-mut)}
+.oc-mod.incluso .oc-desc-col{opacity:.35}
+/* o quadro do incluso no resumo numa linha só */
+.oc-inclbox .lin{display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline}
+.oc-inclbox .lin > b{white-space:nowrap}
+/* ESCOLHER O SERVIÇO: a lista "ver todos" */
+.oc-browse-row{grid-template-columns:40px minmax(0,1fr) 170px auto; padding:.6rem .2rem}
+.oc-browse-row.rec{grid-template-columns:40px minmax(0,1fr) 230px auto}
+.oc-browse-row:hover{background:rgba(255,255,255,.018)}
+.sv-wrap .oc-tog{width:38px; height:22px; min-height:0; padding:0; margin:0; border-radius:99px;
+  background:#243029; border:1px solid var(--borda)}
+.sv-wrap .oc-tog::after{top:3px; left:3px; width:14px; height:14px; background:#9aa9a0}
+.sv-wrap .oc-tog.on{background:var(--verde); border-color:var(--verde)}
+.sv-wrap .oc-tog.on::after{left:19px; background:#fff}
+.oc-browse-row .oc-nome b{font-weight:600; font-size:.92rem}
+.oc-browse-row .svc-thumb,.oc-drop-item .svc-thumb{width:32px; height:32px; flex:0 0 32px; border-radius:8px}
+.oc-browse-row .svc-thumb svg,.oc-drop-item .svc-thumb svg{width:17px; height:17px}
+.oc-bval{text-align:right; font-variant-numeric:tabular-nums; font-size:.86rem; white-space:nowrap}
+.oc-bval i{display:block; font-style:normal; font-size:.6rem; letter-spacing:.07em; text-transform:uppercase; color:var(--txt-mut)}
+.oc-na{display:inline-block; font-size:.62rem; font-weight:600; color:var(--verde-claro); background:#10241d;
+  border:1px solid var(--neon-borda); border-radius:99px; padding:0 .45rem; margin-left:.35rem; vertical-align:middle}
+/* a busca "pra adicionar": ícone, descrição, preço e a ação */
+.oc-drop-item{display:grid; grid-template-columns:32px minmax(0,1fr) auto auto; gap:.65rem}
+.oc-drop-item .tx{min-width:0}
+.oc-drop-item .tx b{display:block; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.oc-drop-item .tx small{display:block; font-size:.74rem; color:var(--txt-mut); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.oc-drop-item .ad{font-size:.72rem; font-weight:600; border:1px solid var(--borda); border-radius:99px;
+  padding:.15rem .6rem; color:var(--txt-mut); white-space:nowrap}
+.oc-drop-item.sel{background:rgba(37,211,102,.07); cursor:default}
+.oc-drop-item.sel .ad{color:var(--verde-claro); border-color:var(--neon-borda)}
+@media(max-width:700px){
+  .oc-browse-row .oc-bval{flex:1 1 100%; text-align:left}
+  .oc-drop-item{grid-template-columns:32px minmax(0,1fr) auto}
+  .oc-drop-item .ad{display:none}
+  .oc-mod.avulso:not(.incluso)::before{left:-.5rem}
+  /* no estreito o número fica à esquerda na caixa — o rótulo acompanha */
+  .oc-mod .oc-num > span{text-align:left}
+}
 """
 
 _CSS = f'<link rel="stylesheet" href="{_estaticos.registrar("servicos.css", _CSS_CRU)}">'
@@ -2979,8 +3066,10 @@ _JS_CRU = r"""(function(){
       if(!el) return;
       if(r.getAttribute('data-incluso')==='1'){
         // a palavra no lugar do zero: é o que o vendedor quer dizer, e é o que
-        // a folha do cliente passa a imprimir.
-        el.className='oc-sub-v incl'; el.textContent='Incluso';
+        // a folha do cliente passa a imprimir. Embaixo, o valor de tabela
+        // riscado (24/09/2026) — o tamanho do que vem junto, como na folha.
+        el.className='oc-sub-v incl';
+        el.innerHTML='Incluso<small class="oc-sub-tab">'+fmt(num(r.querySelector('.oc-setup'))*qtd(r))+'</small>';
         return;
       }
       el.className='oc-sub-v';
@@ -3040,8 +3129,7 @@ _JS_CRU = r"""(function(){
       var temInc=(c.inclusos||0)>0;
       cxInc.style.display=temInc?'block':'none';
       if(temInc){
-        document.getElementById('oc-incl-n').textContent=
-          c.inclusos+(c.inclusos===1?' item':' itens');
+        document.getElementById('oc-incl-n').textContent=String(c.inclusos);
         document.getElementById('oc-incl-v').textContent=fmt(c.inclusoValor||0);
       }
     }
@@ -3492,7 +3580,7 @@ _JS_CRU = r"""(function(){
     return cob
       +'<div class="oc-nome oc-nome-linha">'+thumb+'<div style="min-width:0">'
       +(s.categoria?'<div class="oc-cat">'+ec(s.categoria)+'</div>':'')
-      +'<b>'+ec(s.nome)+'</b>'+selo+'<div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
+      +'<b title="'+ec(s.nome)+'">'+ec(s.nome)+'</b>'+selo+'<div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
       +'<div class="oc-num"><span>Qtd</span><input class="oc-qtd" inputmode="numeric" value="1"></div>'
       +'<div class="oc-num"><span>Vr. unit.</span>'+campoRS('oc-setup',s.setup)+'</div>'
       +'<div class="oc-num oc-custo-col"><span>Custo</span>'+campoRS('oc-custo',s.custo)+'</div>'
@@ -3596,11 +3684,13 @@ _JS_CRU = r"""(function(){
     box.innerHTML=CATALOGO.map(function(s){
       var on=!!SELECIONADOS[s.slug];
       // o preço de vitrine: um valor no evento, as duas pontas no recorrente
+      // o valor é TEXTO (24/09/2026): a caixinha readonly parecia um campo que se
+      // edita, e mostrava "1500" sem R$ nem centavos
       var preco=SERVICO_AVULSO
-        ? '<div class="oc-num"><span>Valor</span><input value="'+s.setup+'" readonly></div>'
-        : '<div class="oc-num"><span>Setup · mensal</span><input value="'+s.setup+' · '+s.mensal+'/mês" readonly></div>';
-      return '<div class="oc-browse-row'+(SERVICO_AVULSO?'':' rec')+'" data-id="'+ec(s.slug)+'"><button class="oc-tog'+(on?' on':'')+'" type="button" title="'+(on?'Remover da proposta':'Adicionar à proposta')+'"></button>'
-        +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
+        ? '<div class="oc-bval"><i>Valor</i>'+fmt(s.setup)+'</div>'
+        : '<div class="oc-bval"><i>'+(s.setup>0?'Implantação · mensal':'Mensal')+'</i>'+(s.setup>0?fmt(s.setup)+' · ':'')+fmt(s.mensal)+'/mês</div>';
+      return '<div class="oc-browse-row'+(SERVICO_AVULSO?'':' rec')+(on?' on':'')+'" data-id="'+ec(s.slug)+'"><button class="oc-tog'+(on?' on':'')+'" type="button" title="'+(on?'Remover da proposta':'Adicionar à proposta')+'"></button>'
+        +'<div class="oc-nome oc-nome-linha">'+(s.icone_svg?'<div class="svc-thumb">'+s.icone_svg+'</div>':'')+'<div style="min-width:0"><b title="'+ec(s.nome)+'">'+ec(s.nome)+(on?' <span class="oc-na">na proposta</span>':'')+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
         +preco
         +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Inativar serviço">⊘</button></div></div>';
     }).join('');
@@ -3656,9 +3746,20 @@ _JS_CRU = r"""(function(){
     var renderDropBusca=function(){
       var q=(ocBusca.value||'').trim().toLowerCase();
       if(!q){ocDrop.style.display='none'; ocDrop.innerHTML=''; return;}
-      var m=CATALOGO.filter(function(s){return !SELECIONADOS[s.slug] && (s.nome||'').toLowerCase().indexOf(q)>=0;});
+      // 24/09/2026: o que JÁ está na proposta também aparece, marcado "✓ na
+      // proposta" — sumir da busca fazia a pessoa achar que o serviço não existia
+      var m=CATALOGO.filter(function(s){return (s.nome||'').toLowerCase().indexOf(q)>=0;});
+      m.sort(function(a,b){return (SELECIONADOS[a.slug]?1:0)-(SELECIONADOS[b.slug]?1:0);});
       ocDrop.innerHTML = m.length
-        ? m.slice(0,8).map(function(s){return '<div class="oc-drop-item" data-id="'+ec(s.slug)+'"><span class="nome">'+ec(s.nome)+'</span><span class="preco">'+fmt(s.setup)+(SERVICO_AVULSO?'':' + '+fmt(s.mensal)+'/mês')+'</span></div>';}).join('')
+        ? m.slice(0,8).map(function(s){
+            var ja=!!SELECIONADOS[s.slug];
+            var preco=SERVICO_AVULSO?fmt(s.setup):((s.setup>0?fmt(s.setup)+' + ':'')+fmt(s.mensal)+'/mês');
+            return '<div class="oc-drop-item'+(ja?' sel':'')+'" data-id="'+ec(s.slug)+'">'
+              +'<div class="svc-thumb">'+(s.icone_svg||'')+'</div>'
+              +'<div class="tx"><b class="nome">'+ec(s.nome)+'</b>'+(s.descricao?'<small>'+ec(s.descricao)+'</small>':'')+'</div>'
+              +'<span class="preco">'+preco+'</span>'
+              +'<span class="ad">'+(ja?'✓ na proposta':'+ adicionar')+'</span></div>';
+          }).join('')
         : '<div class="oc-drop-empty">Nenhum serviço com esse nome.</div>';
       ocDrop.style.display='block';
     }
@@ -3667,6 +3768,7 @@ _JS_CRU = r"""(function(){
     document.addEventListener('click',function(e){if(!e.target.closest('#oc-buscabox'))ocDrop.style.display='none';});
     ocDrop.addEventListener('click',function(e){
       var it=e.target.closest('.oc-drop-item'); if(!it)return;
+      if(it.classList.contains('sel')){ ocDrop.style.display='none'; return; }   // já está
       SELECIONADOS[it.getAttribute('data-id')]=true;
       ocBusca.value=''; ocDrop.style.display='none'; ocDrop.innerHTML='';
       renderCatalogoAvulso();
@@ -5688,7 +5790,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
          inclusos, R$ 13.850 de tabela" de "Economia de R$ 14.850" — que era o
          que esta tela dizia numa proposta onde ninguém tinha descontado nada. #}
       <div class="oc-inclbox" id="oc-inclusos" style="display:none">
-        <div class="lin"><span>Incluso no pacote · <b id="oc-incl-n" style="font-weight:600">0 itens</b></span><b id="oc-incl-v">R$ 0</b></div>
+        <div class="lin"><span>Incluso no pacote · <b id="oc-incl-n" style="font-weight:600">0</b></span><b id="oc-incl-v">R$ 0</b></div>
         <p>Não entra no total. Na folha do cliente cada um sai marcado <b style="color:var(--verde-claro)">Incluso</b>, com o valor de tabela ao lado.</p>
       </div>
       {% endif %}

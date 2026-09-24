@@ -206,3 +206,38 @@ def test_o_salvar_do_cliente_grava_a_proposta_e_exige_o_nome():
     assert "'oc-empresa'" in js          # sem nome, não grava
     assert "atualizarChip()" in js       # fecha no cartão do cliente
     assert "aditivo_url" in js           # contrato assinado: mesmo caminho do Salvar no funil
+
+
+# ------------------------------------------ acabamento das linhas (24/09/2026)
+# Mockup docs/mockups/prime_servicos_linhas.html (v2), aprovado: a estrutura fica,
+# muda o acabamento. O defeito de fundo era o `button{min-height:48px}` global do
+# painel esticando Cobrar|Incluso (pílula de 28px), o interruptor da lista e os
+# ✎/⊘ — o texto saía cortado e o interruptor virava uma bola.
+
+def test_os_botoes_pequenos_desfazem_o_min_height_global():
+    css = ps._CSS_CRU
+    bloco = css[css.index("ACABAMENTO DAS LINHAS"):]
+    for sel in (".oc-cob button{min-height:0", ".sv-wrap .oc-tog{width:38px; height:22px; min-height:0",
+                ".sv-wrap .oc-ic{min-height:0"):
+        assert sel in bloco, sel
+
+
+def test_a_busca_mostra_o_que_ja_esta_na_proposta():
+    js = ps._JS_CRU
+    corpo = js[js.index("var renderDropBusca=function(){"):]
+    corpo = corpo[:corpo.index("ocBusca.addEventListener('input'")]
+    assert "!SELECIONADOS[s.slug] &&" not in corpo       # não some mais da busca
+    assert "✓ na proposta" in corpo and "+ adicionar" in corpo
+    assert "if(it.classList.contains('sel'))" in js       # clicar no que já está não duplica
+
+
+def test_a_lista_ver_todos_mostra_o_valor_como_texto_em_reais():
+    js = ps._JS_CRU
+    corpo = js[js.index("var preco=SERVICO_AVULSO"):]
+    corpo = corpo[:corpo.index("}).join('');")]
+    assert "readonly" not in corpo and "oc-bval" in corpo and "fmt(s.setup)" in corpo
+    assert "na proposta" in corpo
+
+
+def test_o_incluso_mostra_o_valor_de_tabela_riscado():
+    assert "Incluso<small class=\"oc-sub-tab\">" in ps._JS_CRU

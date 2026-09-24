@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serviços — acabamento das linhas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* TOKENS — cópia de web/tema.py (_TOKENS). A fonte da verdade é o tema.py. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23; --line-2:#18211B;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-claro:#4ADE80; --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--body);max-width:1180px;margin:0 auto;
+  padding:34px 16px 100px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.8rem;font-weight:700;line-height:1.15}
+h2{font-size:1.2rem;font-weight:700;margin-bottom:.2rem}
+.sub{color:var(--text-dim);margin-top:.5rem;max-width:84ch}
+.sec{margin-top:44px}
+.num{font-family:var(--mono);font-size:.72rem;color:var(--neon);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);padding:.7rem .9rem;border-radius:0 8px 8px 0;
+  font-size:.86rem;margin-top:1rem;color:var(--text-dim);max-width:88ch}
+.nota b{color:var(--text)}
+.rot{display:inline-block;font:600 .7rem var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:.25rem .6rem;border-radius:6px;margin:1.2rem 0 .5rem}
+.rot.r{background:var(--coral-fundo);color:var(--coral)} .rot.b{background:var(--neon-fundo);color:var(--neon)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:6px 20px}
+
+/* ================= HOJE (reprodução do print) ================= */
+.h-lin{display:flex;align-items:center;gap:.7rem;padding:.6rem 0;border-bottom:1px solid var(--line)}
+.h-cob{display:flex;border:1px solid var(--line);border-radius:99px;overflow:hidden;height:28px;flex:none;width:128px}
+.h-cob i{font-style:normal;flex:1;font-size:.72rem;font-weight:700;padding-top:13px;text-align:center;color:var(--text-dim)}
+.h-cob i.on{background:#0f5a35;color:var(--neon-claro)} .h-cob i.on.c{background:var(--neon);color:var(--sobre-verde)}
+.h-ic{width:34px;height:34px;border:1px solid var(--line);border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--neon-claro);font-size:.8rem}
+.h-nm{flex:1;min-width:0}
+.h-nm b{font-size:1.02rem;font-weight:800;letter-spacing:.01em;color:#cfd8d3;display:block}
+.h-nm small{color:var(--text-dim);font-size:.8rem;display:block}
+.h-cx{border:1px solid var(--line);border-radius:7px;padding:.25rem .5rem;height:74px;display:flex;flex-direction:column;justify-content:space-between;background:#0b110e;flex:none}
+.h-cx s{text-decoration:none;font-size:.58rem;letter-spacing:.05em;color:var(--text-dim);text-align:right}
+.h-cx span{font-size:.9rem;text-align:right;padding-bottom:.9rem}
+.h-dp{display:flex;gap:.3rem;align-items:center;justify-content:flex-end;padding-bottom:.7rem;font-size:.9rem}
+.h-dp em{font-style:normal;font-size:.62rem;border:1px solid var(--line);border-radius:5px;padding:.1rem .35rem;color:var(--text-dim)}
+.h-dp em.on{background:#0f5a35;color:var(--neon-claro)}
+.h-sub{width:110px;text-align:right;font-size:.62rem;letter-spacing:.05em;color:var(--text-dim);flex:none}
+.h-sub b{display:block;font-size:.95rem;letter-spacing:0;color:var(--neon-claro)}
+.h-lx{font-size:.7rem;color:var(--text-dim)}
+
+/* ================= AJUSTADO (mesma estrutura) ================= */
+.lin{display:grid;grid-template-columns:132px minmax(0,1fr) 70px 138px 160px 124px 30px;gap:.65rem;align-items:center;
+  padding:.8rem .2rem;border-bottom:1px solid var(--line-2);position:relative}
+.lin:last-child{border-bottom:0}
+.lin:hover{background:rgba(255,255,255,.018)}
+.ci{display:inline-flex;border:1px solid var(--line);border-radius:99px;overflow:hidden;height:30px;background:var(--bg)}
+.ci i{font-style:normal;flex:1;display:flex;align-items:center;justify-content:center;font-size:.74rem;font-weight:600;color:var(--text-dim);padding:0 .7rem}
+.ci i.on{background:var(--neon);color:var(--sobre-verde)}
+.ci i.on.inc{background:var(--neon-fundo);color:var(--neon-claro);box-shadow:inset 0 0 0 1px var(--neon-borda);border-radius:99px}
+.nm{display:flex;gap:.65rem;align-items:center;min-width:0}
+.ic{width:36px;height:36px;flex:0 0 36px;border-radius:9px;border:1px solid var(--line);background:var(--bg-2);color:var(--neon-claro);display:flex;align-items:center;justify-content:center}
+.ic svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tx{min-width:0}
+.tx .cat{display:block;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--neon-claro);font-weight:600;margin-bottom:1px}
+.tx b{display:block;font-size:.92rem;font-weight:600;line-height:1.3;letter-spacing:.005em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx small{display:block;color:var(--text-dim);font-size:.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.fld .l{font-size:.6rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);margin-bottom:.2rem;text-align:right}
+.fld.q .l{text-align:center}
+.din{display:flex;align-items:center;gap:.3rem;height:38px;border:1px solid var(--line);background:var(--bg);border-radius:9px;padding:0 .6rem}
+.din i{font-style:normal;color:var(--text-faint);font-size:.72rem}
+.din span{flex:1;text-align:right;font-family:var(--mono);font-size:.86rem}
+.din .seg{flex:none;font-family:var(--body)}
+.fld.q .din span{text-align:center}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:none}
+.seg i{font-style:normal;font-size:.64rem;padding:.12rem .4rem;color:var(--text-dim);line-height:1.5}
+.seg i.on{background:var(--neon-fundo);color:var(--neon-claro);font-weight:700}
+.st{text-align:right}
+.st .l{font-size:.6rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);margin-bottom:.2rem}
+.st b{display:block;font-family:var(--mono);font-size:.95rem;font-weight:700;white-space:nowrap;line-height:38px}
+.st b.inc{font-family:var(--body);font-size:.84rem;color:var(--neon-claro);line-height:1.2;padding-top:.35rem}
+.st small{display:block;font-family:var(--mono);font-size:.7rem;color:var(--text-faint);text-decoration:line-through}
+.lix{width:30px;height:30px;border-radius:8px;color:var(--text-faint);display:flex;align-items:center;justify-content:center;align-self:end;margin-bottom:4px}
+.lix svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.lin.inc .din{background:transparent;border-color:var(--line-2)}
+.lin.inc .din span{color:var(--text-dim)}
+.lin.inc .dsc{opacity:.35}
+.lin.inc .tx b{color:#c4cec8}
+.lin.cob::before{content:"";position:absolute;left:-20px;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--neon)}
+
+/* resumo */
+.rs{padding:18px}
+.ll{display:flex;justify-content:space-between;gap:.6rem;font-size:.84rem;color:var(--text-dim);padding:.5rem 0;border-bottom:1px solid var(--line)}
+.ll b{font-family:var(--mono);color:var(--text);font-weight:600;white-space:nowrap}
+.incl{margin-top:.8rem;border:1px dashed var(--neon-borda);border-radius:11px;padding:.7rem .8rem}
+.incl .lh{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem}
+.incl .lh b{color:var(--neon-claro);white-space:nowrap} .incl .lh span{font-family:var(--mono);white-space:nowrap}
+.incl p{font-size:.74rem;color:var(--text-dim);margin-top:.3rem;line-height:1.45}
+.h-rs{border:1px solid var(--line);border-radius:12px;padding:12px;font-size:.84rem;color:var(--text-dim);max-width:300px}
+.h-incl{border:1px dashed var(--neon-borda);border-radius:11px;padding:.6rem .7rem;display:grid;grid-template-columns:1fr auto;gap:.2rem .8rem;margin-top:.6rem}
+.h-incl b{color:var(--neon-claro)}
+.lado{display:grid;grid-template-columns:320px 320px;gap:24px}
+
+.lista{list-style:none;margin-top:1rem;display:grid;gap:.5rem;max-width:88ch}
+.lista li{display:grid;grid-template-columns:26px 1fr;gap:.5rem;font-size:.88rem;color:var(--text-dim)}
+.lista li b{color:var(--text)}
+.lista li::before{content:attr(data-n);width:22px;height:22px;border-radius:50%;background:var(--neon-fundo);color:var(--neon-claro);font:700 .7rem/22px var(--mono);text-align:center}
+
+/* celular */
+.cel{max-width:390px;margin:1rem auto 0;border:1px solid var(--line);border-radius:22px;padding:6px 14px;background:var(--surface)}
+.cel .lin{grid-template-columns:1fr 1fr;row-gap:.5rem;padding:.8rem 0}
+.cel .lin > *{min-width:0}
+.cel .lin .ci{grid-column:1/-1;justify-self:start}
+.cel .lin .nm{grid-column:1/-1;padding-right:34px}
+.cel .lin .fld.dsc{grid-column:1/-1}
+.cel .lin .st{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;border-top:1px dashed var(--line-2);padding-top:.4rem}
+.cel .lin .st b{line-height:1.2}
+.cel .lin .lix{position:absolute;right:0;top:.8rem;margin:0}
+.cel .lin.cob::before{left:-14px}
+
+/* ================= escolher o serviço ================= */
+.h-br{display:grid;grid-template-columns:42px 1fr 90px 16px 16px;gap:.55rem;align-items:center;padding:.5rem 0;border-bottom:1px solid var(--line)}
+.h-tog{width:42px;height:48px;border-radius:50%;background:#2a3550;position:relative}
+.h-tog::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff}
+.h-tog.on{background:var(--neon)} .h-tog.on::after{left:21px}
+.h-br b{font-size:1rem;font-weight:800;color:#cfd8d3;display:block} .h-br small{font-size:.76rem;color:var(--text-dim)}
+.h-val{border:1px solid var(--line);border-radius:7px;height:58px;display:flex;align-items:center;justify-content:flex-end;gap:.4rem;padding:0 .5rem;font-size:.85rem}
+.h-val s{text-decoration:none;font-size:.58rem;color:var(--text-dim)}
+.h-pil{width:16px;height:46px;border:1px solid var(--line);border-radius:99px;font-size:.55rem;display:flex;align-items:center;justify-content:center;color:var(--text-dim)}
+.br{display:grid;grid-template-columns:40px minmax(0,1fr) 150px 68px;gap:.7rem;align-items:center;padding:.6rem .2rem;border-bottom:1px solid var(--line-2);position:relative}
+.br:last-child{border-bottom:0}
+.br:hover{background:rgba(255,255,255,.018)}
+.sw{width:38px;height:22px;border-radius:99px;background:#243029;position:relative;border:1px solid var(--line)}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#9aa9a0;transition:left .15s}
+.sw.on{background:var(--neon);border-color:var(--neon)} .sw.on::after{left:19px;background:#fff}
+.br .val{text-align:right;font-family:var(--mono);font-size:.86rem}
+.br .val i{font-style:normal;font-family:var(--body);font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;color:var(--text-faint);display:block}
+.br .acs{display:flex;gap:.3rem;justify-content:flex-end}
+.ib{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);color:var(--text-faint);display:flex;align-items:center;justify-content:center;font-size:.8rem}
+.br.on .tx b{color:var(--text)}
+.br .chip{display:inline-block;font-size:.62rem;font-weight:600;color:var(--neon-claro);background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:99px;padding:0 .45rem;margin-left:.4rem;vertical-align:middle;letter-spacing:.02em}
+.drop{border:1px solid var(--line);background:var(--bg-2);border-radius:12px;overflow:hidden;max-width:760px}
+.dp{display:grid;grid-template-columns:32px minmax(0,1fr) auto auto;gap:.65rem;align-items:center;padding:.55rem .8rem;border-bottom:1px solid var(--line-2)}
+.dp:last-child{border-bottom:0}
+.dp.sel{background:var(--neon-fraco)}
+.dp .ic{width:32px;height:32px;flex-basis:32px}
+.dp .pr{font-family:var(--mono);font-size:.84rem;color:var(--neon-claro);white-space:nowrap}
+.dp .ad{font-size:.72rem;font-weight:600;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--text-dim);white-space:nowrap}
+.dp .ad.ok{border-color:var(--neon-borda);color:var(--neon-claro)}
+.h-drop{border:1px solid var(--line);border-radius:10px;padding:.55rem .8rem;display:flex;justify-content:space-between;font-size:.85rem;max-width:760px}
+.h-drop span{color:var(--neon-claro)}
+
+@media (max-width:900px){
+  .scroll{overflow-x:auto}
+  .scroll>.card{min-width:880px}
+  .lado{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="num">Mockup v2 · Serviços · Prime Eventos (conta 34) · evento</div>
+<h1>A mesma tela, com acabamento</h1>
+<p class="sub">A estrutura fica <b>exatamente como está</b>: mesma ordem dos serviços, mesma linha, mesmos campos, o "Cobrar | Incluso" no mesmo lugar, o resumo no mesmo lugar.
+Muda só o acabamento: as pílulas inteiras, as caixas alinhadas e mais baixas, o nome sem gritar, e uma divisão clara entre um serviço e outro. Feito com a proposta nº 39 do seu print.</p>
+
+<div class="sec">
+  <div class="num">1 · Lado a lado</div>
+  <h2>Três linhas da proposta nº 39</h2>
+
+  <span class="rot r">Hoje</span>
+  <div class="scroll"><div class="card">
+    <div class="h-lin"><div class="h-cob"><i>Cobrar</i><i class="on">Incluso</i></div><div class="h-ic">⌂</div>
+      <div class="h-nm"><b>LOCAÇÃO CLIMATIZADORES</b></div>
+      <div class="h-cx" style="width:62px"><s>QTD</s><span>1</span></div>
+      <div class="h-cx" style="width:120px"><s>VR. UNIT.</s><span>R$ &nbsp;250,00</span></div>
+      <div class="h-cx" style="width:128px"><s>DESCONTO</s><div class="h-dp">0 <em class="on">%</em><em>R$</em></div></div>
+      <div class="h-sub">SUBTOTAL<b>Incluso</b></div><span class="h-lx">🗑</span></div>
+    <div class="h-lin"><div class="h-cob"><i>Cobrar</i><i class="on">Incluso</i></div><div class="h-ic">◡</div>
+      <div class="h-nm"><b>LOCAÇÃO COZINHA</b><small>Uso exclusivo da área da cozinha.</small></div>
+      <div class="h-cx" style="width:62px"><s>QTD</s><span>1</span></div>
+      <div class="h-cx" style="width:120px"><s>VR. UNIT.</s><span>R$ &nbsp;1.500,00</span></div>
+      <div class="h-cx" style="width:128px"><s>DESCONTO</s><div class="h-dp">0 <em class="on">%</em><em>R$</em></div></div>
+      <div class="h-sub">SUBTOTAL<b>Incluso</b></div><span class="h-lx">🗑</span></div>
+    <div class="h-lin" style="border-bottom:0"><div class="h-cob"><i class="on c">Cobrar</i><i>Incluso</i></div><div class="h-ic">⌂</div>
+      <div class="h-nm"><small style="color:var(--neon-claro);font-size:.62rem;font-weight:700">LOCAÇÃO DE ESPAÇO</small><b>LOCAÇÃO ESPAÇO - PACOTE PRIME<br>- SEXTA A DOMINGO - 2027</b><small>O Espaço inclui: Espaço dos convidados: (Mes...</small></div>
+      <div class="h-cx" style="width:62px"><s>QTD</s><span>1</span></div>
+      <div class="h-cx" style="width:120px"><s>VR. UNIT.</s><span>R$ &nbsp;7.800,00</span></div>
+      <div class="h-cx" style="width:128px"><s>DESCONTO</s><div class="h-dp">0 <em class="on">%</em><em>R$</em></div></div>
+      <div class="h-sub">SUBTOTAL<b>R$ 7.800,00</b></div><span class="h-lx">🗑</span></div>
+  </div></div>
+
+  <span class="rot b">Ajustado</span>
+  <div class="scroll"><div class="card">
+    <div class="lin inc">
+      <span class="ci"><i>Cobrar</i><i class="on inc">Incluso</i></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M2.5 10.5 12 4l9.5 6.5"/><path d="M4.5 10.5V20"/><path d="M19.5 10.5V20"/><path d="M2.5 20h19"/><path d="M8 20v-4.5a4 4 0 0 1 8 0V20"/></svg></span><div class="tx"><b>LOCAÇÃO CLIMATIZADORES</b></div></div>
+      <div class="fld q"><div class="l">Qtd</div><div class="din"><span>1</span></div></div>
+      <div class="fld"><div class="l">Vr. unit.</div><div class="din"><i>R$</i><span>250,00</span></div></div>
+      <div class="fld dsc"><div class="l">Desconto</div><div class="din"><span>0</span><span class="seg"><i class="on">%</i><i>R$</i></span></div></div>
+      <div class="st"><div class="l">Subtotal</div><b class="inc">Incluso</b><small>R$ 250,00</small></div>
+      <div class="lix"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+    </div>
+    <div class="lin inc">
+      <span class="ci"><i>Cobrar</i><i class="on inc">Incluso</i></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.6 10.4h16.8v3.2a6 6 0 0 1-6 6h-4.8a6 6 0 0 1-6-6z"/><path d="M9.4 7.6c0-1.6 1-1.6 1-3.2"/><path d="M13.6 7.6c0-1.6 1-1.6 1-3.2"/></svg></span><div class="tx"><b>LOCAÇÃO COZINHA</b><small>Uso exclusivo da área da cozinha.</small></div></div>
+      <div class="fld q"><div class="l">Qtd</div><div class="din"><span>1</span></div></div>
+      <div class="fld"><div class="l">Vr. unit.</div><div class="din"><i>R$</i><span>1.500,00</span></div></div>
+      <div class="fld dsc"><div class="l">Desconto</div><div class="din"><span>0</span><span class="seg"><i class="on">%</i><i>R$</i></span></div></div>
+      <div class="st"><div class="l">Subtotal</div><b class="inc">Incluso</b><small>R$ 1.500,00</small></div>
+      <div class="lix"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+    </div>
+    <div class="lin cob">
+      <span class="ci"><i class="on">Cobrar</i><i>Incluso</i></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M2.5 10.5 12 4l9.5 6.5"/><path d="M4.5 10.5V20"/><path d="M19.5 10.5V20"/><path d="M2.5 20h19"/><path d="M8 20v-4.5a4 4 0 0 1 8 0V20"/></svg></span><div class="tx"><span class="cat">Locação de espaço</span><b>LOCAÇÃO ESPAÇO - PACOTE PRIME - SEXTA A DOMINGO - 2027</b><small>O Espaço inclui: Espaço dos convidados (mesas, cadeiras); centros de mesa…</small></div></div>
+      <div class="fld q"><div class="l">Qtd</div><div class="din"><span>1</span></div></div>
+      <div class="fld"><div class="l">Vr. unit.</div><div class="din"><i>R$</i><span>7.800,00</span></div></div>
+      <div class="fld dsc"><div class="l">Desconto</div><div class="din"><span>0</span><span class="seg"><i class="on">%</i><i>R$</i></span></div></div>
+      <div class="st"><div class="l">Subtotal</div><b>R$ 7.800,00</b></div>
+      <div class="lix"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+    </div>
+  </div></div>
+
+  <ul class="lista">
+    <li data-n="1"><span><b>Cobrar | Incluso inteiro.</b> O mesmo par, no mesmo lugar, com 30px e o texto no meio. Hoje o botão é esticado para 48px dentro de uma pílula de 28px, e a palavra é cortada.</span></li>
+    <li data-n="2"><span><b>Caixas mais baixas e alinhadas.</b> Os rótulos Qtd, Vr. unit., Desconto e Subtotal continuam na linha, só que <b>em cima da caixa</b>, pequenos. A caixa cai de 74px para 38px, e o número fica no meio dela, não no canto de baixo.</span></li>
+    <li data-n="3"><span><b>O nome sem gritar.</b> Continua como está no catálogo (em maiúsculas), mas com peso normal no lugar do extra-negrito. O nome longo não quebra mais em duas linhas; corta com "…" e aparece inteiro ao passar o mouse.</span></li>
+    <li data-n="4"><span><b>Divisão clara entre os serviços.</b> Todo serviço tem a mesma altura e a mesma linha fina embaixo, e a linha acende de leve ao passar o mouse.</span></li>
+    <li data-n="5"><span><b>O cobrado aparece mais.</b> Sem mudar a ordem: a linha <b>cobrada</b> ganha uma faixa verde à esquerda e o valor em branco. No <b>incluso</b>, os números ficam em cinza, o desconto fica apagado e o subtotal mostra "Incluso" com o valor de tabela riscado embaixo.</span></li>
+  </ul>
+</div>
+
+<div class="sec">
+  <div class="num">2 · O resumo</div>
+  <h2>O quadro do "Incluso no pacote" numa linha só</h2>
+  <div class="lado">
+    <div><span class="rot r">Hoje</span>
+      <div class="h-rs">Investimento inicial <b style="float:right;color:var(--text)">R$ 7.800,00</b>
+        <div class="h-incl"><b>Incluso no pacote · 10<br>itens</b><b>R$<br>4.150,00</b><span style="grid-column:1/-1;font-size:.76rem">Não entra no total. Na folha do cliente cada um sai marcado Incluso, com o valor de tabela ao lado.</span></div></div></div>
+    <div><span class="rot b">Ajustado</span>
+      <div class="card rs">
+        <div class="ll"><span>Investimento inicial</span><b>R$ 7.800,00</b></div>
+        <div class="incl"><div class="lh"><b>Incluso no pacote · 10</b><span>R$ 4.150,00</span></div>
+          <p>Não entra no total. Na folha do cliente, cada um sai marcado <b style="color:var(--neon-claro)">Incluso</b>, com o valor de tabela ao lado.</p></div>
+      </div></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="num">4 · Escolher o serviço</div>
+  <h2>A lista "ver todos" e a busca pra adicionar</h2>
+
+  <span class="rot r">Hoje · lista "ver os 40 serviços"</span>
+  <div class="scroll"><div class="card">
+    <div class="h-br"><span class="h-tog"></span><div><b>BOLO</b><small>3 andares</small></div><div class="h-val"><s>VALOR</s>800</div><span class="h-pil">✎</span><span class="h-pil">⊘</span></div>
+    <div class="h-br"><span class="h-tog"></span><div><b>DJ</b><small>5 horas de som</small></div><div class="h-val"><s>VALOR</s>1500</div><span class="h-pil">✎</span><span class="h-pil">⊘</span></div>
+    <div class="h-br" style="border-bottom:0"><span class="h-tog on"></span><div><b>LOCAÇÃO COZINHA</b><small>Uso exclusivo da área da cozinha.</small></div><div class="h-val"><s>VALOR</s>1500</div><span class="h-pil">✎</span><span class="h-pil">⊘</span></div>
+  </div></div>
+
+  <span class="rot b">Ajustado</span>
+  <div class="scroll"><div class="card">
+    <div class="br"><span class="sw"></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.4 20.6h17.2"/><path d="M4.8 20.6v-7.4h14.4v7.4"/><path d="M12 9.6V7.4"/><circle cx="12" cy="6.1" r="1"/></svg></span><div class="tx"><b>BOLO</b><small>3 andares</small></div></div>
+      <div class="val"><i>Valor</i>R$ 800,00</div>
+      <div class="acs"><span class="ib" title="Editar serviço">✎</span><span class="ib" title="Inativar serviço">⊘</span></div></div>
+    <div class="br"><span class="sw"></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 14.5v-2.6a8 8 0 0 1 16 0v2.6"/><rect x="2.2" y="13" width="4.2" height="7" rx="1.7"/><rect x="17.6" y="13" width="4.2" height="7" rx="1.7"/></svg></span><div class="tx"><b>DJ</b><small>5 horas de som</small></div></div>
+      <div class="val"><i>Valor</i>R$ 1.500,00</div>
+      <div class="acs"><span class="ib">✎</span><span class="ib">⊘</span></div></div>
+    <div class="br on"><span class="sw on"></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.6 10.4h16.8v3.2a6 6 0 0 1-6 6h-4.8a6 6 0 0 1-6-6z"/><path d="M9.4 7.6c0-1.6 1-1.6 1-3.2"/><path d="M13.6 7.6c0-1.6 1-1.6 1-3.2"/></svg></span><div class="tx"><b>LOCAÇÃO COZINHA <span class="chip">na proposta</span></b><small>Uso exclusivo da área da cozinha.</small></div></div>
+      <div class="val"><i>Valor</i>R$ 1.500,00</div>
+      <div class="acs"><span class="ib">✎</span><span class="ib">⊘</span></div></div>
+  </div></div>
+
+  <span class="rot r">Hoje · busca "pra adicionar"</span>
+  <div class="h-drop">BOLO <span>R$ 800,00</span></div>
+  <span class="rot b">Ajustado</span>
+  <div class="drop">
+    <div class="dp"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.4 20.6h17.2"/><path d="M4.8 20.6v-7.4h14.4v7.4"/><path d="M12 9.6V7.4"/><circle cx="12" cy="6.1" r="1"/></svg></span><div class="tx"><b>BOLO</b><small>3 andares</small></div><span class="pr">R$ 800,00</span><span class="ad">+ adicionar</span></div>
+    <div class="dp sel"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.6 10.4h16.8v3.2a6 6 0 0 1-6 6h-4.8a6 6 0 0 1-6-6z"/></svg></span><div class="tx"><b>LOCAÇÃO COZINHA</b><small>Uso exclusivo da área da cozinha.</small></div><span class="pr">R$ 1.500,00</span><span class="ad ok">✓ na proposta</span></div>
+  </div>
+
+  <ul class="lista">
+    <li data-n="6"><span><b>O interruptor de selecionar.</b> Hoje ele é esticado para 48px de altura (a mesma regra geral dos botões) e vira uma bola deformada, com a bolinha fora do lugar. Volta a ser um interruptor de 38 × 22, alinhado com o nome.</span></li>
+    <li data-n="7"><span><b>✎ e ⊘ alinhados.</b> Hoje viram pílulas altas e finas; passam a ser dois botões quadrados de 30px, lado a lado, no fim da linha.</span></li>
+    <li data-n="8"><span><b>Valor em reais.</b> "VALOR 1500" dentro de uma caixa vira "R$ 1.500,00", só texto (a caixa parecia um campo editável, e não é).</span></li>
+    <li data-n="9"><span><b>A lista mostra o que já está na proposta.</b> Cada serviço ganha o ícone. O que já foi escolhido fica com o interruptor verde e o selo "na proposta", tanto na lista quanto na busca, e a busca ganha a descrição e o "+ adicionar".</span></li>
+  </ul>
+</div>
+
+<div class="sec">
+  <div class="num">5 · No celular</div>
+  <h2>A mesma linha, empilhada</h2>
+  <div class="cel">
+    <div class="lin cob">
+      <span class="ci"><i class="on">Cobrar</i><i>Incluso</i></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M2.5 10.5 12 4l9.5 6.5"/><path d="M2.5 20h19"/><path d="M8 20v-4.5a4 4 0 0 1 8 0V20"/></svg></span><div class="tx"><span class="cat">Locação de espaço</span><b>LOCAÇÃO ESPAÇO - PACOTE PRIME</b><small>O Espaço inclui…</small></div></div>
+      <div class="fld q"><div class="l">Qtd</div><div class="din"><span>1</span></div></div>
+      <div class="fld"><div class="l">Vr. unit.</div><div class="din"><i>R$</i><span>7.800,00</span></div></div>
+      <div class="fld dsc"><div class="l">Desconto</div><div class="din"><span>0</span><span class="seg"><i class="on">%</i><i>R$</i></span></div></div>
+      <div class="st"><div class="l">Subtotal</div><b>R$ 7.800,00</b></div>
+      <div class="lix"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+    </div>
+  </div>
+  <div class="nota"><b>Nada muda de lugar e nenhuma conta muda.</b> A ordem dos serviços, os campos, o total (R$ 7.800,00), os R$ 4.150,00 de inclusos fora do total e a folha do cliente continuam iguais.
+  O acabamento das caixas e do Cobrar | Incluso vale também para a tela da ZAQ; a faixa do cobrado e o incluso em cinza são só da Prime, porque só ela tem "incluso no pacote".</div>
+</div>
+
+</body>
+</html>

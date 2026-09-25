@@ -159,6 +159,10 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # entraram no menu e ficaram de fora daqui.
     if caps["vendas"]:
         permitido += ["/painel/renovacoes"]
+    # Hoje (a tela da recepção da clínica): mesmo caso das Renovações — a rota é
+    # quem barra conta de outro perfil, e a recepção entra com papel de vendedor.
+    if caps["vendas"]:
+        permitido += ["/painel/hoje"]
     # Origens: dono, gestor e o convidado da agência. Mesmo erro do Follow-up, meu,
     # no #650 — o link entrou no menu e a rota ficou de fora.
     if caps["origens"]:

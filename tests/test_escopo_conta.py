@@ -159,6 +159,13 @@ TABELAS: dict[str, tuple[str, ...]] = {
     "wa_qr_log": ('conta_id',),
     "wa_qr_sessao_estado": ('conta_id',),
     "wa_qr_sessao_lock": ('conta_id',),
+    # o cadastro da clínica (348): tabelas novas com conta_id entram aqui na mão
+    # até a próxima regeneração do mapa
+    "clinica_profissionais": ('conta_id',),
+    "clinica_locais": ('conta_id',),
+    "clinica_profissional_tipos": ('conta_id',),
+    "clinica_grade": ('conta_id',),
+    "clinica_bloqueios": ('conta_id',),
 }
 
 # Só código de produção. tests/ monta cenário de propósito e scripts/ são

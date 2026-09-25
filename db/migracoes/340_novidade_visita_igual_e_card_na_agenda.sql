@@ -1,4 +1,4 @@
--- 339_novidade_visita_igual_e_card_na_agenda.sql
+-- 340_novidade_visita_igual_e_card_na_agenda.sql
 -- A visita conta igual no Raio-X, no Relatório e no resumo do grupo; a festa
 -- aprovada nasce como festa; e o novo compromisso pergunta de qual card é.
 --

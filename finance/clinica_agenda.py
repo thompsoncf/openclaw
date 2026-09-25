@@ -539,7 +539,7 @@ def config(c, conta_id: int) -> dict:
         with c.transaction():
             r = c.execute("select confirmacao_modo, confirmacao_hora from clinica_agenda_config where conta_id=%s",
                           (conta_id,)).fetchone()
-    except Exception:  # noqa: BLE001 — migração 353 ainda não rodou
+    except Exception:  # noqa: BLE001 — migração 355 ainda não rodou
         r = None
     return {"confirmacao_modo": r[0] if r else "off", "confirmacao_hora": r[1] if r else 10}
 

@@ -569,7 +569,7 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — voltar a chamar falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
-                # Confirmação na véspera da agenda da clínica (migração 353): só perfil
+                # Confirmação na véspera da agenda da clínica (migração 355): só perfil
                 # clínica e só conta que ligou. Lê o 1/2 da resposta e manda os de amanhã.
                 from finance import clinica_agenda as _cag
                 _ca = _cag.rodar(pool)

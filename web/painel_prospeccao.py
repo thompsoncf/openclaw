@@ -755,9 +755,9 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             # do mesmo jeito que cairia sem o try. Foi o que os testes pegaram.
             try:
                 with c.transaction():
-                    for pid, visto, mid, dire, txt, quando in c.execute(
+                    for pid, visto, mid, dire, txt, quando, cv_id, cv_canal in c.execute(
                         """select cv.prospeccao_id, cv.visto_ate_id,
-                                  m.id, m.direcao, m.texto, m.criado_em
+                                  m.id, m.direcao, m.texto, m.criado_em, cv.id, cv.canal
                              from conversas cv
                              join lateral (
                                  select id, direcao, texto, criado_em from mensagens
@@ -779,6 +779,9 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                             # aí toda entrada conta — o estado de todos antes da 188.
                             "nova": (dire == "in" and (visto is None or (mid or 0) > visto)),
                             "minha": dire == "out",
+                            # a conversa DESTA mensagem: a linha da prévia no card
+                            # abre ela (e não outra do mesmo lead, noutro canal)
+                            "conv": cv_id, "canal": cv_canal,
                         }
             except Exception:  # noqa: BLE001 — o funil abre sem a prévia
                 import logging
@@ -947,6 +950,15 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             # o selo do follow-up: dict ou None (conta sem a tela, ou modo 'off')
             "fu": fu_por_lead.get(r[0]),
         })
+        # A LINHA DA ÚLTIMA MENSAGEM ABRE A CONVERSA DELA (24/09/2026): o balão
+        # de e-mail é outro ('emails'), e Instagram usa o de conversas.
+        _u = card["ult"] or {}
+        card["conv_ult"] = _u.get("conv")
+        card["canal_ult"] = "emails" if _u.get("canal") == "email" else "conversas"
+        # sem a tela de Follow-up, o próximo contato vai pra L4 — e em coral
+        # quando já passou (o Evolui S. da ZAQ estava 54 dias vencido, sem destaque)
+        _px = r[8].date() if hasattr(r[8], "date") else r[8]
+        card["proximo_venceu"] = bool(_px and _px < hoje)
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
@@ -9856,6 +9868,13 @@ def prospeccao_excluir(request: Request, alvo_id: int):
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     pool = get_pool()
+    # SÓ DONO E GESTOR EXCLUEM (decisão do dono, 24/09/2026). Excluir é DELETE:
+    # o lead some de vez, sem arquivo pra voltar. Até aqui qualquer papel podia,
+    # a um clique do nome no card. O botão também sumiu da tela do vendedor —
+    # mas a regra que vale é esta, a do servidor.
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono ou o gestor exclui lead."},
+                            status_code=403)
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
@@ -10491,8 +10510,8 @@ _CSS = """<style>
      repeat(6,...) fixo jogava a 7ª pra uma segunda linha no desktop — que é o que
      já acontece hoje em quem criou uma etapa a mais. auto-fit + minmax mantém a
      linha única e faz o quadro rolar quando não couber, como a barra de abas. */
-  .kbrow{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);
-    gap:.55rem;overflow-x:auto;scrollbar-width:thin}
+  .kbrow{display:grid;grid-auto-flow:column;grid-auto-columns:max-content;
+    gap:8px;overflow-x:auto;scrollbar-width:thin}
   /* esfumado na borda direita quando tem coluna cortada — sem isso a última
      coluna (ex.: "Perdido") só some na borda da tela, sem nenhum aviso de que
      dá pra arrastar pro lado; .transborda é ligado/desligado por JS
@@ -10500,6 +10519,10 @@ _CSS = """<style>
   .kbrow.transborda{mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent 100%);
     -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent 100%)}
   .kbcol{display:flex !important;min-height:180px}
+  /* A LARGURA DA COLUNA (24/09/2026) vem do kbLayout (--kb-col): espaço útil ÷
+     colunas abertas, entre 232 e 300 px. Sem JS, 248. Era minmax(150px,1fr)
+     dentro de 1240 px: o nome cortava com 13 letras. */
+  .kbcol{width:clamp(232px,var(--kb-col,248px),300px);box-sizing:border-box}
 }
 /* ---- ficha ---- */
 .fgrid{display:grid;grid-template-columns:1.05fr 1fr;gap:1rem;margin-top:1rem;align-items:start}
@@ -10586,6 +10609,7 @@ _NAV_ASSETS = """<style>
 /* Captar Lead: botão de AÇÃO no cabeçalho do Funil, não aba de navegação. Verde
    cheio porque é o call-to-action da tela — abrir o painel de captação. */
 .cap-btn{display:inline-flex;align-items:center;gap:.4rem;font:inherit;font-size:.84rem;
+  width:auto;min-height:0;margin:0;
   font-weight:700;padding:.5rem .9rem;border-radius:9px;border:0;cursor:pointer;
   background:var(--verde);color:var(--sobre-verde);white-space:nowrap;flex:none}
 .cap-btn:hover{background:var(--verde2,var(--verde))}
@@ -11092,7 +11116,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <td class="mut" style="font-variant-numeric:tabular-nums;white-space:nowrap">💬 {{ l.toque_wa }} · ✉️ {{ l.toque_mail }}</td>
             <td class="mut" style="font-size:.78rem;white-space:nowrap">{{ l.ult or '—' }}</td>
             <td style="white-space:nowrap"><button class="pbtn ghost" name="only" value="{{ l.id }}" style="padding:.2rem .5rem;font-size:.76rem" title="Promover a lead">⬆︎</button>
-              <button type="button" class="pbtn ghost" onclick="baseExcluir({{ l.id }},this)" style="padding:.2rem .5rem;font-size:.76rem;color:var(--coral);border-color:#5c2a27" title="Excluir lead da base">🗑</button></td>
+              {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExcluir({{ l.id }},this)" style="padding:.2rem .5rem;font-size:.76rem;color:var(--coral);border-color:#5c2a27" title="Excluir lead da base">🗑</button>{% endif %}</td>
           </tr>
         {% else %}
           <tr><td colspan="7" class="mut" style="text-align:center;padding:1.5rem">Nada na base ainda. Use o <b style="color:var(--verde-claro)">➕ Adicionar leads à base</b> acima ↑ pra começar.</td></tr>
@@ -11309,7 +11333,7 @@ function baseTirarCheck(){
 
 
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
-<div class="pw">
+<div class="pw funil">
 """ + _navbar('funil') + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
@@ -11585,10 +11609,26 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {# O CARD, uma vez só: a mesma marcação serve pros grupos por mês e pra dobra dos
      parados. Macro do próprio template — enxerga o contexto (temp_cor, vendedores…). #}
   {% macro kbcard(c) -%}
-        <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
+        {#- O CARTÃO EM QUATRO LINHAS (24/09/2026, docs/mockups/prospeccao_layout.html).
+           Era uma pilha de até 13 blocos (250–430 px): cabiam 2 ou 3 por coluna, e a
+           Prime tinha 227 no quadro de setembro. Agora são quatro linhas fixas —
+           quem é · o que quer e quando · o que foi dito por último · o próximo passo
+           — e o resto mora no ⋯ (um menu só pra página inteira, montado pelo JS a
+           partir dos data-* deste botão).
+             * L1 (.kbl1): temperatura (a FORMA da bolinha, não só a cor), nome,
+               selo de outro mês, avatar do responsável e o ⋯;
+             * L2 (.kbl2): o evento e de onde veio (lido/✓/IA), ou segmento · cidade;
+             * L3 (.kbmsg): a última mensagem — a linha inteira abre a conversa;
+             * L4 (.kbl4): o próximo passo em texto, a campanha, os canais e o valor.
+           A ORDEM do que os testes recortam não mudou: o nome vem antes de .camp,
+           .kbch e .kbmsg, que vêm antes de <div class="ft">. Botão novo usa
+           data-lead, NUNCA data-id (é por data-id que os testes acham o card). -#}
+        <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if c.esperando %} data-esp="1"{% endif %}{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
+             tabindex="0" onkeydown="if(event.key==='Enter'&&event.target===this)kbAbrirLead(event,{{ c.id }},this)"
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
-          <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}<button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
-          {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
+          <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="{{ c.vendedor or 'Sem responsável' }} · trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor or '+')[:2]|upper }}</button>{% elif gerencia and c.vendedor %}<span class="kbav" title="{{ c.vendedor }}">{{ c.vendedor[:2]|upper }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
+          <div class="kbl2">
+          {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
              é o que diz qual pacote cabe (semana ou fim de semana) e em que mês a
              venda cai. Sem data, numa conta que vende data, o card diz isso na cara
@@ -11598,30 +11638,29 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% elif c.evento_pista %}<div class="kbev pista">📅 {{ c.evento_pista }}<button type="button" class="kbperg" title="Confirmar ou corrigir no balão" onclick="event.stopPropagation();kbAbrirLead(event,{{ c.id }},this.closest('.kbcard'))">confirmar</button></div>
           {% elif modo_evento %}<div class="kbev sem">📅 sem data{% if c.conv_whatsapp %}<button type="button" class="kbperg" title="Perguntar a data do evento" onclick="kbPerguntarData(event,{{ c.conv_whatsapp }},this)">perguntar</button>{% elif c.zap_pergunta %}<a class="kbperg" href="{{ c.zap_pergunta }}" target="_blank" rel="noopener" title="Abre o WhatsApp com a pergunta pronta" onclick="event.stopPropagation()">perguntar</a>{% endif %}</div>{% endif %}
           {# DE ONDE VEIO o que está no card (migração 198): lido da conversa, pelo
-             agente, ou confirmado pelo vendedor. Com data no lead e outra na conversa,
-             a pista em âmbar — quem muda é o vendedor, no balão. #}
+             agente, ou confirmado pelo vendedor. Na tela sai curto ("lido", "✓",
+             "IA") por CSS; o texto inteiro fica aqui (e no title o trecho lido). #}
           {% if c.evento_origem in ('conversa','agente','confirmado') and (c.evento_em or c.evento_tipo or c.evento_convidados) %}<div class="kbsrc">{% if c.evento_origem == 'conversa' %}<span class="tag lido" title="{{ c.evento_trecho or '' }}">💬 lido da conversa</span>{% elif c.evento_origem == 'agente' %}<span class="tag ia">🤖 lido pelo agente</span>{% else %}<span class="tag ok">✓ confirmado</span>{% endif %}</div>{% endif %}
           {% if c.evento_pista and c.evento_em %}<div class="kbev pista">💬 {{ c.evento_pista }}</div>{% elif c.evento_pista and (c.evento_tipo or c.evento_convidados) %}<div class="kbev pista">📅 {{ c.evento_pista }}<button type="button" class="kbperg" title="Confirmar ou corrigir no balão" onclick="event.stopPropagation();kbAbrirLead(event,{{ c.id }},this.closest('.kbcard'))">confirmar</button></div>{% endif %}
+          </div>
           {# na vista por mês a coluna já é a data: a ETAPA vem pro card como selo,
              com o nº da proposta e a próxima visita quando existem #}
           {% if vista_mes %}<div class="kbetapas"><span class="kbetapa{% if c.etapa_cls %} {{ c.etapa_cls }}{% endif %}">{% if c.proposta_num and c.status == 'proposta' %}Proposta nº {{ c.proposta_num }}{% else %}{{ c.etapa_rot }}{% endif %}</span>{% if c.visita_txt %}<span class="kbetapa vis">{{ c.visita_txt }}</span>{% endif %}</div>{% endif %}
+          {# A ÚLTIMA MENSAGEM (L3). A bolinha verde só acende no que ainda não foi
+             visto e veio do cliente — o que o próprio vendedor mandou nunca é
+             novidade pra ele. Com conversa, a LINHA INTEIRA abre o balão: é a ação
+             nº 1 de quem passa o dia no funil, no maior alvo do cartão. #}
+          {% if c.ult %}<div class="kbmsg{% if c.ult.nova %} nova{% endif %}{% if c.conv_ult %} abre{% endif %}"{% if c.conv_ult %} onclick="kbAbrirChat(event,{{ c.conv_ult }},'{{ c.canal_ult }}',this)" title="Abrir a conversa"{% endif %}>{% if c.ult.nova %}<span class="bolha" aria-hidden="true"></span>{% elif c.ult.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}<span class="txt">{{ c.ult.texto }}</span><span class="qdo">{{ c.ult.quando }}</span></div>{% endif %}
+          <div class="kbl4">
+          {# O PRÓXIMO PASSO (L4), EM TEXTO. Era uma pílula colorida em todo card
+             aberto — 118 de 208 em "🚨 Crítico" na Prime, e quando tudo grita nada
+             se destaca. Só aparece em conta que já tem a tela de Follow-up e com o
+             modo fora de 'off' (ver `fu_por_lead` no handler). "Follow-up hoje"
+             quer dizer "venceu há menos de 24h", e é isso que o card passa a dizer. #}
+          {% if c.fu %}<div class="kbfu {{ c.fu.estado }}" title="{{ c.fu.acao }}">{% if c.fu.estado == 'hoje' and c.fu.atraso %}Venceu há {{ c.fu.atraso }}{% else %}{{ c.fu.rotulo }}{% if c.fu.atraso %} · {{ c.fu.atraso }}{% endif %}{% endif %}</div>{% elif c.proximo and not vista_mes %}<div class="kbprox{% if c.proximo_venceu %} venceu{% endif %}" title="Próximo contato">Próx. contato {{ c.proximo.strftime('%d/%m') }}</div>{% endif %}
           {% if c.campanha or c.chip_apelido %}<div class="camp">{% if c.campanha %}📣 {{ c.campanha }}{% endif %}{% if c.chip_apelido %}<span class="chip">{% if c.campanha %} · {% endif %}📱 {{ c.chip_apelido }}</span>{% endif %}</div>{% endif %}
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
-          {# O SELO DO FOLLOW-UP (16/09/2026). Vem antes da última mensagem porque
-             responde outra pergunta: a mensagem diz o que tem dentro, o selo diz se
-             está no prazo. Só aparece em conta que já tem a tela de Follow-up e com
-             o modo fora de 'off' — ver a leitura de `fu_por_lead` no handler. #}
-          {% if c.fu %}<div class="kbfu {{ c.fu.estado }}" title="{{ c.fu.acao }}">{{ c.fu.emoji }} {{ c.fu.rotulo }}{% if c.fu.atraso %} · {{ c.fu.atraso }}{% endif %}</div>{% endif %}
-          {# A ÚLTIMA MENSAGEM. Fica DEPOIS dos selos de canal e antes do valor
-             porque é a informação que decide se vale abrir o card. A bolinha
-             verde só acende no que ainda não foi visto e veio do cliente — o que
-             o próprio vendedor mandou nunca é novidade pra ele. #}
-          {% if c.ult %}<div class="kbmsg{% if c.ult.nova %} nova{% endif %}">{% if c.ult.nova %}<span class="bolha" aria-hidden="true"></span>{% elif c.ult.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}<span class="txt">{{ c.ult.texto }}</span><span class="qdo">{{ c.ult.quando }}</span></div>{% endif %}
-          <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
-          {% if pode_atribuir %}<select class="kbvend" onclick="event.stopPropagation()" onchange="kbAtribuirVendedor(this,{{ c.id }})" data-prev="{{ c.vendedor_id or '' }}">
-            <option value=""{% if not c.vendedor_id %} selected{% endif %}>— sem responsável —</option>
-            {% for v in vendedores %}<option value="{{ v.id }}"{% if c.vendedor_id==v.id %} selected{% endif %}>👤 {{ v.nome }}</option>{% endfor %}
-          </select>{% elif gerencia and c.vendedor %}<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 {{ c.vendedor }}</div>{% endif %}
+          <div class="ft">{% if c.valor %}<span class="kbval">{{ brl(c.valor) }}</span>{% endif %}</div></div>
           {# mesmo telefone, outro chip: são dois leads de propósito (cada chip responde
              pelo seu número), mas quem olha o funil precisa saber — senão dois
              vendedores negociam com a mesma pessoa, cada um com um preço. #}
@@ -11634,8 +11673,18 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
      dos grupos. Mudar a etapa continua pelo balão do lead. #}
   <div class="kbrow{% if vista_mes %} vmes{% endif %}" id="kbrow">
     {% for s, rot in (vista_cols or colunas_tpl) %}
-    <div class="kbcol" data-status="{{ s }}"{% if not vista_mes %} ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')"{% endif %}>
-      <h4><span>{{ rot }}</span><span class="kbcnt">{% if vista_mes %}{{ (grupos or {}).get(s, []) | sum(attribute='n') }}{% else %}{{ colunas[s]|length }}{% if filtrado %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}{% endif %}</span></h4>
+    {#- A COLUNA (24/09/2026): largura de verdade (232–300 px, calculada pelo
+       kbLayout), altura presa à tela e rolagem própria — o cabeçalho fica parado.
+       Coluna VAZIA vira um trilho de 44 px (data-vazia; o clique abre, e arrastar
+       um card por cima também). A linha de baixo do cabeçalho diz quantos esperam
+       resposta e quantos estão parados, com atalho pra dobra. -#}
+    {%- set _gs = (grupos or {}).get(s, []) -%}
+    {%- set _ncol = (_gs | sum(attribute='n')) if vista_mes else colunas[s]|length -%}
+    {%- set _esp = (_gs | selectattr('tipo', 'equalto', 'esperando') | sum(attribute='n')) -%}
+    {%- set _par = (_gs | selectattr('tipo', 'equalto', 'parado') | sum(attribute='n')) %}
+    <div class="kbcol" data-status="{{ s }}"{% if not _ncol %} data-vazia="1"{% endif %}{% if not vista_mes %} ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')"{% endif %}>
+      <h4 title="{{ rot }}"><span>{{ rot }}</span><span class="kbcnt">{% if vista_mes %}{{ (grupos or {}).get(s, []) | sum(attribute='n') }}{% else %}{{ colunas[s]|length }}{% if filtrado %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}{% endif %}</span></h4>
+      <div class="kbcolsub">{% if _esp %}<span class="v">{{ _esp }} esperando</span>{% endif %}{% if _esp and _par %} · {% endif %}{% if _par %}<button type="button" class="kbpar" onclick="kbParados(this)">{{ _par }} parado{{ 's' if _par != 1 }} ▾</button>{% endif %}</div>
       <div class="kbdrop">
         {# A coluna separada em grupos (evento_lead.agrupar): mês do evento, depois
            sem data por mês de entrada, e no pé a dobra dos parados há 15+ dias —
@@ -11655,19 +11704,31 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     {% endfor %}
   </div>
+  {#- OS POPOVERS DA PÁGINA, um de cada, fora do quadro: o menu ⋯ (montado pelo
+     JS com o que o card tem) e a lista de responsáveis (só pra quem atribui).
+     Antes era um <select> com a lista inteira DENTRO DE CADA CARD — ~1.100
+     <option> na página da Prime, e 48 px por card. -#}
+  <div id="kbmenu" class="kbpop" role="menu" hidden></div>
+  {% if pode_atribuir %}<div id="kbvpop" class="kbpop" role="menu" hidden>
+    <button type="button" class="kbpi" data-v="" onclick="kbVendEscolhe(this)">— sem responsável —</button>
+    {% for v in vendedores %}<button type="button" class="kbpi" data-v="{{ v.id }}" data-nome="{{ v.nome }}" onclick="kbVendEscolhe(this)"><span class="kbav">{{ v.nome[:2]|upper }}</span>{{ v.nome }}</button>{% endfor %}
+  </div>{% endif %}
 </div>
 
 <style>
-/* ---- o selo do follow-up no card (16/09/2026) ---- */
-.kbfu{margin-top:.4rem;font-size:.68rem;line-height:1.3;border-radius:7px;padding:.2rem .4rem;
-  display:inline-flex;gap:.28rem;align-items:baseline;border:1px solid;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.kbfu.critico{color:#f2603a;border-color:rgba(242,96,58,.42);background:rgba(242,96,58,.12)}
-.kbfu.atrasado{color:#e0574f;border-color:rgba(224,87,79,.42);background:rgba(224,87,79,.12)}
-.kbfu.hoje{color:#e0a32e;border-color:rgba(224,163,46,.42);background:rgba(224,163,46,.12)}
-.kbfu.agendado{color:#7bb8e6;border-color:rgba(123,184,230,.36);background:rgba(123,184,230,.10)}
-.kbfu.andamento{color:#46f58a;border-color:rgba(70,245,138,.30);background:rgba(70,245,138,.09)}
-.kbfu.sem_acao{color:var(--mut,#8FA197);border-color:rgba(143,161,151,.32);background:rgba(143,161,151,.09)}
+/* ---- o próximo passo no card (16/09/2026; em TEXTO desde 24/09/2026) ----
+   Era pílula colorida com borda e fundo em todo card aberto; com 118 de 208 em
+   "Crítico" na Prime, mais da metade do quadro gritava igual. Agora é uma
+   palavra na L4: a cor carrega o estado, sem caixa em volta. */
+.kbfu{font-size:.72rem;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.kbfu.critico{color:#f2603a;font-weight:600}
+.kbfu.atrasado{color:#e0574f}
+.kbfu.hoje{color:#e0a32e}
+.kbfu.agendado{color:#9db4c9}
+.kbfu.andamento{color:var(--txt-mut)}
+.kbfu.sem_acao{color:#e0a32e}
+.kbprox{font-size:.72rem;color:var(--txt-mut);white-space:nowrap}
+.kbprox.venceu{color:#e0574f}
 .kbgem{margin-top:.4rem;font-size:.7rem;line-height:1.35;color:#e0b45f;background:rgba(224,180,95,.10);
   border:1px solid rgba(224,180,95,.32);border-radius:8px;padding:.3rem .42rem;cursor:default}
 .kbgem a{color:#e0b45f;text-decoration:underline;white-space:nowrap}
@@ -11779,20 +11840,126 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbch .kbb:hover{border-color:var(--verde)}
 /* o balão do chat mora em web/balao_conversa.py — o Raio-X usa o mesmo */
 {{ balao_css }}
-/* width:auto + margin:0 vencem o `button{width:100%;margin-top:1.4rem}` global
-   (mesma causa raiz já corrigida no ✕ da busca e no ✕ de fechar os balões):
-   sem isso o ✕ de excluir nascia ~22px mais abaixo da linha do nome, flutuando
-   solto perto do rodapé do card em vez de ficar ao lado do nome. */
-.kbx{width:auto;margin:0;background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
-.kbx:hover{opacity:1;color:var(--coral);background:rgba(224,87,79,.12)}
-/* trocar/atribuir vendedor direto no card — só o dono vê (mesma regra de
-   pode_atribuir da ficha completa); quem só tem gerência continua vendo o
-   nome como texto, igual sempre foi. */
-.kbvend{width:100%;margin-top:.3rem;background:var(--bg);border:1px solid var(--borda);
-  color:var(--txt-mut);border-radius:6px;padding:.2rem .35rem;font-size:.72rem;font-family:inherit;
-  cursor:pointer}
-.kbvend:hover{border-color:var(--neon-borda);color:var(--txt)}
-.kbvend:focus{outline:none;border-color:var(--verde)}
+/* ==== O FUNIL ENXUTO (24/09/2026, docs/mockups/prospeccao_layout.html) ====
+   Três regras gerais antes do cartão:
+   1. o funil usa a tela inteira (decisão do dono, 24/09) — as outras telas da
+      Prospecção seguem nos 1240 px do .pw;
+   2. dentro do quadro, os controles NÃO herdam o `button/select{width:100%;
+      min-height:48px;margin-top:1.4rem}` global do portal — era isso que fazia
+      o ✕, o 💬 e o seletor de vendedor terem 48 px cada, dentro de todo card;
+   3. no computador, o quadro tem a altura da janela e cada coluna rola por
+      dentro (--kb-topo é medido pelo kbLayout; sem JS, 260 px). */
+.pw.funil{max-width:none;padding-inline:1.5rem}
+/* :where() deixa a regra com o peso de um `button` puro: empata com o global
+   (e vence por vir depois), mas qualquer classe do card (.kbav, .kbmais,
+   .kbperg) ainda manda no próprio tamanho */
+:where(#kbrow,.kbpop) button,:where(#kbrow) select{width:auto;min-height:0;margin:0;font-family:inherit}
+@media(min-width:900px){
+  .kbrow{height:calc(100dvh - var(--kb-topo,260px) - 16px);min-height:480px;align-items:stretch;margin-top:.8rem}
+  .kbcol{min-height:0;overflow:hidden;padding:0}
+  .kbcol h4{padding:.6rem .7rem 0;margin:0;border-top:2px solid #33413a;border-radius:14px 14px 0 0}
+  .kbdrop{overflow-y:auto;min-height:0;padding:.3rem .45rem .7rem;scrollbar-width:thin;gap:6px}
+  .kbcol[data-vazia="1"]:not(.aberta){width:44px;cursor:pointer}
+  .kbcol[data-vazia="1"]:not(.aberta) h4{writing-mode:vertical-rl;padding:.8rem 0;margin:0 auto;border:0;gap:.5rem;justify-content:flex-start;font-weight:500;color:var(--txt-mut)}
+  .kbcol[data-vazia="1"]:not(.aberta) .kbdrop,.kbcol[data-vazia="1"]:not(.aberta) .kbcolsub{display:none}
+  .kbcol[data-vazia="1"]:not(.aberta){border-style:dashed}
+}
+@media(min-width:900px) and (max-height:640px){.kbrow{height:auto}}
+.kbcol h4 span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.kbcnt{flex:none;font-variant-numeric:tabular-nums}
+.kbcolsub{font-size:.7rem;color:var(--txt-mut);padding:.1rem .7rem .45rem;min-height:1.1rem;border-bottom:1px solid var(--borda)}
+.kbcolsub .v{color:var(--verde-claro)}
+.kbpar{background:none;border:0;padding:0;color:inherit;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+/* os grupos da coluna: "Esperando resposta" numa faixa verde; meses e semanas
+   viram divisores finos com a contagem numa pílula à direita (a ordem e o texto
+   do agrupar não mudam — só a leitura, que era "SET 26 1" e parecia data) */
+.kbrow .kbgrp{text-transform:none;letter-spacing:0;font-size:.7rem;font-weight:500;border-top:0;padding:.4rem .1rem .1rem;margin:0}
+.kbrow .kbgrp .ln{order:1;border-top:1px dotted #2c3a32;background:none;height:0}
+.kbrow .kbgrp b{order:2;font-family:var(--mono,ui-monospace,monospace);font-size:.66rem;color:var(--txt);background:#1a2520;border-radius:99px;padding:0 .4rem}
+.kbrow .kbgrp.verde{background:rgba(37,211,102,.08);border-radius:6px;padding:.3rem .45rem;font-weight:600}
+.kbrow .kbgrp.verde .ln{display:none}
+.kbrow .kbgrp.verde b{margin-left:auto;background:none;color:var(--verde-claro)}
+.kbrow .kbdobra{margin-top:.2rem}
+.kbcard.chegou{animation:kbchegou 2s ease-out}
+@keyframes kbchegou{0%{box-shadow:0 0 0 2px var(--verde)}100%{box-shadow:0 0 0 0 transparent}}
+@media(prefers-reduced-motion:reduce){.kbcard.chegou{animation:none}}
+
+/* ---- o cartão em 4 linhas ---- */
+.kbrow .kbcard{padding:.5rem .6rem;border-radius:10px;display:flex;flex-direction:column;gap:.22rem;
+  border-color:#1E2A23;content-visibility:auto;contain-intrinsic-size:auto 96px}
+.kbrow .kbcard:hover{border-color:#2f4439}
+.kbrow .kbcard:focus-visible{outline:2px solid var(--verde);outline-offset:1px}
+.kbrow .kbcard[data-esp]{box-shadow:inset 3px 0 0 var(--verde)}
+.kbrow .kbcard:has(.kbmsg.nova){border-color:#1E2A23}
+.kbl1{display:flex;align-items:center;gap:.4rem;min-width:0;height:1.15rem}
+.kbl1 .emp{font-size:.86rem}
+.kbcard .tdot{width:8px;height:8px;flex:0 0 8px}
+.tdot.t-quente{background:var(--coral)}
+.tdot.t-morno{background:linear-gradient(90deg,var(--ambar) 50%,transparent 50%);box-shadow:inset 0 0 0 1.5px var(--ambar)}
+.tdot.t-frio{background:transparent;box-shadow:inset 0 0 0 1.5px #7bb8e6}
+.tdot.t-sem{background:transparent;border:1.5px dotted #6d7d74;box-sizing:border-box}
+.kbav{flex:0 0 18px;width:18px;height:18px;border-radius:50%;background:#1f2c26;color:#b9c8bf;font-size:.52rem;
+  font-weight:700;display:inline-grid;place-items:center;letter-spacing:.02em;border:0;padding:0;line-height:1}
+button.kbav{cursor:pointer}
+button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
+.kbav.livre{background:transparent;border:1px dashed #5E6F66;color:var(--txt-mut)}
+.kbmais{flex:none;background:none;border:0;color:var(--txt-mut);opacity:.5;cursor:pointer;padding:0 .2rem;
+  font-size:.95rem;line-height:1;letter-spacing:.05em;border-radius:5px}
+.kbmais:hover,.kbmais:focus-visible,.kbcard:focus-within .kbmais{opacity:1;color:var(--txt)}
+@media(pointer:coarse){.kbmais{opacity:1;padding:.2rem .45rem}}
+.kbl2{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .45rem;min-width:0}
+.kbl2:empty{display:none}
+.kbl2 .sub{flex:1 1 100%;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.74rem}
+.kbl2 .kbev{flex:1 1 0;margin:0;border:0;background:none;padding:0;font-size:.76rem;color:#cfdad3;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.kbl2 .kbev.passou{background:none}
+.kbl2 .kbev.sem,.kbl2 .kbev.pista{display:flex;background:none;border:0;padding:0;color:#e0b45f}
+.kbl2 .kbev.pista{flex-basis:100%;font-size:.72rem}
+.kbl2 .kbperg{margin:0;font-size:.72rem;position:relative}
+.kbl2 .kbperg::after{content:"";position:absolute;inset:-10px -6px}
+/* "de onde veio" curto: o texto inteiro continua no HTML (e no title o trecho);
+   a tela mostra só lido / ✓ / IA. Quem mexer aqui: o que se vê NÃO é o texto
+   do HTML — é o ::after. */
+.kbl2 .kbsrc{flex:none;margin:0;padding:0}
+.kbl2 .kbsrc .tag{font-size:0;padding:0 .3rem;border-radius:4px;line-height:1.35}
+.kbl2 .kbsrc .tag::after{font-size:.6rem}
+.kbl2 .kbsrc .tag.lido::after{content:"lido"}
+.kbl2 .kbsrc .tag.ok::after{content:"✓"}
+.kbl2 .kbsrc .tag.ia::after{content:"IA"}
+.kbrow .kbmsg{margin:0;padding:0;border:0;font-size:.76rem;align-items:center;border-radius:5px}
+.kbrow .kbmsg .txt{color:var(--txt)}
+.kbrow .kbmsg:has(.eu) .txt{color:var(--txt-mut)}
+.kbrow .kbmsg .bolha{margin-top:0;width:6px;height:6px}
+.kbrow .kbmsg .qdo{font-family:var(--mono,ui-monospace,monospace);font-size:.66rem}
+.kbrow .kbcard[data-esp] .kbmsg .qdo{color:var(--verde-claro)}
+.kbrow .kbmsg.abre{cursor:pointer}
+.kbrow .kbmsg.abre:hover .txt{text-decoration:underline;text-decoration-color:#3a4a40;text-underline-offset:2px}
+.kbl4{display:flex;align-items:center;gap:.45rem;min-width:0;min-height:1.15rem}
+.kbrow .kbcard .camp{display:block;flex:1 1 0;min-width:0;margin:0;padding:0;border:0;background:none;
+  color:var(--txt-faint,#5E6F66);font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbl4 .kbfu,.kbl4 .kbprox{flex:0 1 auto}
+.kbl4 .kbch{margin:0 0 0 auto;gap:.25rem;flex:none;font-size:.7rem}
+.kbl4 .kbch .kbb{padding:0 .28rem;border-radius:6px;font-size:.72rem;line-height:1.5}
+.kbl4 .kbch span[title]{opacity:.35}
+.kbrow .kbcard .ft{margin:0;flex:none}
+.kbrow .kbcard .ft:empty{display:none}
+.kbval{font-family:var(--mono,ui-monospace,monospace);font-size:.72rem;color:var(--verde-claro)}
+.kbrow .kbgem{margin-top:.15rem}
+
+/* ---- os popovers: o ⋯ e a lista de responsáveis (um de cada na página) ---- */
+.kbpop{position:fixed;z-index:9000;background:#16211b;border:1px solid #2c3a32;border-radius:10px;padding:5px;
+  min-width:210px;max-width:260px;max-height:min(70vh,420px);overflow:auto;box-shadow:0 14px 34px rgba(0,0,0,.55);font-size:.82rem}
+.kbpop[hidden]{display:none}
+.kbpop .kbpi{display:flex;align-items:center;gap:.55rem;width:100%;text-align:left;background:none;border:0;
+  color:var(--txt);padding:.5rem .6rem;border-radius:7px;cursor:pointer}
+.kbpop .kbpi:hover,.kbpop .kbpi:focus-visible{background:#1f2c26;outline:0}
+.kbpop .kbpi .seta{margin-left:auto;color:var(--txt-mut)}
+.kbpop .kbpi.at{color:var(--verde-claro)}
+.kbpop .kbpi.at::after{content:"atual";margin-left:auto;font-size:.68rem;color:var(--txt-mut)}
+.kbpop .kbpi.sai{opacity:.7;border:1px dashed #2c3a32}
+.kbpop .kbpi.perigo{color:#e8a39b;border-top:1px solid #243029;border-radius:0 0 7px 7px;margin-top:3px}
+.kbpop .kbpt{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);padding:.4rem .6rem .2rem}
+@media(pointer:coarse){.kbpop .kbpi{min-height:44px}}
 {{ janela_css }}
 </style>
 
@@ -11818,6 +11985,8 @@ function kbLerConversas(btn){btn.disabled=true;var t=btn.textContent;btn.textCon
       btn.textContent=d.n?('Lendo '+d.n+' conversa'+(d.n===1?'':'s')+' em 2º plano — recarregue em ~1 min'):'Nada pra ler';
     });}
 window.KB_VISTA={{ ('mes' if vista_mes else '')|tojson }};
+// excluir apaga o lead de vez: só dono e gestor (decisão do dono, 24/09/2026)
+window.KB_EXCLUI={{ 'true' if gerencia else 'false' }};
 var KB_PERGUNTA_DATA={{ (pergunta_data or '')|tojson }};
 function kbPerguntarData(ev,convId,btn){_cpPrefill=KB_PERGUNTA_DATA;kbAbrirChat(ev,convId,'conversas',btn);}
 // a janela do lead (abrir, dados, corrigir, histórico, mudar a situação) mora em
@@ -11834,11 +12003,22 @@ function kbPerguntarData(ev,convId,btn){_cpPrefill=KB_PERGUNTA_DATA;kbAbrirChat(
 // gancho — o que é do kanban continua aqui, que é onde estão as colunas.
 function kbDepoisDoStatus(d,id,novo){
   if(window.KB_VISTA==='mes'){location.reload();return;}
-  var card=document.querySelector('.kbcard[data-id="'+id+'"]');
-  var colNova=document.querySelector('.kbcol[data-status="'+novo+'"] .kbdrop');
-  if(card&&colNova){var vazio=colNova.querySelector('.kbempty');if(vazio)vazio.remove();colNova.appendChild(card);}
+  if(d&&d.ok)kbColocar(id,novo);
   _kbAposMoverStatus(d);
 }
+// O CARD QUE MUDA DE COLUNA ENTRA NO TOPO (24/09/2026), com um brilho de 2s.
+// Antes ia pro FIM — embaixo da dobra dos parados, onde ninguém via que chegou.
+// No próximo carregar ele se acomoda no grupo certo. Etapa que sai do quadro
+// (sai_do_quadro) não tem coluna: o card sai da tela, como sai no reload.
+function kbColocar(id,novo){
+  var card=document.querySelector('.kbcard[data-id="'+id+'"]');if(!card)return;
+  var col=document.querySelector('.kbcol[data-status="'+novo+'"]');
+  if(!col){if(card.parentNode)card.parentNode.removeChild(card);return;}
+  var drop=col.querySelector('.kbdrop');var vazio=drop.querySelector('.kbempty');if(vazio)vazio.remove();
+  drop.insertBefore(card,drop.firstChild);col.classList.add('aberta');kbBrilho(card);
+  drop.scrollTop=0;
+}
+function kbBrilho(card){card.classList.remove('chegou');void card.offsetWidth;card.classList.add('chegou');}
 // FUNDIR: o confirm diz o NÚMERO e o DESTINO. "Confirma?" sozinho não é escolha —
 // quem aperta tem que ver quantos leads vão andar e pra onde.
 function etFundir(btn,rot,n){
@@ -11856,21 +12036,33 @@ function kbTab(s){document.querySelectorAll('.kbcol').forEach(function(c){c.clas
 window._kbMoved=false;
 function kbDrag(ev,id){ev.dataTransfer.setData('text/plain',id);ev.dataTransfer.effectAllowed='move';window._kbDragEl=ev.currentTarget;setTimeout(function(){ev.currentTarget.style.opacity='.35';},0);}
 function kbEnd(ev){ev.currentTarget.style.opacity='';window._kbDragEl=null;setTimeout(function(){window._kbMoved=false;},60);}
-function kbOver(ev){ev.preventDefault();ev.currentTarget.classList.add('dragover');}
-function kbLeave(ev){ev.currentTarget.classList.remove('dragover');}
+function kbOver(ev){ev.preventDefault();var col=ev.currentTarget;col.classList.add('dragover');
+  // coluna recolhida (trilho) abre com o card parado 400ms em cima dela
+  if(col.getAttribute('data-vazia')&&!col.classList.contains('aberta')&&!col._kbAbre)
+    col._kbAbre=setTimeout(function(){col.classList.add('aberta');col._kbAbre=null;kbLayout();},400);}
+function kbLeave(ev){var t=ev.currentTarget;if(ev.relatedTarget&&t.contains(ev.relatedTarget))return;t.classList.remove('dragover');clearTimeout(t._kbAbre);}
 // Contagens das colunas + placeholder "vazio" depois que um card muda de status —
 // usado tanto pelo drag-and-drop (kbDrop) quanto pela troca de situação no balão
 // resumo do lead (kbLeadStatus), pra não duplicar a mesma varredura duas vezes.
 function _kbAposMoverStatus(d){
   if(!d.ok){location.reload();return;}
+  kbRecontar();
+}
+// REGRAVA SÓ O NÚMERO de cada coluna (firstChild), e não o chip inteiro: o chip
+// é "82 <i>de 160</i>", e o textContent de antes apagava o "de 160" no primeiro
+// card movido — a coluna passava a dizer um total que não era o dela.
+function kbRecontar(){
   document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;
-    var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;
+    var chip=col.querySelector('.kbcnt');
+    if(chip){var f=chip.firstChild;if(f&&f.nodeType===3){f.nodeValue=String(n)+(chip.querySelector('i')?' ':'');}else{chip.insertBefore(document.createTextNode(String(n)),chip.firstChild);}}
     var tabc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tabc)tabc.textContent=n;
+    if(n)col.removeAttribute('data-vazia');else col.setAttribute('data-vazia','1');
     var dp=col.querySelector('.kbdrop');if(n===0&&!dp.querySelector('.kbempty')){var e=document.createElement('div');e.className='kbempty';e.textContent='vazio';dp.appendChild(e);}});
+  kbLayout();
 }
 function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove('dragover');
   var id=ev.dataTransfer.getData('text/plain');var card=window._kbDragEl;if(!id||!card)return;window._kbMoved=true;
-  var drop=ev.currentTarget.querySelector('.kbdrop');var emp=drop.querySelector('.kbempty');if(emp)emp.remove();drop.appendChild(card);
+  var drop=ev.currentTarget.querySelector('.kbdrop');var emp=drop.querySelector('.kbempty');if(emp)emp.remove();drop.insertBefore(card,drop.firstChild);kbBrilho(card);
   var body=new URLSearchParams();body.append('status',status);
   zapFetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(d){if(!d){location.reload();return;}
       // ARRASTAR PRA PERDIDO PEDE O MOTIVO (17/09/2026). Antes esta linha era só
@@ -11891,16 +12083,19 @@ var TEMPCOR={frio:'#5b9bd5',morno:'var(--ambar)',quente:'var(--coral)'};
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
 function cardGo(ev,id,el){if(!window._kbMoved)kbAbrirLead(ev,id,el);}
-function enrqLote(){var b=document.getElementById('enrq-btn'),m=document.getElementById('enrq-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Verificando…';m.textContent='';
-  zapFetch('/painel/prospeccao/enriquecer-lote',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(d){if(!d){b.disabled=false;b.textContent=t;return;}b.disabled=false;b.textContent=t;
-    if(!d.ok){m.textContent=d.erro||'Não consegui.';return;}
-    m.textContent=d.n?('Verificando '+d.n+' lead(s) em 2º plano — recarregue em ~1 min pra ver os canais.'):'Nada pra verificar (leads sem site ou já verificados).';});}
-function kbExcluir(ev,id){ev.stopPropagation();ev.preventDefault();
-  if(!confirm('Excluir este lead? A conversa/e-mail dele continua no inbox — só sai do funil.'))return;
+function kbExcluir(ev,id){if(ev){ev.stopPropagation();ev.preventDefault();}
+  var card=document.querySelector('.kbcard[data-id="'+id+'"]');
+  var nome=card&&card.querySelector('.emp')?card.querySelector('.emp').textContent:'este lead';
+  if(!confirm('Excluir '+nome+' do funil? Isso apaga o lead e não tem volta. A conversa continua em Comunicação.'))return;
   zapFetch('/painel/prospeccao/'+id+'/excluir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(d){if(!d)return;if(!d.ok){alert(d.erro||'Não consegui excluir.');return;}
-      var card=document.querySelector('.kbcard[data-id="'+id+'"]');if(card&&card.parentNode)card.parentNode.removeChild(card);
-      updCounts();});}
-function updCounts(){var tot=0;document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;tot+=n;var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;var tc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tc)tc.textContent=n;});var tn=document.getElementById('kb-total-n');if(tn)tn.textContent=tot;}
+      if(card&&card.parentNode)card.parentNode.removeChild(card);
+      updCounts(-1);});}
+// `delta` mexe no TOTAL da conta (±1 quando um lead nasce ou é excluído). Antes
+// o total virava a soma do que estava visível — "478 alvo(s)" passava a dizer
+// 227 depois de excluir um card num quadro filtrado por mês.
+function updCounts(delta){kbRecontar();
+  var tn=document.getElementById('kb-total-n');
+  if(tn&&delta){var t=parseInt(tn.textContent,10);if(!isNaN(t))tn.textContent=Math.max(0,t+delta);}}
 // esfumado da borda direita do quadro (.transborda) — só liga quando sobra
 // coluna pra rolar E ainda não chegou no fim; sem isso a última coluna
 // (ex.: "Perdido") corta na borda da tela sem nenhum aviso de que dá pra
@@ -11912,26 +12107,121 @@ function kbCheckScroll(){var el=document.getElementById('kbrow');if(!el)return;
   el.addEventListener('scroll',kbCheckScroll);
   window.addEventListener('resize',kbCheckScroll);
   kbCheckScroll();})();
+// A LARGURA E A ALTURA DO QUADRO (24/09/2026). Um critério só: o espaço que
+// sobra ÷ as colunas abertas, entre 232 e 300 px (o CSS garante o intervalo).
+// Coluna vazia recolhida conta 44 px. A altura é a da janela menos o que está
+// acima do quadro (--kb-topo), pra cada coluna rolar por dentro com o cabeçalho
+// parado. Sem JS, o CSS cai em 248 px e 260 px.
+function kbLayout(){var el=document.getElementById('kbrow');if(!el||el.offsetParent===null)return;
+  var cols=el.querySelectorAll(':scope>.kbcol');var abertas=0,trilhos=0;
+  cols.forEach(function(c){if(c.getAttribute('data-vazia')&&!c.classList.contains('aberta'))trilhos++;else abertas++;});
+  var gap=8,util=el.clientWidth-trilhos*44-gap*Math.max(0,cols.length-1);
+  if(abertas)el.style.setProperty('--kb-col',Math.floor(util/abertas)+'px');
+  var topo=el.getBoundingClientRect().top+window.scrollY;
+  el.style.setProperty('--kb-topo',Math.round(topo)+'px');
+  kbCheckScroll();}
+// A COLUNA VAZIA RECOLHIDA abre no clique; a escolha fica guardada por conta,
+// neste navegador (try/catch: aba privada e bloqueio de site não quebram nada).
+var _KB_AB_CH='kb_abertas';
+function _kbAbertasLe(){try{return JSON.parse(localStorage.getItem(_KB_AB_CH)||'[]')}catch(e){return []}}
+function _kbAbertasGrava(l){try{localStorage.setItem(_KB_AB_CH,JSON.stringify(l))}catch(e){}}
+(function(){var el=document.getElementById('kbrow');if(!el)return;var ab=_kbAbertasLe();
+  el.querySelectorAll(':scope>.kbcol[data-vazia]').forEach(function(c){
+    if(ab.indexOf(c.getAttribute('data-status'))>=0)c.classList.add('aberta');});
+  // delegado no quadro: coluna que ESVAZIA depois de mover um card também recolhe
+  el.addEventListener('click',function(e){var c=e.target.closest&&e.target.closest('.kbcol[data-vazia]');
+    if(!c||c.parentNode!==el)return;if(c.classList.contains('aberta')&&!e.target.closest('h4'))return;
+    var st=c.getAttribute('data-status'),l=_kbAbertasLe().filter(function(x){return x!==st;});
+    if(c.classList.toggle('aberta'))l.push(st);_kbAbertasGrava(l);kbLayout();});
+  kbLayout();window.addEventListener('resize',kbLayout);
+  // o nome inteiro aparece ao passar o mouse só quando ele foi cortado
+  el.querySelectorAll('.kbcard .emp').forEach(function(e){if(e.scrollWidth>e.clientWidth)e.title=e.textContent;});})();
 // Mesma rota que a ficha completa já usa pra atribuir — só chamada direto do
 // card, sem sair do funil. Guarda o valor anterior em data-prev pra voltar
 // se der erro (o próprio <select> já mudou visualmente antes do fetch responder).
-function kbAtribuirVendedor(sel,id){
-  var novo=sel.value, prev=sel.getAttribute('data-prev')||'';
+//
+// Desde 24/09/2026 quem chama é o AVATAR do card (via kbVendEscolhe), não um
+// <select> em cada card. O avatar só muda depois do OK do servidor — num erro
+// ele continua mostrando quem estava, que é quem de fato está salvo.
+function kbAtribuirVendedor(av,id,novo,nome){
   var fd=new FormData();fd.append('vendedor_id',novo);
-  zapFetch('/painel/prospeccao/'+id+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){sel.value=prev;return;}
-      if(!d.ok){alert(d.erro||'Não consegui trocar o vendedor.');sel.value=prev;return;}
-      sel.setAttribute('data-prev',novo);
+  zapFetch('/painel/prospeccao/'+id+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d)return;
+      if(!d.ok){alert(d.erro||'Não consegui trocar o vendedor.');return;}
+      av.setAttribute('data-vend',novo);av.classList.toggle('livre',!novo);
+      av.textContent=novo?(nome||'').slice(0,2).toUpperCase():'+';
+      av.title=(novo?nome:'Sem responsável')+' · trocar';
     });
 }
+// ---- OS POPOVERS (24/09/2026): um menu ⋯ e uma lista de responsáveis pra página
+// inteira, posicionados no clique (fixed, pra coluna que rola não cortar).
+var _kbPopDe=null;
+function kbPopFecha(){['kbmenu','kbvpop'].forEach(function(i){var e=document.getElementById(i);if(e)e.hidden=true;});_kbPopDe=null;}
+function kbPopAbre(pop,ancora){pop.hidden=false;var r=ancora.getBoundingClientRect();
+  var w=pop.offsetWidth,h=pop.offsetHeight,x=Math.min(r.right-w,window.innerWidth-w-8),y=r.bottom+4;
+  if(y+h>window.innerHeight-8)y=Math.max(8,r.top-h-4);
+  pop.style.left=Math.max(8,x)+'px';pop.style.top=y+'px';var b=pop.querySelector('button');if(b)b.focus({preventScroll:true});}
+document.addEventListener('click',function(e){if(e.target.closest&&(e.target.closest('.kbpop')||e.target.closest('.kbmais')||e.target.closest('button.kbav')))return;kbPopFecha();});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')kbPopFecha();});
+window.addEventListener('scroll',kbPopFecha,true);
+function kbVendPop(ev,av){ev.stopPropagation();var pop=document.getElementById('kbvpop');if(!pop)return;
+  if(!pop.hidden&&_kbPopDe===av){kbPopFecha();return;}kbPopFecha();_kbPopDe=av;
+  var atual=av.getAttribute('data-vend')||'';
+  pop.querySelectorAll('.kbpi').forEach(function(b){b.classList.toggle('at',(b.getAttribute('data-v')||'')===atual);});
+  kbPopAbre(pop,av);}
+function kbVendEscolhe(b){var av=_kbPopDe;kbPopFecha();if(!av)return;var novo=b.getAttribute('data-v')||'';
+  if(novo===(av.getAttribute('data-vend')||''))return;
+  kbAtribuirVendedor(av,av.getAttribute('data-lead'),novo,b.getAttribute('data-nome')||'');}
+function _kbEsc(t){return String(t==null?'':t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+// O ⋯ DO CARD: o que se faz de vez em quando, com nome. Excluir fica no fim, em
+// vermelho, e só pra dono e gestor (o servidor confere a mesma regra).
+function kbMenu(ev,btn){ev.stopPropagation();var pop=document.getElementById('kbmenu');if(!pop)return;
+  if(!pop.hidden&&_kbPopDe===btn){kbPopFecha();return;}kbPopFecha();_kbPopDe=btn;
+  var id=btn.getAttribute('data-lead'),conv=btn.getAttribute('data-conv'),mail=btn.getAttribute('data-mail'),st=btn.getAttribute('data-st');
+  var h='';
+  if(conv)h+='<button type="button" class="kbpi" onclick="kbMenuChat(event,'+(+id)+','+(+conv)+',0)">💬 Abrir conversa</button>';
+  else if(mail)h+='<button type="button" class="kbpi" onclick="kbMenuChat(event,'+(+id)+','+(+mail)+',1)">✉️ Abrir e-mail</button>';
+  if(window.KB_VISTA!=='mes'&&(window._KB_STATUS||[]).length)h+='<button type="button" class="kbpi" onclick="kbMenuMover('+(+id)+')">↔ Mover para <span class="seta">▸</span></button>';
+  if(document.getElementById('kbvpop'))h+='<button type="button" class="kbpi" onclick="kbMenuVend('+(+id)+')">👤 Trocar responsável <span class="seta">▸</span></button>';
+  h+='<button type="button" class="kbpi" onclick="kbMenuFicha(event,'+(+id)+')">↗ Abrir ficha do lead</button>';
+  if(window.KB_EXCLUI)h+='<button type="button" class="kbpi perigo" onclick="kbPopFecha();kbExcluir(null,'+(+id)+')">🗑 Excluir lead…</button>';
+  pop.innerHTML=h;pop.setAttribute('data-st',st||'');kbPopAbre(pop,btn);}
+function _kbCard(id){return document.querySelector('.kbcard[data-id="'+id+'"]');}
+function kbMenuChat(ev,id,conv,email){kbPopFecha();kbAbrirChat(ev,conv,email?'emails':'conversas',_kbCard(id));}
+function kbMenuFicha(ev,id){kbPopFecha();kbAbrirLead(ev,id,_kbCard(id));}
+function kbMenuMover(id){var pop=document.getElementById('kbmenu');var st=pop.getAttribute('data-st')||'';var ancora=_kbPopDe;
+  var h='<div class="kbpt">Mover para</div>';
+  (window._KB_STATUS||[]).forEach(function(e,i){h+='<button type="button" class="kbpi'+(e.c===st?' at':'')+(e.sai?' sai':'')+'"'+(e.c===st?' disabled':'')+' onclick="kbMoverPara('+id+','+i+')">'+_kbEsc(e.r)+'</button>';});
+  pop.innerHTML=h;_kbPopDe=ancora;if(ancora)kbPopAbre(pop,ancora);}
+function kbMenuVend(id){var btn=_kbPopDe;kbPopFecha();var card=document.querySelector('.kbcard[data-id="'+id+'"]');
+  var av=card&&card.querySelector('button.kbav');if(av)kbVendPop({stopPropagation:function(){}},av);}
+// MOVER PELO MENU: o mesmo caminho do arrastar e da janela do lead — a mesma rota,
+// a mesma folha de "por que perdeu", o mesmo gancho depois. É o que faltava pro
+// celular (não dá pra arrastar) e pro teclado.
+function kbMoverPara(id,idx){kbPopFecha();var s=(window._KB_STATUS||[])[idx];if(!s)return;
+  function pronto(d){kbDepoisDoStatus(d,id,s.c);}
+  var body=new URLSearchParams();body.append('status',s.c);
+  zapFetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(d){if(!d)return;
+    if(!d.ok&&d.erro==='motivo_obrigatorio'){kbPerguntarMotivo(id,s.c,d.motivos,pronto,function(){});return;}
+    if(!d.ok){alert(d.msg||d.erro||'Não consegui mudar a etapa.');return;}
+    pronto(d);});}
+// "19 parados ▾" no cabeçalho: abre a dobra do pé da coluna e rola até ela
+function kbParados(b){var col=b.closest('.kbcol');var dob=col&&col.querySelector('.kbdobra');if(!dob)return;
+  dob.open=true;var dp=col.querySelector('.kbdrop');if(dp)dp.scrollTop=dob.offsetTop-dp.offsetTop;}
 function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]');if(!col)return;var drop=col.querySelector('.kbdrop');var e=drop.querySelector('.kbempty');if(e)e.remove();
-  var cor=TEMPCOR[l.temperatura]||'#5b9bd5';
+  // a MESMA anatomia do card do quadro (4 linhas): nome e ⋯, segmento, campanha e
+  // valor. O que o card do servidor traz a mais (evento, mensagem, próximo passo)
+  // ainda não existe num lead que acabou de nascer.
+  var t=(l.temperatura||'sem');
   var sub=(l.segmento||l.cidade)?('<div class="sub">'+(l.segmento?jsEsc(l.segmento):'')+(l.cidade?(' · '+jsEsc(l.cidade)+(l.uf?('/'+jsEsc(l.uf)):'')):'')+'</div>'):'';
   var camp=(l.campanha||l.chip_apelido)?('<div class="camp">'+(l.campanha?('📣 '+jsEsc(l.campanha)):'')
     +(l.chip_apelido?('<span class="chip">'+(l.campanha?' · ':'')+'📱 '+jsEsc(l.chip_apelido)+'</span>'):'')+'</div>'):'';
-  var ft='<div class="ft">'+(l.valor?('<span style="font-size:.76rem;color:var(--verde-claro)">'+jsBrl(l.valor)+'</span>'):'<span></span>')+'<span></span></div>';
-  var vd=l.vendedor?('<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 '+jsEsc(l.vendedor)+'</div>'):'';
-  var html='<div class="kbcard" draggable="true" data-id="'+l.id+'" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo(event,'+l.id+',this)"><div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+cor+'"></span><span class="emp">'+jsEsc(l.empresa)+'</span><button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,'+l.id+')">✕</button></div>'+sub+camp+ft+vd+'</div>';
-  drop.insertAdjacentHTML('afterbegin',html);updCounts();}
+  var ft='<div class="ft">'+(l.valor?('<span class="kbval">'+jsBrl(l.valor)+'</span>'):'')+'</div>';
+  var av=l.vendedor?('<span class="kbav" title="'+jsEsc(l.vendedor)+'">'+jsEsc(l.vendedor.slice(0,2).toUpperCase())+'</span>'):'';
+  var html='<div class="kbcard chegou" draggable="true" data-id="'+l.id+'" tabindex="0" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo(event,'+l.id+',this)">'
+    +'<div class="kbl1"><span class="tdot t-'+jsEsc(t)+'" title="'+jsEsc(t)+'"></span><span class="emp" title="'+jsEsc(l.empresa)+'">'+jsEsc(l.empresa)+'</span>'+av
+    +'<button type="button" class="kbmais" data-lead="'+l.id+'" data-conv="" data-mail="" data-st="'+jsEsc(l.status||'novo')+'" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>'
+    +'<div class="kbl2">'+sub+'</div><div class="kbl4">'+camp+ft+'</div></div>';
+  drop.insertAdjacentHTML('afterbegin',html);updCounts(1);}
 function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 // Desde 20/09/2026 o embrulho é o zapFetch: quem chama recebe o CORPO, e
@@ -12038,6 +12328,23 @@ if(location.search.indexOf('captar=1')>=0){try{capToggle();}catch(e){}}
 // chat aberto, com o painel de captar aberto, arrastando card, nem com o foco
 // dentro de qualquer campo (o <select> de vendedor incluído). Perdeu a janela,
 // tenta de novo em 60s — nada se acumula.
+//
+// DESDE 24/09/2026, MAIS QUATRO FREIOS: a janela do lead aberta, a folha de "por
+// que perdeu", o editor de etapas aberto e um popover (⋯ ou responsável) aberto —
+// antes o reload fechava a janela debaixo de quem estava lendo. E antes de
+// recarregar a tela GUARDA onde a pessoa estava (rolagem do quadro e de cada
+// coluna, dobras e colunas abertas) e volta pra lá; sem sessionStorage, cai no
+// comportamento de antes (volta pro começo), nunca em erro.
+function kbGuardaTela(){try{var el=document.getElementById('kbrow');if(!el)return;var cols={};
+  el.querySelectorAll(':scope>.kbcol').forEach(function(c){var dp=c.querySelector('.kbdrop');
+    cols[c.getAttribute('data-status')]={t:dp?dp.scrollTop:0,d:[].map.call(c.querySelectorAll('.kbdobra'),function(x){return x.open?1:0;}),a:c.classList.contains('aberta')?1:0};});
+  sessionStorage.setItem('kb_tela',JSON.stringify({x:el.scrollLeft,y:window.scrollY,cols:cols,u:location.href}));}catch(e){}}
+(function(){try{var v=JSON.parse(sessionStorage.getItem('kb_tela')||'null');sessionStorage.removeItem('kb_tela');
+  if(!v||v.u!==location.href)return;var el=document.getElementById('kbrow');if(!el)return;
+  Object.keys(v.cols||{}).forEach(function(st){var c=el.querySelector(':scope>.kbcol[data-status="'+st+'"]');if(!c)return;var o=v.cols[st];
+    if(o.a)c.classList.add('aberta');c.querySelectorAll('.kbdobra').forEach(function(x,i){if(o.d&&o.d[i])x.open=true;});
+    var dp=c.querySelector('.kbdrop');if(dp)dp.scrollTop=o.t||0;});
+  kbLayout();el.scrollLeft=v.x||0;window.scrollTo(0,v.y||0);}catch(e){}})();
 setInterval(function(){
   if(document.hidden) return;
   if(document.querySelector('.chatpop')) return;
@@ -12047,6 +12354,10 @@ setInterval(function(){
   var a=document.activeElement;
   if(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
   if(a && a.isContentEditable) return;
+  if(document.querySelector('.leadpop') || document.getElementById('perdapop')) return;
+  if(document.querySelector('.etcfg[open]')) return;
+  if(document.querySelector('.kbpop:not([hidden])')) return;
+  kbGuardaTela();
   location.reload();
 }, 60000);
 </script>

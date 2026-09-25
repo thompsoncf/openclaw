@@ -125,7 +125,13 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # /painel/versao é de TODO papel: é a pergunta que a aba aberta durante o
     # deploy faz pra saber se precisa recarregar. Barrada, o gate devolveria um
     # 303 e a faixa nunca apareceria justamente pra quem passa o dia na mesma aba.
-    permitido = ["/trocar", "/sair", "/painel/versao"]
+    #
+    # /painel/erro-cliente também, pelo mesmo motivo (25/09/2026): é onde o
+    # `zapFetch` grava o erro que a TELA viu. Fora desta lista, o registro de todo
+    # vendedor e gestor voltava 303 e não gravava nada — a troca de situação deu
+    # 500 por duas semanas, o aviso dizia "o ocorrido ficou registrado", e a
+    # `erro_cliente` seguia VAZIA. Quem mais usa o painel era quem não deixava rastro.
+    permitido = ["/trocar", "/sair", "/painel/versao", "/painel/erro-cliente"]
     if caps["vendas"]:
         permitido += ["/painel/servicos", "/painel/prospeccao"]
     if caps["financeiro"]:

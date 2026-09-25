@@ -9615,8 +9615,15 @@ async def prospeccao_status(request: Request, alvo_id: int):
         # SAVEPOINT, não enfeite: sem ele um erro no registro aborta a transação e
         # o commit abaixo vira ROLLBACK calado — o card volta pra coluna antiga e a
         # tela diz que deu certo. Mesmo motivo do savepoint da distribuição.
+        #
+        # O `_fr` aqui é o do topo do módulo, e NÃO pode ganhar um `import` local:
+        # esta linha tinha um `from finance import funil_regua as _fr`, e quando o
+        # #670 (11/09) passou a usar `_fr` no começo da função, o import de baixo
+        # fez do nome uma variável LOCAL da função inteira — `_fr.recusa_de_saida`
+        # virou UnboundLocalError em TODA troca de situação pelo painel (quadro,
+        # janela do lead, Follow-up) por duas semanas. Ver
+        # tests/test_status_do_lead_pelo_painel.py.
         try:
-            from finance import funil_regua as _fr
             with c.transaction():
                 _fr.registrar_movimento(c, ctx["conta_id"], alvo_id, alvo["status"], status,
                                         "manual", ctx["membro_id"])

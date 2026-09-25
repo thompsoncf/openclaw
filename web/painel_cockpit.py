@@ -3109,6 +3109,12 @@ def cockpit_agenda_novo_tela(request: Request):
     cards = _cards_pro_compromisso(conta_id, membro_id, gestao=_eh_gestao(request, g))
     opcoes = "".join(f"<option value='{cid}'>{esc(nome)}{(' · ' + esc(etapa)) if etapa else ''}</option>"
                      for cid, nome, etapa in cards)
+    # a dica segue o nicho (§6): na festa só a VISITA conta no Raio-X — o card diz de quem é
+    from finance import visita as _vis
+    dica_card = (("Ligada a um card, a visita conta pro vendedor do cliente no Raio-X. "
+                  if _vis.vende_festa(get_pool(), conta_id)
+                  else "Ligado a um card, o compromisso conta pro vendedor do cliente no Raio-X. ")
+                 if cards else "")
     campo_card = ("<label class=fic-c><span>De qual cliente (card do funil)</span>"
                   "<select name=prospeccao_id><option value=''>— nenhum —</option>"
                   + opcoes + "</select></label>") if cards else ""
@@ -3126,9 +3132,9 @@ def cockpit_agenda_novo_tela(request: Request):
              + "<label class=fic-c><span>Local (opcional)</span>"
                "<input name=local autocomplete=off placeholder='Endereço ou link'></label>"
              + campo_card
-             + "</div><div class=fonte>Aparece pra equipe inteira, com o seu nome. Ligado a "
-               "um card, conta pro vendedor do cliente no Raio-X. Visita de lead também "
-               "pode ser marcada pelo próprio lead — ali ela já sai ligada na ficha.</div></div></div>"
+             + "</div><div class=fonte>Aparece pra equipe inteira, com o seu nome. " + dica_card
+             + "Visita de lead também pode ser marcada pelo próprio lead — ali ela já sai "
+               "ligada na ficha.</div></div></div>"
              + "<div class=rodape-b><button class=btn type=submit>Marcar</button></div>"
              + "</form>")
     return _page("Novo compromisso", corpo)
@@ -3143,6 +3149,13 @@ def _cards_pro_compromisso(conta_id: int, membro_id, gestao: bool) -> list[tuple
     """Os cards que podem receber o compromisso: os do vendedor (ou, pra gestão,
     os da conta), sem os perdidos, os mais mexidos primeiro. Tolerante: sem a
     lista o formulário abre como abria antes."""
+    # loja de produto não tem funil (regra 6): o perfil que decide é o do Raio-X
+    try:
+        from finance import raio_x_perfil as _rxp
+        if not _rxp.perfil_da_conta(get_pool(), conta_id).get("aplica"):
+            return []
+    except Exception:  # noqa: BLE001
+        return []
     sql = ("select p.id, coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Lead'), "
            "coalesce(fe.rotulo, p.status) from prospeccao p "
            "left join funil_etapas fe on fe.conta_id = p.conta_id and fe.chave = p.status "
@@ -6958,7 +6971,8 @@ def _bloco_da_visita(pool, conta_id: int, periodo: str, de, ate) -> str:
         return ""
     voc = perfil["vocab"]
     comp, comps = voc["compromisso"], voc["compromissos"]
-    pct = f" · {dv['vis_orc_pct']}% viram orçamento" if dv["vis_orc_pct"] is not None else ""
+    pct = (f" · {dv['vis_orc_pct']}% {'das com card ' if dv.get('sem_card') else ''}viram orçamento"
+           if dv["vis_orc_pct"] is not None else "")
 
     def _st(l, v, d, fim=False):
         return (f"<div class='kpi{' hero' if fim else ''}'><div class=v>{v}</div>"

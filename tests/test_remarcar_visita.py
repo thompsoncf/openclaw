@@ -478,3 +478,24 @@ def test_na_agenda_do_app_a_festa_ligada_e_reservado_e_nao_visita(pool):
     itens = {x["id"]: x for x in ck.agenda_da_conta(pool, CONTA, VEND)}
     assert itens[eid]["tipo_ev"] == "reservado"
     assert itens[vid]["tipo_ev"] == "visita"
+
+
+def test_o_app_pede_a_resposta_da_reuniao_no_card_so_de_quem_nao_vende_festa(pool, monkeypatch):
+    """No serviço, a reunião ligada ao card conta no Raio-X como "sem resposta" —
+    então tem que voltar no app pra ser respondida. Na festa, só a "Visita…" conta,
+    e a reunião não volta (nem vira cobrança que ninguém vai atender)."""
+    from finance import visita as vis
+    lead = _lead(pool)
+    ini = _daqui(-2)
+    with pool.connection() as c:
+        eid = c.execute(
+            """insert into eventos_agenda (conta_id, membro_id, titulo, inicio, prospeccao_id, tipo)
+               values (%s,%s,'Reunião com Camila',%s,%s,'empresa') returning id""",
+            (CONTA, VEND, ini, lead)).fetchone()[0]
+        c.commit()
+    monkeypatch.setattr(vis, "vende_festa", lambda pool, conta_id: False)
+    itens = {x["id"]: x for x in ck.agenda_da_conta(pool, CONTA, VEND)}
+    assert itens[eid]["precisa_resposta"] is True
+    monkeypatch.setattr(vis, "vende_festa", lambda pool, conta_id: True)
+    itens = {x["id"]: x for x in ck.agenda_da_conta(pool, CONTA, VEND)}
+    assert eid not in itens

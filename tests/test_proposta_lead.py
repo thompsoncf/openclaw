@@ -407,17 +407,28 @@ def test_na_aprovacao_ela_amarra_no_lead_que_ja_existia(pool):
     assert pl.garantir_pelo_orcamento(pool, CONTA, oid) == {"lead_id": lid, "como": "ligado"}
 
 
-def test_a_assinatura_e_a_aprovacao_garantem_o_card_antes_de_andar():
-    """A ORDEM importa: sem card não há o que levar ao fechamento nem a quê ligar a
-    festa. Lido na fonte, porque as duas chamadas vivem no meio de fluxos longos
-    (financeiro, contrato, agenda) que este arquivo não monta."""
-    import inspect
+def test_a_aprovacao_garante_o_card_antes_de_reservar_a_data(monkeypatch):
+    """A ORDEM importa: sem card, a festa nasce sem a quê se ligar. Pelo que a
+    função FAZ (e não pelo texto dela, que casaria com o comentário)."""
     from finance import contrato as ctr
     from web import proposta as prop
+    ordem = []
+    monkeypatch.setattr(pl, "garantir_pelo_orcamento", lambda *a, **k: ordem.append("card") or {})
+    monkeypatch.setattr(prop, "_reservar_na_agenda", lambda d, pool=None: ordem.append("data") or 1)
+    monkeypatch.setattr(ctr, "criar_para_orcamento", lambda *a, **k: ordem.append("contrato"))
+    monkeypatch.setattr(prop, "_notificar_assinatura", lambda *a, **k: None)
+    monkeypatch.setattr(prop, "get_pool", lambda: None)
+    prop._pos_assinatura({"id": 1, "conta_id": CONTA}, "Ana")
+    assert ordem == ["card", "data", "contrato"]
+
+
+def test_a_assinatura_garante_o_card_antes_de_levar_ao_fechamento():
+    """`assinar` monta financeiro e contrato — este arquivo não sobe isso. Então se
+    confere a CHAMADA (com o parêntese, que o comentário não tem)."""
+    import inspect
+    from finance import contrato as ctr
     src = inspect.getsource(ctr.assinar)
-    assert src.index("garantir_pelo_orcamento") < src.index("marcar_por_assinatura")
-    src = inspect.getsource(prop._pos_assinatura)
-    assert src.index("garantir_pelo_orcamento") < src.index("_reservar_na_agenda")
+    assert src.index("_pl.garantir_pelo_orcamento(") < src.index("_fg.marcar_por_assinatura(")
 
 
 def _etapas(pool):
@@ -488,6 +499,16 @@ def test_na_assinatura_a_festa_que_ja_estava_na_agenda_ganha_o_card_e_o_tipo(poo
         ev_outra = c.execute("insert into eventos_agenda (conta_id) values (%s) returning id",
                              (CONTA + 1,)).fetchone()[0]
         c.commit()
+    # um orçamento DESTA conta apontando pra festa de OUTRA: a trava de conta do
+    # UPDATE é o que impede ligar o card daqui na agenda de lá
+    o_torto = _orc(pool, empresa="Torto", whatsapp="86911110000")
+    with pool.connection() as c:
+        c.execute("update orcamentos set evento_agenda_id=%s where id=%s", (ev_outra, o_torto))
+        c.commit()
+    assert pl.garantir_pelo_orcamento(pool, CONTA, o_torto)["como"] == "criado"
+    with pool.connection() as c:
+        assert c.execute("select prospeccao_id, tipo_evento from eventos_agenda where id=%s",
+                         (ev_outra,)).fetchone() == (None, None)
     oid = _orc(pool, empresa="Viviane Alves", whatsapp="86998479896")
     with pool.connection() as c:
         c.execute("update orcamentos set evento=%s, evento_agenda_id=%s where id=%s",
@@ -498,7 +519,21 @@ def test_na_assinatura_a_festa_que_ja_estava_na_agenda_ganha_o_card_e_o_tipo(poo
     with pool.connection() as c:
         assert c.execute("select prospeccao_id, tipo_evento from eventos_agenda where id=%s",
                          (ev,)).fetchone() == (r["lead_id"], "Casamento")
-        assert c.execute("select prospeccao_id from eventos_agenda where id=%s",
-                         (ev_outra,)).fetchone() == (None,)
     # de novo (a assinatura depois da aprovação): nada muda
     assert pl.garantir_pelo_orcamento(pool, CONTA, oid)["como"] == "ja_tinha"
+
+
+def test_a_festa_da_aprovacao_acha_o_card_e_o_cliente_do_orcamento(pool):
+    """`proposta._card_e_cliente` contra o banco: o card que aponta pro orçamento e
+    o cadastro dele; de outra conta, nada."""
+    from web import proposta as prop
+    with pool.connection() as c:
+        c.execute("alter table orcamentos add column if not exists cliente_id bigint")
+        c.commit()
+    oid = _orc(pool, empresa="Josinalva")
+    lid = _lead(pool, empresa="Josinalva", orcamento_id=oid)
+    with pool.connection() as c:
+        c.execute("update orcamentos set cliente_id=94 where id=%s", (oid,))
+        c.commit()
+    assert prop._card_e_cliente(pool, CONTA, oid) == (lid, 94)
+    assert prop._card_e_cliente(pool, CONTA + 1, oid) == (None, None)

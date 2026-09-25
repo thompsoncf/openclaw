@@ -272,3 +272,22 @@ def test_retornar_contato_e_festa_nunca_sao_visita():
     assert vis.eh_visita(titulo="Reunião com Paulo", prospeccao_id=3)
     # a festa digitada sem tipo e ligada ao card: na festa, não é visita
     assert not vis.eh_visita(titulo="Formatura - Beatriz", prospeccao_id=3, festa=True)
+
+
+def test_o_card_do_formulario_so_liga_se_for_da_conta_e_do_vendedor(pool, cen):
+    """O `prospeccao_id` vem do navegador. O vendedor só liga card DELE (senão
+    daria a visita ao colega no Raio-X); dono e gestor, qualquer card da conta;
+    o financeiro, nenhum; card de outra conta, nunca."""
+    from web import painel_agenda as pa
+    with pool.connection() as c:
+        agna = c.execute("select id from prospeccao where contato='Agna Luíza' and conta_id=%s",
+                         (cen["conta"],)).fetchone()[0]
+    def ctx(papel, membro, conta=None):
+        return {"conta_id": conta or cen["conta"], "papel": papel, "membro_id": membro}
+    assert pa._card_do_compromisso(pool, ctx("vendedor", cen["pedro"]), str(agna)) == agna
+    assert pa._card_do_compromisso(pool, ctx("vendedor", cen["jaque"]), str(agna)) is None
+    assert pa._card_do_compromisso(pool, ctx("gestor", cen["gestor"]), str(agna)) == agna
+    assert pa._card_do_compromisso(pool, ctx("dono", None), str(agna)) == agna
+    assert pa._card_do_compromisso(pool, ctx("financeiro", cen["gestor"]), str(agna)) is None
+    assert pa._card_do_compromisso(pool, ctx("dono", None, conta=cen["conta"] + 99), str(agna)) is None
+    assert pa._card_do_compromisso(pool, ctx("dono", None), "x1") is None

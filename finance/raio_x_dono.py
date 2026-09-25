@@ -665,8 +665,9 @@ def da_visita(c, conta_id: int, f: dict, ini, fim, festa: bool = False) -> dict:
         "visitas": len(vis) + len(sem_card),
         "vis_orc": len(com_orc),
         "vis_orc_valor": sum(int(v[4] or 0) for v in com_orc),
-        "vis_orc_pct": (round(100 * len(com_orc) / (len(vis) + len(sem_card)))
-                        if (vis or sem_card) else None),
+        # a taxa é sobre a visita COM card: a sem card não tem de onde tirar
+        # orçamento, e contá-la como "não virou" diria 0% da Renata, que assinou
+        "vis_orc_pct": (round(100 * len(com_orc) / len(vis)) if vis else None),
         "prop_ass": len(prop),
         "prop_ass_valor": sum(int(x[2] or 0) for x in prop),
         "prop_ass_com_contrato": sum(1 for x in prop if x[3]),

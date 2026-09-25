@@ -54,7 +54,8 @@ def test_a_regua_de_ocupar_e_mais_estreita_que_a_de_contar_visita():
     """
     from finance import visita as vis
     from web import painel_relatorios as pr
-    assert pr._E_VISITA == vis.sql_e_visita("e", festa=True)
+    assert pr._e_visita(True) == vis.sql_e_visita("e", festa=True)
+    assert pr._e_visita(False) == vis.sql_e_visita("e", festa=False)
     for titulo, tipo_evento in (("Visita — Shirley", None), ("VISITA TÉCNICA - PEDRO", None),
                                 ("Visita — Ana", "Casamento"), ("Aniversário", None),
                                 ("Reunião com a engenheira", None)):

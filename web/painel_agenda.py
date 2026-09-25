@@ -554,6 +554,11 @@ def _tem_cards(pool, conta_id: int) -> bool:
     ganham um campo que não teria o que achar (regra 6: a tela segue o nicho).
     Tolerante pelo mesmo motivo de `_tem_clientes`: a agenda abre sem ele."""
     try:
+        # o NICHO primeiro (o perfil do Raio-X): loja de produto que recebe lead pelo
+        # WhatsApp tem lead, mas não tem funil nem Raio-X pra onde o card conte
+        from finance import raio_x_perfil as _rxp
+        if not _rxp.perfil_da_conta(pool, conta_id).get("aplica"):
+            return False
         with pool.connection() as c:
             r = c.execute("select exists(select 1 from prospeccao where conta_id=%s "
                           "and coalesce(estagio,'lead')='lead')", (conta_id,)).fetchone()

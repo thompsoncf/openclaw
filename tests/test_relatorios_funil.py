@@ -53,6 +53,15 @@ ONTEM = AGORA - timedelta(days=1)
 AMANHA = AGORA + timedelta(days=1)
 
 
+@pytest.fixture(autouse=True)
+def _a_prime_vende_festa(monkeypatch):
+    """A conta daqui é a Prime — nicho de eventos. O banco de teste não tem a
+    tabela de nichos, e conta sem nicho cai no perfil de serviço, que fala
+    "reunião" (regra 6). A palavra da tela vem do perfil desde 24/09/2026."""
+    from finance import raio_x_perfil as rxp
+    monkeypatch.setattr(rxp, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("eventos"))
+
+
 @pytest.fixture(scope="module")
 def pool():
     admin = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1, open=True)
@@ -348,3 +357,13 @@ def test_texto_da_cobertura_fala_em_gente_nao_em_porcentagem():
     assert vendas.texto_da_cobertura(3, 8) == "3 de 8 responderam — faltam 5"
     assert vendas.texto_da_cobertura(8, 8) == "todas as 8 responderam"
     assert vendas.texto_da_cobertura(0, 0) == "sem nenhuma visita no período"
+
+
+def test_a_palavra_do_funil_segue_o_nicho(pool, monkeypatch):
+    """Quem vende serviço lê "reunião" onde a Prime lê "visita"."""
+    from finance import raio_x_perfil as rxp
+    monkeypatch.setattr(rxp, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("consultoria"))
+    d = rel._dados_funil(pool, 1, "todos", "", "", "")
+    rotulos = [c["rotulo"] for c in d["colunas"]] + [m[0] for m in d["metricas"]]
+    assert "Reunião marcada" in rotulos and "Leads → reunião agendada" in rotulos
+    assert not any("isita" in r for r in rotulos)

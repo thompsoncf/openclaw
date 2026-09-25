@@ -101,6 +101,16 @@ def _suplementos(slug) -> bool:
     return (slug or "") == "suplementos"
 
 
+def _clinica(slug) -> bool:
+    """Clínica — o terceiro portão de UM nicho só, e o primeiro que pergunta ao
+    PERFIL e não ao slug cru. Hoje os dois coincidem (o nicho `clinica` é o único
+    do perfil), mas a tela que o aviso anuncia (/painel/hoje) abre pelo perfil; se
+    um dia entrar "odontologia" no mesmo perfil, o aviso acompanha a tela sozinho.
+    """
+    from finance import raio_x_perfil as _rxp
+    return bool(slug) and _rxp.perfil_por_nicho(slug) == "clinica"
+
+
 def _canal_proprio(pool, conta_id: int) -> bool:
     """A conta fala pelo WhatsApp DELA, conectado por QR code.
 
@@ -167,6 +177,7 @@ PUBLICOS_NICHO = {
     "recorrente": _recorrente,
     "seguros": _seguros,
     "suplementos": _suplementos,
+    "clinica": _clinica,
 }
 
 PUBLICOS_CONTA = {

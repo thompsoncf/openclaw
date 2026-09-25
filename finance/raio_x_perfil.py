@@ -411,8 +411,55 @@ def funil_resolvido(chave_perfil: str, da_conta: dict) -> tuple[dict, set]:
     return dict(base, **{k: da_conta[k] for k in escolhidas}), escolhidas
 
 
+# ---------------------------------------------------------------- voltar a chamar
+#
+# "VOLTAR A CHAMAR DEPOIS DO PREÇO" (finance/voltar_a_chamar.py) — só a clínica,
+# por enquanto. Medido na Espaço Pelle (conta 39) de 24/08 a 23/09/2026: 11
+# pacientes escreveram e receberam o preço da consulta, 1 marcou, e quem não
+# marcou não foi chamado de novo. Em festa e mensalidade o "voltar a chamar" já é
+# o Follow-up, com vendedor; aqui é a recepção, e o que ela manda é uma frase só.
+#
+# `toques_min`: +3h, +1 dia, +3 dias, +7 dias depois do preço.
+# `re_contexto`: o preço só conta se a mesma mensagem falar da consulta — senão o
+# "segue o boleto de R$ 1.200" do fornecedor vira paciente.
+# OS TEXTOS NÃO FALAM DE PREÇO nem de saúde: preço repetido no toque viraria fato
+# novo (o módulo também exclui as próprias mensagens, mas uma trava só é pouco), e
+# queixa de saúde não sai por mensagem automática (LGPD, art. 11). O dono aprova
+# os textos na tela Hoje antes de ligar; o que ele mudar vale só pra conta dele.
+_VOLTAR_POR_PERFIL = {
+    "clinica": {
+        "toques_min": (180, 1440, 4320, 10080),
+        "re_contexto": r"(consulta|avalia)",
+        "textos": {
+            "0": "Oi, {nome}! Tudo bem? Você tinha perguntado sobre a consulta aqui na "
+                 "clínica. Ainda quer marcar? Se quiser, vejo um horário para você 😊",
+            "1": "Oi, {nome}! Conseguiu ver as informações da consulta? Se quiser, já "
+                 "vejo um horário para você 😊",
+            "2": "Oi, {nome}! Passando para saber se ficou alguma dúvida sobre a "
+                 "consulta. Quer que eu veja um horário?",
+            "3": "Oi, {nome}! Ainda dá para marcar sua consulta esta semana. Quer que "
+                 "eu veja os horários?",
+            "4": "Oi, {nome}! Vou deixar seu contato separado aqui. Quando quiser "
+                 "marcar a consulta, é só responder esta mensagem 😊",
+        },
+        "teto_dia": 10,
+    },
+}
+
+
+def voltar_padrao(chave_perfil: str) -> dict | None:
+    """O padrão do "voltar a chamar" do perfil, ou None pra quem não tem.
+
+    None, e não {}: quem pergunta decide por ausência, e um dicionário vazio
+    passaria num `if cfg:` descuidado como se o perfil tivesse o recurso."""
+    p = _VOLTAR_POR_PERFIL.get(chave_perfil)
+    if not p:
+        return None
+    return dict(p, textos=dict(p["textos"]))
+
+
 #: nichos com perfil próprio (slug -> chave do perfil). Os demais saem dos portões.
-_PERFIL_DO_NICHO = {"seguros": "seguros", "clinica": "clinica"}
+_PERFIL_DO_NICHO ={"seguros": "seguros", "clinica": "clinica"}
 
 
 def perfil_por_nicho(slug: str | None) -> str:

@@ -351,6 +351,34 @@ def test_o_corpo_gigante_e_cortado(banco):
     assert len(linhas[0][0]) <= 400 and len(linhas[0][3]) <= 300
 
 
+def test_o_erro_do_VENDEDOR_tambem_fica_registrado(banco):
+    """O gate de papel (web/app.py) é whitelist, e `/painel/erro-cliente` ficou
+    de fora dela de 19 a 25/09/2026: o registro de todo vendedor e gestor voltava
+    303 e não gravava nada. A troca de situação do lead deu 500 nesse tempo todo,
+    o aviso na tela dizia "o ocorrido ficou registrado", e a `erro_cliente`
+    seguia VAZIA — justamente quem mais usa o painel não deixava rastro.
+
+    Os testes de cima postam SEM sessão, e o gate só barra quem tem papel: por
+    isso eles passavam. Aqui a requisição vem logada, como vem do navegador."""
+    import base64
+    import itsdangerous
+    from contas import equipe as eq
+    for papel in ("gestor", "vendedor", "financeiro", "restrito"):
+        assert "/painel/erro-cliente" in eq.rotas_do_papel(papel), papel
+    c = _cliente()
+    for papel, membro in (("vendedor", 71), ("gestor", 72)):
+        bruto = base64.b64encode(json.dumps(
+            {"conta_id": 34, "papel": papel, "membro_id": membro}).encode())
+        segredo = os.environ.get("PORTAL_SECRET", "troque-isto-em-producao")
+        c.cookies.set("session", itsdangerous.TimestampSigner(segredo).sign(bruto).decode())
+        r = c.post("/painel/erro-cliente", json={
+            "url": "/painel/prospeccao/1438/status", "metodo": "POST", "status": 500})
+        assert r.status_code == 200, f"o gate barrou o {papel} ({r.status_code})"
+    with banco.connection() as con:
+        quem = con.execute("select conta_id, membro_id from erro_cliente order by id").fetchall()
+    assert quem == [(34, 71), (34, 72)]
+
+
 def test_um_laco_na_tela_nao_vira_um_laco_no_banco(banco):
     """Uma tela que entre em erro dentro de um `setInterval` mandaria um registro
     por segundo — e o que era pra ser a trilha do incidente vira o incidente."""

@@ -40,7 +40,7 @@ _MEMBROS = ["gestor", "vendedor", "financeiro", "restrito", "membro", "convidado
 
 #: rotas que o gate deixa passar pra qualquer um, e que por isso não precisam
 #: aparecer no menu (nem podem ser cobradas dele)
-_LIVRES = {"/trocar", "/sair", "/painel/versao"}
+_LIVRES = {"/trocar", "/sair", "/painel/versao", "/painel/erro-cliente"}
 
 
 #: Os perfis de nicho que o menu conhece. O menu não é o mesmo pra todos (regra 6:

@@ -582,8 +582,14 @@ def test_trocar_situacao_no_balao_move_o_card_e_fecha_o_balao():
     gancho = inspect.getsource(pp).split("function kbDepoisDoStatus")[1][:700]
     assert "_kbAposMoverStatus(d)" in gancho, (
         "o funil não reaproveita a mesma atualização de contagem do drag-and-drop")
-    assert "if(card&&colNova){" in gancho and "colNova.appendChild(card)" in gancho, (
+    # desde 24/09/2026 quem move é `kbColocar` (o mesmo do menu ⋯): o card entra
+    # no TOPO da coluna nova, e sai da tela se a etapa não tem coluna
+    assert "kbColocar(id,novo)" in gancho, (
         "o funil não move o card pra coluna nova depois de trocar a situação")
+    colocar = inspect.getsource(pp).split("function kbColocar")[1][:700]
+    assert "drop.insertBefore(card,drop.firstChild)" in colocar
+    assert "card.parentNode.removeChild(card)" in colocar, (
+        "etapa que sai do quadro deixava o card parado na coluna antiga")
 
 
 def test_arrastar_pra_perdido_pergunta_o_motivo_em_vez_de_recarregar_calado():
@@ -726,35 +732,39 @@ def test_x_de_limpar_a_busca_nao_esmaga_o_campo_de_texto():
 
 
 def test_trocar_vendedor_no_card_so_aparece_pra_quem_pode_atribuir():
-    """22/08: pedido pra organizar leads na fase inicial sem sair do funil —
-    o card ganha um <select> de vendedor. Só pra quem `pode_atribuir` (dono),
-    igual a regra que já existe hoje pra atribuir lead na ficha/Comunicação;
-    quem só tem gerência (gestor) continua vendo o nome como texto fixo."""
+    """22/08: pedido pra organizar leads na fase inicial sem sair do funil. Era um
+    <select> em CADA card; desde 24/09/2026 (funil enxuto) é o AVATAR do
+    responsável, que abre uma lista só pra página inteira (#kbvpop) — eram ~1.100
+    <option> na Prime. A regra de quem pode é a mesma: `pode_atribuir`."""
     html_dono = _render("prospeccao", pode_atribuir=True,
                          vendedores=[{"id": 9, "nome": "Jacqueline Prime", "papel": "vendedor"},
                                      {"id": 11, "nome": "Thiago Pinheiro", "papel": "vendedor"}])
-    assert 'class="kbvend"' in html_dono, "o seletor de vendedor não apareceu pro dono"
-    assert 'onchange="kbAtribuirVendedor(this,1)"' in html_dono
+    assert 'class="kbav' in html_dono and 'onclick="kbVendPop(event,this)"' in html_dono, (
+        "o avatar que troca o responsável não apareceu pro dono")
+    assert 'id="kbvpop"' in html_dono
     assert "Jacqueline Prime" in html_dono and "Thiago Pinheiro" in html_dono
     assert "— sem responsável —" in html_dono
+    assert html_dono.count('id="kbvpop"') == 1, "a lista é uma só na página, não uma por card"
 
-    html_gestor = _render("prospeccao", gerencia=True, pode_atribuir=False,
-                          vendedores=[{"id": 9, "nome": "Jacqueline Prime", "papel": "vendedor"}])
-    assert 'class="kbvend"' not in html_gestor, (
-        "gestor sem pode_atribuir não devia ver o seletor — só o dono atribui, hoje")
+    html_vend = _render("prospeccao", gerencia=False, pode_atribuir=False,
+                        vendedores=[{"id": 9, "nome": "Jacqueline Prime", "papel": "vendedor"}])
+    assert 'id="kbvpop"' not in html_vend and "kbVendPop(event,this)" not in html_vend, (
+        "quem não pode atribuir não devia ver a troca de responsável")
 
 
 def test_trocar_vendedor_usa_a_mesma_rota_que_a_ficha_ja_usa():
     """Sem rota nova: reaproveita POST /painel/prospeccao/<id>/atribuir, que já
     existe e já é chamada por fetch em outro lugar deste mesmo arquivo (o menu
     de responsável da Comunicação) — mesma regra de permissão nos dois."""
-    fonte = inspect.getsource(pp).split("function kbAtribuirVendedor")[1][:700]
+    fonte = inspect.getsource(pp).split("function kbAtribuirVendedor")[1][:900]
     assert "/atribuir'" in fonte
     assert "'X-Requested-With':'fetch'" in fonte, (
         "sem esse header a rota devolve redirect (não JSON) — /atribuir só responde "
         "JSON quando reconhece o pedido como ajax")
-    assert "sel.value=prev" in fonte, (
-        "sem reverter o <select> num erro, a tela mostra um vendedor que não foi salvo")
+    # o avatar só muda DEPOIS do ok: num erro ele continua mostrando quem está salvo
+    ok = fonte.index("if(!d.ok)")
+    assert fonte.index("av.setAttribute('data-vend',novo)") > ok, (
+        "o avatar mudaria antes do servidor confirmar — a tela mostraria um vendedor que não foi salvo")
 
 
 def test_botao_de_fechar_o_balao_fica_cravado_no_canto_nao_no_fluxo_do_cabecalho():
@@ -777,21 +787,17 @@ def test_botao_de_fechar_o_balao_fica_cravado_no_canto_nao_no_fluxo_do_cabecalho
 
 def test_x_de_excluir_lead_no_card_nao_esmaga_igual_o_da_busca_ja_esmagou():
     """22/08, 3ª rodada: MESMO bug do ✕ da busca da Comunicação (#537) e quase
-    do ✕ de fechar os balões (#538) — achado agora no ✕ de EXCLUIR lead do
-    card do funil, reportado com print mostrando o ✕ (vermelho, hover)
-    flutuando solto perto do rodapé do card em vez de ficar ao lado do nome.
+    do ✕ de fechar os balões (#538) — o ✕ de EXCLUIR lead nascia ~22px abaixo da
+    linha do nome, porque herdava o `button{margin-top:1.4rem}` global.
 
-    Comprovado com Playwright: `.kbx` tinha `margin-top` computado de
-    22.4px (o `button{margin-top:1.4rem}` global, pros formulários de
-    login/cadastro, vazando por falta de `margin:0` na classe) — o botão
-    ficava ~22px mais abaixo da linha do nome. `width:auto` sozinho (que
-    `.kbx` também não tinha) não bastava; era o `margin-top` que empurrava."""
+    Desde 24/09/2026 o ✕ saiu do card (excluir mora no ⋯, só pra dono e gestor),
+    e a correção virou uma regra só pro quadro inteiro: nenhum botão ou select
+    dentro de #kbrow (nem dos popovers) herda largura, altura ou margem do global.
+    Era o que dava 48 px ao 💬, ao "perguntar" e ao seletor de vendedor."""
     fonte = inspect.getsource(pp)
-    regra = fonte.split(".kbx{")[1].split("}")[0]
-    assert "margin:0" in regra, (
-        "sem margin:0, o ✕ de excluir lead herda margin-top:1.4rem do button{} global "
-        "e nasce empurrado pra baixo, longe do nome do lead")
-    assert "width:auto" in regra
+    regra = fonte.split(":where(#kbrow,.kbpop) button,:where(#kbrow) select{")[1].split("}")[0]
+    assert "margin:0" in regra and "width:auto" in regra and "min-height:0" in regra
+    assert 'class="kbx"' not in pp._KANBAN_TPL, "o ✕ de excluir voltou pra linha do nome"
 
 
 def test_botao_editar_do_balao_tambem_tinha_o_mesmo_vazamento_de_margem():

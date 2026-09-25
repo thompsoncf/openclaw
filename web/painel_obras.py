@@ -27,6 +27,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
+from finance import obra_venda as ov
 from finance import obras as ob
 from finance import raio_x_perfil as rxp
 from web.portal import _env, _render, conta_logada, nicho_da_conta
@@ -103,6 +104,16 @@ def painel_obras(request: Request):
     obras = ob.listar_obras(pool, conta[0], incluir_arquivadas=True)
     abertas = [o for o in obras if o["status"] not in ("arquivada",)]
     andamento = [o for o in abertas if o["status"] in ("em_obra", "pronta")]
+    # o chip de cada casa: o que trava (casa pronta) ou o primeiro alerta de prazo
+    avisos = {}
+    for o in abertas:
+        if o["tipo"] != "casa":
+            continue
+        sit = ov.situacao_da_casa(pool, conta[0], o)
+        if o["pct"] == 100 and sit["trava"]:
+            avisos[o["id"]] = "trava: " + sit["trava"]["nome"].lower()
+        elif sit["alertas"]:
+            avisos[o["id"]] = sit["alertas"][0]
     return _render(
         "obras", request, titulo="Obras", secao_ativa="obras", brl=_brl,
         obras=abertas, arquivadas=[o for o in obras if o["status"] == "arquivada"],
@@ -110,6 +121,7 @@ def painel_obras(request: Request):
         # o botão Dividir reparte entre as EM OBRA (a mesma regra de `lancamento_na_obra`)
         n_em_obra=sum(1 for o in abertas if o["status"] == "em_obra"),
         gasto_andamento=sum(o["custos"]["total"] for o in andamento),
+        parado=ov.parado_em_casas(pool, conta[0], abertas), avisos=avisos,
         sem=ob.sem_obra(pool, conta[0]),
         escolhas=[o for o in abertas if o["status"] != "entregue"],
         tipos=ob.ROTULO_TIPO, hoje=date.today(),
@@ -167,10 +179,71 @@ def ficha(request: Request, obra_id: int):
     o = ob.obter_obra(get_pool(), conta[0], obra_id)
     if not o:
         return RedirectResponse("/painel/obras", status_code=303)
+    sit = ov.situacao_da_casa(get_pool(), conta[0], o) if o["tipo"] == "casa" else None
     return _render("obra", request, titulo=o["nome"], secao_ativa="obras", brl=_brl,
                    o=o, tipos=ob.ROTULO_TIPO, status=ob.ROTULO_STATUS,
-                   rotulo_custo=ob.ROTULO_CUSTO,
+                   rotulo_custo=ob.ROTULO_CUSTO, sit=sit,
+                   status_doc=ov.STATUS_DOC, modalidades=ov.MODALIDADES,
+                   situacoes=[(k, ov.ROTULO_SITUACAO[k]) for k in ov.SITUACOES],
                    erro=(request.query_params.get("erro") or "").strip())
+
+
+@router.post("/painel/obras/{obra_id}/documento")
+def documento(request: Request, obra_id: int, tipo: str = Form(...),
+              status: str = Form("pendente"), numero: str = Form(""),
+              emitido_em: str = Form(""), vence_em: str = Form("")):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        ov.marcar_documento(get_pool(), conta[0], obra_id, tipo, status=status,
+                            numero=numero, emitido_em=_data(emitido_em),
+                            vence_em=_data(vence_em), substituir=True)
+    except ValueError as e:
+        return _volta(f"/painel/obras/{obra_id}", str(e))
+    return RedirectResponse(f"/painel/obras/{obra_id}#papeis", status_code=303)
+
+
+@router.post("/painel/obras/{obra_id}/venda")
+def salvar_venda(request: Request, obra_id: int, comprador: str = Form(""),
+                 telefone: str = Form(""), faixa: str = Form(""),
+                 modalidade: str = Form("financiada"), valor_venda: str = Form(""),
+                 valor_avaliacao: str = Form(""), avaliacao_em: str = Form(""),
+                 aprovado_em: str = Form(""), financiamento: str = Form(""),
+                 subsidio: str = Form(""), fgts: str = Form(""), entrada: str = Form(""),
+                 obs: str = Form("")):
+    """O cadastro da venda. As datas de assinatura, registro e crédito NÃO vêm
+    daqui: elas andam pelo botão do passo, que é quem cria as contas a receber —
+    uma data digitada aqui seria uma venda assinada sem título."""
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        ov.salvar_venda(get_pool(), conta[0], obra_id, comprador=comprador,
+                        telefone=telefone,
+                        faixa=int(faixa) if faixa.strip().isdigit() else None,
+                        modalidade=modalidade, valor_venda_centavos=_cent(valor_venda),
+                        valor_avaliacao_centavos=_cent(valor_avaliacao),
+                        avaliacao_em=_data(avaliacao_em), aprovado_em=_data(aprovado_em),
+                        financiamento_centavos=_cent(financiamento),
+                        subsidio_centavos=_cent(subsidio), fgts_centavos=_cent(fgts),
+                        entrada_centavos=_cent(entrada), obs=obs)
+    except ValueError as e:
+        return _volta(f"/painel/obras/{obra_id}", str(e))
+    return RedirectResponse(f"/painel/obras/{obra_id}#venda", status_code=303)
+
+
+@router.post("/painel/obras/{obra_id}/venda/passo")
+def passo_da_venda(request: Request, obra_id: int, situacao: str = Form(...),
+                   data: str = Form("")):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        ov.andar_venda(get_pool(), conta[0], obra_id, situacao, _data(data))
+    except ValueError as e:
+        return _volta(f"/painel/obras/{obra_id}", str(e))
+    return RedirectResponse(f"/painel/obras/{obra_id}#venda", status_code=303)
 
 
 @router.post("/painel/obras/{obra_id}/editar")
@@ -277,6 +350,19 @@ _CSS = r"""<style>
 .ob-et.feita{border-color:var(--verde)}
 .ob-et form{margin:0}
 .ob-custo{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem}
+/* o caminho do dinheiro: um passo por caixinha, o que trava em âmbar */
+.ob-passos{display:flex;flex-wrap:wrap;gap:.35rem;margin:.4rem 0 .6rem}
+.ob-passo{flex:1 1 92px;border:1px solid var(--borda);border-radius:9px;padding:.4rem .45rem;font-size:.74rem;text-align:center;color:var(--txt-mut);line-height:1.35}
+.ob-passo small{display:block;font-size:.66rem;opacity:.85}
+.ob-passo.ok{border-color:var(--verde);color:var(--verde-claro)}
+.ob-passo.trava{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6;font-weight:700}
+.ob-alertas{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:9px;padding:.5rem .7rem;margin:.4rem 0 .8rem;font-size:.84rem}
+.ob-doc{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--borda)}
+.ob-doc .nm{flex:1 1 180px;font-size:.86rem}
+.ob-doc select,.ob-doc input{width:auto}
+.ob-doc input[type=date]{max-width:9.5rem}
+.ob-doc input[name=numero]{max-width:8rem}
+.ob-chip{display:inline-block;margin-top:.25rem;font-size:.7rem;color:#F0DCA6;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:12px;padding:1px 8px}
 @media (max-width:760px){.ob-card{grid-template-columns:1fr 1fr}}
 </style>"""
 
@@ -291,6 +377,8 @@ _TPL_LISTA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <span class="n">em obra ou prontas</span></div>
   <div class="ob-cx"><span class="r">Gasto nessas obras</span><span class="v">{{ brl(gasto_andamento) }}</span>
     <span class="n">dinheiro que ainda está na obra</span></div>
+  {% if parado %}<div class="ob-cx"><span class="r">Parado em casa não paga</span><span class="v">{{ brl(parado) }}</span>
+    <span class="n">gasto em casa que a Caixa ainda não pagou</span></div>{% endif %}
   {% if sem.n %}<a class="ob-cx alerta" href="#sem-obra"><span class="r">Sem obra</span>
     <span class="v">{{ sem.n }}</span><span class="n">{{ brl(sem.total_centavos) }} de material e mão de obra sem casa</span></a>{% endif %}
 </div>
@@ -304,7 +392,8 @@ _TPL_LISTA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <span class="ob-mut">{{ ('próxima: ' ~ o.proxima_etapa|lower|e) if o.proxima_etapa else 'todas feitas' }}</span></div>
   <div><b>{{ brl(o.custos.total) }}</b>
     <div class="ob-mut">{% if o.custo_previsto_centavos %}de {{ brl(o.custo_previsto_centavos) }} previstos ({{ o.pct_previsto }}%){% else %}sem previsto{% endif %}</div></div>
-  <div><span class="ob-pill {{ o.status }}">{{ o.rotulo_status }}</span></div>
+  <div><span class="ob-pill {{ o.status }}">{{ o.rotulo_status }}</span>
+    {% if avisos[o.id] %}<div><span class="ob-chip">{{ avisos[o.id]|e }}</span></div>{% endif %}</div>
 </a>{% endfor %}
 </div>{% endif %}
 
@@ -384,6 +473,70 @@ _TPL_FICHA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <p class="ob-mut" style="margin:.5rem 0 0">Material é o que foi lançado em Insumos (conta 3.1.03); mão de obra, o de
   Serviços (conta 3.1.04). O resto cai em outros.</p>
 </div>
+
+{% if sit %}
+<h3 class="ob-sec" id="caminho">O caminho do dinheiro</h3>
+<div class="ob-passos">{% for p in sit.caminho %}<div class="ob-passo{{ ' ok' if p.feito }}{{ ' trava' if p.trava }}">{{ '✓ ' if p.feito }}{{ p.nome }}{% if p.detalhe %}<small>{{ p.detalhe }}</small>{% endif %}</div>{% endfor %}</div>
+<p class="ob-mut">{% if sit.trava %}O que trava agora: <b>{{ sit.trava.nome }}</b>. Na casa pronta, o dinheiro da Caixa só cai depois do
+registro — e o registro depende de habite-se, CND da obra e averbação.{% else %}Dinheiro na conta. ✅{% endif %}</p>
+{% if sit.alertas %}<div class="ob-alertas">{% for a in sit.alertas %}<div>⚠️ {{ a|e }}</div>{% endfor %}</div>{% endif %}
+
+<h3 class="ob-sec" id="papeis">Os papéis da casa</h3>
+<div class="ob-box">{% for d in sit.documentos %}
+  <form method="post" action="/painel/obras/{{ o.id }}/documento" class="ob-doc">
+    <input type="hidden" name="tipo" value="{{ d.tipo }}">
+    <span class="nm">{{ '✓' if d.status == 'ok' else '○' }} {{ d.nome }}</span>
+    <select name="status">{% for k, r in status_doc.items() %}<option value="{{ k }}"{{ ' selected' if k == d.status }}>{{ r }}</option>{% endfor %}</select>
+    <input name="numero" value="{{ d.numero|e }}" placeholder="número">
+    <label class="ob-mut">emitido <input type="date" name="emitido_em" value="{{ d.emitido_em or '' }}"></label>
+    <label class="ob-mut">vence <input type="date" name="vence_em" value="{{ d.vence_em or '' }}"></label>
+    <button class="ob-bt">Salvar</button>
+  </form>{% endfor %}
+  <p class="ob-mut" style="margin:.5rem 0 0">CNO: até 30 dias do início da obra. Certidões da empresa valem 180 dias.
+  O Zaq lembra o papel; o imposto (INSS da obra, RET) é com o contador.</p>
+</div>
+
+<h3 class="ob-sec" id="venda">A venda</h3>
+{% set v = sit.venda %}
+{% if v %}<div class="ob-faixas">
+  <div class="ob-cx"><span class="r">Situação</span><span class="v" style="font-size:1rem">{{ v.rotulo_situacao }}</span>
+    <span class="n">{{ v.comprador|e or 'comprador não informado' }}{% if v.faixa %} · Faixa {{ v.faixa }}{% endif %}</span></div>
+  <div class="ob-cx"><span class="r">Entrada (do comprador)</span><span class="v">{{ brl(v.entrada_centavos) if v.entrada_centavos else '—' }}</span></div>
+  <div class="ob-cx"><span class="r">Repasse (da Caixa)</span><span class="v">{{ brl(v.repasse_centavos) if v.repasse_centavos else '—' }}</span>
+    <span class="n">financiamento + subsídio + FGTS</span></div>
+  {% if v.titulo_entrada_id or v.titulo_repasse_id %}<div class="ob-cx"><span class="r">Contas a receber</span>
+    <span class="v" style="font-size:1rem">criadas</span><span class="n">na assinatura, no centro desta obra</span></div>{% endif %}
+</div>
+<form method="post" action="/painel/obras/{{ o.id }}/venda/passo" class="ob-box ob-acoes">
+  <b style="margin-right:.4rem">Andar a venda</b>
+  <select name="situacao">{% for k, r in situacoes %}<option value="{{ k }}"{{ ' selected' if k == v.situacao }}>{{ r }}</option>{% endfor %}</select>
+  <input type="date" name="data" title="vazio = hoje">
+  <button class="ob-bt prim">Salvar passo</button>
+  <span class="ob-mut">Na assinatura nascem as contas a receber da entrada e do repasse.</span>
+</form>{% endif %}
+<details class="ob-box"{% if not v %} open{% endif %}><summary>{{ 'Dados da venda' if v else '+ Cadastrar a venda' }}</summary>
+<form method="post" action="/painel/obras/{{ o.id }}/venda">
+  <div class="ob-grid">
+    <div><label>Comprador</label><input name="comprador" value="{{ (v.comprador if v else '')|e }}"></div>
+    <div><label>Telefone</label><input name="telefone" value="{{ (v.telefone if v else '')|e }}"></div>
+    <div><label>Faixa do MCMV</label><select name="faixa"><option value="">—</option>{% for f in (1, 2, 3, 4) %}<option value="{{ f }}"{{ ' selected' if v and v.faixa == f }}>Faixa {{ f }}</option>{% endfor %}</select></div>
+    <div><label>Modalidade</label><select name="modalidade">{% for k, r in modalidades.items() %}<option value="{{ k }}"{{ ' selected' if v and v.modalidade == k }}>{{ r }}</option>{% endfor %}</select></div>
+    <div><label>Preço de venda (R$)</label><input name="valor_venda" inputmode="decimal" value="{{ '%.2f'|format(v.valor_venda_centavos / 100) if v and v.valor_venda_centavos is not none else '' }}"></div>
+    <div><label>Financiamento (R$)</label><input name="financiamento" inputmode="decimal" value="{{ '%.2f'|format(v.financiamento_centavos / 100) if v and v.financiamento_centavos is not none else '' }}"></div>
+    <div><label>Subsídio (R$)</label><input name="subsidio" inputmode="decimal" value="{{ '%.2f'|format(v.subsidio_centavos / 100) if v and v.subsidio_centavos is not none else '' }}"></div>
+    <div><label>FGTS (R$)</label><input name="fgts" inputmode="decimal" value="{{ '%.2f'|format(v.fgts_centavos / 100) if v and v.fgts_centavos is not none else '' }}"></div>
+    <div><label>Entrada (R$) · vazio = calcula</label><input name="entrada" inputmode="decimal" value="{{ '%.2f'|format(v.entrada_centavos / 100) if v and v.entrada_centavos is not none else '' }}"></div>
+    <div><label>Avaliação da Caixa (R$)</label><input name="valor_avaliacao" inputmode="decimal" value="{{ '%.2f'|format(v.valor_avaliacao_centavos / 100) if v and v.valor_avaliacao_centavos is not none else '' }}"></div>
+    <div><label>Data da avaliação</label><input type="date" name="avaliacao_em" value="{{ (v.avaliacao_em if v else '') or '' }}"></div>
+    <div><label>Crédito aprovado em</label><input type="date" name="aprovado_em" value="{{ (v.aprovado_em if v else '') or '' }}"></div>
+  </div>
+  <div style="margin-top:.6rem"><label>Observação</label><textarea name="obs" rows="2">{{ (v.obs if v else '')|e }}</textarea></div>
+  <p class="ob-mut" style="margin:.6rem 0">Entrada = preço − financiamento − subsídio − FGTS. Se a avaliação da Caixa vier abaixo do
+  preço, a diferença sai do bolso do comprador — o alerta aparece aqui em cima. O Zaq não simula financiamento: os valores
+  vêm da simulação da Caixa ou do correspondente.</p>
+  <button class="ob-bt prim">Salvar a venda</button>
+</form></details>
+{% endif %}
 
 <h3 class="ob-sec" id="etapas">Etapas · {{ o.pct }}%</h3>
 <div class="ob-bar" style="height:9px;margin-bottom:.6rem"><i style="width:{{ o.pct }}%"></i></div>

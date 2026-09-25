@@ -555,15 +555,26 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
                           f"no painel: {ob.LINK_OBRAS}")
         return None, f"Não achei a obra “{ref}”. As obras são: {nomes}. Qual delas?"
 
+    def _com_caminho(o: dict) -> str:
+        """O resumo da obra e, se for casa, o caminho do dinheiro dela."""
+        txt = ob.resumo_da_obra(o)
+        if o["tipo"] == "casa":
+            try:
+                from . import obra_venda as ov
+                txt += " " + ov.resumo_caminho(o, ov.situacao_da_casa(pool, conta_id, o))
+            except Exception:  # noqa: BLE001 — sem a 353, só o custo
+                pass
+        return txt
+
     def consultar_obra(e: dict) -> str:
         ref = (e.get("obra") or "").strip()
         if ref:
             o, erro = _obra(ref)
-            return ob.resumo_da_obra(ob.obter_obra(pool, conta_id, o["id"])) if o else erro
+            return _com_caminho(ob.obter_obra(pool, conta_id, o["id"])) if o else erro
         obras = ob.listar_obras(pool, conta_id)
         if not obras:
             return f"Ainda não tem obra cadastrada. Cadastro no painel: {ob.LINK_OBRAS}"
-        partes = [ob.resumo_da_obra(o) for o in obras]
+        partes = [_com_caminho(o) for o in obras]
         falta = ob.sem_obra(pool, conta_id, limite=0)
         if falta["n"]:
             partes.append(f"Sem obra: {falta['n']} despesa(s) de obra, "
@@ -624,6 +635,48 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
         txt = f"{r['etapa']} {verbo} em {r['obra']}: a obra está em {r['pct']}%."
         if r["status"] == "pronta":
             txt += " Todas as etapas feitas — marquei a obra como PRONTA."
+        return txt
+
+    def marcar_documento(e: dict) -> str:
+        from . import obra_venda as ov
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
+        tipo = ov.achar_documento(e.get("documento"))
+        if not tipo:
+            nomes = ", ".join(n for _t, n in ov.DOCUMENTOS)
+            return f"Não entendi qual papel. Os da casa são: {nomes}."
+        status = (e.get("situacao") or "ok").strip()
+        if status not in ov.STATUS_DOC:
+            status = "ok"
+        try:
+            d = ov.marcar_documento(pool, conta_id, o["id"], tipo, status=status,
+                                    emitido_em=_parse_data_pj(e["data"]) if e.get("data") else None)
+        except ValueError as err:
+            return str(err)
+        sit = ov.situacao_da_casa(pool, conta_id, ob.obter_obra(pool, conta_id, o["id"]))
+        txt = f"{d['nome']} da {o['nome']}: {ov.STATUS_DOC[d['status']].lower()}. ✅"
+        if sit["trava"]:
+            txt += f" Agora o que trava é {sit['trava']['nome'].lower()}."
+        return txt
+
+    def andar_venda(e: dict) -> str:
+        from . import obra_venda as ov
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
+        passo = ov.achar_passo(e.get("passo"))
+        if not passo:
+            return ("Não entendi o passo da venda. Pode ser: análise, aprovado, avaliação, "
+                    "assinatura, registro, creditado ou desistiu.")
+        try:
+            r = ov.andar_venda(pool, conta_id, o["id"], passo,
+                               _parse_data_pj(e["data"]) if e.get("data") else None)
+        except ValueError as err:
+            return str(err)
+        txt = f"{r['obra']}: {r['rotulo'].lower()}. ✅"
+        if r["titulos"]:
+            txt += " Criei as contas a receber: " + " e ".join(r["titulos"]) + "."
         return txt
 
     def gastos_sem_obra(_e: dict) -> str:
@@ -688,6 +741,37 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
                 "required": ["obra", "etapa"],
             },
             executar=marcar_etapa,
+        ),
+        Ferramenta(
+            nome="marcar_documento",
+            descricao=("Marca um papel da CASA: alvará, ART/RRT, CNO, habite-se, CND da "
+                       "obra, averbação, matrícula ou certidões da empresa. 'documento' "
+                       "pode vir do jeito que a pessoa falou (\"saiu o habite-se\")."),
+            parametros={
+                "type": "object",
+                "properties": {"obra": obra_s,
+                               "documento": {"type": "string"},
+                               "situacao": {"type": "string",
+                                            "enum": ["ok", "pendente", "nao_se_aplica"]},
+                               "data": {"type": "string", "description": "dd/mm/aaaa; vazio = hoje"}},
+                "required": ["obra", "documento"],
+            },
+            executar=marcar_documento,
+        ),
+        Ferramenta(
+            nome="andar_venda",
+            descricao=("Anda a venda da CASA um passo: análise, aprovado, avaliação, "
+                       "assinatura, registro, creditado (o dinheiro caiu) ou desistiu. Na "
+                       "assinatura nascem as contas a receber da entrada e do repasse da "
+                       "Caixa. A venda (comprador e valores) tem que estar cadastrada."),
+            parametros={
+                "type": "object",
+                "properties": {"obra": obra_s,
+                               "passo": {"type": "string"},
+                               "data": {"type": "string", "description": "dd/mm/aaaa; vazio = hoje"}},
+                "required": ["obra", "passo"],
+            },
+            executar=andar_venda,
         ),
         Ferramenta(
             nome="gastos_sem_obra",

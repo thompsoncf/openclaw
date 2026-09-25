@@ -434,6 +434,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('hoje','/painel/hoje','agenda','Hoje') }}{% endif %}
+  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
   {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
@@ -492,6 +493,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('hoje','/painel/hoje','agenda','Hoje') }}{% endif %}
+  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
   {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
@@ -8486,6 +8488,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("origens", "/painel/origens"),
                  ("renovacoes", "/painel/renovacoes"),
                  ("hoje", "/painel/hoje"),
+                 ("clinica", "/painel/clinica"),
                  ("obras", "/painel/obras"),
                  ("follow_up", "/painel/follow-up"),
                  ("novidades", "/painel/novidades"),

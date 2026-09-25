@@ -67,7 +67,24 @@ def _reais(centavos: int) -> str:
     return "R$ " + f"{(centavos or 0) // 100:,}".replace(",", ".")
 
 
-def _linha_catalogo(s) -> str:
+def _precos_escondidos(c, conta_id: int) -> set[str]:
+    """Slugs de atendimento da CLÍNICA cujo preço o agente não pode dizer
+    (Configurar › Atendimentos, "o agente pode dizer este preço" desmarcado).
+
+    Só a linha criada pelo cadastro da clínica (tem `duracao_min`) entra: as linhas
+    das outras contas nasceram com a coluna em false e continuam como sempre foram.
+    Tolerante: banco sem as colunas (348) não esconde nada."""
+    try:
+        with c.transaction():
+            return {r[0] for r in c.execute(
+                """select slug from servicos_catalogo
+                    where conta_id=%s and ativo and duracao_min is not null
+                      and not agente_diz_preco""", (conta_id,)).fetchall()}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _linha_catalogo(s, preco_escondido: bool = False) -> str:
     """Uma linha do catálogo do jeito que a IA deve LER — e, por tabela, falar.
 
     O catálogo nasceu pra serviço recorrente (setup + mensalidade), e a linha era
@@ -88,6 +105,9 @@ def _linha_catalogo(s) -> str:
     que é a verdade e ainda deixa a IA saber que precisa perguntar."""
     setup = s.get("setup_centavos") or 0
     mensal = s.get("mensal_centavos") or 0
+    if preco_escondido:
+        return (f"- {s['nome']} (slug {s['slug']}): valor sob consulta "
+                "(a recepção informa — não diga nem estime o preço)")
     if setup and mensal:
         preco = f"{_reais(setup)} de entrada + {_reais(mensal)} por mês"
     elif setup:
@@ -342,7 +362,9 @@ def _atender(pool, conta_id, conversa_id):
             ("Cliente: " if a == "lead" else ("Agente: " if a == "bot" else "Vendedor: ")) + (t or "")
             for (_d, a, t) in reversed(msgs))
 
-        cat_txt = "\n".join(_linha_catalogo(s) for s in catalogo) or "(sem catálogo)"
+        escondidos = _precos_escondidos(c, conta_id)
+        cat_txt = "\n".join(_linha_catalogo(s, s["slug"] in escondidos) for s in catalogo) \
+            or "(sem catálogo)"
         # A VISITA (migração 259). O bloco só entra quando a conta ligou a chave E
         # estamos na janela comercial — fora dela quem resolve é gente, e instruir a
         # IA sobre visita que ela não pode marcar é convidá-la a prometer horário.

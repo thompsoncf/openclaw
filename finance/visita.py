@@ -68,10 +68,10 @@ def sql_e_visita(a: str = "e", *, festa: bool = False) -> str:
     `festa=True` é a conta que vende festa (`finance.vendas.vende_data`): aí só o
     título diz que é visita — ver o docstring do módulo."""
     ligado = "" if festa else f"{a}.prospeccao_id is not null or "
-    # A CONSULTA DA CLÍNICA NÃO É VISITA (migração 355): ela tem card e não tem
+    # A CONSULTA DA CLÍNICA NÃO É VISITA (migração 360): ela tem card e não tem
     # tipo_evento, e cabia aqui. Contada como visita, virava "visita" no Cockpit
     # (remarcável por fora da grade) e no Raio-X. `to_jsonb` lê `situacao` sem exigir
-    # a coluna: banco sem a 355 continua igual.
+    # a coluna: banco sem a 360 continua igual.
     return (f"((to_jsonb({a}) ->> 'situacao') is null and {a}.tipo_evento is null"
             f" and coalesce({a}.tipo, '') <> 'fornecedor'"
             f" and coalesce({a}.titulo, '') !~* '{_RE_RETORNO}'"

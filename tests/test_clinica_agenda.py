@@ -2,7 +2,7 @@
 
 Em cima da semente da Espaço Pelle (350): o Dr. Manoel atende seg a sex,
 08:00–12:00 (2 encaixes) e 13:30–16:30, na sede. As migrações da agenda de
-sempre (098, 099, 130, 136, 179) e a 355 rodam de verdade.
+sempre (098, 099, 130, 136, 179) e a 360 rodam de verdade.
 """
 import os
 from datetime import date, datetime, time, timedelta, timezone
@@ -68,7 +68,7 @@ def pool():
                   "136_visita_agenda.sql", "179_agenda_tipo_e_hora_sugerida.sql", "348_clinica_base.sql", "350_clinica_semente_espaco_pelle.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
-        c.execute((BASE / "355_clinica_agenda.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "360_clinica_agenda.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()

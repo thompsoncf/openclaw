@@ -19,9 +19,15 @@ from db.conexao import init_schema
 from finance import obras as ob
 from web import painel_obras as po
 
+# a ficha da casa lê a venda e os papéis (353), e a assinatura cria título a receber
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
-              "057_natureza_lancamento.sql", "132_plano_contas_centros_custo.sql",
-              "349_plano_obras.sql", "351_obras.sql")
+              "057_natureza_lancamento.sql", "064_clientes_lojista.sql",
+              "066_pessoas_identidade.sql", "067_titulos_cliente.sql",
+              "131_pessoa_cnpj.sql", "132_plano_contas_centros_custo.sql",
+              "182_clientes_papel.sql",
+              "195_titulo_aprovacao.sql", "196_titulo_recorrencia.sql",
+              "197_titulo_acrescimo.sql", "317_titulo_classificacao.sql",
+              "349_plano_obras.sql", "351_obras.sql", "353_obra_venda_documentos.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 
 
@@ -233,3 +239,60 @@ def test_arquivar_pela_ficha(pool, conta, monkeypatch):
                                                     "status": "arquivada"})
     assert ob.obter_obra(pool, conta, o["id"])["status"] == "arquivada"
     assert "Arquivadas · 1" in c.get("/painel/obras").text
+
+
+# ── a venda e os papéis (PR 3) ────────────────────────────────────────────
+def _casa_pronta(pool, conta, nome="Casa 2"):
+    o = ob.criar_obra(pool, conta, nome, "casa")
+    for e in o["etapas"]:
+        ob.marcar_etapa(pool, conta, o["id"], e["id"])
+    return o
+
+
+def test_a_ficha_da_casa_mostra_o_caminho_e_o_que_trava(pool, conta, monkeypatch):
+    o = _casa_pronta(pool, conta)
+    c = _cliente(pool, conta, monkeypatch)
+    _entrar(c)
+    html = c.get(f"/painel/obras/{o['id']}").text
+    assert "O caminho do dinheiro" in html and "O que trava agora: <b>Habite-se</b>" in html
+    assert "Os papéis da casa" in html and "+ Cadastrar a venda" in html
+    assert "trava: habite-se" in c.get("/painel/obras").text
+
+
+def test_a_reforma_nao_tem_venda_nem_papeis(pool, conta, monkeypatch):
+    r = ob.criar_obra(pool, conta, "Reforma", "reforma")
+    c = _cliente(pool, conta, monkeypatch)
+    _entrar(c)
+    html = c.get(f"/painel/obras/{r['id']}").text
+    assert "O caminho do dinheiro" not in html and "Os papéis da casa" not in html
+
+
+def test_marcar_o_papel_pela_ficha(pool, conta, monkeypatch):
+    o = _casa_pronta(pool, conta)
+    c = _cliente(pool, conta, monkeypatch)
+    _entrar(c)
+    r = c.post(f"/painel/obras/{o['id']}/documento",
+               data={"tipo": "habite_se", "status": "ok", "numero": "77/2026",
+                     "emitido_em": "2026-09-20", "vence_em": ""})
+    assert r.status_code == 303
+    from finance import obra_venda as ov
+    d = {x["tipo"]: x for x in ov.documentos(pool, conta, o["id"])}["habite_se"]
+    assert (d["status"], d["numero"], str(d["emitido_em"])) == ("ok", "77/2026", "2026-09-20")
+
+
+def test_cadastrar_a_venda_e_assinar_pela_ficha(pool, conta, monkeypatch):
+    o = _casa_pronta(pool, conta)
+    c = _cliente(pool, conta, monkeypatch)
+    _entrar(c)
+    c.post(f"/painel/obras/{o['id']}/venda",
+           data={"comprador": "J. Silva", "faixa": "2", "modalidade": "financiada",
+                 "valor_venda": "150.000,00", "financiamento": "110000",
+                 "subsidio": "25.000,00", "fgts": "10000", "entrada": ""})
+    from finance import obra_venda as ov
+    v = ov.venda(pool, conta, o["id"])
+    assert v["entrada_centavos"] == 500_000 and v["repasse_centavos"] == 14_500_000
+    c.post(f"/painel/obras/{o['id']}/venda/passo", data={"situacao": "assinatura", "data": ""})
+    v = ov.venda(pool, conta, o["id"])
+    assert v["situacao"] == "assinatura" and v["titulo_entrada_id"] and v["titulo_repasse_id"]
+    html = c.get(f"/painel/obras/{o['id']}").text
+    assert "Contrato assinado" in html and "R$ 145.000,00" in html

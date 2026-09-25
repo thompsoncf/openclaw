@@ -597,7 +597,42 @@ def bloco_persona(pool, conta_id: int) -> str:
             f"({_brl(falta['total_centavos'])}). Se ele perguntar, ou numa hora boa (uma "
             "vez, sem insistir), ofereça distribuir: gastos_sem_obra lista, e cada um vai "
             "com por_na_obra ou dividir_entre_obras.")
+    linhas += _bloco_das_casas(pool, conta_id, obras)
     return "\n".join(linhas)
+
+
+def _bloco_das_casas(pool, conta_id: int, obras: list[dict]) -> list[str]:
+    """O caminho do dinheiro no prompt (finance/obra_venda.py): as ferramentas do
+    papel e da venda, e o que TRAVA cada casa pronta. Casa em obra não entra — o
+    que trava ela é a própria obra, e isso o agente já sabe pelas etapas. Vazio
+    sem a 353."""
+    casas = [o for o in obras if o["tipo"] == "casa"]
+    if not casas:
+        return []
+    try:
+        from . import obra_venda as _ov
+        pend = []
+        for o in casas:
+            sit = _ov.situacao_da_casa(pool, conta_id, o)
+            partes = []
+            if o["pct"] == 100 and sit["trava"]:
+                partes.append(f"trava em {sit['trava']['nome'].lower()}")
+            partes += sit["alertas"][:2]
+            if partes:
+                pend.append(f"{o['nome']}: " + "; ".join(partes))
+    except Exception:  # noqa: BLE001 — sem a 353, sem o caminho
+        return []
+    linhas = [
+        "- PAPEL DA CASA: \"saiu o habite-se da casa 2\", \"averbou a casa 1\" -> "
+        "marcar_documento. VENDA: \"assinou o contrato da casa 2\", \"registrou\", "
+        "\"caiu o dinheiro\" -> andar_venda. A entrada e o repasse da Caixa viram contas "
+        "a receber na assinatura. Comprador e valores da venda se cadastram na ficha da "
+        "obra, no painel.",
+    ]
+    if pend:
+        linhas.append("- PENDÊNCIAS DAS CASAS (lembre no máximo uma vez por semana, sem "
+                      "insistir): " + " | ".join(pend) + ".")
+    return linhas
 
 
 def resumo_da_obra(o: dict) -> str:

@@ -28,7 +28,7 @@ from datetime import time
 
 from finance import nichos as _n
 
-PERFIS = ("eventos", "recorrente", "seguros", "clinica", "produto")
+PERFIS = ("eventos", "recorrente", "seguros", "clinica", "obras", "produto")
 
 #: por que perdeu — a lista completa (check da migração 213). O perfil escolhe seis.
 MOTIVOS_TODOS = (
@@ -49,6 +49,8 @@ _MOTIVOS_POR_PERFIL = {
     "seguros": ("sumiu_apos_proposta", "ficou_com_atual", "achou_caro", "fora_do_escopo", "sem_interesse", "outro"),
     # clínica também: o que ela tem de próprio nasce só na semente abaixo
     "clinica": ("sumiu_apos_proposta", "ficou_com_atual", "achou_caro", "fora_do_escopo", "sem_interesse", "outro"),
+    # e obra, pelo mesmo motivo
+    "obras": ("sumiu_apos_proposta", "ficou_com_atual", "achou_caro", "fora_do_escopo", "sem_interesse", "outro"),
     "produto": (),
 }
 
@@ -112,6 +114,29 @@ _SEMENTE_MOTIVOS = {
         ("nao_indicado", "Procedimento não indicado pelo médico", False),
         ("condicao_pagamento", "Condição de pagamento", False),
         ("sem_interesse", "Sem interesse", False),
+        ("outro", "Outro", True),
+    ),
+    # Os de obra, dos dois negócios do ramo (docs/mockups/nicho_construcao.html,
+    # seção 08). CINCO só existem aqui, e todos são da casa de Minha Casa Minha
+    # Vida, que quem reprova não é o cliente, é a CAIXA: crédito reprovado,
+    # restrição no CPF, renda que não enquadra, quem já tem imóvel ou financiamento
+    # (e perde o FGTS) e a avaliação que vem abaixo do preço. Nenhum deles é falha
+    # de venda — e misturá-los com "achou caro" apagaria a diferença entre a casa
+    # que ninguém quis e a casa que o banco não deixou vender.
+    #
+    # Da reforma vem "fechou com outro construtor ou pedreiro": o concorrente real
+    # dela é o pedreiro conhecido (82% das moradias são feitas sem arquiteto nem
+    # engenheiro, Datafolha/CAU 2022).
+    "obras": (
+        ("nao_respondeu", "Não respondeu — após as tentativas de follow-up", False),
+        ("credito_reprovado", "Crédito reprovado na Caixa", False),
+        ("restricao_cpf", "Restrição no CPF (nome sujo)", False),
+        ("renda_insuficiente", "Renda não enquadra / parcela não cabe", False),
+        ("ja_tem_imovel", "Já tem imóvel ou financiamento (sem FGTS)", False),
+        ("avaliacao_abaixo", "Avaliação da Caixa abaixo do preço", False),
+        ("achou_caro", "Preço — acima do que queria pagar", False),
+        ("fechou_concorrente", "Fechou com outro construtor ou pedreiro", False),
+        ("adiou", "Adiou a compra ou a obra", False),
         ("outro", "Outro", True),
     ),
     # produto não tem funil nem vendedor: não há perda de lead pra motivar
@@ -190,6 +215,27 @@ _PERFIS = {
         "blocos": ("da_visita", "servicos", "reunioes", "ciclo", "perdas", "hora"),
         "faixas": ("pergunta", "proposta", "toque", "visita"),
     },
+    # CONSTRUÇÃO E REFORMA (nicho `construcao`). A primeira conta é a PX2
+    # (conta 33, Lago da Pedra-MA), que em 25/09/2026 estava no nicho certo e via o
+    # funil de quem vende mensalidade pra empresa. Desenho aprovado pelo dono no
+    # mesmo dia (docs/mockups/nicho_construcao.html, seção 08).
+    #
+    # UM PERFIL PRA DOIS NEGÓCIOS: ela vende CASA de Minha Casa Minha Vida e faz
+    # REFORMA. O compromisso é VISITA nos dois — à casa pronta ou à obra, pra quem
+    # compra; visita técnica, pra quem reforma. O pedido é a OBRA.
+    #
+    # O que sai em relação ao recorrente é o mesmo que saiu da clínica, pelo mesmo
+    # motivo: quem compra casa popular e quem reforma a casa é pessoa física, sem
+    # CNPJ pra dar segmento, porte e UF; e não há mensalidade pra somar em `mrr`.
+    "obras": {
+        "chave": "obras", "rotulo": "construção e reforma",
+        "vocab": {"data": False, "compromisso": "visita", "compromissos": "visitas",
+                  "compromisso_kpi": "visitas que aconteceram", "pedido": "obra",
+                  "oferta": "serviço", "proposta_aceita": "propostas aceitas"},
+        "filtros": ("periodo", "vendedor", "servico", "origem", "hora"),
+        "blocos": ("da_visita", "servicos", "reunioes", "ciclo", "perdas", "hora"),
+        "faixas": ("pergunta", "proposta", "toque", "visita"),
+    },
     "produto": {
         "chave": "produto", "rotulo": "produto",
         "vocab": {"data": False, "compromisso": "compromisso", "compromissos": "compromissos",
@@ -264,6 +310,18 @@ _FUNIL_POR_PERFIL = {
     # Os mesmos do recorrente, pelo motivo que a corretora deu: não há lead de
     # clínica na base pra medir. A conta sobrescreve sem deploy.
     "clinica": {
+        "janela_dias": "1,2,3,4,5", "janela_abre": time(8, 0), "janela_fecha": time(19, 0),
+        "sem_resposta_min": 120, "bola_nossa_min": 240, "bola_cliente_min": 4320,
+        "escala_min": 240, "teto_avisos_dia": 5,
+        "fu_proposta_dias": 3, "fu_toques_dias": "2,4,7,15", "fu_festa_dias": None,
+        "fu_teto_dia": 15,
+        "temp_quente_h": 72, "temp_morno_dias": 14, "temp_frio_tentativas": 4,
+    },
+    # Os mesmos do recorrente, pelo motivo da corretora e da clínica: não há lead
+    # de obra na base pra medir. Venda de casa pela Caixa leva de 60 a 90 dias da
+    # documentação ao crédito, então é provável que a temperatura precise esfriar
+    # mais devagar aqui — mas a hora de mudar o padrão é com dado da PX2.
+    "obras": {
         "janela_dias": "1,2,3,4,5", "janela_abre": time(8, 0), "janela_fecha": time(19, 0),
         "sem_resposta_min": 120, "bola_nossa_min": 240, "bola_cliente_min": 4320,
         "escala_min": 240, "teto_avisos_dia": 5,
@@ -370,6 +428,27 @@ _ETAPAS_POR_PERFIL = {
         ("ganho", "Fechado", 900, True, True, False),
         ("perdido", "Perdido", 910, True, False, False),
     ),
+    "obras": (
+        ("novo", "Novo", 0, True, False, False),
+        ("contatado", "Contatado", 10, False, False, False),
+        ("follow_up", "Follow-up", 20, False, False, False),
+        # visita à casa pronta (quem compra) ou visita técnica (quem reforma)
+        ("qualificado", "Visita", 30, False, False, False),
+        # simulação da casa ou orçamento da reforma
+        ("proposta", "Proposta", 40, False, False, False),
+        # A COLUNA QUE SÓ ESTE RAMO TEM, e é a primeira chave nova de etapa desde
+        # `follow_up`. Os dois negócios param aqui: a casa espera a CAIXA analisar
+        # o comprador, e a reforma espera o cliente ter o Reforma Casa Brasil
+        # liberado. Nos dois, a bola não está com ninguém da empresa — separar a
+        # coluna é o que deixa isso visível em vez de parecer lead esquecido em
+        # "Proposta". Chave nova porque não existe status parecido gravado em
+        # lugar nenhum pra reaproveitar.
+        ("credito", "Crédito em análise", 50, False, False, False),
+        # sai do quadro (contrato assinado não é prospecção) e NÃO agenda: a
+        # obra não tem data no cadastro do lead, e a ponte não teria o que ler.
+        ("ganho", "Fechado", 900, True, True, False),
+        ("perdido", "Perdido", 910, True, False, False),
+    ),
     # produto não tem funil nem vendedor (ver o docstring). Recebe o genérico de
     # sempre: nada muda pra quem já está assim, e ninguém ganha uma coluna de
     # "Agendado Visita" numa tela que vende caixa.
@@ -459,7 +538,7 @@ def voltar_padrao(chave_perfil: str) -> dict | None:
 
 
 #: nichos com perfil próprio (slug -> chave do perfil). Os demais saem dos portões.
-_PERFIL_DO_NICHO ={"seguros": "seguros", "clinica": "clinica"}
+_PERFIL_DO_NICHO = {"seguros": "seguros", "clinica": "clinica", "construcao": "obras"}
 
 
 def perfil_por_nicho(slug: str | None) -> str:

@@ -141,6 +141,9 @@ def pool():
         c.execute((BASE / "338_novidade_empresa_reorganizada.sql").read_text(encoding="utf-8"))
         # 347 amplia pela quinta vez, com `clinica` (a tela Hoje da clínica).
         c.execute((BASE / "347_novidade_hoje_da_clinica.sql").read_text(encoding="utf-8"))
+        # 350 amplia pela sexta, com `construcao` — o quarto portão de UM nicho
+        # só. Depois da 347 de propósito: a lista dela é a base da dele.
+        c.execute((BASE / "350_novidade_nicho_construcao.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

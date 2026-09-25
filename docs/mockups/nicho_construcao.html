@@ -1,0 +1,624 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PX2: o nicho de construção e reforma</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.barra{display:inline-block;height:9px;border-radius:3px;background:#C9BFA8;vertical-align:middle;margin-right:6px}
+.barra.ruim{background:#D99A93}
+.barra.boa{background:#7FBFA0}
+.pill{display:inline-block;background:#F2EFE7;border:1px solid #E3DDD0;border-radius:99px;padding:.18rem .6rem;font-size:.78rem;margin:0 4px 6px 0;font-family:ui-monospace,Menlo,monospace}
+.pill.pad{background:#E8F5EE;border-color:#BFE3D0;color:#155c3b;font-weight:700}
+.pill.cond{background:#FFF6E8;border-color:#F0DDBA;color:#7A4E0C}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-ex{background:#EEF1F6;color:#5A6678;border:1px solid #D5DBE6}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+.ftr a{color:#8A6A2E;word-break:break-all}
+
+/* ---------- réplica do painel escuro ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .tit{font-weight:700;font-size:.95rem;margin-bottom:.15rem}
+.pn .mut{color:#7B8A99;font-size:.76rem}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .75rem;margin-bottom:.5rem}
+.pn .lbl{color:#7B8A99;font-size:.66rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.25rem}
+.pn .expl{color:#9AA7B4;font-size:.84rem;margin:.6rem 0 .1rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.pn .obra{display:grid;grid-template-columns:1.25fr 1.2fr 1fr 1.35fr;gap:.6rem;align-items:center;background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.55rem .75rem;margin-bottom:.4rem;font-size:.84rem}
+.pn .obra .nm b{display:block;font-size:.88rem}
+.pn .obra .nm span{color:#7B8A99;font-size:.72rem}
+.pn .vl{font-variant-numeric:tabular-nums}
+.pn .vl small{display:block;color:#7B8A99;font-size:.7rem}
+.pn .bar{height:7px;background:#22303C;border-radius:4px;overflow:hidden;margin:.25rem 0 .1rem}
+.pn .bar i{display:block;height:100%;background:#2C9E6E}
+.pn .bar i.amb{background:#D9932B}
+.pn .chip{display:inline-block;border-radius:14px;padding:2px 9px;font-size:.7rem;margin:0 4px 4px 0;border:1px solid #22303C;background:#16212C;color:#B4B2A9}
+.pn .chip.ok{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .chip.am{border-color:#7A5A1A;background:#2A2112;color:#F2C46B}
+.pn .chip.vm{border-color:#7A2A24;background:#2A1512;color:#FF8F85}
+.pn .linha{display:flex;justify-content:space-between;gap:.6rem;font-size:.82rem;padding:.2rem 0;border-bottom:1px dashed #22303C}
+.pn .linha:last-child{border-bottom:0}
+.pn .passos{display:flex;flex-wrap:wrap;gap:4px;margin:.35rem 0 .2rem}
+.pn .passo{flex:1 1 84px;background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.35rem .4rem;font-size:.68rem;color:#7B8A99;text-align:center;line-height:1.35}
+.pn .passo.ok{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .passo.agora{border-color:#D9932B;background:#2A2112;color:#F2C46B;font-weight:700}
+.pn .passo.din{border-color:#2C6E52;color:#DDE4EC;font-weight:700}
+.pn .cols{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem}
+.pn .col{background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.45rem .5rem;font-size:.74rem}
+.pn .col b{display:block;font-size:.78rem;color:#DDE4EC}
+.pn .col.novo b{color:#7EE7B8}
+
+/* ---------- réplica do WhatsApp ---------- */
+.wa{background:#E5DDD5;border-radius:12px;padding:12px;margin:0 0 14px;max-width:560px}
+.wa .hd{background:#075E54;color:#fff;border-radius:10px 10px 0 0;margin:-12px -12px 10px;padding:8px 12px;font-weight:600;font-size:13px}
+.wa .hd small{font-weight:400;opacity:.8;margin-left:6px}
+.b{max-width:86%;padding:7px 10px;border-radius:8px;margin:0 0 6px;font-size:13px;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.08);width:fit-content}
+.b.eu{background:#DCF8C6;margin-left:auto}
+.b.zq{background:#fff}
+.b .ft{display:block;background:#CFE9BA;border-radius:6px;padding:14px 8px;text-align:center;color:#3B5A2A;font-size:12px;margin-bottom:4px}
+.dupla{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:720px){.dupla,.pn .grid2{grid-template-columns:1fr}.pn .obra{grid-template-columns:1fr 1fr}.pn .cols{grid-template-columns:1fr 1fr}
+  table{display:block;overflow-x:auto}td,th,code,.mono{overflow-wrap:anywhere}}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q,table,.wa{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<h1>PX2: o nicho de construção e reforma</h1>
+<p class="lead">A conta 33 (<b>PX2 Empreendimentos</b>, Lago da Pedra-MA) constrói <b>casa popular pra
+vender pelo Minha Casa Minha Vida</b> e também <b>faz reforma</b>. Quem toca o dia a dia é o
+<b>Pablo, encarregado e gestão</b>, e ele vive no WhatsApp. O nicho <code>construcao</code> existe desde
+a migração 109, mas pela metade: fala de honorário e mensalidade, e não sabe o que é uma obra. Este documento
+mostra o que a PX2 usa hoje (medido em produção, só leitura, em 25/09/2026). Depois mostra como o dinheiro
+entra em cada um dos dois negócios, a partir de uma pesquisa na Caixa, no Código Civil, no CDC e no SINAPI.
+Por fim desenha o nicho inteiro: a obra no centro, o WhatsApp da obra, o caminho do dinheiro da casa, a
+reforma, o funil, a persona, o CNAE e o aviso. No fim, as decisões que são suas.</p>
+<p class="lead" style="border-left:3px solid #B8862E;background:#FBFAF7;padding:10px 13px;border-radius:8px;margin-top:-10px"><b>Atualização de 25/09/2026: as seis decisões foram respondidas.</b> O dono mandou seguir as
+recomendações da seção 15. A obra nasce no painel; o funil é um só; a venda é de casa pronta, a confirmar com o
+Pablo antes do PR 3; as duas contas entram no plano; a entrega é em quatro PRs. O <b>PR 1</b> é a linha 1 da
+seção 14: nome, vocabulário, persona, CNAE pelo código, plano de contas, perfil <code>obras</code> e o aviso.</p>
+
+<h2><span class="n">01</span> O que a PX2 vê hoje</h2>
+<div class="sub">O nicho certo no cadastro, e nada dele na tela</div>
+
+<table>
+<tr><th>Onde</th><th>O que ela vê hoje</th><th>Por que é errado pra ela</th></tr>
+<tr><td>O agente no WhatsApp</td><td><code>_molde_servico</code>, o molde de escritório</td>
+    <td>Ensina que a receita é <b>"Honorários"</b> e que a mensalidade é o forte. A PX2 recebe por
+        <b>casa vendida</b> e por <b>etapa de reforma</b>. Clínica e corretora saíram do molde pelo
+        mesmo motivo.</td></tr>
+<tr><td>Funil e Raio-X</td><td>perfil <code>recorrente</code></td>
+    <td>"Reunião marcada", filtro de porte e segmento do CNPJ e bloco de MRR. Quem compra casa e quem
+        contrata reforma é <b>pessoa física</b>, e nada ali tem mensalidade.</td></tr>
+<tr><td>Orçamento e contrato</td><td>modo <code>recorrente</code>, sem contrato</td>
+    <td>A proposta fala em implantação + "/mês". Reforma precisa de m², material incluso ou não,
+        prazo e pagamento por etapa.</td></tr>
+<tr><td>CNAE → nicho</td><td class="mono">7112-0/00 "Serviços de engenharia"</td>
+    <td>O <code>nicho_do_cnae</code> só lê o CNAE principal e manda pra <b>arquitetura</b>. Ela está em
+        <code>construcao</code> porque alguém escolheu na mão. <b>20 dos 28 CNAEs secundários</b> dela são de
+        obra (seção F). E "pintura de edifícios" não cai em nicho nenhum.</td></tr>
+<tr><td>A despesa da empresa</td><td>sem obra, em três categorias</td>
+    <td>Nenhum centro de custo. A mesma compra de material está gravada como <code>Compras</code> e como
+        <code>Construcao</code>, que é categoria de despesa de casa, do Raio-X de consumo.</td></tr>
+<tr><td>Plano</td><td>trial vencido em 07/08</td>
+    <td>Usa por causa do beta, que está ligado desde 09/07. O aviso de vencimento está calado desde 20/08.</td></tr>
+</table>
+
+<h2><span class="n">02</span> A prova está no uso dele</h2>
+<div class="sub">26 lançamentos, todos despesa, e nenhum sabe de qual casa é</div>
+
+<table>
+<tr><th>O que ele lançou (empresa)</th><th>Lanç.</th><th>Valor</th><th>Como ficou gravado</th></tr>
+<tr><td>Material de loja de construção (pelo menos 4 lojas): tinta, cabo, material de cerca elétrica etc.</td>
+    <td class="num">10</td><td class="num">R$ 6.881,08</td><td class="mono">Compras (7) · Construcao (2) · Compras/marketplace (1)</td></tr>
+<tr><td><b>6 kits bacia + caixa acoplada</b>, 2 por casa</td>
+    <td class="num">1</td><td class="num">R$ 3.599,40</td><td class="mono">Construcao</td></tr>
+<tr><td>Mão de obra da <b>"primeira etapa"</b>, via Pix</td>
+    <td class="num">1</td><td class="num">R$ 10.000,00</td><td class="mono">Servicos</td></tr>
+<tr><td>Subempreiteiro: instalação de cerca elétrica em <b>"3 casas"</b></td>
+    <td class="num">1</td><td class="num">R$ 1.500,00</td><td class="mono">Servicos</td></tr>
+<tr><td><b>Total da empresa</b></td><td class="num"><b>13</b></td><td class="num"><b>R$ 21.980,48</b></td>
+    <td>Mais 13 fora da empresa (R$ 3.209,72: 12 pessoais e 1 sem natureza), na mesma conta</td></tr>
+</table>
+
+<div class="perigo"><b>Três casas ao mesmo tempo, e o sistema não sabe quanto cada uma custou.</b> "Primeira
+etapa", "3 casas" e "6 bacias" estão escritos na descrição, porque não havia campo pra isso. A pergunta que
+decide se uma casa de MCMV dá lucro é quanto ela custou contra quanto a Caixa paga. Hoje ela não tem
+resposta.</div>
+
+<div class="alerta"><b>E ele parou de usar pra empresa.</b> O último gasto de obra é de 15/08. De lá até
+21/09 ele só lançou despesa pessoal: luz, lazer, presente. O uso diário continua, 16 dias até agora. O
+agente serve pra conta de casa e não serve pra obra.</div>
+
+<div class="nota"><b>Quase tudo chegou por foto no WhatsApp:</b> 25 dos 26 lançamentos. Das 28 imagens, 22
+são nota sem QR, que é a nota de balcão da loja de material do interior. Quem leu foi a leitura de foto, e
+ela funcionou. <b>A porta de entrada deste nicho já existe e está boa.</b> O que falta é o que vem
+depois da foto.</div>
+
+<h2><span class="n">03</span> Os dois negócios, e quando o dinheiro entra em cada um</h2>
+<div class="sub">Casa vendida paga no registro. Reforma paga por etapa</div>
+
+<table>
+<tr><th></th><th>Casa pra vender (MCMV)</th><th>Reforma</th></tr>
+<tr><td>Quem paga</td><td>A <b>Caixa</b> (financiamento + FGTS + subsídio) e o <b>comprador</b> (a diferença, como entrada)</td>
+    <td>O <b>cliente</b>, muitas vezes com o <b>Reforma Casa Brasil</b></td></tr>
+<tr><td>Quando entra</td><td>Na casa pronta, <b>só depois do registro do contrato no cartório</b>. Da entrega dos
+    documentos ao crédito, o mercado fala em 60 a 90 dias.</td>
+    <td>Sinal + parcelas por etapa. No Reforma Casa Brasil o <b>cliente</b> recebe 90% na assinatura e 10% depois
+    das fotos da obra pronta, e a obra tem <b>55 dias</b>.</td></tr>
+<tr><td>O que trava</td><td><b>Papel da casa:</b> habite-se → CND da obra (SERO) → averbação → matrícula. E o
+    comprador: crédito, nome no SPC, renda, FGTS.</td>
+    <td>Preço, o "pedreiro conhecido" e aditivo de escopo no meio da obra</td></tr>
+<tr><td>O risco</td><td><b>Capital parado:</b> ela paga material e mão de obra do bolso e só recebe no
+    fim. A greve da Caixa, desde 10/09, está atrasando repasse.</td>
+    <td>Estouro de material, cliente que atrasa a etapa e serviço extra sem aceite</td></tr>
+</table>
+
+<div class="card">
+<p><b>As regras do MCMV que valem hoje</b> (Portaria MCID 333/2026, aplicada pela Caixa desde 22/04/2026):</p>
+<p><span class="pill">Faixa 1 · até R$ 3.200</span><span class="pill">Faixa 2 · até R$ 5.000</span>
+<span class="pill">Faixa 3 · até R$ 9.600</span><span class="pill">Faixa 4 · até R$ 13.000</span></p>
+<p style="margin-top:6px"><b>Subsídio</b> de até R$ 55 mil no Nordeste (Faixas 1–2). <b>Parcela</b> de até 30%
+da renda. <b>FGTS</b> só pra quem tem 3 anos de fundo e nenhum imóvel no município. <b>Teto do imóvel</b>: nas
+Faixas 1–2 depende do porte da cidade. Lago da Pedra tem 44.403 habitantes (Censo 2022), e a pesquisa
+aponta <b>R$ 210 mil</b>, <span class="eti e-hoje">não confirmado</span>: conferir no simulador da Caixa antes
+de usar em tela.</p>
+<p style="margin-top:6px"><b>As três formas de vender</b> e qual serve pra PX2:</p>
+<p>• <b>Casa pronta</b>: o comprador financia "imóvel novo" e o dinheiro sai no registro. Com duas ou mais
+casas prontas e averbadas existe a <b>Alocação de Recursos</b>, com avaliação em grupo válida por 365 dias.
+<span class="rec">É a que bate com o que a PX2 faz</span>: constrói com o próprio dinheiro e vende depois.<br>
+• <b>Terreno + construção</b> (pessoa física): a Caixa libera por medição mensal (PLS, com 12 fotos). A própria
+Caixa diz que essa linha <b>não serve pra construir em série pra vender</b>. Arriscado pra PX2.<br>
+• <b>Apoio à Produção / Plano Empresário</b>: vende na planta com medição da Caixa. Exige PBQP-H e
+incorporação registrada. Grande demais pra PX2 hoje.</p>
+</div>
+
+<h2><span class="n">04</span> O que o mercado vende pra isso, e o que falta</h2>
+<div class="sub">Os sistemas bons são de incorporadora média; nenhum mora no WhatsApp do encarregado</div>
+
+<table>
+<tr><th>Quem</th><th>O que tem</th><th>O que não serve pra PX2</th></tr>
+<tr><td><b>CV CRM</b> (e a Anapro, que ele comprou em 2025)</td>
+    <td>Espelho de vendas (disponível, reservada, vendida), análise de crédito, módulo de repasse com o
+        correspondente, comissão, portal do comprador com fotos da obra, WhatsApp oficial</td>
+    <td>Preço sob consulta, feito pra incorporadora de médio porte pra cima. As etapas do repasse quem configura
+        é o cliente, e há cliente relatando classificação manual do repasse da Caixa.</td></tr>
+<tr><td><b>Obra Prima</b></td><td>Gestão de obra: orçamento, diário e fotos, portal do cliente</td>
+    <td>A partir de <b>R$ 399,20/mês</b>. Não tem venda, espelho nem repasse.</td></tr>
+<tr><td><b>Planilha + WhatsApp</b></td><td>O que a PX2 usa hoje. É o normal do ramo: 82% das moradias são
+    feitas sem arquiteto nem engenheiro (Datafolha/CAU, 2022)</td><td>Não sabe quanto custou cada casa</td></tr>
+</table>
+
+<div class="bom"><b>O lugar do Zaq:</b> o encarregado não vai abrir sistema na obra, mas manda foto no
+WhatsApp o dia inteiro. <b>Custo por casa, etapas e caminho do dinheiro, alimentados pela foto que ele já
+manda</b>, é o que nenhum dos dois faz. O espelho e o repasse do CV CRM, pro tamanho de 3 a 10 casas,
+cabem numa aba.</div>
+
+<h2><span class="n">05</span> A obra no centro</h2>
+<div class="sub">Cada casa e cada reforma é uma obra, e cada obra é um centro de custo</div>
+
+<p>A peça nova é a <b>obra</b>: <code>casa</code> (pra vender) ou <code>reforma</code> (de cliente). Ela
+guarda o que só obra tem: lote/endereço, m², etapas, documentos, comprador e o caminho do dinheiro.
+<b>Cada obra nasce ligada a um centro de custo</b>, e isso é o que faz o desenho barato. Tudo que já
+existe por centro passa a responder por obra, sem código novo:</p>
+<table>
+<tr><th>Já existe</th><th>Vira</th></tr>
+<tr><td>DRE por centro (<code>empresa.dre_por_centro</code>)</td><td><b>Resultado por obra</b>: quanto entrou e saiu em cada casa</td></tr>
+<tr><td>Card "Empresa por centro" do Financeiro (#820)</td><td>Gasto por casa, com <b>"Sem obra"</b> em âmbar</td></tr>
+<tr><td>Conta a pagar com centro (#818)</td><td>O boleto da loja de material já nasce na casa certa</td></tr>
+<tr><td>O agente conhece os centros (23/09)</td><td>O agente conhece as obras, pelo mesmo caminho</td></tr>
+</table>
+
+<p style="font-size:12.5px;color:#8A8475;margin-bottom:6px"><b>A ABA OBRAS</b> <span class="eti e-novo">nova · só construção</span> <span class="eti e-ex">números de exemplo</span></p>
+<div class="pn">
+  <div class="tit">Obras · PX2 Empreendimentos</div>
+  <div class="mut">3 casas em obra · 1 reforma · <b style="color:#F2C46B">R$ 21.980 gastos sem obra: distribuir</b></div>
+  <div style="height:.6rem"></div>
+  <div class="obra">
+    <div class="nm"><b>🏠 Casa 1</b><span>Qd 4 · Lt 11 · 45 m² · pra vender</span></div>
+    <div><span class="lbl" style="margin:0">Etapas · 62%</span><div class="bar"><i style="width:62%"></i></div><span class="mut">reboco e revestimento</span></div>
+    <div class="vl">R$ 48.900<small>de R$ 82.000 previstos</small></div>
+    <div><span class="chip ok">alvará</span><span class="chip ok">CNO</span><span class="chip am">habite-se</span></div>
+  </div>
+  <div class="obra">
+    <div class="nm"><b>🏠 Casa 2</b><span>Qd 4 · Lt 12 · 45 m² · pra vender</span></div>
+    <div><span class="lbl" style="margin:0">Etapas · 100%</span><div class="bar"><i style="width:100%"></i></div><span class="mut">pronta há 12 dias</span></div>
+    <div class="vl">R$ 79.300<small>de R$ 82.000 previstos</small></div>
+    <div><span class="chip vm">falta habite-se</span><span class="chip">comprador em análise</span></div>
+  </div>
+  <div class="obra">
+    <div class="nm"><b>🏠 Casa 3</b><span>Qd 4 · Lt 13 · 45 m² · pra vender</span></div>
+    <div><span class="lbl" style="margin:0">Etapas · 34%</span><div class="bar"><i class="amb" style="width:34%"></i></div><span class="mut">alvenaria · parada há 16 dias</span></div>
+    <div class="vl">R$ 27.100<small>de R$ 82.000 previstos</small></div>
+    <div><span class="chip ok">alvará</span><span class="chip am">CNO vence em 4 dias</span></div>
+  </div>
+  <div class="obra">
+    <div class="nm"><b>🔨 Reforma · cliente A.</b><span>banheiro + área · 18 m²</span></div>
+    <div><span class="lbl" style="margin:0">Etapas · 50%</span><div class="bar"><i style="width:50%"></i></div><span class="mut">dia 31 de 55</span></div>
+    <div class="vl">R$ 6.200<small>custo · contrato R$ 14.500</small></div>
+    <div><span class="chip ok">sinal pago</span><span class="chip am">2ª etapa vence 30/09</span></div>
+  </div>
+  <div class="expl">No topo do Financeiro: <b>R$ 155.300 parados em obra</b>, gasto em casa ainda não paga pela Caixa.
+  Com a greve da Caixa atrasando repasse, esse é o número que decide se ela começa a Casa 4.</div>
+</div>
+
+<div class="alerta"><b>A regra do dono de 23/09 continua valendo:</b> o agente não cria nem mexe em centro de
+custo. Por isso a obra nasce <b>no painel</b>, num botão "Nova obra" que a própria PX2 aperta, e o centro
+nasce junto com ela. Se o Pablo pedir pelo WhatsApp ("abre a casa 4"), o agente responde com o link. Liberar
+o agente pra abrir obra é a <b>decisão 1</b> da seção 15.</div>
+
+<h2><span class="n">06</span> A ficha da casa e o caminho do dinheiro</h2>
+<div class="sub">O que falta pra essa casa virar dinheiro, em uma linha</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin-bottom:6px"><b>A FICHA DA CASA 2</b> <span class="eti e-ex">números de exemplo</span></p>
+<div class="pn">
+  <div class="tit">🏠 Casa 2 · Qd 4 · Lt 12 · 45 m²</div>
+  <div class="mut">pronta desde 13/09 · comprador: J. S. (Faixa 2) · venda R$ 150.000</div>
+  <span class="lbl" style="margin-top:.7rem">O caminho do dinheiro</span>
+  <div class="passos">
+    <div class="passo ok">✓ Obra<br>100%</div>
+    <div class="passo agora">Habite-se<br>pedido 15/09</div>
+    <div class="passo">CND da obra<br>(SERO)</div>
+    <div class="passo">Averbação<br>na matrícula</div>
+    <div class="passo ok">✓ Comprador<br>aprovado</div>
+    <div class="passo">Avaliação<br>Caixa</div>
+    <div class="passo">Assinatura</div>
+    <div class="passo">Registro<br>≤ 30 dias</div>
+    <div class="passo din">💰 Crédito<br>R$ 145.000</div>
+  </div>
+  <div class="expl">O primeiro passo aceso em âmbar é o que trava a casa. Aqui é o habite-se: sem ele não
+  sai a CND, sem a CND o cartório não averba, e sem averbação <b>a Caixa não paga</b>. O agente lembra o Pablo
+  toda segunda até o passo andar.</div>
+  <div class="grid2" style="margin-top:.6rem">
+    <div class="bloco"><span class="lbl">Custo</span>
+      <div class="linha"><span>Material</span><span class="vl">R$ 46.100</span></div>
+      <div class="linha"><span>Mão de obra</span><span class="vl">R$ 29.800</span></div>
+      <div class="linha"><span>Louças, esquadrias, outros</span><span class="vl">R$ 3.400</span></div>
+      <div class="linha"><span><b>Obra · R$ 1.762/m²</b></span><span class="vl"><b>R$ 79.300</b></span></div>
+      <div class="linha"><span>Terreno e papéis (lote, alvará, ART, cartório)</span><span class="vl">R$ 29.500</span></div>
+      <div class="linha"><span><b>Custo da casa</b></span><span class="vl"><b>R$ 108.800</b></span></div>
+      <div class="mut" style="margin-top:.3rem">Referência SINAPI-MA ago/2026: R$ 1.969/m² de obra, pra comparar e não pra cobrar</div></div>
+    <div class="bloco"><span class="lbl">A venda</span>
+      <div class="linha"><span>Financiamento Caixa</span><span class="vl">R$ 110.000</span></div>
+      <div class="linha"><span>Subsídio</span><span class="vl">R$ 25.000</span></div>
+      <div class="linha"><span>FGTS</span><span class="vl">R$ 10.000</span></div>
+      <div class="linha"><span>Entrada (paga à PX2)</span><span class="vl">R$ 5.000</span></div>
+      <div class="linha"><span><b>Margem prevista · 27%</b></span><span class="vl"><b>R$ 41.200</b></span></div>
+      <div class="mut" style="margin-top:.3rem">entrada = venda − financiamento − subsídio − FGTS. Se a avaliação vier abaixo da venda, o aviso sai aqui</div></div>
+  </div>
+  <div class="grid2">
+    <div class="bloco"><span class="lbl">Etapas (pesos editáveis)</span>
+      <div class="mut">✓ preliminares e fundação 8% · ✓ estrutura 14% · ✓ alvenaria 10% · ✓ cobertura 12% · ✓ elétrica 6% ·
+      ✓ hidráulica 6% · ✓ reboco e revestimento 12% · ✓ pisos 10% · ✓ esquadrias 9% · ✓ louças e metais 5% · ✓ pintura 6% · ✓ limpeza 2%</div></div>
+    <div class="bloco"><span class="lbl">Fotos da obra</span>
+      <div class="mut">38 fotos, que chegaram pelo WhatsApp e foram guardadas por etapa. São elas que viram as
+      fotos do Reforma Casa Brasil ou da PLS, se um dia a venda for por medição.</div></div>
+  </div>
+</div>
+
+<div class="nota"><b>De onde vêm os pesos das etapas.</b> Estão dentro das faixas da planilha de construção
+individual da Caixa (PCI): estrutura 12–18%, pisos 8–12%, paredes 5–11%, esquadrias 4–13%, cobertura até 13%,
+revestimento interno 7–9%, fundação 3–7%, cada instalação 4–5%, louças 4–5%. Pintura, limpeza e preliminares
+entram pra fechar 100. <b>A PX2 ajusta na primeira casa</b>, e o ajuste vale pras próximas.</div>
+
+<h2><span class="n">07</span> O WhatsApp da obra</h2>
+<div class="sub">Quatro conversas, que são o dia do Pablo</div>
+
+<div class="dupla">
+<div class="wa"><div class="hd">Zaq <small>a nota de material</small></div>
+  <div class="b eu"><span class="ft">📷 foto da nota · Sampaio</span></div>
+  <div class="b zq">Anotei <b>R$ 1.763,91 de material</b> da Sampaio, Pix, hoje. É de qual obra?<br>
+  <b>1</b> Casa 1 · <b>2</b> Casa 2 · <b>3</b> Casa 3 · <b>D</b> dividir entre as três</div>
+  <div class="b eu">divide</div>
+  <div class="b zq">Dividi: <b>R$ 587,97</b> em cada casa. ✅ A Casa 3 está em 33% do previsto.</div>
+</div>
+<div class="wa"><div class="hd">Zaq <small>a mão de obra por etapa</small></div>
+  <div class="b eu">paguei 10 mil pro empreiteiro, primeira etapa da casa 2</div>
+  <div class="b zq">Lancei <b>R$ 10.000 de mão de obra</b> na <b>Casa 2</b>. Foi Pix? E essa "primeira etapa"
+  fechou qual parte: fundação e estrutura?</div>
+  <div class="b eu">isso, até a laje</div>
+  <div class="b zq">Marquei fundação e estrutura como pagas na Casa 2. ✅</div>
+</div>
+<div class="wa"><div class="hd">Zaq <small>a pergunta que vale dinheiro</small></div>
+  <div class="b eu">quanto ja gastei na casa 2?</div>
+  <div class="b zq"><b>Casa 2: R$ 79.300</b> (material R$ 46.100 · mão de obra R$ 29.800 · outros R$ 3.400).
+  Previsto R$ 82.000, ou seja, <b>97%</b>. Obra pronta.<br>⚠️ Falta o <b>habite-se</b>, e sem ele a Caixa não paga os R$ 145 mil.</div>
+</div>
+<div class="wa"><div class="hd">Zaq <small>a foto que não é nota</small></div>
+  <div class="b eu"><span class="ft">📷 foto do telhado</span>casa 3 terminou o telhado</div>
+  <div class="b zq">Boa! Marquei <b>cobertura concluída</b> na Casa 3, que foi pra <b>46%</b>. Guardei a foto na
+  etapa. 📸</div>
+</div>
+</div>
+
+<div class="alerta"><b>O que muda no agente, pra essas quatro existirem.</b> Pra conta de construção, o
+bloco PJ passa a listar as <b>obras abertas</b> e a mandar perguntar "de qual obra?" em toda despesa de
+empresa de material, mão de obra ou equipamento. Não é o agente escolhendo, é ele perguntando, então a regra
+de 23/09 fica de pé. As ferramentas novas são <code>dividir_entre_obras</code>, <code>consultar_obra</code> e
+<code>marcar_etapa</code>. A obra entra no <code>lancar_despesa</code> pelo mesmo parâmetro
+<code>centro_custo</code> que já existe, porque o nome da obra é o nome do centro dela.</div>
+
+<h2><span class="n">08</span> O funil: quem compra casa e quem contrata reforma</h2>
+<div class="sub">Um quadro só, com a coluna que os dois têm: o crédito em análise</div>
+
+<div class="pn">
+  <div class="cols">
+    <div class="col"><b>Novo</b>entrou</div>
+    <div class="col"><b>Contatado</b>respondeu</div>
+    <div class="col"><b>Follow-up</b>esfriou</div>
+    <div class="col"><b>Visita</b>à casa ou visita técnica</div>
+    <div class="col"><b>Proposta</b>simulação ou orçamento</div>
+    <div class="col novo"><b>Crédito em análise</b>Caixa ou Reforma Casa Brasil</div>
+    <div class="col"><b>Fechado</b>contrato assinado → sai do quadro</div>
+    <div class="col"><b>Perdido</b>com motivo</div>
+  </div>
+  <div class="expl"><b>A coluna nova é o crédito.</b> Na casa, é a Caixa analisando o comprador. Na reforma, é o
+  cliente esperando o Reforma Casa Brasil. Nos dois casos, a bola não está com ninguém da PX2, e o follow-up
+  não deve cobrar como se estivesse.</div>
+</div>
+
+<table>
+<tr><th>Motivo de perda (semente do nicho)</th><th>De onde vem</th></tr>
+<tr><td>Crédito reprovado na Caixa</td><td>casa</td></tr>
+<tr><td>Restrição no CPF <span class="eti e-novo">volta sozinho</span></td><td>casa. O lead volta ao funil quando o prazo que ele deu pra limpar o nome vence</td></tr>
+<tr><td>Renda não enquadra / parcela não cabe</td><td>casa (parcela até 30% da renda)</td></tr>
+<tr><td>Já tem imóvel ou financiamento (sem FGTS)</td><td>casa</td></tr>
+<tr><td>Avaliação da Caixa abaixo do preço</td><td>casa. O comprador teria que cobrir a diferença</td></tr>
+<tr><td>Preço acima do que queria pagar</td><td>os dois; é a maior barreira da reforma</td></tr>
+<tr><td>Fechou com outro construtor ou pedreiro</td><td>os dois; o concorrente real da reforma é o pedreiro conhecido</td></tr>
+<tr><td>Adiou a compra ou a obra</td><td>os dois</td></tr>
+<tr><td>Não respondeu, após as tentativas de follow-up</td><td>os dois</td></tr>
+<tr><td>Outro (pede descrição)</td><td>—</td></tr>
+</table>
+
+<div class="nota"><b>Vocabulário do perfil <code>obras</code>:</b> o compromisso é <b>visita</b> (à casa pronta,
+à obra ou visita técnica de reforma), o pedido é <b>obra</b> e a oferta é <b>serviço</b>. Sem porte,
+segmento nem UF do CNPJ, e sem MRR: o placar mostra valor total proposto e fechado, como na clínica. Os
+números da régua e da temperatura <b>repetem os do recorrente</b> até haver lead de construção pra medir,
+a mesma regra que clínica e corretora seguiram.</div>
+
+<h2><span class="n">09</span> A reforma: orçamento, contrato e cobrança</h2>
+<div class="sub">O que a lei já manda ter, virando campo</div>
+
+<table>
+<tr><th>Peça</th><th>O que tem</th><th>Por quê</th></tr>
+<tr><td>Orçamento de obra <span class="eti e-novo">modo novo</span></td>
+    <td>Itens por serviço, em m², diária, empreitada ou unidade; <b>material incluso ou não</b>; mão de
+        obra, material e equipamento separados; prazo; forma de pagamento; validade</td>
+    <td>CDC, art. 40: o orçamento discrimina esses itens e vale 10 dias. Hoje o modo
+        <code>recorrente</code> fala em "/mês".</td></tr>
+<tr><td>Contrato de empreitada</td>
+    <td>Escopo e memorial, material, cronograma, medição, aditivo, garantia e ART/RRT quando mexe em
+        estrutura ou instalação</td>
+    <td>CC, arts. 610 (material só se estiver escrito), 614 (medição aceita se não reclamada em 30 dias),
+        618 (5 anos de solidez) e 619 (extra só com instrução escrita); CDC, art. 26; NBR 16280</td></tr>
+<tr><td>Aditivo</td><td>Serviço extra vira uma versão nova do orçamento, aceita antes de executar</td>
+    <td>A cobrança extra no meio da obra é a briga mais comum. O Zaq já tem aditivo de contrato; é
+        reaproveitar.</td></tr>
+<tr><td>Cobrança por etapa</td><td>Sinal + parcelas ligadas às etapas da obra, com Pix e lembrete</td>
+    <td>A etapa concluída no WhatsApp (seção 07) é o gatilho da cobrança da parcela</td></tr>
+<tr><td>Modelo "Reforma Casa Brasil"</td><td>Parcelas que cabem em 90% + 10% e 55 dias. A última parcela é
+    ligada às <b>fotos da obra pronta</b>, que saem do diário.</td>
+    <td>Crédito de R$ 10–50 mil a 0,99% ao mês, 36 a 72 parcelas, que paga material <b>e</b> mão de obra. Até
+        16/07 tinha usado só 6,7% dos R$ 40 bi: tem cliente com dinheiro liberado procurando quem faça.</td></tr>
+</table>
+
+<div class="alerta"><b>O agente nunca intermedia o crédito.</b> A Caixa diz que o Reforma Casa Brasil não
+precisa de intermediário, e "taxa de liberação" é o golpe clássico. O agente explica os requisitos
+(renda até R$ 13 mil, morar no imóvel, parcela até 25% da renda) e manda pro site da Caixa. Nunca pede
+senha do gov.br, nunca promete aprovação.</div>
+
+<h2><span class="n">10</span> Os papéis de cada casa</h2>
+<div class="sub">O checklist que é o caminho do dinheiro. O Zaq lembra, não decide imposto</div>
+
+<table>
+<tr><th>Fase</th><th>Documento</th><th>Prazo / regra</th><th>Se faltar</th></tr>
+<tr><td rowspan="3">Antes</td><td>Projeto aprovado + <b>alvará</b></td><td>Tem validade: o Zaq guarda a data e avisa antes de vencer</td><td>Obra com alvará vencido complica o habite-se</td></tr>
+<tr><td><b>ART/RRT</b> de projeto e de execução</td><td>Uma por obra</td><td>A Caixa pede na documentação da obra</td></tr>
+<tr><td><b>CNO</b> (Cadastro Nacional de Obras)</td><td>Até <b>30 dias</b> do início da obra. Obrigação do dono da obra ou do empreiteiro total (IN RFB 2.061/2021)</td><td>Sem CNO não tem aferição, e sem aferição não tem CND</td></tr>
+<tr><td>Durante</td><td>Fotos por etapa</td><td>Chegam pelo WhatsApp (seção 07)</td><td>Prova de avanço, pra PLS ou pro Reforma Casa Brasil</td></tr>
+<tr><td rowspan="3">Ao terminar</td><td><b>Habite-se</b></td><td>Prefeitura de Lago da Pedra</td><td>Trava tudo o que vem depois</td></tr>
+<tr><td><b>CND da obra</b> (aferição no SERO)</td><td>A lei exige pra averbar (Lei 8.212, art. 47). Empresa com contabilidade regular pode aferir pela contabilidade</td><td>O cartório não averba</td></tr>
+<tr><td><b>Averbação</b> + matrícula individualizada</td><td>Cartório: 5 dias pra averbar sem exigência</td><td>A Caixa não paga a casa pronta</td></tr>
+<tr><td rowspan="2">Pra vender</td><td>Certidões da PX2 (Junta ≤ 180 dias, CNDs)</td><td>A restrição do <b>vendedor</b> também derruba a venda</td><td>Venda cai no fim</td></tr>
+<tr><td>Avaliação da Caixa</td><td>Vale 12 meses</td><td>Refazer custa tarifa de novo</td></tr>
+</table>
+
+<div class="nota"><b>Imposto é com o contador, e o agente diz isso em uma linha.</b> Construtora de casa
+popular pode ter regime especial: <b>RET de 1%</b> pra unidade da Faixa 1 e 4% nas demais. Uma solução de
+consulta da Receita de 2026 aceita os dois no mesmo empreendimento com patrimônio de afetação, e a reforma
+tributária mexe nisso a partir de 2026. É dinheiro grande pra PX2, e decidir não é papel do Zaq. O Zaq
+<b>pergunta se ela já conversou com o contador</b> e guarda a resposta.</div>
+
+<h2><span class="n">11</span> As peças do nicho</h2>
+<div class="sub">Mesmo caminho da clínica (#802 → #805) e da corretora (Renovações), mais a obra</div>
+
+<table>
+<tr><th>Peça</th><th>Onde mora</th><th>O que muda</th></tr>
+<tr><td>Nome do nicho</td><td class="mono">nichos.py + migração</td><td>"Construção civil / Obras" vira <b>"Construção e reforma"</b>. O slug <code>construcao</code> fica, porque a FK e o código dependem dele.</td></tr>
+<tr><td>Vocabulário</td><td class="mono">finance/nichos.py · <code>NICHOS</code></td>
+    <td>Unidades: <span class="pill pad">m2</span><span class="pill">empreitada</span><span class="pill">diaria</span><span class="pill">etapa</span><span class="pill">unidade</span><span class="pill">obra</span><span class="pill cond">medicao</span> (a última fica por quem já cobra por medição).
+        As categorias passam de custo pra o que ela <b>vende</b>: <span class="pill pad">reforma</span><span class="pill">construcao</span><span class="pill">pintura</span><span class="pill">eletrica</span><span class="pill">hidraulica</span><span class="pill">alvenaria</span><span class="pill">acabamento</span><span class="pill">cobertura</span><span class="pill">piso_revestimento</span><span class="pill">gesso_drywall</span><span class="pill">outro</span></td></tr>
+<tr><td>Persona</td><td class="mono">nichos.py · <code>_PERSONAS_NICHO</code></td><td>Própria, fora do molde (seção 12)</td></tr>
+<tr><td>CNAE → nicho</td><td class="mono">finance/cnpj_info.py</td><td>Passa a ler o <b>código</b>. Seção F (divisões 41–43) é construção. 7112 (engenharia) com secundários de obra também é construção; sem eles, segue arquitetura. Pintura e elétrica param de se perder.</td></tr>
+<tr><td>Plano de contas</td><td class="mono">migração (global, como #833)</td><td>Contas novas: <b>1.1.04 Venda de Imóveis</b> e <b>3.1.04 Mão de Obra de Obras</b>. Material já tem casa: 3.1.03 Insumos e Materiais.</td></tr>
+<tr><td>Perfil</td><td class="mono">finance/raio_x_perfil.py</td><td><code>obras</code> em <code>_PERFIL_DO_NICHO</code>: vocabulário, filtros, blocos, etapas, motivos e régua (seção 08)</td></tr>
+<tr><td>Obra</td><td class="mono">migração + <code>finance/obras.py</code></td><td>Tabelas <code>obras</code>, <code>obra_etapas</code> e <code>obra_documentos</code>. Cada obra tem um <code>centro_custo_id</code> único.</td></tr>
+<tr><td>Aba Obras e ficha</td><td class="mono"><code>web/painel_obras.py</code></td><td>Menu só com <code>perfil.chave == 'obras'</code>, como Renovações, e a rota entra em <code>rotas_do_papel</code></td></tr>
+<tr><td>Agente</td><td class="mono">finance/tools_pj.py</td><td>Obras abertas no bloco, "de qual obra?", <code>dividir_entre_obras</code>, <code>consultar_obra</code>, <code>marcar_etapa</code></td></tr>
+<tr><td>Orçamento</td><td class="mono">finance/vendas.py + check do banco</td><td>Modo <code>obra</code>, além de <code>evento</code> e <code>recorrente</code></td></tr>
+<tr><td>Contrato</td><td class="mono">finance/contrato.py</td><td>Modelo de empreitada, com as cláusulas da seção 09</td></tr>
+<tr><td>Aviso</td><td class="mono">finance/novidades.py + check</td><td>Portão novo <code>construcao</code>, de um nicho só, como <code>seguros</code> e <code>suplementos</code></td></tr>
+</table>
+
+<div class="bom"><b>Nada do que a PX2 já lançou é mexido.</b> Os 13 gastos da empresa continuam como estão.
+Quando as três casas existirem, eles aparecem em âmbar como <b>"Sem obra (13)"</b>, e o agente oferece
+distribuir um por um, com o Pablo dizendo qual é qual. Nenhuma migração reclassifica dado de cliente
+(regra 0).</div>
+
+<h2><span class="n">12</span> A persona do agente</h2>
+<div class="sub">O que ela ensina, e que nenhuma outra ensina</div>
+
+<div class="card">
+<p>1. <b>Toda despesa de obra tem dono: uma casa ou uma reforma.</b> O agente pergunta "de qual obra?" e oferece
+dividir. Sem isso não existe custo por casa, e sem custo por casa não existe margem.</p>
+<p>2. <b>Material, mão de obra e equipamento são três coisas.</b> Material vai pra 3.1.03, mão de obra de
+empreiteiro e diarista pra 3.1.04, e aluguel de betoneira ou andaime é equipamento. Nunca "Compras" ou
+"Construcao", que são categorias de casa.</p>
+<p>3. <b>Dois jeitos de ganhar.</b> Casa vendida é "Venda de Imóveis", e o dinheiro entra no registro: a
+entrada vem do comprador e o resto vem da Caixa. Reforma é "Prestação de Serviços", com sinal e etapas.</p>
+<p>4. <b>Casa só vira dinheiro com papel.</b> O agente sabe a ordem (habite-se → CND → averbação → registro) e
+lembra o que trava cada casa. Não insiste mais de uma vez por semana.</p>
+<p>5. <b>Não promete crédito.</b> Quem aprova é a Caixa. O agente não simula financiamento oficial e manda
+pro simulador ou pro correspondente. Nunca pede senha do gov.br e nunca fala em "taxa de liberação".</p>
+<p>6. <b>Não dá conselho de imposto nem de engenharia.</b> RET, INSS da obra e aferição são com o contador;
+estrutura e ART, com o engenheiro. Uma linha dizendo isso, e segue ajudando no caixa.</p>
+<p>7. <b>Pessoal e empresa na mesma conta.</b> O Pablo lança conta de casa e nota de obra no mesmo WhatsApp.
+A pergunta "é da empresa?" continua valendo, mas nota de loja de material já nasce empresa.</p>
+</div>
+
+<h2><span class="n">13</span> O aviso, nos PRs que mudam tela</h2>
+<div class="sub">Regra 5 do CLAUDE.md</div>
+
+<table>
+<tr><th>Campo</th><th>Valor</th></tr>
+<tr><td>publico</td><td class="mono">construcao</td></tr>
+<tr><td>pra_quem</td><td class="mono">dono, gestor</td></tr>
+<tr><td>título</td><td>O Zaq agora fala a língua da obra</td></tr>
+<tr><td>resumo (vai pro site)</td><td>Construtora e reforma ganharam a aba Obras: gasto por casa, etapas pelo
+    WhatsApp, documentos e o caminho até o dinheiro da Caixa.</td></tr>
+<tr><td>link</td><td class="mono">/painel/obras</td></tr>
+<tr><td>quem recebe</td><td><b>conta 33 · PX2 Empreendimentos · Lago da Pedra-MA</b>, e mais ninguém, de propósito</td></tr>
+</table>
+
+<div class="alerta"><b>Por que o portão é novo:</b> <code>servico</code> alcançaria consultoria, advocacia e
+contabilidade, e <code>recorrente</code> alcançaria as consultorias. Nenhuma delas ganha a aba Obras.</div>
+
+<h2><span class="n">14</span> O plano, na ordem</h2>
+<div class="sub">Um desenho só, entregue em quatro PRs que se apoiam</div>
+
+<table>
+<tr><th>#</th><th>O que entra</th><th>Efeito pra PX2</th></tr>
+<tr><td class="num">1</td><td>Nome, vocabulário, persona, CNAE por código, plano de contas e perfil <code>obras</code>
+    (funil, motivos, Raio-X) + aviso</td><td>O agente e o funil param de falar de mensalidade</td></tr>
+<tr><td class="num">2</td><td><b>Obras</b>: tabelas, aba, ficha, etapas, "de qual obra?", dividir, consultar, marcar
+    etapa, "Sem obra" no Financeiro + aviso</td><td><b>Custo por casa.</b> É o PR que traz ele de volta.</td></tr>
+<tr><td class="num">3</td><td><b>Venda da casa</b>: caminho do dinheiro, documentos com prazo e lembrete,
+    comprador, entrada e repasse como títulos a receber, dinheiro parado em obra + aviso</td><td>Sabe o que trava cada
+    casa e quanto tem parado</td></tr>
+<tr><td class="num">4</td><td><b>Reforma</b>: orçamento modo obra, contrato de empreitada, aditivo, cobrança por etapa,
+    modelo Reforma Casa Brasil + aviso</td><td>Vende reforma com proposta e contrato</td></tr>
+</table>
+
+<table>
+<tr><th>Do lado da PX2</th><th>Quem</th></tr>
+<tr><td>Abrir as 3 casas em "Nova obra" (área, previsto, datas do alvará e do CNO)</td><td>Pablo, com a gente do lado na primeira</td></tr>
+<tr><td>Distribuir os 13 gastos "Sem obra"</td><td>Pablo, pelo WhatsApp, um por um</td></tr>
+<tr><td>Confirmar a forma de venda (casa pronta com financiamento do comprador?)</td><td>Pablo, com o correspondente da Caixa</td></tr>
+<tr><td>Levar o RET pro contador</td><td>O sócio</td></tr>
+<tr><td>Converter o trial, vencido desde 07/08</td><td>Você, quando o PR 2 estiver no ar</td></tr>
+</table>
+
+<h2><span class="n">15</span> As decisões que são suas</h2>
+<div class="sub">Regra 6 do CLAUDE.md: na dúvida, pergunta antes de construir</div>
+
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">1. A obra pode nascer pelo WhatsApp? <span class="eti e-novo">respondida</span></div>
+<div class="qo">A regra de 23/09 diz que o agente não cria centro de custo, e a obra cria um. <span class="rec">Minha
+recomendação: a obra nasce no painel, no botão "Nova obra"</span>, e o agente manda o link quando o Pablo pedir.
+São três ou quatro por semestre: o atrito é pequeno, e a regra fica inteira. Se quiser liberar, ela passa a
+ser "o agente cria obra (e o centro dela) só com confirmação explícita".</div></div>
+
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">2. Um funil pra casa e reforma, ou dois? <span class="eti e-novo">respondida</span></div>
+<div class="qo"><span class="rec">Recomendo um</span>, com a coluna "Crédito em análise" que serve aos dois
+(seção 08) e uma etiqueta 🏠/🔨 no cartão. Dois quadros exigiriam funil por produto, que o Zaq não tem.</div></div>
+
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">3. A PX2 vende casa pronta? <span class="eti e-novo">respondida</span></div>
+<div class="qo">Tudo indica que sim: constrói com o próprio dinheiro, três casas de uma vez. O caminho do
+dinheiro da seção 06 é desenhado pra isso. Se alguma for "terreno + construção" com medição da Caixa, a
+ficha ganha a régua da PLS mensal, mas a Caixa diz que essa linha não é pra quem constrói pra vender.
+<b>Vale confirmar com o Pablo antes do PR 3.</b></div></div>
+
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">4. Duas contas novas no plano de contas de todo mundo? <span class="eti e-novo">respondida</span></div>
+<div class="qo">"Venda de Imóveis" e "Mão de Obra de Obras" entram na árvore global e aparecem habilitadas
+pra todas as contas, como Fardamentos (#833). A alternativa é usar "Venda de Produtos" e "Custo dos Serviços
+Prestados", e o DRE da PX2 fica menos claro. <span class="rec">Recomendo as duas contas novas.</span></div></div>
+
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">5. Quatro PRs em sequência, ou um grande? <span class="eti e-novo">respondida</span></div>
+<div class="qo"><span class="rec">Recomendo quatro</span>, na ordem da seção 14, cada um com teste e aviso. O 2
+já devolve o valor pra PX2, e o 4 (reforma) pode esperar as casas estarem rodando. Um PR único seria grande
+demais pra revisar e para o nicho inteiro se uma peça travar.</div></div>
+
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">6. O sócio entra no Zaq? <span class="eti e-novo">respondida</span></div>
+<div class="qo">Na Receita, o único sócio-administrador da PX2 é outra pessoa, e é o sócio quem assina com a ZAQ.
+Pôr o sócio como membro, recebendo por e-mail o resumo semanal das obras, faz o dono do dinheiro ver o
+dinheiro parado em obra sem precisar entrar no sistema.</div></div>
+
+<div class="ftr">
+<b>Como isto foi medido.</b> Leitura, só leitura, no banco de produção em 25/09/2026: conta 33 e o nicho dela,
+os 26 lançamentos (tipo, natureza, categoria, origem, valor e data), as 28 leituras de imagem, o log das 25
+conversas, uso diário, membros, canais e centros de custo, e <code>app_config</code> (beta e aviso de
+vencimento). Nenhuma escrita foi feita. CNPJ na BrasilAPI. As funções <code>nicho_do_cnae</code>,
+<code>perfil</code> e <code>modo_por_nicho</code> foram rodadas sobre o código da main (<code>c1c865e</code>).
+Os números das seções 05 a 07 são <b>de exemplo</b>, porque a PX2 ainda não separa gasto por casa.<br>
+<b>Fontes (consultadas em 25/09/2026; as notícias do gov.br estão fora do ar pelo período eleitoral):</b>
+MCMV, <a href="https://www.gov.br/cidades/pt-br/acesso-a-informacao/institucional/base-juridica/portarias/PORTARIAMCIDN333DE30DEMARODE2026.pdf">Portaria MCID 333/2026</a>,
+<a href="https://www.caixa.gov.br/voce/habitacao/minha-casa-minha-vida/urbana/Paginas/default.aspx">Caixa MCMV</a>,
+<a href="https://www.caixa.gov.br/voce/habitacao/perguntas-frequentes-novos-financiamentos/Paginas/default.aspx">perguntas frequentes da Caixa</a>,
+<a href="https://www.caixa.gov.br/empresa/construcao-civil/alocacao-de-recursos/Paginas/default.aspx">Alocação de Recursos</a>,
+<a href="https://www.caixa.gov.br/empresa/construcao-civil/apoio-a-producao/Paginas/default.aspx">Apoio à Produção</a>,
+<a href="https://www.caixa.gov.br/voce/habitacao/construcao/Paginas/default.aspx">construção PF</a>,
+<a href="https://www.caixa.gov.br/Downloads/habitacao-documentos-gerais/cartilha-habitacao-PF-construcao-conclusao-reforma-ampliacao-de-unidades-habitacionais.pdf">cartilha PF construção</a>,
+<a href="https://www.caixa.gov.br/Downloads/habitacao-documentos-gerais/planilha_construcao_individual.zip">planilha PCI/PLS</a>,
+<a href="https://cbic.org.br/conselho-do-fgts-aprova-aumento-do-limite-de-renda-e-do-valor-dos-imoveis-no-minha-casa-minha-vida/">CBIC, tetos</a>,
+<a href="https://apisidra.ibge.gov.br/values/t/4709/n6/2105708/v/93/p/2022">IBGE, Lago da Pedra</a>,
+<a href="https://portas.com.br/noticias/greve-da-caixa-pressiona-repasses-e-fluxo-de-caixa-das-incorporadoras/">greve da Caixa (Portas, 24/09)</a>.
+Reforma: <a href="https://www.caixa.gov.br/voce/habitacao/reforma-casa-brasil/Paginas/default.aspx">Reforma Casa Brasil</a>,
+<a href="https://www.caixa.gov.br/voce/habitacao/reforma-casa-brasil/perguntas-frequentes/Paginas/default.aspx">perguntas frequentes</a>,
+<a href="https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?tipo=Resolu%C3%A7%C3%A3o%20CMN&amp;numero=5301">Res. CMN 5.301</a>,
+<a href="https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2026/mpv/mpv1385.htm">MP 1.385/2026</a>,
+<a href="https://www.planalto.gov.br/ccivil_03/leis/2002/l10406compilada.htm">Código Civil</a>,
+<a href="https://www.planalto.gov.br/ccivil_03/leis/l8078compilado.htm">CDC</a>,
+<a href="https://caubr.gov.br/normadereformas/">NBR 16280 (CAU)</a>,
+<a href="https://caubr.gov.br/pesquisa-datafolha-82-das-moradias-do-pais-sao-feitas-sem-arquitetos-ou-engenheiros/">Datafolha/CAU</a>,
+<a href="https://sidra.ibge.gov.br/tabela/2296">SINAPI (IBGE)</a>.
+Papéis: <a href="https://www.legisweb.com.br/legislacao/?id=424879">IN RFB 2.061/2021 (CNO)</a>,
+<a href="https://www.gov.br/receitafederal/pt-br/assuntos/construcao-civil/sero">SERO</a>,
+<a href="https://www.planalto.gov.br/ccivil_03/leis/l8212cons.htm">Lei 8.212, art. 47</a>,
+<a href="https://www.gov.br/pt-br/servicos/optar-pelo-regime-especial-de-tributacao-ret-construcao-ret">RET</a>,
+<a href="https://www.cafaro.com.br/2026/08/21/ret-de-1-e-4-no-mesmo-empreendimento-o-que-muda-com-a-solucao-de-consulta-cosit-no-132-2026/">RET 1% e 4% (Cosit 132/2026)</a>.
+Mercado: <a href="https://cvcrm.com.br/minha-casa-minha-vida/">CV CRM</a>,
+<a href="https://www.anapro.com.br/">Anapro</a>,
+<a href="https://obraprima.eng.br/planos/">Obra Prima</a>.<br>
+<b>Não confirmado em fonte oficial:</b> o teto exato do imóvel em Lago da Pedra, os prazos de cada etapa da
+Caixa (60–90 dias é estimativa de mercado) e o sinal típico de reforma. Nada disso vira número fixo em tela
+sem conferência.
+</div>
+
+</div></body></html>

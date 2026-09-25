@@ -139,12 +139,29 @@ NICHOS: dict[str, dict] = {
         "categorias": ["contabil", "fiscal", "folha", "abertura_empresa",
                        "societario", "imposto_renda", "consultoria", "outro"],
     },
+    # Construção e reforma (primeira conta: PX2 Empreendimentos, conta 33, Lago
+    # da Pedra-MA). Ela constrói CASA POPULAR PRA VENDER pelo Minha Casa Minha
+    # Vida e faz REFORMA pra cliente (respostas do dono, 25/09/2026). Desenho em
+    # docs/mockups/nicho_construcao.html.
+    #
+    # AS CATEGORIAS SÃO DO QUE ELA VENDE, não do que ela gasta. Até 25/09 a lista
+    # era material, mão de obra, equipamento, subempreiteiro — o CUSTO da obra, que
+    # é assunto da despesa (categoria + plano de contas), não do catálogo. No
+    # catálogo mora o serviço oferecido ao cliente de reforma: pintura, piso,
+    # elétrica.
+    #
+    # A ORDEM: reforma se orça por m² (pintura, reboco, piso), e primeiro da lista
+    # é o que o formulário já vem preenchido. `empreitada` é o preço fechado;
+    # `medicao` fica no fim só porque é a unidade de quem cobra por medição, e tirar
+    # uma unidade da lista não apaga o que foi gravado com ela.
     "construcao": {
-        "label": "Construção civil / Obras",
+        "label": "Construção e reforma",
         "vende_produto": False, "vende_servico": True,
-        "unidades": ["obra", "etapa", "medicao", "m2", "diaria", "empreitada"],
-        "categorias": ["material", "mao_de_obra", "equipamento", "subempreiteiro",
-                       "projeto", "outro"],
+        "unidades": ["m2", "empreitada", "diaria", "etapa", "unidade", "obra",
+                     "medicao"],
+        "categorias": ["reforma", "construcao", "pintura", "eletrica",
+                       "hidraulica", "alvenaria", "acabamento", "cobertura",
+                       "piso_revestimento", "gesso_drywall", "outro"],
     },
     # ---- NICHOS MISTOS (vendem PRODUTO e SERVICO) ----
     "oficina": {
@@ -348,6 +365,7 @@ _UNIDADE_LABEL = {
     "campanha": "campanha", "convidado": "convidado",
     "pote": "pote", "sache": "sachê", "marmita": "marmita",
     "consulta": "consulta", "procedimento": "procedimento",
+    "empreitada": "empreitada", "obra": "obra",
 }
 
 
@@ -549,14 +567,58 @@ _PERSONAS_NICHO: dict[str, str] = {
         "nem produto pra problema de pele, e não interprete exame. Isso é com o "
         "médico da clínica — diga isso em uma linha e siga ajudando no caixa."
     ),
-    "construcao": _molde_servico(
-        "CONSTRUÇÃO CIVIL / OBRAS", "um construtor/engenheiro de obras",
-        "o faturamento é por MEDIÇÃO/ETAPA da obra (o cliente paga conforme a obra "
-        "avança); empreitada fechada ou por administração. Cada obra/cliente é uma "
-        "carteira de medições a receber.",
-        "MATERIAL, mão de obra e diárias, aluguel de equipamento e subempreiteiros "
-        "são os custos da obra -> 'Servicos'/'Compras'; INSS da obra, ISS e DAS -> "
-        "'Impostos'."),
+    # NÃO usa _molde_servico desde 25/09/2026. O molde ensinava honorário e
+    # mensalidade, e a primeira conta do ramo (PX2, conta 33) ganha de dois jeitos
+    # que ele não conhece: CASA VENDIDA, que só vira dinheiro no registro do
+    # contrato, e REFORMA, com sinal e etapas. Medido no uso dela: 13 despesas de
+    # obra em três categorias diferentes, nenhuma dizendo de qual casa era — e a
+    # margem de casa popular é custo da casa contra o que a Caixa paga.
+    #
+    # As frases que só existem aqui: DE QUAL OBRA (o custo por casa nasce da
+    # pergunta), MATERIAL NÃO É MÃO DE OBRA, CASA SÓ VIRA DINHEIRO COM PAPEL e NÃO
+    # PROMETA CRÉDITO — quem aprova é a Caixa, e "taxa de liberação" é golpe.
+    "construcao": (
+        "RAMO DA EMPRESA: CONSTRUÇÃO E REFORMA. A empresa constrói CASA POPULAR "
+        "PRA VENDER (Minha Casa Minha Vida) e também faz REFORMA pra cliente. Você "
+        "fala com o dono ou o encarregado — gente de obra, que manda foto de nota "
+        "do meio do canteiro. Vá direto, sem explicar o básico de obra. Você é o "
+        "braço OPERACIONAL do caixa da obra.\n"
+        "- DE QUAL OBRA: toda despesa de obra da EMPRESA (nota de material, "
+        "pagamento de mão de obra, aluguel de equipamento) é de uma casa ou de uma "
+        "reforma. Na mesma resposta em que confirma o registro, pergunte de qual "
+        "obra foi (\"Casa 2\", \"reforma da Dona Maria\") ou se é pra dividir entre "
+        "as obras. Ponha o nome da obra na descrição; se existir centro de custo "
+        "com esse nome, passe centro_custo também. Pergunte uma vez: se ele não "
+        "disser, registre assim mesmo.\n"
+        "- MATERIAL NÃO É MÃO DE OBRA, e é essa separação que diz se a casa dá "
+        "lucro. Material de obra (cimento, tijolo, ferro, areia, tinta, louça, "
+        "fio, cano) -> categoria 'Insumos', conta contábil 3.1.03. Empreiteiro, "
+        "pedreiro, servente, diarista e subempreiteiro -> categoria 'Servicos', "
+        "conta 3.1.04. Aluguel de betoneira, andaime e caçamba -> 'Servicos'. "
+        "Alvará, ART, cartório, INSS da obra e DAS -> 'Impostos'. Nunca 'Compras' "
+        "nem 'Construcao' pra material de obra da empresa: essas duas são "
+        "categorias de gasto de casa.\n"
+        "- NOTA DE LOJA DE MATERIAL DE CONSTRUÇÃO já nasce EMPRESA "
+        "(natureza=\"empresa\"), a não ser que ele diga que foi pra casa dele.\n"
+        "- DOIS JEITOS DE GANHAR. CASA VENDIDA: receita 'Vendas', conta 1.1.04 "
+        "(Venda de Imóveis). O dinheiro vem em duas partes: a ENTRADA, que o "
+        "comprador paga à empresa, e o REPASSE da Caixa (financiamento + FGTS + "
+        "subsídio), que só cai depois que o contrato é registrado no cartório. "
+        "REFORMA: receita 'Vendas', conta 1.1.02 (Prestação de Serviços), com sinal "
+        "e parcelas por etapa -> títulos a RECEBER, com o cliente na contraparte.\n"
+        "- CASA SÓ VIRA DINHEIRO COM PAPEL: habite-se -> CND da obra (aferição no "
+        "SERO) -> averbação na matrícula -> registro do contrato. Se ele falar de "
+        "casa pronta esperando a Caixa, pergunte qual desses passos falta. Não "
+        "repita esse lembrete mais de uma vez por semana.\n"
+        "- NÃO PROMETA CRÉDITO. Quem aprova financiamento é a Caixa, e o Reforma "
+        "Casa Brasil é contratado pelo próprio cliente, sem intermediário. Não faça "
+        "simulação oficial (mande pro simulador da Caixa ou pro correspondente), "
+        "nunca peça senha do gov.br e nunca fale em \"taxa de liberação\" — isso é "
+        "golpe.\n"
+        "- NADA DE CONSELHO DE IMPOSTO NEM DE ENGENHARIA: RET, INSS da obra e "
+        "aferição são com o contador; estrutura, laudo e ART, com o engenheiro. "
+        "Diga isso em uma linha e siga ajudando no caixa."
+    ),
 }
 
 
@@ -576,7 +638,9 @@ _ROTULO_RECEBER = {
     "arquitetura": "Honorários",
     "agencia": "Mensalidades",
     "tecnologia": "Mensalidades",
-    "construcao": "Medições",
+    # quem deve à construtora é o comprador da casa (a entrada) ou o cliente da
+    # reforma (as etapas) — nenhum dos dois é "medição", que era o rótulo até 25/09
+    "construcao": "A receber",
     # vende produto, mas paciente não compra "fiado" — deve consulta e pacote
     "clinica": "A receber",
 }

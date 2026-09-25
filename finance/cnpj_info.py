@@ -45,8 +45,15 @@ def consultar_cnpj(cnpj: str) -> dict | None:
     cidade = (dados.get("municipio") or "").strip() or None
     uf = (dados.get("uf") or "").strip() or None
     cnae_desc = (dados.get("cnae_fiscal_descricao") or "").strip() or None
-    ramo = classificar_ramo(cnae_desc)
-    nicho = nicho_do_cnae(cnae_desc)
+    # o CÓDIGO do CNAE e os secundários, além da descrição: é por eles que a
+    # construtora com CNAE principal de engenharia deixa de virar arquitetura
+    # (ver `nicho_do_cnae`)
+    cnae_cod = dados.get("cnae_fiscal")
+    secundarios = [s.get("codigo") for s in (dados.get("cnaes_secundarios") or [])
+                   if isinstance(s, dict)]
+    nicho = nicho_do_cnae(cnae_desc, cnae_cod, secundarios)
+    ramo = "Construcao" if _construcao_pelo_codigo(cnae_cod, secundarios) \
+        else classificar_ramo(cnae_desc)
     # contato: email e telefone vem do cadastro da Receita (pode estar
     # desatualizado) — usado so como SUGESTAO, o cliente confirma na tela.
     email = (dados.get("email") or "").strip().lower() or None
@@ -183,10 +190,46 @@ _RAMO_NICHO = {
 }
 
 
-def nicho_do_cnae(cnae_desc: str | None) -> str | None:
-    """Deriva o SLUG do nicho (Vendas) a partir da descricao do CNAE.
-    Reusa classificar_ramo e mapeia pro nosso nicho. None se nao classificar
-    (a tela cai no 'generico' ou o cliente escolhe)."""
+# O CÓDIGO DO CNAE, ANTES DA DESCRIÇÃO — só pra construção, por enquanto.
+#
+# A seção F da CNAE (divisões 41, 42 e 43) é construção: edifícios, obras de
+# infraestrutura e os serviços especializados — pintura, elétrica, hidráulica,
+# gesso, fundação. Pela descrição, metade se perdia: "Serviços de pintura de
+# edifícios em geral" não casa com chave nenhuma, e "Instalação e manutenção
+# elétrica" caía em serviços gerais pela palavra "manutenção".
+#
+# E o caso que fez isto nascer (PX2, conta 33, 25/09/2026): CNAE principal
+# 71.12-0-00 "Serviços de engenharia", que pela descrição vira arquitetura, com
+# 20 dos 28 secundários na seção F. Construtora com engenheiro responsável
+# costuma registrar engenharia como principal e obra como secundário. Sem
+# secundário de obra, engenharia continua arquitetura.
+_DIVISOES_CONSTRUCAO = {"41", "42", "43"}
+_ENGENHARIA = "7112000"
+
+
+def _cnae7(codigo) -> str:
+    """O código com 7 dígitos. A BrasilAPI manda inteiro, e inteiro perde o zero
+    da frente (0111-3/01 chega como 111301)."""
+    d = "".join(ch for ch in str(codigo or "") if ch.isdigit())
+    return d.zfill(7) if d else ""
+
+
+def _construcao_pelo_codigo(codigo, secundarios=()) -> bool:
+    principal = _cnae7(codigo)
+    if principal[:2] in _DIVISOES_CONSTRUCAO:
+        return True
+    return principal == _ENGENHARIA and any(
+        _cnae7(s)[:2] in _DIVISOES_CONSTRUCAO for s in (secundarios or ()))
+
+
+def nicho_do_cnae(cnae_desc: str | None, codigo=None, secundarios=()) -> str | None:
+    """Deriva o SLUG do nicho (Vendas) a partir do CNAE.
+    O código, quando vem, decide construção antes da descrição (ver
+    `_construcao_pelo_codigo`); o resto segue pela descrição, via
+    classificar_ramo. None se nao classificar (a tela cai no 'generico' ou o
+    cliente escolhe)."""
+    if _construcao_pelo_codigo(codigo, secundarios):
+        return "construcao"
     ramo = classificar_ramo(cnae_desc)
     return _RAMO_NICHO.get(ramo) if ramo else None
 

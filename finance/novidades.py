@@ -111,6 +111,21 @@ def _clinica(slug) -> bool:
     return bool(slug) and _rxp.perfil_por_nicho(slug) == "clinica"
 
 
+def _construcao(slug) -> bool:
+    """Construção e reforma — o quarto portão de UM nicho só, e o segundo que
+    pergunta ao PERFIL, como o `_clinica` logo acima: a aba Obras abre pelo perfil
+    `obras` (web/painel_obras._acesso), e o aviso tem que acompanhar a tela.
+
+    Obra, casa de Minha Casa Minha Vida, visita técnica e crédito da Caixa não
+    existem em nenhum outro ramo. `servico` alcançaria advocacia e contabilidade,
+    e `recorrente` alcançaria as consultorias — o perfil `obras` e o que vier
+    depois dele (a aba Obras, o caminho do dinheiro da casa) não abrem pra
+    nenhuma delas.
+    """
+    from finance import raio_x_perfil as _rxp
+    return bool(slug) and _rxp.perfil_por_nicho(slug) == "obras"
+
+
 def _canal_proprio(pool, conta_id: int) -> bool:
     """A conta fala pelo WhatsApp DELA, conectado por QR code.
 
@@ -178,6 +193,7 @@ PUBLICOS_NICHO = {
     "seguros": _seguros,
     "suplementos": _suplementos,
     "clinica": _clinica,
+    "construcao": _construcao,
 }
 
 PUBLICOS_CONTA = {

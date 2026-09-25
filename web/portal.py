@@ -419,7 +419,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      tem vendas ou financeiro entra. Sem esta linha a rota abria mas NENHUM link
      aparecia pro time — o buraco que o #490 deixou. `_tem_app` fica pra conta só de
      cesta não ganhar um menu que ela nunca teve. #}
-  {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
+  {#- a clínica tem a agenda dela (uma coluna por profissional); quem não vende (financeiro) segue na agenda da conta -#}
+  {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda', '/painel/clinica/agenda' if (caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica') else '/painel/agenda', 'agenda', 'Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# o Raio-X (finance/raio_x_dono) é de quem manda na conta: dono e gestor #}
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
@@ -478,7 +479,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      tem vendas ou financeiro entra. Sem esta linha a rota abria mas NENHUM link
      aparecia pro time — o buraco que o #490 deixou. `_tem_app` fica pra conta só de
      cesta não ganhar um menu que ela nunca teve. #}
-  {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
+  {#- a clínica tem a agenda dela (uma coluna por profissional); quem não vende (financeiro) segue na agenda da conta -#}
+  {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda', '/painel/clinica/agenda' if (caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica') else '/painel/agenda', 'agenda', 'Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# o Raio-X (finance/raio_x_dono) é de quem manda na conta: dono e gestor #}
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}

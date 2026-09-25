@@ -3243,7 +3243,8 @@ def remarcar_visita(pool, conta_id: int, membro_id: int | None, evento_id: int, 
                  from eventos_agenda e
                  join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
                 where e.id=%s and e.conta_id=%s and e.status='ativo'
-                  and e.tipo_evento is null""",
+                  and e.tipo_evento is null
+                  and (to_jsonb(e) ->> 'situacao') is null""",
             (evento_id, conta_id)).fetchone()
     if not ev:
         return {"ok": False, "erro": "Essa visita não existe mais."}
@@ -3320,7 +3321,8 @@ def visita_para_remarcar(pool, conta_id: int, membro_id: int | None, evento_id: 
                  from eventos_agenda e
                  join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
                 where e.id=%s and e.conta_id=%s and e.status='ativo'
-                  and e.tipo_evento is null""",
+                  and e.tipo_evento is null
+                  and (to_jsonb(e) ->> 'situacao') is null""",
             (evento_id, conta_id)).fetchone()
     if not r:
         return None
@@ -3352,7 +3354,8 @@ def excluir_visita(pool, conta_id: int, membro_id: int | None, evento_id: int,
             """select e.membro_id from eventos_agenda e
                  join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
                 where e.id=%s and e.conta_id=%s and e.status='ativo'
-                  and e.tipo_evento is null""",
+                  and e.tipo_evento is null
+                  and (to_jsonb(e) ->> 'situacao') is null""",
             (evento_id, conta_id)).fetchone()
     if not ev:
         return {"ok": False, "erro": "Essa visita não existe mais."}
@@ -3410,7 +3413,9 @@ def visita_ics(pool, token: str) -> str | None:
     from finance import agenda as ag
     with pool.connection() as c:
         r = c.execute("select id, titulo, inicio, fim, local, descricao, criado_em "
-                      "from eventos_agenda where ics_token=%s and status='ativo'", (token,)).fetchone()
+                      "from eventos_agenda where ics_token=%s and status='ativo' "
+                      # consulta da clínica não publica .ics (título e descrição são internos)
+                      "and (to_jsonb(eventos_agenda) ->> 'situacao') is null", (token,)).fetchone()
     if not r:
         return None
     ev = {"id": r[0], "titulo": r[1], "inicio": r[2], "fim": r[3], "local": r[4],
@@ -3494,6 +3499,7 @@ def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
                  left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
                  left join membros m on m.id = e.membro_id
                 where e.conta_id=%s {cond}and e.status in ('ativo','pre_reservado')
+                  and (to_jsonb(e) ->> 'situacao') is null
                   and ((e.inicio >= %s {janela}) {volta})
                 order by e.inicio""",
             args).fetchall()

@@ -55,9 +55,10 @@ def _int(txt) -> int | None:
 
 def _data(txt, padrao: date) -> date:
     try:
-        return datetime.strptime((txt or "").strip(), "%Y-%m-%d").date()
+        d = datetime.strptime((txt or "").strip(), "%Y-%m-%d").date()
     except ValueError:
         return padrao
+    return d if 2000 <= d.year <= 2100 else padrao
 
 
 def _instante(txt: str) -> datetime | None:
@@ -66,7 +67,7 @@ def _instante(txt: str) -> datetime | None:
         dt = datetime.fromisoformat((txt or "").strip())
     except ValueError:
         return None
-    return dt if dt.tzinfo else None
+    return dt if (dt.tzinfo and 2000 <= dt.year <= 2100) else None
 
 
 def _ir(request: Request, url: str, aviso: str = "", erro: str = "") -> RedirectResponse:
@@ -127,7 +128,8 @@ def agenda(request: Request):
                    link_prox=link(data=prox.isoformat()), link_hoje=link(data=hoje.isoformat()),
                    link_dia=link(vista="dia", data=data.isoformat()),
                    link_semana=link(vista="semana", data=data.isoformat()),
-                   prof_nome={p["id"]: p["nome"] for p in profs})
+                   prof_nome={p["id"]: p["nome"] for p in profs},
+                   prof_marca=any(p["id"] == prof_id and p["tipos"] for p in profs))
 
 
 # ------------------------------------------------------------------ novo agendamento
@@ -141,6 +143,9 @@ def novo(request: Request):
     q = request.query_params
     agora = datetime.now(timezone.utc)
     hoje = ca.hoje_br(agora)
+    # o que a recepção já tinha preenchido (buscar paciente, ou um erro) volta pela
+    # sessão — nome, celular e busca nunca vão na URL
+    form = request.session.pop("agenda_form", None) or {}
     with get_pool().connection() as c:
         profs = [p for p in cc.listar_profissionais(c, conta_id)
                  if p["funcao"] != "Recepção, não atende" and p["tipos"]]
@@ -161,9 +166,12 @@ def novo(request: Request):
                 pedido = ca.utc(data, h)
             except ValueError:
                 pedido = None
+        ja = _instante((form.get("inicio") or "").replace("enc|", ""))
+        if ja and any(x["inicio"] == ja for x in livres):
+            pedido = ja
         escolhido = pedido if pedido and any(x["inicio"] == pedido for x in livres) else None
         pode_encaixe = bool(pedido and not escolhido and pedido > agora)
-        achados = ca.buscar_pacientes(c, conta_id, q.get("busca") or "")
+        achados = ca.buscar_pacientes(c, conta_id, form.get("busca") or "")
     opcoes = [{"valor": x["inicio"].isoformat(), "txt": f"{ca.dia_txt(x['inicio'])} {ca.hora_txt(x['inicio'])}",
                "on": x["inicio"] == (escolhido or (livres[0]["inicio"] if livres else None))}
               for x in livres]
@@ -172,35 +180,48 @@ def novo(request: Request):
                    profs=profs, prof=prof, tipos_prof=tipos_prof, tipo=tipo, opcoes=opcoes,
                    pedido=pedido.isoformat() if pode_encaixe else "",
                    pedido_txt=(f"{ca.dia_txt(pedido)} {ca.hora_txt(pedido)}" if pode_encaixe else ""),
-                   achados=achados, busca=q.get("busca") or "", data_iso=data.isoformat(),
-                   hora=q.get("hora") or "", ORIGENS=ca.ORIGENS)
+                   achados=achados, busca=form.get("busca") or "", data_iso=data.isoformat(),
+                   hora=q.get("hora") or "", ORIGENS=ca.ORIGENS, form=form,
+                   lead_escolhido=_int(form.get("lead_id")))
 
 
 @router.post("/painel/clinica/agenda/novo")
 def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), inicio: str = Form(""),
-                encaixe: str = Form(""), lead_id: str = Form(""), nome: str = Form(""),
-                fone: str = Form(""), origem: str = Form(""), observacao: str = Form(""),
-                acao: str = Form("agendar")):
+                lead_id: str = Form(""), nome: str = Form(""), fone: str = Form(""),
+                origem: str = Form(""), observacao: str = Form(""), busca: str = Form(""),
+                data: str = Form(""), acao: str = Form("agendar")):
     conta, _g, redir = _acesso(request)
     if redir is not None:
         return redir
     conta_id, membro = conta[0], request.session.get("membro_id")
-    quando = _instante(inicio)
-    volta = "/painel/clinica/agenda/novo?" + urlencode({"prof": prof, "tipo": tipo})
+    # o rádio do encaixe carrega a marca no próprio valor: escolher outro horário
+    # (livre) nunca vira encaixe por um campo escondido que valia pra todos
+    encaixe = inicio.startswith("enc|")
+    quando = _instante(inicio.replace("enc|", ""))
+    dia_volta = ca.local(quando).date().isoformat() if quando else data
+    volta = "/painel/clinica/agenda/novo?" + urlencode({"prof": prof, "tipo": tipo, "data": dia_volta})
+    guardar = {"inicio": inicio, "lead_id": lead_id, "nome": nome[:120], "fone": fone[:30],
+               "origem": origem, "observacao": observacao[:500], "busca": busca[:60]}
+    if acao == "buscar":
+        request.session["agenda_form"] = guardar
+        return _ir(request, volta)
     if not quando:
+        request.session["agenda_form"] = guardar
         return _ir(request, volta, erro="Escolha um horário.")
     with get_pool().connection() as c:
         eid, erro = ca.agendar(c, conta_id, profissional_id=_int(prof) or 0, servico_id=_int(tipo) or 0,
                                inicio=quando, lead_id=_int(lead_id), nome=nome, fone=fone, origem=origem,
-                               observacao=observacao, encaixe=bool(encaixe), membro_id=membro)
+                               observacao=observacao, encaixe=encaixe, membro_id=membro)
         if erro:
             c.rollback()
+            request.session["agenda_form"] = guardar
             return _ir(request, volta, erro=erro)
         c.commit()
         aviso = "marcado"
         if acao == "confirmar":
             ev = ca.evento(c, conta_id, eid)
-            ok = ev and ca.enviar(c, conta_id, ev, ca.texto_marcado(c, conta_id, ev),
+            promete = ca.config(c, conta_id)["confirmacao_modo"] == "ligado"
+            ok = ev and ca.enviar(c, conta_id, ev, ca.texto_marcado(c, conta_id, ev, promete),
                                   autor="humano", membro_id=membro).get("ok")
             c.commit()
             aviso = "marcado_msg" if ok else "marcado_sem_msg"
@@ -230,8 +251,9 @@ def ver_evento(request: Request, evento_id: int):
                                            dias=14, agora=agora, limite=13, ignorar=evento_id)
                         if x["inicio"] != ev["inicio"]][:12]      # o horário de agora não é opção
         conversa = ca._conversa(c, conta_id, ev)
-        msg_marcado = ca.texto_marcado(c, conta_id, ev)
-        msg_vespera = ca.texto_vespera(c, conta_id, ev)
+        promete = ca.config(c, conta_id)["confirmacao_modo"] == "ligado"
+        msg_marcado = ca.texto_marcado(c, conta_id, ev, promete)
+        msg_vespera = ca.texto_vespera(c, conta_id, ev, agora)
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
                    ev=ev, prof=prof, proximos=ca.PROXIMOS.get(ev["situacao"], ()), remarcar=remarcar,
                    conversa=conversa, quando=f"{ca.dia_txt(ev['inicio'])} {ev['hora']}–{ev['fim_txt']}",
@@ -272,7 +294,14 @@ def evento_mensagem(request: Request, evento_id: int, qual: str = Form("marcado"
         ev = ca.evento(c, conta_id, evento_id)
         if not ev or ev["situacao"] in ("finalizado", "cancelou", "faltou"):
             return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", erro="Esse agendamento não recebe mensagem.")
-        texto = ca.texto_vespera(c, conta_id, ev) if qual == "vespera" else ca.texto_marcado(c, conta_id, ev)
+        agora = datetime.now(timezone.utc)
+        if qual == "vespera" and ev["confirmacao_enviada_em"] and \
+                agora - ev["confirmacao_enviada_em"] < timedelta(minutes=5):
+            # duplo clique (ou duas abas): o lembrete acabou de sair
+            return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", "mensagem")
+        promete = ca.config(c, conta_id)["confirmacao_modo"] == "ligado"
+        texto = (ca.texto_vespera(c, conta_id, ev, agora) if qual == "vespera"
+                 else ca.texto_marcado(c, conta_id, ev, promete))
         ok = ca.enviar(c, conta_id, ev, texto, autor="humano", membro_id=request.session.get("membro_id")).get("ok")
         if ok and qual == "vespera":
             c.execute("update eventos_agenda set confirmacao_enviada_em=now() where id=%s and conta_id=%s",
@@ -343,7 +372,14 @@ button.sec{background:transparent;border:1px solid var(--borda);color:var(--txt)
 .ag-msg{font-size:.84rem;padding:.45rem .6rem;border-radius:9px;background:var(--neon-fundo);border:1px solid var(--neon-borda);margin-top:.35rem}
 .mut{color:var(--txt-mut);font-size:.8rem}
 @media (max-width:620px){.ag-form{grid-template-columns:1fr}}
-</style>"""
+</style>
+<script>
+/* o segundo clique não manda de novo: o botão trava assim que o formulário sai */
+document.addEventListener('submit', function(ev){
+  var b = ev.submitter; if(!b || b.value === 'buscar') return;
+  setTimeout(function(){ ev.target.querySelectorAll('button').forEach(function(x){ x.disabled = true; }); }, 0);
+});
+</script>"""
 
 _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="ag-pag">
@@ -377,8 +413,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   </div>
 
   {% if vista == 'dia' and d.remarcar %}
-  <div class="ag-caixa alerta"><b>Pediram para remarcar</b> (responderam 2 na confirmação)
-    {% for e in d.remarcar %}<div><a href="/painel/clinica/agenda/evento/{{ e.id }}">{{ e.paciente }} · {{ e.hora }} · {{ prof_nome.get(e.profissional_id, '') }}</a></div>{% endfor %}</div>
+  <div class="ag-caixa alerta"><b>Pediram para remarcar</b> (responderam 2 no lembrete)
+    {% for e in d.remarcar %}<div><a href="/painel/clinica/agenda/evento/{{ e.id }}">{{ e.paciente }} · {{ e.dia }} {{ e.hora }} · {{ prof_nome.get(e.profissional_id, '') }}</a></div>{% endfor %}</div>
   {% endif %}
 
   {% if not d.colunas %}
@@ -389,7 +425,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <tbody>{% for h in d.linhas %}{% set i = loop.index0 %}<tr><td class="h">{{ '%02d:%02d'|format(h.hour, h.minute) }}</td>
       {% for col in d.colunas %}{% set cel = col.celulas[i] %}
         {% if cel.tipo == 'ev' %}<td>{% for e in cel.evs %}<a class="ev s-{{ e.situacao }}" style="border-left-color:{{ e.cor }}" href="/painel/clinica/agenda/evento/{{ e.id }}"><b>{{ e.paciente }}</b><span>{{ e.tipo }} · {{ e.hora }}–{{ e.fim_txt }}{% if e.encaixe %} · encaixe{% endif %}</span><span>{{ SIT_D[e.situacao] }}{% if e.pede_remarcar_em %} · quer remarcar{% endif %}</span></a>{% endfor %}</td>
-        {% elif cel.tipo == 'livre' %}<td><a class="livre" href="/painel/clinica/agenda/novo?prof={{ col.prof.id if vista == 'dia' else prof_id }}&data={{ (col.dia if vista == 'semana' else d.data).isoformat() }}&hora={{ '%02d:%02d'|format(h.hour, h.minute) }}">+ livre</a></td>
+        {% elif cel.tipo == 'livre' and ((vista == 'dia' and col.marca) or (vista == 'semana' and prof_marca)) %}<td><a class="livre" href="/painel/clinica/agenda/novo?prof={{ col.prof.id if vista == 'dia' else prof_id }}&data={{ (col.dia if vista == 'semana' else d.data).isoformat() }}&hora={{ '%02d:%02d'|format(h.hour, h.minute) }}">+ livre</a></td>
+        {% elif cel.tipo == 'livre' %}<td class="continua"></td>
         {% elif cel.tipo == 'continua' %}<td class="continua"></td>
         {% elif cel.tipo == 'passou' %}<td class="continua"></td>
         {% else %}<td class="fora"></td>{% endif %}
@@ -403,7 +440,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="mut" style="margin:.2rem 0 .5rem">Na véspera, quem tem horário recebe no WhatsApp: "Amanhã você tem consulta às 09:00 com o Dr. Manoel… Responda 1 para confirmar ou 2 se precisar remarcar." Quem responde 1 fica Confirmado sozinho; quem responde 2 aparece aqui em cima. A mensagem nunca diz o procedimento.</div>
     <div class="ag-form">
       <label>Modo<select name="modo"><option value="off" {% if cfg.confirmacao_modo == 'off' %}selected{% endif %}>Desligada</option><option value="ligado" {% if cfg.confirmacao_modo == 'ligado' %}selected{% endif %}>Ligada — o Zaq manda sozinho</option></select></label>
-      <label>A partir de que hora (no horário de atendimento)<select name="hora">{% for hh in range(7, 20) %}<option value="{{ hh }}" {% if cfg.confirmacao_hora == hh %}selected{% endif %}>{{ hh }}h</option>{% endfor %}</select></label>
+      <label>A partir de que hora (no horário de atendimento)<select name="hora">{% for hh in range(7, 19) %}<option value="{{ hh }}" {% if cfg.confirmacao_hora == hh %}selected{% endif %}>{{ hh }}h</option>{% endfor %}</select></label>
     </div>
     <div class="ag-acoes"><button>Salvar</button></div>
   </form>
@@ -420,37 +457,33 @@ _TPL_NOVO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="ag-caixa">Ninguém com atendimento cadastrado ainda. Cadastre em Clínica › Profissionais.</div>
   {% else %}
   <form class="ag-caixa ag-form" method="get" action="/painel/clinica/agenda/novo">
-    <input type="hidden" name="data" value="{{ data_iso }}"><input type="hidden" name="hora" value="{{ hora }}"><input type="hidden" name="busca" value="{{ busca }}">
+    <input type="hidden" name="data" value="{{ data_iso }}"><input type="hidden" name="hora" value="{{ hora }}">
     <label>Profissional<select name="prof" onchange="this.form.submit()">{% for p in profs %}<option value="{{ p.id }}" {% if prof and prof.id == p.id %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}</select></label>
     <label>Atendimento<select name="tipo" onchange="this.form.submit()">{% for t in tipos_prof %}<option value="{{ t.id }}" {% if tipo and tipo.id == t.id %}selected{% endif %}>{{ t.nome }} · {{ t.duracao_min }} min · {{ t.preco }}</option>{% endfor %}</select></label>
     <noscript><button class="sec">Ver horários</button></noscript>
   </form>
 
-  <form class="ag-caixa ag-form" method="get" action="/painel/clinica/agenda/novo">
-    <input type="hidden" name="prof" value="{{ prof.id if prof else '' }}"><input type="hidden" name="tipo" value="{{ tipo.id if tipo else '' }}">
-    <input type="hidden" name="data" value="{{ data_iso }}"><input type="hidden" name="hora" value="{{ hora }}">
-    <label class="inteira">Paciente: buscar por nome ou telefone<input name="busca" value="{{ busca }}" placeholder="Maria, 99 98888-7777" autocomplete="off"></label>
-    <div class="ag-acoes inteira" style="margin-top:0"><button class="sec">Buscar</button></div>
-  </form>
-
   <form class="ag-caixa ag-form" method="post" action="/painel/clinica/agenda/novo">
     <input type="hidden" name="prof" value="{{ prof.id if prof else '' }}"><input type="hidden" name="tipo" value="{{ tipo.id if tipo else '' }}">
+    <input type="hidden" name="data" value="{{ data_iso }}">
     <div class="inteira"><span class="mut">Horário{% if tipo %} ({{ tipo.duracao_min }} min){% endif %}</span>
       <div class="ag-ops" style="margin-top:.3rem">
-        {% if pedido %}<label><input type="radio" name="inicio" value="{{ pedido }}" checked> {{ pedido_txt }} · <b>encaixe</b></label><input type="hidden" name="encaixe" value="1">{% endif %}
-        {% for o in opcoes %}<label><input type="radio" name="inicio" value="{{ o.valor }}" {% if o.on and not pedido %}checked{% endif %}> {{ o.txt }}</label>{% else %}{% if not pedido %}<span class="mut">Nenhum horário livre nos próximos 14 dias. Confira a grade em Clínica › Grade.</span>{% endif %}{% endfor %}
+        {% if pedido %}<label><input type="radio" name="inicio" value="enc|{{ pedido }}" {% if not form.inicio or form.inicio.startswith('enc|') %}checked{% endif %}> {{ pedido_txt }} · <b>encaixe</b></label>{% endif %}
+        {% for o in opcoes %}<label><input type="radio" name="inicio" value="{{ o.valor }}" {% if form.inicio == o.valor or (o.on and not pedido and not form.inicio) %}checked{% endif %}> {{ o.txt }}</label>{% else %}{% if not pedido %}<span class="mut">Nenhum horário livre nos próximos 14 dias. Confira a grade em Clínica › Grade.</span>{% endif %}{% endfor %}
       </div>
-      {% if pedido %}<div class="mut" style="margin-top:.3rem">Esse horário está ocupado: vai como encaixe, se ainda houver encaixe no dia.</div>{% endif %}
+      {% if pedido %}<div class="mut" style="margin-top:.3rem">O horário que você clicou está ocupado: só vai como encaixe se você deixar esse marcado, e se ainda houver encaixe no dia.</div>{% endif %}
     </div>
-    <div class="inteira"><span class="mut">Paciente</span>
+    <label class="inteira">Paciente: buscar por nome ou telefone<input name="busca" value="{{ busca }}" placeholder="Maria, 99 98888-7777" autocomplete="off"></label>
+    <div class="ag-acoes inteira" style="margin-top:0"><button class="sec" name="acao" value="buscar" formnovalidate>Buscar</button></div>
+    <div class="inteira"><span class="mut">Paciente{% if achados %} (escolha um, ou "Paciente novo"){% endif %}</span>
       <div class="ag-ops" style="margin-top:.3rem">
-        {% for a in achados %}<label><input type="radio" name="lead_id" value="{{ a.id }}" {% if loop.first %}checked{% endif %}> {{ a.nome }}{% if a.fone %} · {{ a.fone }}{% endif %}</label>{% endfor %}
-        <label><input type="radio" name="lead_id" value="" {% if not achados %}checked{% endif %}> Paciente novo</label>
+        {% for a in achados %}<label><input type="radio" name="lead_id" value="{{ a.id }}" {% if lead_escolhido == a.id %}checked{% endif %}> {{ a.nome }}{% if a.fone %} · {{ a.fone }}{% endif %}</label>{% endfor %}
+        <label><input type="radio" name="lead_id" value="" {% if not achados or (not lead_escolhido and form.nome) %}checked{% endif %}> Paciente novo</label>
       </div></div>
-    <label>Nome (paciente novo)<input name="nome" maxlength="120" autocomplete="off"></label>
-    <label>Celular com DDD (paciente novo)<input name="fone" inputmode="tel" maxlength="20" autocomplete="off" placeholder="(99) 9 8888-7777"></label>
-    <div class="inteira"><span class="mut">Como conheceu</span><div class="ag-ops" style="margin-top:.3rem">{% for o in ORIGENS %}<label><input type="radio" name="origem" value="{{ o }}"> {{ o }}</label>{% endfor %}</div></div>
-    <label class="inteira">Observação para a recepção (nunca vai pro paciente)<input name="observacao" maxlength="500"></label>
+    <label>Nome (paciente novo)<input name="nome" maxlength="120" autocomplete="off" value="{{ form.nome or '' }}"></label>
+    <label>Celular com DDD (paciente novo)<input name="fone" inputmode="tel" maxlength="20" autocomplete="off" placeholder="(99) 9 8888-7777" value="{{ form.fone or '' }}"></label>
+    <div class="inteira"><span class="mut">Como conheceu</span><div class="ag-ops" style="margin-top:.3rem">{% for o in ORIGENS %}<label><input type="radio" name="origem" value="{{ o }}" {% if form.origem == o %}checked{% endif %}> {{ o }}</label>{% endfor %}</div></div>
+    <label class="inteira">Observação para a recepção (nunca vai pro paciente)<input name="observacao" maxlength="500" value="{{ form.observacao or '' }}"></label>
     <div class="ag-acoes inteira"><button name="acao" value="agendar">Agendar</button><button class="sec" name="acao" value="confirmar">Agendar e mandar confirmação</button></div>
     <div class="mut inteira">O Zaq guarda só nome, celular, atendimento, horário e origem. Nada de queixa ou diagnóstico.</div>
   </form>

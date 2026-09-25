@@ -64,8 +64,8 @@ def pool():
     with p.connection() as c:
         c.execute(_SQL)
         for m in ("071_servicos_catalogo.sql", "148_servico_categoria_foto.sql", "153_servico_icone.sql",
-                  "098_agenda.sql", "099_agenda_tipo.sql", "136_visita_agenda.sql",
-                  "348_clinica_base.sql", "350_clinica_semente_espaco_pelle.sql"):
+                  "098_agenda.sql", "099_agenda_tipo.sql", "130_evento_desfecho.sql",
+                  "136_visita_agenda.sql", "179_agenda_tipo_e_hora_sugerida.sql", "348_clinica_base.sql", "350_clinica_semente_espaco_pelle.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         c.execute((BASE / "351_clinica_agenda.sql").read_text(encoding="utf-8"))
@@ -204,46 +204,84 @@ def test_mensagem_nunca_diz_o_procedimento(pool):
         assert "sua consulta com Juliana está marcada" in ca.texto_marcado(c, CLINICA, ev_consulta)
 
 
-def test_confirmacao_na_vespera_e_as_respostas(pool, envios):
+def _conversa_de(c, eid, fone):
+    lead = ca.evento(c, CLINICA, eid)["lead"]
+    return c.execute("insert into conversas (conta_id, prospeccao_id, contato_ref) values (39,%s,%s) returning id",
+                     (lead, fone)).fetchone()[0]
+
+
+def _resposta(c, conv, texto, quando):
+    c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) values (%s,'in',%s,%s)",
+              (conv, texto, quando))
+
+
+def test_vespera_de_segunda_sai_na_sexta_e_as_respostas(pool, envios):
+    """Segunda 28/09. Domingo está fora da janela: o lembrete sai na sexta, e diz o dia."""
     with pool.connection() as c:
         eid1, _ = _marcar(c, nome="Ana", fone="99 97777-0011")
         eid2, _ = _marcar(c, h=9, nome="Rui", fone="99 97777-0012")
+        eid3, _ = _marcar(c, h=10, nome="Lia", fone="99 97777-0013")
         ca.salvar_config(c, CLINICA, "ligado", 10)
         c.commit()
     sexta_9h = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
     sexta_11h = datetime(2026, 9, 25, 14, tzinfo=timezone.utc)
-    domingo = datetime(2026, 9, 27, 14, tzinfo=timezone.utc)
-    assert ca.rodar(pool, agora=sexta_11h)["enviadas"] == 0        # segunda não é amanhã
-    # domingo a clínica está fechada (janela seg–sex): nada sai
-    assert ca.rodar(pool, agora=domingo)["enviadas"] == 0
-    # a véspera de segunda, dentro da janela, é sexta; testa com a sexta anterior à segunda de outubro
+    assert ca.rodar(pool, agora=sexta_9h)["enviadas"] == 0             # antes das 10h
+    assert ca.rodar(pool, agora=sexta_11h)["enviadas"] == 3
+    assert ca.rodar(pool, agora=sexta_11h)["enviadas"] == 0            # nunca duas vezes
+    assert all("Na segunda, 28/09, você tem consulta" in e["texto"] and "Responda 1" in e["texto"]
+               for e in envios)
     with pool.connection() as c:
-        c.execute("update eventos_agenda set inicio = inicio - interval '3 days', fim = fim - interval '3 days'")
-        c.commit()                                  # agora os dois são sexta 25 → véspera = quinta 24
-    quinta_11h = datetime(2026, 9, 24, 14, tzinfo=timezone.utc)
-    quinta_9h = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
-    assert ca.rodar(pool, agora=quinta_9h)["enviadas"] == 0          # antes das 10h
-    assert ca.rodar(pool, agora=quinta_11h)["enviadas"] == 2
-    assert ca.rodar(pool, agora=quinta_11h)["enviadas"] == 0          # nunca duas vezes
-    assert all("Responda 1" in e["texto"] for e in envios)
-    with pool.connection() as c:
-        lead1 = ca.evento(c, CLINICA, eid1)["lead"]
-        lead2 = ca.evento(c, CLINICA, eid2)["lead"]
-        conv1 = c.execute("insert into conversas (conta_id, prospeccao_id, contato_ref) values (39,%s,'5599977770011') returning id",
-                          (lead1,)).fetchone()[0]
-        conv2 = c.execute("insert into conversas (conta_id, prospeccao_id, contato_ref) values (39,%s,'5599977770012') returning id",
-                          (lead2,)).fetchone()[0]
-        c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) values (%s,'in','1',%s)",
-                  (conv1, quinta_11h + timedelta(minutes=5)))
-        c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) values (%s,'in','2, não vou poder',%s)",
-                  (conv2, quinta_11h + timedelta(minutes=5)))
+        conv1 = _conversa_de(c, eid1, "5599977770011")
+        conv2 = _conversa_de(c, eid2, "5599977770012")
+        conv3 = _conversa_de(c, eid3, "5599977770013")
+        depois = sexta_11h + timedelta(minutes=5)
+        _resposta(c, conv1, "oi, tudo bem?", depois)                   # conversa antes da resposta
+        _resposta(c, conv1, "1", depois + timedelta(minutes=1))
+        _resposta(c, conv2, "2, não vou poder", depois)
+        _resposta(c, conv3, "15h tem vaga?", depois)                   # "15h" não é "1"
         c.commit()
-    assert ca.rodar(pool, agora=quinta_11h + timedelta(minutes=10))["respostas"] == 2
+    assert ca.rodar(pool, agora=sexta_11h + timedelta(minutes=10))["respostas"] == 2
     with pool.connection() as c:
         assert ca.evento(c, CLINICA, eid1)["situacao"] == "confirmado"
         ev2 = ca.evento(c, CLINICA, eid2)
         assert ev2["situacao"] == "agendado" and ev2["pede_remarcar_em"]
-        assert [e["id"] for e in ca.dia(c, CLINICA, date(2026, 9, 25), quinta_11h)["remarcar"]] == [eid2]
+        assert ca.evento(c, CLINICA, eid3)["situacao"] == "agendado"
+        # quem pediu pra remarcar aparece em qualquer dia que a recepção abrir
+        assert [e["id"] for e in ca.dia(c, CLINICA, date(2026, 9, 25), sexta_11h)["remarcar"]] == [eid2]
+
+
+def test_lembrete_manual_com_a_confirmacao_desligada_tambem_le_a_resposta(pool, envios):
+    with pool.connection() as c:
+        eid, _ = _marcar(c, nome="Ana", fone="99 97777-0021")
+        conv = _conversa_de(c, eid, "5599977770021")
+        c.execute("update eventos_agenda set confirmacao_enviada_em=%s where id=%s", (AGORA, eid))
+        _resposta(c, conv, "Sim, confirmo", AGORA + timedelta(minutes=3))
+        c.commit()
+    assert ca.rodar(pool, agora=AGORA + timedelta(minutes=5))["respostas"] == 1
+    with pool.connection() as c:
+        assert ca.evento(c, CLINICA, eid)["situacao"] == "confirmado"
+
+
+def test_envio_que_falha_tenta_de_novo(pool, monkeypatch):
+    monkeypatch.setattr(agente, "_mandar", lambda *a, **k: {"ok": False, "erro": "desconectado"})
+    with pool.connection() as c:
+        eid, _ = _marcar(c, nome="Ana", fone="99 97777-0031")
+        ca.salvar_config(c, CLINICA, "ligado", 10)
+        c.commit()
+    ca.rodar(pool, agora=datetime(2026, 9, 25, 14, tzinfo=timezone.utc))
+    with pool.connection() as c:
+        assert ca.evento(c, CLINICA, eid)["confirmacao_enviada_em"] is None
+
+
+def test_texto_diz_o_dia_certo_e_so_promete_lembrete_se_ligado(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c, nome="Ana", fone="99 97777-0041")
+        ev = ca.evento(c, CLINICA, eid)
+        assert ca.texto_vespera(c, CLINICA, ev, datetime(2026, 9, 27, 14, tzinfo=timezone.utc)).startswith(
+            "Oi, Ana! Amanhã você tem consulta")
+        assert "Na segunda, 28/09," in ca.texto_vespera(c, CLINICA, ev, AGORA)
+        assert "Na véspera" not in ca.texto_marcado(c, CLINICA, ev)
+        assert "Na véspera" in ca.texto_marcado(c, CLINICA, ev, True)
 
 
 def test_confirmacao_desligada_ou_outro_nicho_nao_manda(pool, envios):
@@ -318,3 +356,99 @@ def test_so_clinica_e_config_so_gerencia(cli):
     cli.get("/_papel/financeiro")
     cli.estado["nicho"] = "clinica"
     assert cli.get("/painel/clinica/agenda").headers["location"] == "/painel"
+
+
+# ------------------------------------------------------------------ 2ª leva: revisão do #850
+
+def test_cancelar_pela_agenda_de_sempre_libera_e_nao_manda_vespera(pool, envios):
+    from finance import agenda as ag
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        c.commit()
+    assert ag.cancelar_evento(pool, CLINICA, eid)
+    with pool.connection() as c:
+        assert ca.evento(c, CLINICA, eid)["situacao"] == "cancelou"
+        assert ca.utc(SEG, time(8)) in [x["inicio"] for x in
+                                        ca.livres(c, CLINICA, _manoel(c)["id"], _tipo(c, "Consulta")["id"], SEG, 1, AGORA)]
+        ca.salvar_config(c, CLINICA, "ligado", 10)
+        c.commit()
+    ca.rodar(pool, agora=datetime(2026, 9, 25, 14, tzinfo=timezone.utc))
+    assert envios == []
+
+
+def test_remarcar_pela_agenda_de_sempre_e_recusado(pool):
+    from finance import agenda as ag
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        c.commit()
+    assert ag.remarcar_evento(pool, CLINICA, eid, ca.utc(SEG, time(9))) is False
+    with pool.connection() as c:
+        assert ca.evento(c, CLINICA, eid)["hora"] == "08:00"
+
+
+def test_consulta_nao_e_visita_e_titulo_nao_diz_procedimento(pool):
+    from finance import visita
+    with pool.connection() as c:
+        juliana = cc.listar_profissionais(c, CLINICA)[1]
+        cc.salvar_grade(c, CLINICA, profissional_id=juliana["id"], local_id=cc.listar_locais(c, CLINICA)[0]["id"],
+                        dias=[1], inicio="08:00", fim="12:00")
+        eid, _ = ca.agendar(c, CLINICA, profissional_id=juliana["id"],
+                            servico_id=_tipo(c, "Procedimento estético")["id"], inicio=ca.utc(SEG, time(8)),
+                            nome="Bia", fone="99 97777-0051", observacao="alergia a lidocaína", agora=AGORA)
+        titulo, descricao, obs = c.execute(
+            "select titulo, descricao, observacao_interna from eventos_agenda where id=%s", (eid,)).fetchone()
+        assert titulo == "Bia · atendimento" and descricao is None and obs == "alergia a lidocaína"
+        n = c.execute("select count(*) from eventos_agenda e where e.conta_id=39 and " + visita.sql_conta("e")).fetchone()[0]
+        assert n == 0
+
+
+def test_reabrir_falta_so_se_o_horario_continua_livre(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        assert ca.mudar_situacao(c, CLINICA, eid, "faltou") is None
+        _marcar(c, nome="Outra", fone="99 97777-0061")               # alguém pegou as 08:00
+        assert "ocupado" in ca.mudar_situacao(c, CLINICA, eid, "agendado")
+
+
+def test_mesmo_celular_nome_digitado_e_em_bacabal(pool):
+    with pool.connection() as c:
+        eid1, _ = _marcar(c, nome="Maria", fone="99 98888-0071")
+        eid2, _ = _marcar(c, h=9, nome="Joãozinho", fone="99 98888-0071")    # a mãe marca pro filho
+        e1, e2 = ca.evento(c, CLINICA, eid1), ca.evento(c, CLINICA, eid2)
+        assert e1["lead"] == e2["lead"] and e2["paciente"] == "Joãozinho"
+        bacabal = next(x for x in cc.listar_locais(c, CLINICA) if x["nome"] == "Bacabal")
+        assert ", em Bacabal" in ca._onde(c, CLINICA, dict(e1, local_id=bacabal["id"]))
+        assert ", no Espaço Pelle" in ca._onde(c, CLINICA, e1)
+
+
+def test_buscar_paciente_guarda_o_horario_e_encaixe_so_quando_escolhido(cli, pool, envios):
+    seg = _proxima_segunda()
+    with pool.connection() as c:
+        manoel, consulta = _manoel(c)["id"], _tipo(c, "Consulta")["id"]
+    nove = ca.utc(seg, time(9)).isoformat()
+    r = cli.post("/painel/clinica/agenda/novo", data={"prof": manoel, "tipo": consulta, "inicio": nove,
+                                                     "busca": "Maria", "nome": "Maria X", "acao": "buscar"})
+    assert "Maria" not in r.headers["location"]                     # nada pessoal na URL
+    html = cli.get(r.headers["location"]).text
+    assert f'value="{nove}" checked' in html and 'value="Maria X"' in html
+    # 08:00 ocupado + pedido como encaixe, mas a recepção escolheu 09:00 (livre): não vira encaixe
+    cli.post("/painel/clinica/agenda/novo", data={"prof": manoel, "tipo": consulta,
+                                                 "inicio": ca.utc(seg, time(8)).isoformat(), "nome": "A",
+                                                 "fone": "99 97777-0081", "acao": "agendar"})
+    cli.post("/painel/clinica/agenda/novo", data={"prof": manoel, "tipo": consulta, "inicio": nove,
+                                                 "nome": "B", "fone": "99 97777-0082", "acao": "agendar"})
+    with pool.connection() as c:
+        assert c.execute("select count(*) from eventos_agenda where encaixe").fetchone()[0] == 0
+    cli.post("/painel/clinica/agenda/novo", data={"prof": manoel, "tipo": consulta,
+                                                 "inicio": "enc|" + ca.utc(seg, time(8)).isoformat(),
+                                                 "nome": "C", "fone": "99 97777-0083", "acao": "agendar"})
+    with pool.connection() as c:
+        assert c.execute("select count(*) from eventos_agenda where encaixe").fetchone()[0] == 1
+
+
+def test_data_absurda_nao_quebra(cli):
+    assert cli.get("/painel/clinica/agenda?data=9999-12-31").status_code == 200
+    r = cli.post("/painel/clinica/agenda/novo", data={"prof": "1", "tipo": "1",
+                                                     "inicio": "9999-12-31T23:59:00+00:00", "acao": "agendar"})
+    assert r.status_code == 303
+

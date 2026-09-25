@@ -47,8 +47,10 @@ PROXIMOS = {
 NAO_OCUPA = ("cancelou", "faltou")
 ORIGENS = ("Instagram", "Indicação", "Google", "Já é paciente", "Outro")
 _SEMANA = {1: "seg", 2: "ter", 3: "qua", 4: "qui", 5: "sex", 6: "sáb", 7: "dom"}
-_RE_SIM = re.compile(r"^\s*(1|sim|confirm)", re.I)
-_RE_REMARCAR = re.compile(r"^\s*(2|remarc|n[ãa]o\s+(vou|posso|consigo))", re.I)
+# A RESPOSTA É A MENSAGEM INTEIRA (o número sozinho) ou começa pela palavra: "15h",
+# "10 horas" e "1 dúvida" não são "1". Pergunta ("posso ir às 15h?") não é resposta.
+_RE_SIM = re.compile(r"^\s*(1\s*[.!)✅👍]*\s*$|(sim|confirm\w*|confirmad[oa])\b)", re.I)
+_RE_REMARCAR = re.compile(r"^\s*(2\s*[.!)]*\s*$|2\s*[,.-]|(remarc\w*|n[ãa]o\s+(vou|posso|consigo))\b)", re.I)
 _PALAVRA = {"consulta": "consulta", "retorno": "retorno", "sessao": "sessão"}
 
 
@@ -79,11 +81,15 @@ def hoje_br(agora: datetime | None = None) -> date:
 
 def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int | None = None) -> list[dict]:
     rows = c.execute(
+        # CANCELADO POR FORA TAMBÉM É CANCELOU: a agenda de sempre e o assistente do
+        # dono cancelam gravando só status='cancelado'. Sem esta leitura a consulta
+        # cancelada continuaria ocupando o horário e recebendo a véspera.
         """select e.id, e.profissional_id, e.inicio, coalesce(e.fim, e.inicio + interval '30 minutes'),
-                  e.situacao, coalesce(e.paciente_nome, e.titulo), e.paciente_fone, e.servico_id,
+                  case when e.status = 'cancelado' then 'cancelou' else e.situacao end,
+                  coalesce(e.paciente_nome, e.titulo), e.paciente_fone, e.servico_id,
                   s.nome, s.cor, s.categoria, e.clinica_local_id, e.encaixe, e.origem,
                   e.confirmacao_enviada_em, e.confirmado_em, e.pede_remarcar_em, e.prospeccao_id,
-                  coalesce(e.descricao, '')
+                  coalesce(e.observacao_interna, '')
              from eventos_agenda e
              left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
             where e.conta_id = %s and e.situacao is not null
@@ -181,11 +187,14 @@ def _ocupacao(faixas: list[dict], evs: list[dict]) -> int | None:
 
 def dia(c, conta_id: int, data: date, agora: datetime, local_id: int | None = None) -> dict:
     grade, bloqueios = cc.listar_grade(c, conta_id), cc.listar_bloqueios(c, conta_id, data)
-    profs = _profs_que_atendem(c, conta_id)
+    # inclui quem saiu da agenda: o agendamento dele continua existindo e contando,
+    # então a coluna aparece (sem horário livre) até a recepção remarcar ou cancelar
+    profs = [p for p in cc.listar_profissionais(c, conta_id, so_ativos=False)
+             if p["funcao"] != "Recepção, não atende"]
     evs = _eventos(c, conta_id, utc(data, time(0)), utc(data + timedelta(days=1), time(0)))
     faixas = {}
     for p in profs:
-        fs = cc.faixas_do_dia(grade, bloqueios, p["id"], data)
+        fs = cc.faixas_do_dia(grade, bloqueios, p["id"], data) if p["ativo"] else []
         faixas[p["id"]] = [f for f in fs if not local_id or f["local_id"] == local_id]
     if local_id:
         evs = [e for e in evs if e["local_id"] in (None, local_id)]
@@ -193,6 +202,8 @@ def dia(c, conta_id: int, data: date, agora: datetime, local_id: int | None = No
     colunas = [p for p in profs if faixas[p["id"]] or any(e["profissional_id"] == p["id"] for e in evs)]
     linhas = _linhas({p["id"]: faixas[p["id"]] for p in colunas}, evs)
     grade_dia = [{"prof": p, "faixas": faixas[p["id"]],
+                  # "+ livre" só leva a algum lugar se ele tem atendimento pra marcar
+                  "marca": bool(p["ativo"] and p["tipos"]),
                   "celulas": _celulas(linhas, faixas[p["id"]],
                                       [e for e in evs if e["profissional_id"] == p["id"]], data, agora)}
                  for p in colunas]
@@ -203,7 +214,15 @@ def dia(c, conta_id: int, data: date, agora: datetime, local_id: int | None = No
             "confirmados": sum(1 for e in vivos if e["situacao"] != "agendado"),
             "a_confirmar": len(vivos),
             "faltas": sum(1 for e in evs if e["situacao"] == "faltou"),
-            "remarcar": [e for e in evs if e["pede_remarcar_em"] and e["situacao"] == "agendado"]}
+            "remarcar": pediram_remarcar(c, conta_id, agora)}
+
+
+def pediram_remarcar(c, conta_id: int, agora: datetime) -> list[dict]:
+    """Quem respondeu 2 na confirmação, de hoje em diante — em qualquer dia. A resposta
+    chega na véspera; se só aparecesse no dia da consulta, a recepção veria tarde."""
+    evs = _eventos(c, conta_id, agora, agora + timedelta(days=60))
+    return [dict(e, dia=dia_txt(e["inicio"])) for e in evs
+            if e["pede_remarcar_em"] and e["situacao"] == "agendado"]
 
 
 def semana(c, conta_id: int, profissional_id: int, segunda: date, agora: datetime) -> dict:
@@ -271,7 +290,9 @@ def _lead_do_paciente(c, conta_id: int, lead_id: int | None, nome: str, fone: st
                                     or right(regexp_replace(coalesce(telefone,''), '\D', '', 'g'), 8) = %s)
              order by atualizado_em desc nulls last limit 1""", (conta_id, dig[-8:], dig[-8:])).fetchone()
     if r:
-        return r[0], r[1] or nome, "+" + dig, None
+        # o card é o do celular, mas o paciente é quem a recepção digitou: a mãe marca
+        # pro filho do próprio celular, e a agenda tem que dizer o nome do filho
+        return r[0], nome, "+" + dig, None
     lid = c.execute(
         """insert into prospeccao (conta_id, empresa, contato, whatsapp, tipo, origem, temperatura,
                                    status, estagio)
@@ -343,26 +364,37 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
     _mover_card(c, conta_id, lid, membro_id)
     loc_id = faixa["local_id"] if faixa else None
     loc = next((x for x in cc.listar_locais(c, conta_id) if x["id"] == loc_id), None)
+    # O TÍTULO NÃO DIZ O PROCEDIMENTO: é o que a agenda de sempre e o .ics mostram.
+    # E a observação da recepção não vai em `descricao` (que o .ics publica).
+    palavra = _palavra({"tipo": tipo["nome"], "categoria": tipo["categoria"]})
     eid = c.execute(
         """insert into eventos_agenda
-             (conta_id, titulo, inicio, fim, local, descricao, tipo, prospeccao_id, profissional_id,
+             (conta_id, titulo, inicio, fim, local, tipo, prospeccao_id, profissional_id,
               servico_id, clinica_local_id, situacao, situacao_em, origem, paciente_nome, paciente_fone,
-              encaixe, marcado_por, status)
-           values (%s,%s,%s,%s,%s,%s,'empresa',%s,%s,%s,%s,'agendado',now(),%s,%s,%s,%s,'recepcao','ativo')
+              encaixe, marcado_por, status, observacao_interna)
+           values (%s,%s,%s,%s,%s,'empresa',%s,%s,%s,%s,'agendado',now(),%s,%s,%s,%s,'recepcao','ativo',%s)
            returning id""",
-        (conta_id, f"{nome_pac} · {tipo['nome']}"[:200], inicio, fim, loc["nome"] if loc else None,
-         (observacao or "").strip()[:500] or None, lid, profissional_id, servico_id, loc_id,
-         origem if origem in ORIGENS else None, nome_pac[:120], fone_pac, bool(encaixe and not livre))).fetchone()[0]
+        (conta_id, f"{nome_pac} · {palavra}"[:200], inicio, fim, loc["nome"] if loc else None,
+         lid, profissional_id, servico_id, loc_id,
+         origem if origem in ORIGENS else None, nome_pac[:120], fone_pac, bool(encaixe and not livre),
+         (observacao or "").strip()[:500] or None)).fetchone()[0]
     return eid, None
 
 
 def mudar_situacao(c, conta_id: int, evento_id: int, nova: str) -> str | None:
-    ev = c.execute("select situacao from eventos_agenda where id=%s and conta_id=%s and situacao is not null for update",
+    ev = c.execute("""select case when status = 'cancelado' then 'cancelou' else situacao end,
+                             profissional_id, inicio, coalesce(fim, inicio + interval '30 minutes')
+                        from eventos_agenda where id=%s and conta_id=%s and situacao is not null for update""",
                    (evento_id, conta_id)).fetchone()
     if not ev:
         return "Agendamento não encontrado."
     if nova not in PROXIMOS.get(ev[0], ()):
         return f"De {SIT_D.get(ev[0], ev[0])} não dá pra ir pra {SIT_D.get(nova, nova)}."
+    if ev[0] == "faltou" and nova == "agendado" and ev[1]:
+        # reabrir a falta volta a ocupar o horário: só se ninguém foi marcado ali
+        c.execute("select pg_advisory_xact_lock(%s::int, %s::int)", (_LOCK_MARCAR, int(ev[1])))
+        if ocupados(c, conta_id, ev[1], ev[2], ev[3], ignorar=evento_id):
+            return "Esse horário já foi ocupado por outro paciente. Remarque em vez de reabrir."
     c.execute(
         """update eventos_agenda
               set situacao=%s, situacao_em=now(),
@@ -421,7 +453,9 @@ def _onde(c, conta_id: int, ev: dict) -> str:
     loc = next((x for x in cc.listar_locais(c, conta_id, so_ativos=False) if x["id"] == ev.get("local_id")), None)
     if not loc:
         return ""
-    return f", no {loc['nome']}" + (f" ({loc['endereco']})" if loc["endereco"] else "")
+    # "no Espaço Pelle" (o lugar), "em Bacabal" (a cidade da viagem)
+    prep = "em" if loc["tipo"] == "viagem" else "no"
+    return f", {prep} {loc['nome']}" + (f" ({loc['endereco']})" if loc["endereco"] else "")
 
 
 def _prof_nome(c, conta_id: int, ev: dict) -> str:
@@ -430,20 +464,37 @@ def _prof_nome(c, conta_id: int, ev: dict) -> str:
     return p["nome"] if p else ""
 
 
-def texto_marcado(c, conta_id: int, ev: dict) -> str:
+_DIA_LONGO = {1: "segunda", 2: "terça", 3: "quarta", 4: "quinta", 5: "sexta", 6: "sábado", 7: "domingo"}
+
+
+def _quando(inicio: datetime, agora: datetime) -> str:
+    """"Amanhã", "Hoje" ou "Na segunda, 28/09," — a véspera de segunda sai na sexta, e
+    o lembrete manual pode sair em qualquer dia: "amanhã" fixo seria mentira."""
+    d, hoje = local(inicio).date(), hoje_br(agora)
+    if d == hoje:
+        return "Hoje"
+    if d == hoje + timedelta(days=1):
+        return "Amanhã"
+    artigo = "No" if d.isoweekday() in (6, 7) else "Na"
+    return f"{artigo} {_DIA_LONGO[d.isoweekday()]}, {d:%d/%m},"
+
+
+def texto_marcado(c, conta_id: int, ev: dict, promete_lembrete: bool = False) -> str:
     from finance.voltar_a_chamar import primeiro_nome
     n = primeiro_nome(ev["paciente"])
     palavra = _palavra(ev)
     art, fim = _genero(palavra)
     return (f"Prontinho!! ✅ {n + ', ' + art.lower() if n else art} {palavra} com {_prof_nome(c, conta_id, ev)} "
-            f"está marcad{fim} para {dia_txt(ev['inicio'])} às {ev['hora']}{_onde(c, conta_id, ev)}. "
-            "Na véspera eu te mando um lembrete 😊")
+            f"está marcad{fim} para {dia_txt(ev['inicio'])} às {ev['hora']}{_onde(c, conta_id, ev)}."
+            + (" Na véspera eu te mando um lembrete 😊" if promete_lembrete
+               else " Qualquer coisa, é só responder por aqui 😊"))
 
 
-def texto_vespera(c, conta_id: int, ev: dict) -> str:
+def texto_vespera(c, conta_id: int, ev: dict, agora: datetime | None = None) -> str:
     from finance.voltar_a_chamar import primeiro_nome
     n = primeiro_nome(ev["paciente"])
-    return (f"Oi{', ' + n if n else ''}! Amanhã você tem {_palavra(ev)} às {ev['hora']} com "
+    quando = _quando(ev["inicio"], agora or datetime.now(timezone.utc))
+    return (f"Oi{', ' + n if n else ''}! {quando} você tem {_palavra(ev)} às {ev['hora']} com "
             f"{_prof_nome(c, conta_id, ev)}{_onde(c, conta_id, ev)}. Confirma? "
             "Responda 1 para confirmar ou 2 se precisar remarcar.")
 
@@ -496,7 +547,8 @@ def config(c, conta_id: int) -> dict:
 def salvar_config(c, conta_id: int, modo: str, hora: int | None) -> str | None:
     if modo not in ("off", "ligado"):
         return "Modo inválido."
-    hora = hora if hora and 7 <= int(hora) <= 19 else 10
+    # até 18h: a janela padrão fecha às 19h, e hora que nunca cabe na janela não manda nada
+    hora = hora if hora and 7 <= int(hora) <= 18 else 10
     c.execute("""insert into clinica_agenda_config (conta_id, confirmacao_modo, confirmacao_hora)
                  values (%s,%s,%s) on conflict (conta_id) do update
                  set confirmacao_modo=excluded.confirmacao_modo, confirmacao_hora=excluded.confirmacao_hora,
@@ -505,40 +557,61 @@ def salvar_config(c, conta_id: int, modo: str, hora: int | None) -> str | None:
 
 
 def ler_respostas(c, conta_id: int, agora: datetime) -> int:
-    """O paciente respondeu 1 (confirma) ou 2 (remarcar) depois da mensagem da véspera."""
+    """O paciente respondeu 1 (confirma) ou 2 (remarcar) depois do lembrete — o da
+    véspera ou o que a recepção mandou na mão. Olha TODAS as mensagens dele desde o
+    lembrete, na ordem: a primeira que for resposta decide ("oi", "tudo bem?" antes
+    não atrapalham; "15h" não é "1")."""
     mudou = 0
     for eid, enviada, lead, fone in c.execute(
             """select id, confirmacao_enviada_em, prospeccao_id, paciente_fone from eventos_agenda
-                where conta_id=%s and situacao='agendado' and confirmacao_enviada_em is not null
+                where conta_id=%s and situacao='agendado' and status='ativo'
+                  and confirmacao_enviada_em is not null
                   and pede_remarcar_em is null and inicio > %s""", (conta_id, agora)).fetchall():
         conv = _conversa(c, conta_id, {"lead": lead, "fone": fone})
         if not conv:
             continue
-        r = c.execute("""select m.texto from mensagens m join conversas cv on cv.id = m.conversa_id
-                          where m.conversa_id=%s and cv.conta_id=%s and m.direcao='in' and m.criado_em > %s
-                          order by m.criado_em, m.id limit 1""", (conv, conta_id, enviada)).fetchone()
-        if not r:
-            continue
-        if _RE_SIM.search(r[0] or ""):
-            c.execute("""update eventos_agenda set situacao='confirmado', situacao_em=now(), confirmado_em=now()
-                          where id=%s and conta_id=%s and situacao='agendado'""", (eid, conta_id))
-            mudou += 1
-        elif _RE_REMARCAR.search(r[0] or ""):
-            c.execute("update eventos_agenda set pede_remarcar_em=now() where id=%s and conta_id=%s",
-                      (eid, conta_id))
-            mudou += 1
+        for (texto,) in c.execute(
+                """select m.texto from mensagens m join conversas cv on cv.id = m.conversa_id
+                    where m.conversa_id=%s and cv.conta_id=%s and m.direcao='in' and m.criado_em > %s
+                    order by m.criado_em, m.id limit 20""", (conv, conta_id, enviada)).fetchall():
+            t = texto or ""
+            if _RE_SIM.search(t):
+                c.execute("""update eventos_agenda set situacao='confirmado', situacao_em=now(), confirmado_em=now()
+                              where id=%s and conta_id=%s and situacao='agendado'""", (eid, conta_id))
+                mudou += 1
+                break
+            if _RE_REMARCAR.search(t):
+                c.execute("update eventos_agenda set pede_remarcar_em=now() where id=%s and conta_id=%s",
+                          (eid, conta_id))
+                mudou += 1
+                break
     return mudou
 
 
+def _dias_da_vespera(hoje: date, janela: dict) -> list[date]:
+    """Os dias cujo lembrete sai hoje: amanhã e, se amanhã a clínica não abre, até o
+    próximo dia de atendimento. Sexta manda sábado, domingo e segunda — sem isso a
+    consulta de segunda nunca teria véspera (domingo está fora da janela)."""
+    abertos = fr._dias(janela)
+    out = []
+    d = hoje + timedelta(days=1)
+    for _ in range(7):
+        out.append(d)
+        if d.isoweekday() in abertos:
+            break
+        d += timedelta(days=1)
+    return out
+
+
 def mandar_vesperas(c, conta_id: int, agora: datetime, cfg: dict, janela: dict, limite: int = 3) -> int:
-    """Na hora escolhida (e dentro do horário da clínica), a mensagem de quem tem
-    horário amanhã. No máximo `limite` por ciclo: o resto sai nos próximos."""
+    """Na hora escolhida (e dentro do horário da clínica), o lembrete de quem tem
+    horário até o próximo dia de atendimento. No máximo `limite` por ciclo."""
     if local(agora).hour < cfg["confirmacao_hora"] or not fr.dentro_da_janela(agora, janela):
         return 0
-    amanha = hoje_br(agora) + timedelta(days=1)
-    evs = [e for e in _eventos(c, conta_id, utc(amanha, time(0)), utc(amanha + timedelta(days=1), time(0)))
+    dias = _dias_da_vespera(hoje_br(agora), janela)
+    evs = [e for e in _eventos(c, conta_id, utc(dias[0], time(0)), utc(dias[-1] + timedelta(days=1), time(0)))
            if e["situacao"] == "agendado" and not e["confirmacao_enviada_em"]
-           and local(e["inicio"]).date() == amanha]
+           and local(e["inicio"]).date() in dias and e["inicio"] > agora]
     feitos = 0
     for ev in evs[:limite]:
         # marca antes de mandar: se cair no meio, o paciente fica sem a mensagem, e nunca com duas
@@ -546,15 +619,26 @@ def mandar_vesperas(c, conta_id: int, agora: datetime, cfg: dict, janela: dict, 
                           where id=%s and conta_id=%s and confirmacao_enviada_em is null returning id""",
                       (agora, ev["id"], conta_id)).fetchone()
         c.commit()
-        if r and enviar(c, conta_id, ev, texto_vespera(c, conta_id, ev), autor="bot").get("ok"):
+        if not r:
+            continue
+        res = enviar(c, conta_id, ev, texto_vespera(c, conta_id, ev, agora), autor="bot")
+        if res.get("ok"):
             feitos += 1
+        elif res.get("erro") != "sem_numero":
+            # falhou limpo (WhatsApp fora do ar): tenta de novo no próximo ciclo
+            c.execute("update eventos_agenda set confirmacao_enviada_em=null where id=%s and conta_id=%s",
+                      (ev["id"], conta_id))
         c.commit()
     return feitos
 
 
 def rodar(pool, agora: datetime | None = None) -> dict:
-    """Uma passada da confirmação na véspera, nas contas que ligaram. Chamada pelo
-    poller (web/app.py). Só perfil clínica e só com o modo ligado."""
+    """Uma passada da confirmação na véspera. Chamada pelo poller (web/app.py).
+
+    MANDA só nas contas clínica com o modo ligado. LÊ a resposta em toda conta
+    clínica que tenha lembrete esperando resposta — inclusive o que a recepção
+    mandou na mão com o modo desligado: pedir "responda 1 ou 2" e não ler seria
+    ignorar o paciente."""
     agora = agora or datetime.now(timezone.utc)
     total = {"contas": 0, "enviadas": 0, "respostas": 0}
     with pool.connection() as lockc:
@@ -564,19 +648,24 @@ def rodar(pool, agora: datetime | None = None) -> dict:
             with pool.connection() as c:
                 try:
                     with c.transaction():
-                        contas = [r[0] for r in c.execute(
-                            "select conta_id from clinica_agenda_config where confirmacao_modo='ligado'").fetchall()]
+                        ligadas = {r[0] for r in c.execute(
+                            "select conta_id from clinica_agenda_config where confirmacao_modo='ligado'").fetchall()}
+                        esperando = {r[0] for r in c.execute(
+                            """select distinct conta_id from eventos_agenda
+                                where situacao='agendado' and confirmacao_enviada_em is not null
+                                  and pede_remarcar_em is null and inicio > %s""", (agora,)).fetchall()}
                 except Exception:  # noqa: BLE001
-                    contas = []
-            for conta_id in contas:
+                    ligadas, esperando = set(), set()
+            for conta_id in sorted(ligadas | esperando):
                 try:
                     with pool.connection() as c:
                         if fr.perfil_da_conta(c, conta_id) != "clinica":
                             continue
                         total["respostas"] += ler_respostas(c, conta_id, agora)
                         c.commit()
-                        total["enviadas"] += mandar_vesperas(c, conta_id, agora, config(c, conta_id),
-                                                             fr.config(c, conta_id))
+                        if conta_id in ligadas:
+                            total["enviadas"] += mandar_vesperas(c, conta_id, agora, config(c, conta_id),
+                                                                 fr.config(c, conta_id))
                         c.commit()
                     total["contas"] += 1
                 except Exception:  # noqa: BLE001

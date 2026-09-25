@@ -30,7 +30,10 @@ create table membros (id bigserial primary key, conta_id bigint, nome text, emai
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text not null, contato text, telefone text, whatsapp text, tipo text, origem text,
   temperatura text, status text default 'novo', estagio text default 'base',
+  valor_estimado_centavos bigint not null default 0,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
+create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint, membro_id bigint,
+  tipo text, resultado text, descricao text default '', criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, contato_nome text,
   ultima_msg_em timestamptz default now());
@@ -451,4 +454,82 @@ def test_data_absurda_nao_quebra(cli):
     r = cli.post("/painel/clinica/agenda/novo", data={"prof": "1", "tipo": "1",
                                                      "inicio": "9999-12-31T23:59:00+00:00", "acao": "agendar"})
     assert r.status_code == 303
+
+
+# ------------------------------------------------------------------ fase 3a: o card anda com a agenda
+
+def _status(c, eid):
+    return c.execute("""select p.status, p.valor_estimado_centavos from prospeccao p
+                         join eventos_agenda e on e.prospeccao_id = p.id where e.id=%s""", (eid,)).fetchone()
+
+
+def test_faltou_volta_pro_follow_up_e_reabrir_devolve(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        assert _status(c, eid)[0] == "qualificado"
+        assert ca.mudar_situacao(c, CLINICA, eid, "faltou") is None
+        assert _status(c, eid)[0] == "follow_up"
+        nota = c.execute("select descricao from prospeccao_atividades order by id desc limit 1").fetchone()[0]
+        assert nota.startswith("Faltou à consulta de 28/09 08:00")
+        assert ca.mudar_situacao(c, CLINICA, eid, "agendado") is None
+        assert _status(c, eid)[0] == "qualificado"
+        assert [r[0] for r in c.execute("select motivo from funil_movimentos").fetchall()] == ["agenda"] * 3
+
+
+def test_cancelou_tambem_volta_pro_follow_up(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        ca.mudar_situacao(c, CLINICA, eid, "cancelou")
+        assert _status(c, eid)[0] == "follow_up"
+
+
+def _ate_atendimento(c, eid):
+    for s in ("confirmado", "presente", "atendimento"):
+        assert ca.mudar_situacao(c, CLINICA, eid, s) is None
+
+
+def test_finalizado_com_tratamento_vai_pro_plano_com_o_valor(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        _ate_atendimento(c, eid)
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="sim", valor_centavos=320000) is None
+        assert _status(c, eid) == ("proposta", 320000)
+
+
+def test_finalizado_sem_tratamento_fecha_com_o_valor_da_consulta(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        _ate_atendimento(c, eid)
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="nao") is None
+        assert _status(c, eid) == ("ganho", 50000)
+
+
+def test_finalizado_sem_resposta_nao_mexe_e_card_adiante_nao_volta(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        _ate_atendimento(c, eid)
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado") is None
+        assert _status(c, eid)[0] == "qualificado"
+        eid2, _ = _marcar(c, h=9, nome="Outra", fone="99 97777-0091")
+        lead = ca.evento(c, CLINICA, eid2)["lead"]
+        c.execute("update prospeccao set status='proposta' where id=%s", (lead,))
+        ca.mudar_situacao(c, CLINICA, eid2, "faltou")
+        assert _status(c, eid2)[0] == "proposta"          # alguém já levou adiante: fica
+
+
+def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
+    seg = _proxima_segunda()
+    with pool.connection() as c:
+        eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, "Consulta")["id"],
+                               inicio=ca.utc(seg, time(8)), nome="Ana", fone="99 97777-0092")
+        assert erro is None
+        _ate_atendimento(c, eid)
+        c.commit()
+    html = cli.get(f"/painel/clinica/agenda/evento/{eid}").text
+    assert "O médico propôs tratamento?" in html
+    r = cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
+                 data={"nova": "finalizado", "tratamento": "sim", "valor": "1.500,00"})
+    assert "aviso=situacao" in r.headers["location"]
+    with pool.connection() as c:
+        assert _status(c, eid) == ("proposta", 150000)
 

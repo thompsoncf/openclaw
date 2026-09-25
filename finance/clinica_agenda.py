@@ -381,7 +381,80 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
     return eid, None
 
 
-def mudar_situacao(c, conta_id: int, evento_id: int, nova: str) -> str | None:
+def _chaves_do_funil(c, conta_id: int) -> set[str]:
+    """As colunas que o funil da conta tem. Funil ainda não aberto = o modelo do
+    nicho clínica (é ele que a conta vai receber)."""
+    ch = {r[0] for r in c.execute("select chave from funil_etapas where conta_id=%s", (conta_id,)).fetchall()}
+    if ch:
+        return ch
+    from finance import raio_x_perfil as rxp
+    return {e[0] for e in rxp.etapas_padrao("clinica")}
+
+
+def _nota(c, lead_id: int, membro_id: int | None, texto: str) -> None:
+    try:
+        with c.transaction():
+            c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao)
+                         values (%s,%s,'nota',%s)""", (lead_id, membro_id, texto[:400]))
+    except Exception:  # noqa: BLE001 — a linha do tempo é bônus; mover o card é o pedido
+        _log.info("agenda da clínica: nota não gravada (lead %s)", lead_id, exc_info=True)
+
+
+def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento: str | None = None,
+                     valor_centavos: int | None = None, membro_id: int | None = None) -> str | None:
+    """O CARD ANDA QUANDO A AGENDA ANDA (seção 06 da parte 1 aprovada). Devolve a
+    etapa nova, ou None se o card ficou onde estava.
+
+        faltou / cancelou        Consulta agendada → Follow-up ("faltou, remarcar").
+                                 Não é Perdido: faltar não é desistir.
+        reaberto (faltou→agend.) Follow-up → Consulta agendada
+        finalizado + propôs      → Plano de tratamento (com o valor, se informado)
+        finalizado, sem proposta → Fechado (virou paciente)
+        finalizado sem resposta  → fica onde está
+
+    Só mexe em card que está onde a agenda o pôs (ou antes): card que alguém já levou
+    pra Plano de tratamento, Fechado ou Perdido não volta por causa da agenda.
+    """
+    r = c.execute("""select e.prospeccao_id, p.status, coalesce(p.valor_estimado_centavos, 0),
+                            coalesce(s.setup_centavos, 0), to_char(e.inicio - interval '3 hours', 'DD/MM HH24:MI')
+                       from eventos_agenda e
+                       join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                       left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
+                      where e.id=%s and e.conta_id=%s""", (evento_id, conta_id)).fetchone()
+    if not r:
+        return None
+    lead, atual, valor_atual, preco_tipo, quando = r
+    chaves = _chaves_do_funil(c, conta_id)
+    antes = ("novo", "contatado", "follow_up", "qualificado")
+    destino, nota, valor = None, None, None
+    if nova in ("faltou", "cancelou") and atual == "qualificado" and "follow_up" in chaves:
+        destino = "follow_up"
+        nota = f"{'Faltou à' if nova == 'faltou' else 'Cancelou a'} consulta de {quando}: remarcar."
+    elif nova == "agendado" and atual == "follow_up" and "qualificado" in chaves:
+        destino = "qualificado"
+    elif nova == "finalizado" and tratamento == "sim" and atual in antes and "proposta" in chaves:
+        destino = "proposta"
+        valor = valor_centavos if valor_centavos and valor_centavos > 0 else None
+        nota = "Consulta finalizada: o médico propôs tratamento" + (
+            f" (R$ {valor / 100:,.2f})".replace(",", "X").replace(".", ",").replace("X", ".") if valor else "") + "."
+    elif nova == "finalizado" and tratamento == "nao" and atual in antes and "ganho" in chaves:
+        destino = "ganho"
+        valor = preco_tipo if (not valor_atual and preco_tipo) else None
+        nota = "Consulta finalizada, sem proposta de tratamento."
+    if not destino or destino == atual:
+        return None
+    c.execute("""update prospeccao set status=%s, estagio='lead', atualizado_em=now(),
+                        valor_estimado_centavos = coalesce(%s, valor_estimado_centavos)
+                  where id=%s and conta_id=%s""", (destino, valor, lead, conta_id))
+    fr.registrar_movimento(c, conta_id, lead, atual, destino, "agenda", membro_id)
+    if nota:
+        _nota(c, lead, membro_id, nota)
+    return destino
+
+
+def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: str | None = None,
+                   valor_centavos: int | None = None, membro_id: int | None = None) -> str | None:
+    """Muda o status e, junto, o card do funil (`card_pela_agenda`)."""
     ev = c.execute("""select case when status = 'cancelado' then 'cancelou' else situacao end,
                              profissional_id, inicio, coalesce(fim, inicio + interval '30 minutes')
                         from eventos_agenda where id=%s and conta_id=%s and situacao is not null for update""",
@@ -390,6 +463,17 @@ def mudar_situacao(c, conta_id: int, evento_id: int, nova: str) -> str | None:
         return "Agendamento não encontrado."
     if nova not in PROXIMOS.get(ev[0], ()):
         return f"De {SIT_D.get(ev[0], ev[0])} não dá pra ir pra {SIT_D.get(nova, nova)}."
+    if nova == "finalizado" and tratamento not in (None, "sim", "nao"):
+        return "Resposta inválida sobre o tratamento."
+    erro = _gravar_situacao(c, conta_id, evento_id, ev, nova)
+    if erro:
+        return erro
+    card_pela_agenda(c, conta_id, evento_id, nova, tratamento=tratamento,
+                     valor_centavos=valor_centavos, membro_id=membro_id)
+    return None
+
+
+def _gravar_situacao(c, conta_id: int, evento_id: int, ev, nova: str) -> str | None:
     if ev[0] == "faltou" and nova == "agendado" and ev[1]:
         # reabrir a falta volta a ocupar o horário: só se ninguém foi marcado ali
         c.execute("select pg_advisory_xact_lock(%s::int, %s::int)", (_LOCK_MARCAR, int(ev[1])))

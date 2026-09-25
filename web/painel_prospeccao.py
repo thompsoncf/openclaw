@@ -286,6 +286,24 @@ def _tempo_curto(horas) -> str:
     return f"{h}h" if h < 48 else f"{h // 24}d"
 
 
+def _busca_norm(txt) -> str:
+    """Minúsculo e sem acento: "Geórgia" acha com "georgia". O JS da busca do funil
+    (`_kbNorm`) faz a MESMA coisa, pra digitar e dar Enter acharem os mesmos cards."""
+    import unicodedata
+    s = unicodedata.normalize("NFD", str(txt or "").lower())
+    return "".join(ch for ch in s if not unicodedata.combining(ch))
+
+
+def _busca_bate(card: dict, termo_norm: str, termo_dig: str) -> bool:
+    """O card bate com a busca? Pelo nome (pedaço, sem acento) ou pelo telefone —
+    o telefone só a partir de 4 dígitos, senão "2" acharia meio funil."""
+    if not termo_norm:
+        return True
+    if termo_norm in _busca_norm(card.get("empresa")):
+        return True
+    return len(termo_dig) >= 4 and termo_dig in (card.get("tel_q") or "")
+
+
 def _vendedores(pool, conta_id: int) -> list[dict]:
     """Quem pode receber alvos: o dono (aparece pelo nome) + vendedores/gestores.
     O dono vem primeiro e rotulado, pra ele poder ficar com leads no próprio nome."""
@@ -605,7 +623,7 @@ def _promover_para_lead(c, conta_id, pros_id) -> None:
 
 @router.get("/painel/prospeccao", response_class=HTMLResponse)
 def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista: str = "",
-                      entrou: str = "", fora: str | None = None):
+                      entrou: str = "", fora: str | None = None, q: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -614,16 +632,33 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     where = ["p.conta_id = %s"]
     params: list = [conta_id]
     filtro_vend = ""
+    # O VENDEDOR vê só os leads dele, e isso fica no SQL: é permissão, não filtro.
+    # O FILTRO de vendedor da gerência saiu do SQL em 25/09/2026 e foi pro Python,
+    # junto com os outros filtros do quadro (ver abaixo): o seletor passou a dizer
+    # quantos cards cada vendedor tem no quadro ("Jacqueline · 48"), e a linha de
+    # críticos conta todos os vendedores mesmo com um só escolhido — as duas
+    # contas precisam da lista inteira, que o `where` escondia.
     if not ctx["gerencia"]:
         where.append("p.vendedor_id = %s")
         params.append(ctx["membro_id"])
     else:
         filtro_vend = (vendedor or "").strip()
+        if filtro_vend != "nao" and not filtro_vend.isdigit():
+            filtro_vend = ""
+
+    def _passa_vend(vid) -> bool:
         if filtro_vend == "nao":
-            where.append("p.vendedor_id is null")
-        elif filtro_vend.isdigit():
-            where.append("p.vendedor_id = %s")
-            params.append(int(filtro_vend))
+            return vid is None
+        if filtro_vend:
+            return vid == int(filtro_vend)
+        return True
+
+    # A BUSCA (25/09/2026): nome ou telefone. Digitando, o JS filtra o que já está
+    # na tela; o Enter chega aqui com `q` e procura em TODOS os meses — só nesta
+    # visita: o período guardado na sessão não muda por causa de uma busca.
+    busca = (q or "").strip()[:80]
+    busca_n = _busca_norm(busca)
+    busca_dig = re.sub(r"\D", "", busca)
     where.append("p.estagio = 'lead'")   # funil = só quem engajou; o resto fica na aba Base
     # OS FILTROS DO QUADRO ficam no Python, não no SQL: o quadro inteiro da conta
     # (vendedor e tudo) vem de uma vez — são centenas de linhas, não milhares — e
@@ -902,6 +937,9 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     hoje = _agora().date()
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
+    # os cards dos OUTROS vendedores (gerência com um vendedor escolhido): não vão
+    # pro quadro, mas entram nas contagens do seletor e na linha de críticos
+    outros_vend: list[dict] = []
     for r in rows:
         conv = conv_por_lead.get(r[0], {})
         chip_apelido = None
@@ -960,6 +998,13 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         # quando já passou (o Evolui S. da ZAQ estava 54 dias vencido, sem destaque)
         _px = r[8].date() if hasattr(r[8], "date") else r[8]
         card["proximo_venceu"] = bool(_px and _px < hoje)
+        # os dígitos dos dois telefones, pra busca (a do servidor e a do JS, que lê
+        # o data-tel do card)
+        card["tel_q"] = " ".join(x for x in (re.sub(r"\D", "", r[9] or ""),
+                                             re.sub(r"\D", "", r[10] or "")) if x)
+        if not _passa_vend(r[11]):
+            outros_vend.append(card)
+            continue
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
@@ -980,7 +1025,9 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # quadro; quem ficou de fora só entra pela pílula (esperando resposta, festa
     # nos próximos 30 dias) e chega marcado com o mês em que entrou.
     todos_cards = [cc for cards in colunas.values() for cc in cards]
-    for cc in todos_cards:
+    if busca:
+        filtro_entrou = "tudo"   # o Enter da busca procura em todos os meses
+    for cc in todos_cards + outros_vend:
         cc["esperando"] = _evl.esperando_resposta(cc)
         cc["festa30"] = _evl.festa_em_30_dias(cc, hoje)
         cc["no_periodo"] = _evl.no_periodo(cc, filtro_entrou)
@@ -1003,7 +1050,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
 
     # "9 de 224": o total da coluna na conta inteira, pra ninguém achar que sumiu
     totais_col = {chave: len(cards) for chave, cards in colunas.items()}
-    filtrado = bool(filtro_mes) or filtro_entrou != "tudo"
+    # a busca também filtra: a coluna mostra "2 de 119", senão parece que sumiram
+    filtrado = bool(filtro_mes) or filtro_entrou != "tudo" or bool(busca)
     # o trilho ("Festa em") conta só o que está no quadro, fora Perdido, antes do
     # próprio filtro de mês — senão a régua sumiria ao usá-la
     contagens: dict = {}
@@ -1011,11 +1059,55 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         if _visivel(cc) and cc["status"] != "perdido":
             k = _evl.mes_chave(cc["evento_em"]) if cc.get("evento_em") else None
             contagens[k] = contagens.get(k, 0) + 1
-    colunas = {chave: [cc for cc in cards if _visivel(cc) and _passa_mes(cc)]
+    def _no_quadro(cc):
+        return _visivel(cc) and _passa_mes(cc) and _busca_bate(cc, busca_n, busca_dig)
+
+    colunas = {chave: [cc for cc in cards if _no_quadro(cc)]
                for chave, cards in colunas.items()}
     n_quadro = sum(len(v) for v in colunas.values())
     entrou_itens = _evl.meses_entrada(todos_cards, hoje)
     entrou_rotulo = next((m["rotulo"] for m in entrou_itens if m["chave"] == filtro_entrou), "Tudo")
+    # O SELETOR DE VENDEDOR COM A CONTAGEM ("Jacqueline · 48") e A LINHA DE CRÍTICOS
+    # (25/09/2026). Os dois contam o que estaria NO QUADRO com os filtros de agora —
+    # período, pílulas de fora, mês do evento, busca —, de todos os vendedores,
+    # mesmo com um só escolhido: é a régua pra trocar de um pro outro. Só gerência
+    # (o vendedor não tem seletor, e cobrar a equipe não é papel dele).
+    vend_cont: dict[str, int] = {}
+    criticos: list[dict] = []
+    if ctx["gerencia"]:
+        _crit: dict = {}
+        for cc in todos_cards + outros_vend:
+            if not _no_quadro(cc):
+                continue
+            chave_v = str(cc["vendedor_id"]) if cc["vendedor_id"] else "nao"
+            vend_cont[chave_v] = vend_cont.get(chave_v, 0) + 1
+            # crítico = o MESMO estado do selo do card e da tela de Follow-up
+            # (`fu_por_lead`); conta sem a tela, ou em 'off', não tem linha nenhuma
+            if (cc.get("fu") or {}).get("estado") == "critico" and cc["status"] != "perdido":
+                n_, nome_ = _crit.get(chave_v, (0, cc.get("vendedor")))
+                _crit[chave_v] = (n_ + 1, nome_)
+        for chave_v, (n_, nome_) in sorted(_crit.items(), key=lambda kv: (-kv[1][0], kv[1][1] or "")):
+            criticos.append({
+                "n": n_, "chave": chave_v,
+                # o primeiro nome basta ("Jacqueline"): é uma linha, não uma tabela
+                "nome": (((nome_ or "").split() or ["sem responsável"])[0]
+                         if chave_v != "nao" else "sem responsável"),
+                "on": filtro_vend == chave_v})   # a URL sai do _kb_url, lá embaixo
+    vend_total = sum(vend_cont.values())
+    # O MÊS QUASE VAZIO (decisão do dono, 24/09: o quadro abre no mês corrente). Quem
+    # capta em lote — a ZAQ teve 1 lead em setembro e 162 em agosto — abria num
+    # quadro de colunas vazias sem saber por quê. Com até 3 cards no mês e um lote
+    # de 10+ num mês anterior, o espaço livre diz o que houve e leva pra lá.
+    mes_vazio = None
+    if (not busca and not filtro_mes and _evl.mes_valido(filtro_entrou)
+            and n_quadro <= 3):
+        _lote = next((m for m in entrou_itens
+                      if m["chave"] not in (filtro_entrou, "tudo") and m["n"] >= 10), None)
+        if _lote:
+            mes_vazio = {"n": n_quadro, "rotulo": entrou_rotulo,
+                         "lote_rotulo": _lote["rotulo"], "lote_n": _lote["n"],
+                         "lote_chave": _lote["chave"],
+                         "tudo_n": next((m["n"] for m in entrou_itens if m["chave"] == "tudo"), 0)}
 
     # os links das pílulas: o período e o de-fora vão na URL uma vez e ficam na sessão
     from urllib.parse import urlencode as _urlencode
@@ -1027,6 +1119,16 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
 
     for m in entrou_itens:
         m["url"] = _kb_url(entrou=m["chave"])
+    for cr in criticos:
+        # clicar no nome filtra o quadro por ele; clicar de novo (já filtrado) solta
+        cr["url"] = _kb_url(vendedor="" if cr["on"] else cr["chave"])
+    if mes_vazio:
+        mes_vazio["lote_url"] = _kb_url(entrou=mes_vazio["lote_chave"])
+        mes_vazio["tudo_url"] = _kb_url(entrou="tudo")
+    # a base do Enter da busca (vendedor e vista ficam; o período não importa, a
+    # busca vai em todos os meses) e o "✕ limpar" dela
+    busca_base = _kb_url(mes="")
+    busca_limpa = _kb_url()
     fora_urls = {k: _kb_url(fora=",".join(sorted((set(fora_on) ^ {k}))) or "") for k in ("esperando", "festa30")}
     # `fora=` vazio precisa chegar na URL pra limpar — o urlencode acima o descarta
     for k, u in fora_urls.items():
@@ -1050,7 +1152,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # o trilho só entra quando há data em algum lead (ou um filtro pra limpar):
     # numa conta onde ninguém tem data ainda ele seria "Todos · Sem data", duas
     # pílulas dizendo a mesma coisa.
-    trilho_itens = (_evl.trilho(contagens, filtro_mes)
+    # Desde 25/09/2026 desenhado como RÉGUA (uma barra por mês) — ver `_evl.regua`.
+    trilho_itens = (_evl.regua(contagens, filtro_mes, hoje)
                     if modo_evento and (any(k for k in contagens if k) or filtro_mes) else [])
     # A FAIXA DO MODELO DO RAMO (14/09/2026). Só pra dono/gestor: o vendedor vê o
     # quadro todo dia e não decide nome de coluna — faixa que ele não resolve vira
@@ -1076,12 +1179,15 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    entrou=filtro_entrou, entrou_itens=entrou_itens, entrou_rotulo=entrou_rotulo,
                    fora_on=fora_on, fora_cont=fora_cont, fora_urls=fora_urls,
                    n_quadro=n_quadro, filtrado=filtrado,
+                   busca=busca, busca_base=busca_base, busca_limpa=busca_limpa,
+                   vend_cont=vend_cont, vend_total=vend_total, criticos=criticos,
+                   mes_vazio=mes_vazio,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
                    totais_col=totais_col, modo_evento=modo_evento, pergunta_data=_evl.PERGUNTA_DATA,
                    status=status_tpl, colunas_tpl=colunas_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
-                   total_alvos=len(rows), tem_places=fontes.tem_chave_places(),
+                   total_alvos=len(rows) - len(outros_vend), tem_places=fontes.tem_chave_places(),
                    tem_maps_js=fontes.tem_chave_maps_js(), maps_js_key=fontes.chave_maps_js(),
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -11336,20 +11442,42 @@ function baseTirarCheck(){
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw funil">
 """ + _navbar('funil') + """
-  <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
-    <div style="flex:1;min-width:170px">
-      <h2 class="tt">Prospecção</h2>
-      <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if entrou_itens %} · <b style="color:var(--txt)">{{ n_quadro }}</b> no quadro{% if entrou != 'tudo' %} · entraram em {{ entrou_rotulo|lower }}{% endif %}{% endif %}{% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
+  {#- O TÍTULO NUMA LINHA SÓ (25/09/2026, docs/mockups/prospeccao_layout.html):
+     o nome, os números e as ações. Antes eram três faixas — o título, o "🎯 Captar
+     Lead" virado barra verde de 48 px e o "Editar etapas" entre os filtros e o
+     quadro —, e o primeiro card começava ~500 px abaixo do topo no computador.
+     Captar e Etapas abrem numa GAVETA à direita, por cima do quadro, sem empurrar
+     nada. No celular os botões viram ícones (🔍 ⚙ +). -#}
+  <script>document.documentElement.classList.add('kbjs')</script>
+  <div class="kbtit{% if busca %} buscando{% endif %}" id="kbtit">
+    <h2 class="tt">Funil</h2>
+    <div class="kbnum">{% if conta %}<span class="kbconta">🏢 {{ conta[2] }} · </span>{% endif %}<b>{{ n_quadro }}</b><span class="kbnq"> no quadro</span>{% if entrou_itens and entrou != 'tudo' %}<span class="kbper"> · <span class="kbnq">entraram em </span>{{ entrou_rotulo|lower }}</span>{% endif %}<span class="kbtot"> · <span id="kb-total-n">{{ total_alvos }}</span> leads no total</span>{% if total_valor %}<span class="kbtot"> · pipeline {{ brl(total_valor) }}</span>{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
+    <div class="kbacoes">
+      {# A BUSCA: digitar filtra o que está na tela; Enter procura em todos os meses
+         (a rota recebe `q`). "/" em qualquer lugar da página põe o foco aqui. #}
+      <label class="kbbusca" title="Buscar por nome ou telefone — Enter procura em todos os meses">
+        <span aria-hidden="true">🔍</span><input id="kbbusca" type="search" autocomplete="off" enterkeyhint="search"
+          placeholder="Buscar nome ou telefone" aria-label="Buscar lead por nome ou telefone" value="{{ (busca or '')|e }}"
+          oninput="kbBuscaFiltra()" onkeydown="kbBuscaTecla(event)"><kbd>/</kbd></label>
+      <button type="button" class="kbbt kbico-busca" onclick="kbBuscaAbre()" aria-label="Buscar">🔍</button>
+      {% if modo_evento %}<div class="vseg" title="Colunas por etapa do funil, ou por mês da festa">
+        <a class="{% if not vista_mes %}on{% endif %}" href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">Por etapa</a><a class="{% if vista_mes %}on{% endif %}" href="/painel/prospeccao?vista=mes{% if filtro_vend %}&amp;vendedor={{ filtro_vend }}{% endif %}">Por mês do evento</a>
+      </div>{% endif %}
+      {% if gerencia %}<button type="button" class="kbbt" onclick="etAbre()" title="Editar as etapas do funil" aria-label="Etapas">⚙<span class="tx"> Etapas</span></button>{% endif %}
+      {# Captar Lead nunca navegou pra lugar nenhum: abre o painel de captação — desde
+         25/09/2026 numa gaveta à direita, sem empurrar o quadro pra baixo. #}
+      <button type="button" class="cap-btn" onclick="capToggle()" aria-label="Captar lead">+<span class="tx"> Captar lead</span></button>
     </div>
-    {# Captar Lead saiu da barra de abas e virou botão AQUI: ele nunca navegou pra lugar
-       nenhum — abre o painel de captação logo abaixo, nesta mesma tela. Como aba ele
-       ocupava 129px da barra apontando pro próprio Funil; como botão fica em evidência,
-       ao lado do título, e a barra ganhou o espaço de volta. #}
-    {% if modo_evento %}<div class="vseg" title="Colunas por etapa do funil, ou por mês da festa">
-      <a class="{% if not vista_mes %}on{% endif %}" href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">Por etapa</a><a class="{% if vista_mes %}on{% endif %}" href="/painel/prospeccao?vista=mes{% if filtro_vend %}&amp;vendedor={{ filtro_vend }}{% endif %}">Por mês do evento</a>
-    </div>{% endif %}
-    <button type="button" class="cap-btn" onclick="capToggle()">🎯 Captar Lead</button>
   </div>
+  {% if busca %}<div class="kbbusca-faixa">🔍 <span>Buscando <b>“{{ busca|e }}”</b> em todos os meses · {{ n_quadro }} encontrado{{ '' if n_quadro == 1 else 's' }}</span><a href="{{ busca_limpa|e }}">✕ limpar</a></div>{% endif %}
+  <div class="kbbusca-n" id="kbbusca-n" hidden></div>
+
+  {#- OS CRÍTICOS POR VENDEDOR (25/09/2026): o dono cobra a equipe sem contar card
+     na mão. Mesmo estado do selo "Crítico" do card e da tela de Follow-up — por
+     isso só existe em conta que tem aquela tela. Clicar no nome filtra o quadro. -#}
+  {% if criticos %}<div class="kbcrit" id="kbcrit"><span class="rot">Críticos no quadro</span>
+    {% for v in criticos %}<a href="{{ v.url|e }}" class="{% if v.on %}on{% endif %}" title="{% if v.on %}Ver todos os vendedores{% else %}Ver só os cards de {{ v.nome|e }}{% endif %}"><b>{{ v.n }}</b> {{ v.nome|e }}</a>{% if not loop.last %}<span class="pt">·</span>{% endif %}{% endfor %}
+    <a class="lk" href="/painel/follow-up">ver fila →</a></div>{% endif %}
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
@@ -11373,8 +11501,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
   {% endif %}
 
-  <!-- painel de captação inline (abre pra baixo, sem sair da página) -->
-  <div id="captar" class="fsec" style="display:none;margin-top:1rem">
+  <!-- painel de captação: gaveta à direita, por cima do quadro (desde 25/09/2026) -->
+  <div class="kbgav-fundo" id="kbgav-fundo" hidden onclick="kbGavFecha()"></div>
+  <div id="captar" class="fsec kbgav" style="display:none" role="dialog" aria-modal="true" aria-label="Captar lead">
+    <div class="kbgav-hd"><b>🎯 Captar lead</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
     <div class="cabas">
       <button type="button" class="caba on" data-tab="manual" onclick="capTab('manual')">✏️ Manual</button>
       <button type="button" class="caba" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
@@ -11496,22 +11626,27 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="foco" id="foco">
     {% if entrou_itens %}<span class="rot">Entraram em</span>
     {% for m in entrou_itens %}<a class="pil{% if m.chave == entrou %} on{% endif %}" href="{{ m.url }}">{{ m.rotulo }} <b>{{ m.n }}</b></a>{% endfor %}{% endif %}
+    {# o seletor diz quantos cards cada um tem no quadro, com os filtros de agora
+       (25/09/2026) — "Todos · 227", "Jacqueline · 48" #}
     {% if gerencia %}<span class="sep"></span>
     <form method="get" action="/painel/prospeccao" class="vendf">
-      <span class="mut" style="font-size:.8rem">Vendedor:</span>
-      <select name="vendedor" onchange="this.form.submit()" style="width:auto;padding:.35rem .55rem;margin:0">
-        <option value="" {% if not filtro_vend %}selected{% endif %}>Todos</option>
-        <option value="nao" {% if filtro_vend=='nao' %}selected{% endif %}>Sem responsável</option>
-        {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
+      <span class="rot">Vendedor</span>
+      <select name="vendedor" onchange="this.form.submit()" aria-label="Filtrar por vendedor">
+        <option value="" {% if not filtro_vend %}selected{% endif %}>Todos · {{ vend_total or 0 }}</option>
+        <option value="nao" {% if filtro_vend=='nao' %}selected{% endif %}>Sem responsável · {{ (vend_cont or {}).get('nao', 0) }}</option>
+        {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }} · {{ (vend_cont or {}).get(v.id|string, 0) }}</option>{% endfor %}
       </select>
       {% if filtro_mes %}<input type="hidden" name="mes" value="{{ filtro_mes }}">{% endif %}
       {% if vista_mes %}<input type="hidden" name="vista" value="mes">{% endif %}
+      {% if busca %}<input type="hidden" name="q" value="{{ busca|e }}">{% endif %}
     </form>{% endif %}
     {% if entrou_itens and entrou != 'tudo' and ((fora_cont or {}).get('esperando') or (fora_cont or {}).get('festa30')) %}<span class="sep"></span>
-    <span class="rot">Fora de {{ entrou_rotulo|lower }}</span>
+    <span class="rot" title="Leads que entraram em outro mês e pedem atenção agora">+ de outros meses</span>
     <a class="pil fora{% if 'esperando' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('esperando', '#') }}" title="O cliente falou por último e ninguém respondeu">🟢 esperando resposta <b>{{ (fora_cont or {}).get('esperando', 0) }}</b></a>
     {% if modo_evento %}<a class="pil fora{% if 'festa30' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('festa30', '#') }}" title="Data do evento nos próximos 30 dias">🎉 festa em 30 dias <b>{{ (fora_cont or {}).get('festa30', 0) }}</b></a>{% endif %}
     {% endif %}
+    {# a legenda da temperatura: a FORMA da bolinha, não só a cor (parte 1) #}
+    <span class="kbleg" aria-hidden="true"><span><i class="tdot t-quente"></i>quente</span><span><i class="tdot t-morno"></i>morno</span><span><i class="tdot t-frio"></i>frio</span><span><i class="tdot t-sem"></i>sem</span></span>
   </div>
 
   {# O TRILHO DE MESES: mês do EVENTO, não o mês em que o lead escreveu. Clicou em
@@ -11523,9 +11658,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="lerconv" id="lerconv">🔎 <span><b>{{ por_ler }}</b> conversa{{ '' if por_ler == 1 else 's' }} de lead{{ '' if por_ler == 1 else 's' }} sem data ainda não {{ 'foi lida' if por_ler == 1 else 'foram lidas' }}</span>
     <button type="button" class="pbtn" id="lerconv-btn" onclick="kbLerConversas(this)">Ler as conversas</button></div>
   {% endif %}
+  {#- A RÉGUA "FESTA EM" (25/09/2026): uma barra por mês, com a contagem em cima e o
+     mês embaixo, e o ano como divisa. Eram 19 pílulas numa faixa que rolava de lado.
+     Só em conta que vende data (`modo_evento`, §6): quem vende mensalidade não tem
+     festa, e nem a palavra chega na página. -#}
   {% if trilho_itens and not vista_mes %}
-  <div class="trilho" id="trilho"><span class="rot">Festa em</span>
-    {% for t in trilho_itens %}<a class="mes{% if t.on %} on{% endif %}{% if t.sem %} semdata{% endif %}{% if not t.n and not t.on %} vazio{% endif %}" href="/painel/prospeccao?{% if filtro_vend %}vendedor={{ filtro_vend }}&amp;{% endif %}{% if t.chave %}mes={{ t.chave }}{% endif %}">{{ t.rotulo }} <b>{{ t.n }}</b></a>{% endfor %}
+  <div class="regua" id="trilho"><span class="rot">Festa em</span>
+    {% for t in trilho_itens %}{% if t.ano %}<span class="ano">{{ t.ano }}</span>{% endif %}<a class="mes{% if t.on %} on{% endif %}{% if t.sem %} semdata{% endif %}{% if t.todos %} todos{% endif %}{% if not t.n and not t.on %} vazio{% endif %}" href="/painel/prospeccao?{% if filtro_vend %}vendedor={{ filtro_vend }}&amp;{% endif %}{% if t.chave %}mes={{ t.chave }}{% endif %}" title="{{ t.titulo or t.rotulo }} · {{ t.n }}"><b>{{ t.n }}</b><i style="height:{{ t.h or 1 }}px"></i>{{ t.rotulo }}</a>{% endfor %}
   </div>
   {% if filtro_mes %}<div class="trilho-faixa">{% if filtro_mes == 'sem' %}📅 <b>Sem data do evento</b> · quem ainda não disse quando é a festa{% else %}🎉 <b>{{ filtro_mes_rotulo }}</b> · só as festas desse mês, em todas as etapas{% endif %}<a href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">✕ limpar</a></div>{% endif %}
   {% endif %}
@@ -11558,9 +11697,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   .etadd{display:flex;gap:.4rem;margin-top:.8rem;flex-wrap:wrap}
   .etadd .etin{min-width:160px}
   </style>
-  <details class="etcfg">
+  {# Desde 25/09/2026 o editor abre como GAVETA à direita, pelo "⚙ Etapas" do título
+     (etAbre). Continua um <details>: o `open` é o que o freio do reload de 60 s
+     confere, e sem JS o sumário volta a aparecer e abre no lugar, como antes. #}
+  <details class="etcfg" id="etcfg">
     <summary>⚙️ Editar etapas do funil</summary>
-    <div class="etbody">
+    <div class="etbody kbgav" role="dialog" aria-label="Etapas do funil">
+      <div class="kbgav-hd"><b>⚙ Etapas do funil</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
       <p class="ethint">Renomeie no campo e clique ✓. Reordene com ◀ ▶. O ✕ remove — só quando a etapa
         estiver <b>sem leads</b>. Pra esvaziar, escolha uma etapa em <b>fundir em…</b> e clique ⇥: os leads
         vão pra lá com registro no histórico, e a etapa some do quadro sem ser apagada.
@@ -11602,9 +11745,11 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </details>
   {% endif %}
 
-  <!-- abas de status (só mobile) -->
+  {#- AS ABAS DE ETAPA (só no celular): uma coluna por vez. Desde 25/09/2026 ficam
+     presas no topo ao rolar, e cada uma diz em verde quantos clientes esperam
+     resposta ali (●7) — o vendedor escolhe a etapa pelo que pede ação. -#}
   <div class="kbtabs" id="kbtabs">
-    {% for s, rot in (vista_cols or colunas_tpl) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')">{{ rot }} <span class="c">{{ (grupos or {}).get(s, []) | sum(attribute='n') if vista_mes else colunas[s]|length }}</span></button>{% endfor %}
+    {% for s, rot in (vista_cols or colunas_tpl) %}{% set _tgs = (grupos or {}).get(s, []) %}{% set _tesp = (_tgs | selectattr('tipo', 'equalto', 'esperando') | sum(attribute='n')) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')"><span class="r">{{ rot }}</span><span class="n"><span class="c">{{ _tgs | sum(attribute='n') if vista_mes else colunas[s]|length }}</span>{% if _tesp %}<i class="e" title="{{ _tesp }} esperando resposta">●{{ _tesp }}</i>{% endif %}</span></button>{% endfor %}
   </div>
 
   {# O CARD, uma vez só: a mesma marcação serve pros grupos por mês e pra dobra dos
@@ -11624,7 +11769,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
            A ORDEM do que os testes recortam não mudou: o nome vem antes de .camp,
            .kbch e .kbmsg, que vêm antes de <div class="ft">. Botão novo usa
            data-lead, NUNCA data-id (é por data-id que os testes acham o card). -#}
-        <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if c.esperando %} data-esp="1"{% endif %}{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
+        <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if c.esperando %} data-esp="1"{% endif %}{% if c.tel_q %} data-tel="{{ c.tel_q }}"{% endif %}{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
              tabindex="0" onkeydown="if(event.key==='Enter'&&event.target===this)kbAbrirLead(event,{{ c.id }},this)"
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
           <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="{{ c.vendedor or 'Sem responsável' }} · trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor or '+')[:2]|upper }}</button>{% elif gerencia and c.vendedor %}<span class="kbav" title="{{ c.vendedor }}">{{ c.vendedor[:2]|upper }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
@@ -11704,6 +11849,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
     </div>
     {% endfor %}
+    {# o mês quase vazio: o espaço livre diz o que houve e leva pro lote (25/09) #}
+    {% if mes_vazio %}<div class="kbnota" id="kbnota"><b>{{ mes_vazio.rotulo }} tem {{ mes_vazio.n }} lead{{ '' if mes_vazio.n == 1 else 's' }}.</b>
+      O último lote entrou em {{ mes_vazio.lote_rotulo|lower }} ({{ mes_vazio.lote_n }}).<br>
+      <a href="{{ mes_vazio.lote_url }}">Ver {{ mes_vazio.lote_rotulo|lower }}</a> · <a href="{{ mes_vazio.tudo_url }}">Ver tudo ({{ mes_vazio.tudo_n }})</a></div>{% endif %}
   </div>
   {#- OS POPOVERS DA PÁGINA, um de cada, fora do quadro: o menu ⋯ (montado pelo
      JS com o que o card tem) e a lista de responsáveis (só pra quem atribui).
@@ -11764,18 +11913,32 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbperg{margin:0 0 0 auto;width:auto;padding:0;font-size:.7rem;font-weight:600;color:#e0b45f;background:transparent;
   border:0;text-decoration:underline;text-underline-offset:2px;cursor:pointer;line-height:1.3;font-family:inherit}
 .kbperg:hover{color:var(--txt)}
-/* o trilho de meses em cima do quadro */
-.trilho{display:flex;gap:.35rem;overflow-x:auto;margin-top:.8rem;padding-bottom:.35rem;align-items:center;
-  scrollbar-width:thin;-webkit-overflow-scrolling:touch}
-.trilho .rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-weight:600;flex:none;margin-right:.2rem}
-.trilho .mes{flex:none;display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--borda);border-radius:999px;
-  padding:.26rem .65rem;font-size:.78rem;color:var(--txt-mut);background:var(--card);text-decoration:none}
-.trilho .mes b{font-weight:500;font-size:.72rem;color:var(--txt);font-variant-numeric:tabular-nums}
-.trilho .mes.on{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde);font-weight:600}
-.trilho .mes.on b{color:var(--sobre-verde)}
-.trilho .mes.vazio{opacity:.45}
-.trilho .mes.semdata{border-color:rgba(224,180,95,.32);background:rgba(224,180,95,.08);color:#e0b45f}
-.trilho .mes.semdata b{color:#e0b45f}
+/* a RÉGUA dos meses (25/09/2026): uma barra por mês — a contagem em cima, a
+   barra no meio (altura em px vinda de `evento_lead.regua`) e o mês embaixo; o
+   ano entra como divisa tracejada. Rola de lado só se não couber. O rótulo dela
+   mora no template, atrás do portão do §6 — este CSS vai pra toda conta, então
+   não carrega vocabulário de nicho. */
+.regua{display:flex;align-items:flex-end;gap:4px;overflow-x:auto;margin-top:.5rem;padding:4px 0 2px;min-height:56px;
+  border-top:1px solid var(--borda);border-bottom:1px solid var(--borda);scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+.regua .rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-weight:600;flex:none;
+  align-self:center;margin-right:.4rem}
+.regua .mes{flex:none;min-width:40px;display:grid;grid-template-rows:14px 22px 15px;justify-items:center;align-items:end;
+  font-size:.66rem;color:var(--txt-mut);text-decoration:none;border-radius:6px;padding:0 2px}
+.regua .mes b{font-family:var(--mono,ui-monospace,monospace);font-size:.66rem;font-weight:600;color:var(--txt)}
+.regua .mes i{display:block;width:16px;border-radius:3px 3px 0 0;background:#2f6f55}
+.regua .mes:hover i{background:var(--verde-claro)}
+.regua .mes:hover{color:var(--txt)}
+.regua .mes.on{background:var(--neon-fundo);color:var(--verde-claro);font-weight:600}
+.regua .mes.on i{background:var(--verde)}
+.regua .mes.todos{min-width:52px}
+.regua .mes.todos i{background:#3a4a40}
+.regua .mes.todos.on i{background:var(--verde)}
+.regua .mes.vazio{opacity:.45}
+.regua .mes.semdata{min-width:58px;color:#e0b45f}
+.regua .mes.semdata i{background:var(--ambar)}
+.regua .mes.semdata b{color:#e0b45f}
+.regua .ano{flex:none;align-self:stretch;display:flex;align-items:flex-end;font-size:.62rem;color:var(--txt-faint,#5E6F66);
+  border-left:1px dashed #2c3a32;padding:0 0 2px 4px;margin:0 2px}
 .trilho-faixa{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.4rem;font-size:.82rem;color:var(--txt-mut);
   background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.45rem .7rem}
 .trilho-faixa a{margin-left:auto;color:var(--verde-claro);font-size:.76rem}
@@ -11961,6 +12124,113 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
 .kbpop .kbpi.perigo{color:#e8a39b;border-top:1px solid #243029;border-radius:0 0 7px 7px;margin-top:3px}
 .kbpop .kbpt{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);padding:.4rem .6rem .2rem}
 @media(pointer:coarse){.kbpop .kbpi{min-height:44px}}
+
+/* ==== O TOPO EM TRÊS FAIXAS CURTAS (25/09/2026, parte 2 do mockup) ====
+   1. o título com os números e as ações (busca, Por etapa/mês, ⚙ Etapas, + Captar);
+   2. os críticos por vendedor (só gerência, só em conta com Follow-up);
+   3. a barra de foco (período, vendedor com contagem, "+ de outros meses", legenda)
+   — e, em quem vende data, a régua dos meses. Os botões daqui também não herdam
+   o `button{width:100%;min-height:48px}` global. */
+:where(#kbtit,.kbgav) button{width:auto;min-height:0;margin:0;font-family:inherit}
+.kbtit{display:flex;align-items:center;gap:.4rem .7rem;flex-wrap:wrap;min-height:44px}
+.kbtit h2.tt{font-size:1.35rem;flex:none}
+.kbnum{flex:1 1 260px;min-width:0;font-size:.82rem;color:var(--txt-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbnum b{color:var(--txt)}
+.kbconta{color:var(--verde-claro);font-weight:600}
+.kbacoes{display:flex;align-items:center;gap:.45rem;margin-left:auto;flex-wrap:wrap}
+.kbbusca{display:flex;align-items:center;gap:.45rem;width:250px;height:34px;padding:0 .6rem;border:1px solid var(--borda);
+  border-radius:9px;background:var(--bg);color:var(--txt-mut);font-size:.82rem;cursor:text;margin:0}
+.kbbusca:focus-within{border-color:var(--verde)}
+.kbbusca input{flex:1;min-width:0;border:0;background:transparent;color:var(--txt);padding:0;margin:0;font:inherit;
+  font-size:.84rem;outline:0;height:auto;min-height:0;box-shadow:none}
+.kbbusca kbd{font-family:var(--mono,ui-monospace,monospace);font-size:.64rem;border:1px solid #2c3a32;border-radius:4px;
+  padding:0 .3rem;color:var(--txt-mut)}
+.kbbusca:focus-within kbd{display:none}
+.kbbt{display:inline-flex;align-items:center;gap:.25rem;height:34px;padding:0 .75rem;border-radius:9px;border:1px solid var(--borda);
+  background:transparent;color:var(--txt);font-size:.82rem;cursor:pointer;white-space:nowrap}
+.kbbt:hover{border-color:var(--verde)}
+.kbtit .cap-btn{height:34px;padding:0 .85rem}
+.kbico-busca{display:none}
+.kbbusca-faixa{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.4rem;font-size:.82rem;color:var(--txt-mut);
+  background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.4rem .7rem}
+.kbbusca-faixa b{color:var(--txt)}
+.kbbusca-faixa a{margin-left:auto;color:var(--verde-claro);font-size:.76rem}
+.kbbusca-n{font-size:.76rem;color:var(--txt-mut);margin-top:.3rem}
+.kbcard.kbnao,#kbrow .kbnao{display:none}
+.kbcrit{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.3rem;font-size:.8rem;color:var(--txt-mut);min-height:26px}
+.kbcrit .rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-right:.1rem}
+.kbcrit a{color:var(--txt);text-decoration:underline dotted #3a4a40;text-underline-offset:3px;white-space:nowrap;border-radius:5px;padding:0 .15rem}
+.kbcrit a b{color:#e0574f;font-family:var(--mono,ui-monospace,monospace);font-weight:600}
+.kbcrit a.on{background:var(--neon-fundo);text-decoration:none}
+.kbcrit .pt{opacity:.6}
+.kbcrit a.lk{color:var(--verde-claro);text-decoration:none;margin-left:.2rem}
+.foco{margin-top:.5rem}
+.foco .vendf select{width:auto;min-height:0;margin:0;padding:.28rem .55rem;border-radius:8px;font-size:.8rem;height:30px}
+.kbleg{margin-left:auto;display:inline-flex;gap:.7rem;font-size:.7rem;color:var(--txt-mut);align-items:center;white-space:nowrap}
+.kbleg span{display:inline-flex;align-items:center;gap:.3rem}
+.kbleg .tdot{width:8px;height:8px;flex:0 0 8px}
+@media(max-width:1199px){.kbleg{display:none}}
+.lerconv{margin-top:.5rem;padding:.35rem .6rem;font-size:.8rem}
+.lerconv .pbtn{padding:.3rem .7rem;font-size:.76rem;min-height:0;height:auto}
+@media(max-width:899px){.lerconv{flex-wrap:nowrap;font-size:.74rem;line-height:1.3}.lerconv .pbtn{flex:none;white-space:nowrap}}
+/* o mês quase vazio: um aviso no espaço livre do quadro, não 5 caixas "vazio" */
+.kbnota{align-self:center;max-width:340px;margin:.6rem 0 0 .8rem;font-size:.84rem;color:var(--txt-mut);line-height:1.5;
+  border:1px dashed #2c3a32;border-radius:12px;padding:.8rem 1rem}
+.kbnota b{color:var(--txt)}
+.kbnota a{color:var(--verde-claro)}
+@media(max-width:899px){.kbnota{margin:.6rem 0 0;max-width:none}}
+
+/* ---- as GAVETAS: Captar e Etapas abrem à direita, por cima do quadro ---- */
+.kbgav-fundo{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:8000}
+.kbgav-fundo[hidden]{display:none}
+#captar.kbgav{position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);margin:0;border-radius:14px 0 0 14px;
+  z-index:8001;overflow-y:auto;box-shadow:-18px 0 40px rgba(0,0,0,.45);padding:1rem 1.1rem 2rem}
+.kbgav-hd{display:flex;align-items:center;gap:.5rem;margin:0 0 .8rem;font-size:.95rem}
+.kbgav-x{margin-left:auto !important;background:none;border:1px solid var(--borda);color:var(--txt-mut);border-radius:8px;
+  width:32px;height:32px;cursor:pointer;font-size:.9rem}
+.kbgav-x:hover{color:var(--txt);border-color:var(--verde)}
+.etcfg .kbgav-hd{display:none}
+.kbjs .etcfg{border:0;background:none;margin:0}
+.kbjs .etcfg>summary{display:none}
+.kbjs .etcfg[open]>.etbody{position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);z-index:8001;overflow-y:auto;
+  background:var(--card);border-left:1px solid var(--borda);border-top:0;border-radius:14px 0 0 14px;
+  box-shadow:-18px 0 40px rgba(0,0,0,.45);padding:1rem 1.1rem 2rem;box-sizing:border-box}
+.kbjs .etcfg .kbgav-hd{display:flex}
+
+/* ---- o celular: título com ícones, faixas que rolam de lado, abas presas ---- */
+@media(max-width:899px){
+  .pw.funil{padding-inline:.75rem}
+  .kbtit{flex-wrap:nowrap;gap:.4rem}
+  .kbtit h2.tt{font-size:1.2rem}
+  .kbnum{flex:1 1 auto;font-size:.74rem}
+  .kbconta,.kbtot,.kbnq{display:none}
+  .kbacoes{flex-wrap:nowrap;gap:.35rem}
+  .kbtit .tx{display:none}
+  .kbtit .vseg{display:none}
+  .kbbt,.kbtit .cap-btn{width:36px;height:36px;padding:0;justify-content:center;font-size:1rem}
+  .kbtit .cap-btn{font-weight:800}
+  .kbico-busca{display:inline-flex}
+  .kbbusca{display:none}
+  /* as ações viram filhas diretas do título: aberta, a busca desce pra uma linha
+     só dela e os ícones ficam onde estavam */
+  .kbacoes{display:contents}
+  .kbtit.buscando{flex-wrap:wrap}
+  .kbtit.buscando .kbbusca{display:flex;order:10;flex:1 1 100%;width:auto;height:40px}
+  .kbtit.buscando .kbbusca kbd{display:none}
+  .kbcrit,.foco{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;scrollbar-width:none;
+    -webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)}
+  .kbcrit::-webkit-scrollbar,.foco::-webkit-scrollbar{display:none}
+  .foco .pil,.foco .vendf{flex:none}
+  .kbtabs{position:sticky;top:0;z-index:20;background:var(--bg);margin-top:.6rem;padding:.35rem 0;gap:.35rem}
+  .kbtab{flex-direction:column;align-items:center;gap:.05rem;border-radius:10px;padding:.3rem .65rem;line-height:1.25}
+  .kbtab .r{font-size:.76rem}
+  .kbtab .n{font-size:.72rem}
+  .kbtab .c{background:none;padding:0;font-family:var(--mono,ui-monospace,monospace);color:var(--txt);font-weight:600}
+  .kbtab .e{font-style:normal;color:var(--verde-claro);font-family:var(--mono,ui-monospace,monospace);margin-left:.3rem}
+  .kbtab.on{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--verde-claro)}
+  .kbtab.on .c{color:var(--verde-claro)}
+  #captar.kbgav,.kbjs .etcfg[open]>.etbody{border-radius:0;width:100vw}
+}
 {{ janela_css }}
 </style>
 
@@ -12056,7 +12326,12 @@ function kbRecontar(){
   document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;
     var chip=col.querySelector('.kbcnt');
     if(chip){var f=chip.firstChild;if(f&&f.nodeType===3){f.nodeValue=String(n)+(chip.querySelector('i')?' ':'');}else{chip.insertBefore(document.createTextNode(String(n)),chip.firstChild);}}
-    var tabc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tabc)tabc.textContent=n;
+    // a aba do celular: o número e o ●N de quem espera resposta nesta coluna
+    var tab=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"]');
+    if(tab){var tabc=tab.querySelector('.c');if(tabc)tabc.textContent=n;
+      var ne=col.querySelectorAll('.kbcard[data-esp]').length,te=tab.querySelector('.e'),tn=tab.querySelector('.n');
+      if(ne&&tn){if(!te){te=document.createElement('i');te.className='e';tn.appendChild(te);}te.textContent='●'+ne;te.title=ne+' esperando resposta';}
+      else if(te)te.remove();}
     if(n)col.removeAttribute('data-vazia');else col.setAttribute('data-vazia','1');
     var dp=col.querySelector('.kbdrop');if(n===0&&!dp.querySelector('.kbempty')){var e=document.createElement('div');e.className='kbempty';e.textContent='vazio';dp.appendChild(e);}});
   kbLayout();
@@ -12223,7 +12498,55 @@ function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]')
     +'<button type="button" class="kbmais" data-lead="'+l.id+'" data-conv="" data-mail="" data-st="'+jsEsc(l.status||'novo')+'" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>'
     +'<div class="kbl2">'+sub+'</div><div class="kbl4">'+camp+ft+'</div></div>';
   drop.insertAdjacentHTML('afterbegin',html);updCounts(1);}
-function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
+// AS GAVETAS (25/09/2026): Captar e Etapas abrem à direita, por cima do quadro, com
+// um fundo escuro que fecha no clique (e no Esc). Uma de cada vez. O Captar continua
+// ligado/desligado pelo style.display — é o que o freio do reload confere — e as
+// Etapas pelo `open` do <details>, pelo mesmo motivo.
+function _kbFundo(on){var f=document.getElementById('kbgav-fundo');if(f)f.hidden=!on;document.body.style.overflow=on?'hidden':'';}
+function kbGavFecha(){var c=document.getElementById('captar');if(c)c.style.display='none';
+  var d=document.getElementById('etcfg');if(d)d.open=false;_kbFundo(false);}
+function capToggle(){var e=document.getElementById('captar');if(!e)return;var vis=e.style.display!=='none';kbGavFecha();if(vis)return;
+  e.style.display='block';_kbFundo(true);var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus({preventScroll:true});}
+function etAbre(){var d=document.getElementById('etcfg');if(!d)return;var ab=d.open;kbGavFecha();if(ab)return;
+  d.open=true;_kbFundo(true);var i=d.querySelector('.etin');if(i)i.focus({preventScroll:true});}
+document.addEventListener('keydown',function(e){if(e.key!=='Escape')return;var c=document.getElementById('captar'),d=document.getElementById('etcfg');
+  if((c&&c.style.display!=='none')||(d&&d.open))kbGavFecha();});
+// A BUSCA (25/09/2026). Digitar filtra os cards que já estão na tela, pelo nome
+// (sem acento) ou pelo telefone (4+ dígitos) — a MESMA regra do `_busca_bate` do
+// servidor. Enter leva a busca pro servidor, que procura em todos os meses; Esc
+// limpa. "/" em qualquer lugar (fora de campo) põe o foco na busca.
+var KB_BUSCA={{ (busca or '')|tojson }},KB_BUSCA_BASE={{ (busca_base or '/painel/prospeccao?')|tojson }},KB_BUSCA_LIMPA={{ (busca_limpa or '/painel/prospeccao')|tojson }};
+function _kbNorm(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');}
+function kbBuscaFiltra(){var i=document.getElementById('kbbusca');if(!i)return;var v=i.value.trim(),q=_kbNorm(v),dg=v.replace(/\\D/g,''),n=0,tot=0;
+  document.querySelectorAll('#kbrow .kbcard').forEach(function(c){tot++;var e=c.querySelector('.emp');
+    var ok=!q||_kbNorm(e?e.textContent:'').indexOf(q)>=0||(dg.length>=4&&(c.getAttribute('data-tel')||'').indexOf(dg)>=0);
+    c.classList.toggle('kbnao',!ok);if(ok)n++;});
+  // resultado dentro da dobra dos parados: abre a dobra, senão o card achado fica escondido
+  if(q)document.querySelectorAll('#kbrow .kbdobra').forEach(function(d){if(d.querySelector('.kbcard:not(.kbnao)'))d.open=true;});
+  // grupo (mês, semana, dobra) sem nenhum card achado some junto, pra coluna não
+  // virar uma pilha de cabeçalhos vazios
+  document.querySelectorAll('#kbrow .kbdrop').forEach(function(dp){var hd=null,tem=false;
+    function fecha(){if(hd)hd.classList.toggle('kbnao',!!q&&!tem);}
+    [].forEach.call(dp.children,function(el){
+      if(el.classList.contains('kbgrp')){fecha();hd=el;tem=false;}
+      else if(el.classList.contains('kbdobra')){fecha();hd=null;el.classList.toggle('kbnao',!!q&&!el.querySelector('.kbcard:not(.kbnao)'));}
+      else if(el.classList.contains('kbcard')&&!el.classList.contains('kbnao'))tem=true;});
+    fecha();});
+  // no celular (uma coluna por vez): se a aba aberta não tem resultado, vai pra
+  // primeira que tem
+  var ab=document.querySelector('#kbrow .kbcol.show');
+  if(q&&ab&&!ab.querySelector('.kbcard:not(.kbnao)')){var alvo=document.querySelector('#kbrow .kbcol .kbcard:not(.kbnao)');
+    if(alvo)kbTab(alvo.closest('.kbcol').getAttribute('data-status'));}
+  var r=document.getElementById('kbbusca-n');if(r){r.hidden=!q;r.textContent=q?(n+' de '+tot+' no quadro · Enter procura em todos os meses'):'';}}
+function kbBuscaTecla(ev){var i=ev.target;
+  if(ev.key==='Enter'){ev.preventDefault();var v=i.value.trim();if(!v){if(KB_BUSCA)location.href=KB_BUSCA_LIMPA;return;}
+    var b=KB_BUSCA_BASE;location.href=b+(/[?&]$/.test(b)?'':(b.indexOf('?')<0?'?':'&'))+'q='+encodeURIComponent(v);return;}
+  if(ev.key==='Escape'){if(KB_BUSCA){location.href=KB_BUSCA_LIMPA;return;}i.value='';kbBuscaFiltra();i.blur();}}
+function kbBuscaAbre(){var t=document.getElementById('kbtit'),i=document.getElementById('kbbusca');if(!t||!i)return;
+  if(t.classList.toggle('buscando'))i.focus();else if(!i.value)kbBuscaFiltra();}
+document.addEventListener('keydown',function(e){if(e.key!=='/'||e.ctrlKey||e.metaKey||e.altKey)return;var a=document.activeElement;
+  if(a&&(/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)||a.isContentEditable))return;
+  var i=document.getElementById('kbbusca');if(!i)return;e.preventDefault();var t=document.getElementById('kbtit');if(t)t.classList.add('buscando');i.focus();i.select();});
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 // Desde 20/09/2026 o embrulho é o zapFetch: quem chama recebe o CORPO, e
 // recebe `null` quando a troca falhou — com o aviso certo já na tela. Por
@@ -12358,6 +12681,9 @@ setInterval(function(){
   if(document.querySelector('.leadpop') || document.getElementById('perdapop')) return;
   if(document.querySelector('.etcfg[open]')) return;
   if(document.querySelector('.kbpop:not([hidden])')) return;
+  // busca digitada e não enviada: o reload apagaria o filtro debaixo de quem procura
+  var kbb=document.getElementById('kbbusca');
+  if(kbb && kbb.value.trim() && kbb.value.trim()!==KB_BUSCA) return;
   kbGuardaTela();
   location.reload();
 }, 60000);

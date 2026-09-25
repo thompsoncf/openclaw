@@ -466,6 +466,50 @@ def trilho(contagens: dict, mes_sel: str = "") -> list[dict]:
     return itens
 
 
+#: altura da barra mais alta da régua, em px (o resto é proporcional a ela)
+REGUA_ALTURA = 22
+
+
+def regua(contagens: dict, mes_sel: str = "", hoje: date | None = None) -> list[dict]:
+    """O trilho desenhado como RÉGUA (25/09/2026, docs/mockups/prospeccao_layout.html):
+    uma barra por mês, com a contagem em cima e o mês embaixo, sem rolar de lado. Eram
+    19 pílulas numa faixa que rolava — na Prime, os meses do fim do ano que vem só
+    apareciam arrastando.
+
+    Os mesmos itens de `trilho` (mesma ordem, mesmas chaves, mesmo 'on'), com três
+    campos a mais:
+      * `h`: a altura da barra. Os meses são proporcionais ao mês mais cheio; "Todos"
+        é sempre a barra inteira; "Sem data" é proporcional ao total (é uma fatia
+        dele). Mês com lead nunca some (mínimo 2 px); mês zerado fica com 1 px;
+      * `titulo`: o nome com o ano ("Jan 27"), pro title — na tela o mês vai curto;
+      * `ano`: o ano que COMEÇA neste item ("2027"), pra régua desenhar a divisa. O
+        primeiro mês só ganha divisa quando não é do ano corrente.
+    O rótulo curto ("Jan") só vale porque a divisa diz o ano: sem ela, "Jan" seria
+    ambíguo — o motivo de `mes_rotulo` levar o ano."""
+    hoje = hoje or date.today()
+    itens = trilho(contagens, mes_sel)
+    total = itens[0]["n"]
+    meses = [it for it in itens if it["chave"] and it["chave"] != "sem"]
+    maior = max((it["n"] for it in meses), default=0)
+    ano_ant = hoje.year
+    for it in itens:
+        it["todos"] = not it["chave"]
+        it["titulo"] = it["rotulo"]
+        it["ano"] = ""
+        if it["todos"]:
+            it["h"] = REGUA_ALTURA if total else 1
+        elif it["sem"]:
+            it["h"] = max(2, round(REGUA_ALTURA * it["n"] / total)) if it["n"] and total else 1
+        else:
+            y, m = int(it["chave"][:4]), int(it["chave"][5:7])
+            it["rotulo"] = _MESES_ROT[m - 1]
+            if y != ano_ant:
+                it["ano"] = str(y)
+                ano_ant = y
+            it["h"] = max(2, round(REGUA_ALTURA * it["n"] / maior)) if it["n"] and maior else 1
+    return itens
+
+
 # ------------------------------------------------------------------ vista por mês
 _DIAS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
 

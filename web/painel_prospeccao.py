@@ -304,6 +304,49 @@ def _busca_bate(card: dict, termo_norm: str, termo_dig: str) -> bool:
     return len(termo_dig) >= 4 and termo_dig in (card.get("tel_q") or "")
 
 
+def _nomes_curtos(nomes: dict) -> dict:
+    """{id: "JACQUELINE PRIME"} → {id: "Jacqueline"}: o primeiro nome, escrito normal
+    (o cadastro costuma guardar tudo em maiúscula). Dois com o mesmo primeiro nome
+    ganham a inicial do sobrenome ("Pedro Y." e "Pedro L.") — senão o nome no card
+    não diria de quem é, que é a razão de estar lá (pedido do dono em 25/09/2026:
+    "faltou o nome do vendedor no card, senão toda vez tenho que clicar")."""
+    def _cap(p):
+        return p[:1].upper() + p[1:].lower()
+    partes = {k: (v or "").split() for k, v in nomes.items()}
+    primeiros: dict[str, int] = {}
+    for p in partes.values():
+        if p:
+            primeiros[p[0].lower()] = primeiros.get(p[0].lower(), 0) + 1
+    out = {}
+    for k, p in partes.items():
+        if not p:
+            out[k] = ""
+            continue
+        curto = _cap(p[0])
+        if primeiros[p[0].lower()] > 1 and len(p) > 1:
+            curto += " " + p[-1][:1].upper() + "."
+        out[k] = curto
+    return out
+
+
+def _rotulos_de_chip(principal: str, outros: dict) -> dict:
+    """O nome de cada número da conta, pro 💬 do card (opção A do mockup
+    docs/mockups/funil_cabecalho.html, escolhida pelo dono em 25/09/2026).
+
+    `principal` é o rótulo do número principal (canais_config.rotulo) e `outros` é
+    {chip_id: nome} dos números filhos (contas.nome). Devolve {None: curto, id:
+    curto}. Quando TODOS os nomes começam pela mesma palavra — "CP Zarb" e "CP
+    Thiago", na Prime —, ela sai: no botão cabe "Zarb", e o "CP" não distingue
+    nada. Número sem nome vira "principal" / "outro número"."""
+    nomes = {None: (principal or "").strip() or "principal"}
+    for cid, nome in outros.items():
+        nomes[cid] = (nome or "").strip() or "outro número"
+    partes = [n.split() for n in nomes.values()]
+    if len(partes) > 1 and all(len(p) > 1 for p in partes) and len({p[0].lower() for p in partes}) == 1:
+        return {k: " ".join(v.split()[1:]) for k, v in nomes.items()}
+    return nomes
+
+
 def _vendedores(pool, conta_id: int) -> list[dict]:
     """Quem pode receber alvos: o dono (aparece pelo nome) + vendedores/gestores.
     O dono vem primeiro e rotulado, pra ele poder ficar com leads no próprio nome."""
@@ -823,17 +866,45 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                 logging.getLogger("prospeccao.funil").warning(
                     "não deu pra ler a última mensagem dos cards", exc_info=True)
                 ult_por_lead = {}
-        # apelido de cada chip SECUNDÁRIO usado no board (contas.nome, o mesmo que o
-        # Inbox lê — ver comunicacao_chip_apelido). O rótulo do principal não é
-        # mais lido aqui: desde 25/09/2026 o card só mostra o chip que NÃO é o
-        # principal (ver o selo, no laço dos cards).
-        chip_nomes: dict[int, str] = {}
+        # O NÚMERO DE CADA CONVERSA, NO 💬 DO CARD (25/09/2026, opção A do mockup
+        # docs/mockups/funil_cabecalho.html). Pergunta do dono ao ver o funil sem
+        # selo nenhum: "como vou saber de qual chip é?". Todo card com conversa de
+        # WhatsApp diz o número no próprio botão que abre a conversa — o principal
+        # discreto, o outro em azul. Só em conta com dois números.
+        #
+        # Os nomes são os de SEMPRE — `canais_config.rotulo` pro principal e
+        # `contas.nome` pros filhos, o mesmo par que o Inbox lê (ver
+        # comunicacao_chip_apelido) —, de TODOS os números da conta e não só dos que
+        # aparecem no quadro: é com a lista inteira que se sabe se todos começam pela
+        # mesma palavra ("CP"), que sai do botão (ver `_rotulos_de_chip`).
+        chip_rotulos: dict = {}
+        chip_nomes_inteiros: dict = {}
         if dois_chips and chip_por_lead:
-            ids_chip = [v for v in set(chip_por_lead.values()) if v]
-            if ids_chip:
-                chip_nomes = dict(c.execute(
-                    "select id, coalesce(nullif(btrim(nome),''),'') from contas where id = any(%s)",
-                    (ids_chip,)).fetchall())
+            filhos = dict(c.execute(
+                "select id, coalesce(nullif(btrim(nome),''),'') from contas where chip_de=%s",
+                (conta_id,)).fetchall())
+            r_p = c.execute(
+                "select coalesce(nullif(btrim(rotulo),''),'') from canais_config "
+                "where conta_id=%s and canal='whatsapp'", (conta_id,)).fetchone()
+            principal = (r_p[0] if r_p else "") or ""
+            chip_rotulos = _rotulos_de_chip(principal, filhos)
+            chip_nomes_inteiros = {None: principal or "número principal",
+                                   **{k: (v or "outro número") for k, v in filhos.items()}}
+        # O NOME DA EMPRESA no título (25/09/2026): era `conta[2]`, que é o nome do
+        # DONO da conta ("MANOEL SOARES" na Prime), e não o da empresa. A linha da
+        # conta (conta_logada) não traz o nome fantasia, e ela é lida por dezenas de
+        # telas — uma leitura própria aqui é mais barata que mexer nela. Tolerante e
+        # com SAVEPOINT, como as outras leituras de enfeite deste quadro: sem a
+        # coluna, o título volta pro nome de sempre.
+        empresa_nome = ""
+        try:
+            with c.transaction():
+                _r_emp = c.execute(
+                    "select coalesce(nullif(btrim(nome_fantasia),''), nullif(btrim(razao_social),''), '') "
+                    "from contas where id=%s", (conta_id,)).fetchone()
+                empresa_nome = (_r_emp[0] if _r_emp else "") or ""
+        except Exception:  # noqa: BLE001 — o título cai no nome da conta
+            empresa_nome = ""
         # o mesmo número atendido pelo OUTRO chip — uma consulta pro funil inteiro, e
         # nenhuma numa empresa de um chip só (que é o caso de quase todas)
         gemeos = _gemeos_de_outro_chip(c, conta_id, [r[0] for r in rows])
@@ -936,30 +1007,44 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # os cards dos OUTROS vendedores (gerência com um vendedor escolhido): não vão
     # pro quadro, mas entram nas contagens do seletor e na linha de críticos
     outros_vend: list[dict] = []
+    # O NOME DO VENDEDOR NO CARD (25/09/2026, pedido do dono: "faltou o nome do
+    # vendedor no card, senão toda vez tenho que clicar"). Era um avatar com duas
+    # letras ("JA", "TH"). Os nomes curtos saem de uma lista só — os vendedores do
+    # quadro e os da lista de troca —, pra que o card e a lista digam o mesmo, e pra
+    # dois "Pedro" virarem "Pedro Y." e "Pedro L." (ver `_nomes_curtos`).
+    vends = _vendedores(pool, conta_id) if ctx["gerencia"] else []
+    _nomes_vend = {v["id"]: v["nome"].removesuffix(" (você)") for v in vends}
+    _nomes_vend.update({r[11]: r[12] for r in rows if r[11] and r[12]})
+    curtos_vend = _nomes_curtos(_nomes_vend)
+    for v in vends:
+        v["curto"] = curtos_vend.get(v["id"]) or v["nome"]
     for r in rows:
         conv = conv_por_lead.get(r[0], {})
-        chip_apelido = None
-        # só resolve apelido quando o lead TEM conversa de WhatsApp de verdade — sem
-        # isso, "sem chip nenhum" e "chip principal" ficavam indistinguíveis e o selo
-        # mostrava "· 📱 <rótulo do principal>" até pra quem nunca trocou mensagem.
-        #
-        # E SÓ QUANDO NÃO É O PRINCIPAL (25/09/2026, parte 3 do funil enxuto). Na
-        # Prime, 472 das 485 conversas de lead estão no chip principal: o "📱 CP
-        # Zarb" aparecia em quase todo card e parecia botão. O selo existe pra
-        # dizer "este aqui veio pelo OUTRO número" — e é isso que ele diz agora.
-        # O rótulo do principal continua lido (o Inbox e os relatórios usam).
-        if dois_chips and chip_por_lead.get(r[0]):
-            chip_apelido = chip_nomes.get(chip_por_lead[r[0]]) or None
+        # O NÚMERO NO 💬 (ver `chip_rotulos`, lá em cima). Só quando o lead TEM
+        # conversa de WhatsApp de verdade — sem isso, "sem chip nenhum" e "chip
+        # principal" ficavam indistinguíveis (chip_id nulo nos dois). Desde
+        # 25/09/2026 o número sai do selo de campanha ("· 📱 apelido") e vai pro
+        # botão da conversa, em todo card: o selo só no outro número (parte 3)
+        # deixou o dono sem saber de qual número era o card sem selo.
+        chip_zap = chip_zap_nome = None
+        chip_zap_outro = False
+        if chip_rotulos and r[0] in chip_por_lead:
+            _cid = chip_por_lead[r[0]]
+            chip_zap = chip_rotulos.get(_cid) or None
+            chip_zap_nome = chip_nomes_inteiros.get(_cid) or chip_zap
+            chip_zap_outro = bool(_cid)
         card = {"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3],
                 "uf": r[4], "status": r[5], "temperatura": r[6], "valor": r[7],
                 "proximo": r[8], "telefone": r[9], "whatsapp": r[10],
                 "vendedor_id": r[11], "vendedor": r[12],
+                "vendedor_curto": curtos_vend.get(r[11], "") if r[11] else "",
                 "tem_email": bool(r[13]), "tem_whatsapp": bool(r[10]),
                 "tem_instagram": bool(r[14]), "enriquecido": bool(r[15]),
                 "conv_whatsapp": conv.get("whatsapp"), "conv_email": conv.get("email"),
                 "conv_instagram": conv.get("instagram"),
                 "campanha": r[16] or None,
-                "chip_apelido": chip_apelido,
+                "chip_zap": chip_zap, "chip_zap_nome": chip_zap_nome,
+                "chip_zap_outro": chip_zap_outro,
                 "ult": ult_por_lead.get(r[0]),
                 "gemeo": _aviso_gemeo(gemeos.get(r[0])),
                 "gemeo_lead": ((gemeos.get(r[0]) or {}).get("lead_id")
@@ -1019,7 +1104,6 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # produziu o defeito de 17/09.
     colunas_tpl = [(e["chave"], e["rotulo"]) for e in etapas]
     etapas_edit = [{**e, "n": len(colunas.get(e["chave"], []))} for e in etapas]
-    vends = _vendedores(pool, conta_id) if ctx["gerencia"] else []
     agora = _agora()
     # ---- O PERÍODO e O QUE FICOU DE FORA. Cada card sabe se entrou no mês do
     # quadro; quem ficou de fora só entra pela pílula (esperando resposta, festa
@@ -1084,14 +1168,14 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             # crítico = o MESMO estado do selo do card e da tela de Follow-up
             # (`fu_por_lead`); conta sem a tela, ou em 'off', não tem linha nenhuma
             if (cc.get("fu") or {}).get("estado") == "critico" and cc["status"] != "perdido":
-                n_, nome_ = _crit.get(chave_v, (0, cc.get("vendedor")))
+                n_, nome_ = _crit.get(chave_v, (0, cc.get("vendedor_curto") or cc.get("vendedor")))
                 _crit[chave_v] = (n_ + 1, nome_)
         for chave_v, (n_, nome_) in sorted(_crit.items(), key=lambda kv: (-kv[1][0], kv[1][1] or "")):
             criticos.append({
                 "n": n_, "chave": chave_v,
-                # o primeiro nome basta ("Jacqueline"): é uma linha, não uma tabela
-                "nome": (((nome_ or "").split() or ["sem responsável"])[0]
-                         if chave_v != "nao" else "sem responsável"),
+                # o MESMO nome curto do card ("Jacqueline", não "JACQUELINE"; dois
+                # "Pedro" viram "Pedro Y." e "Pedro L.") — ver `_nomes_curtos`
+                "nome": (nome_ or "sem nome") if chave_v != "nao" else "sem responsável",
                 "on": filtro_vend == chave_v})   # a URL sai do _kb_url, lá embaixo
     vend_total = sum(vend_cont.values())
     # O MÊS QUASE VAZIO (decisão do dono, 24/09: o quadro abre no mês corrente). Quem
@@ -1181,6 +1265,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    fora_on=fora_on, fora_cont=fora_cont, fora_urls=fora_urls,
                    n_quadro=n_quadro, filtrado=filtrado,
                    busca=busca, busca_base=busca_base, busca_limpa=busca_limpa,
+                   empresa_nome=empresa_nome,
                    vend_cont=vend_cont, vend_total=vend_total, criticos=criticos,
                    mes_vazio=mes_vazio,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
@@ -10616,11 +10701,6 @@ _CSS = """<style>
   border:1px solid var(--neon-borda);border-radius:8px;padding:.22rem .5rem;
   font-size:.7rem;line-height:1.3;color:var(--verde-claro);margin-top:.34rem;
   max-width:100%;box-sizing:border-box}
-/* nowrap só no NOME DO CHIP: sem isso, um apelido curto ("CP Zarb") ainda
-   quebrava no meio ("CP" numa linha, "Zarb" na outra) — o clamp de 2 linhas
-   do .camp é pro texto da campanha, que pode ser grande; o chip é sempre
-   curto e não devia quebrar sozinho. */
-.kbcard .camp .chip{opacity:.72;font-weight:600;white-space:nowrap}
 @media(min-width:900px){
   .kbtabs{display:none}
   /* Uma coluna por ETAPA, e as etapas são configuráveis desde a régua: o
@@ -10701,15 +10781,23 @@ _CSS = """<style>
 #: (07/09/2026) e desenham a mesma barra em `web/painel_follow_up.py` e
 #: `web/painel_origens.py`. Uma segunda cópia divergiria: foi assim que a aba
 #: "Quem atacar" sumiu pra quem estava no Funil.
-NAVBAR_CSS = """.pnavbar{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;margin:.2rem 0 1.1rem}
-.pnav-rol{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;min-width:0;
+#:
+#: ABAS LEVES (25/09/2026, mockup docs/mockups/funil_cabecalho.html, aprovado pelo
+#: dono: "sim" pra valer em todas as telas da Prospecção). Eram nove botões com
+#: contorno e a ativa em verde cheio — a barra pesava mais que o título da tela.
+#: Agora é texto com ícone, sem contorno, sobre uma linha; a ativa fica em branco
+#: com um sublinhado verde (a sombra por dentro, pra rolagem da .pnav-rol não cortar).
+NAVBAR_CSS = """.pnavbar{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:stretch;margin:.1rem 0 1rem;
+  border-bottom:1px solid var(--borda)}
+.pnav-rol{display:flex;gap:.1rem;flex-wrap:nowrap;align-items:stretch;min-width:0;
   overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .pnav-rol::-webkit-scrollbar{display:none}
 .pnav{flex:none}
-.pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;width:auto;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle;height:auto}
-.pnav:hover{border-color:var(--verde);color:#fff}
-.pnav.on{color:var(--sobre-verde);background:var(--verde);border-color:var(--verde)}
-.pnav.cfg{margin-left:auto;padding:.45rem .55rem;flex:none}
+.pnav{display:inline-flex;align-items:center;gap:.4rem;font:inherit;font-size:.86rem;font-weight:500;padding:.62rem .75rem .68rem;border:0;border-radius:0;color:var(--txt-mut);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;width:auto;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle;height:auto;min-height:0;box-shadow:inset 0 -2px 0 transparent;transition:color .15s,box-shadow .15s}
+.pnav:hover{color:var(--txt);box-shadow:inset 0 -2px 0 var(--borda)}
+.pnav:focus-visible{outline:2px solid var(--verde);outline-offset:-2px}
+.pnav.on{color:var(--txt);font-weight:600;box-shadow:inset 0 -2px 0 var(--verde)}
+.pnav.cfg{margin-left:auto;padding:.62rem .6rem;flex:none}
 """
 
 _NAV_ASSETS = """<style>
@@ -11458,10 +11546,31 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
      quadro —, e o primeiro card começava ~500 px abaixo do topo no computador.
      Captar e Etapas abrem numa GAVETA à direita, por cima do quadro, sem empurrar
      nada. No celular os botões viram ícones (🔍 ⚙ +). -#}
+  {#- O CABEÇALHO MAIS LEVE (25/09/2026, docs/mockups/funil_cabecalho.html, aprovado
+     pelo dono): o nome da EMPRESA e os números descem pra uma linha própria embaixo
+     do título — na linha do título eles cortavam em "490 lea…" —, e o aviso do
+     modelo do ramo deixa de ser uma faixa de duas linhas e vira um selo nela. O mês
+     não se repete aqui: a pílula de "Entraram em" já diz. -#}
   <script>document.documentElement.classList.add('kbjs')</script>
   <div class="kbtit{% if busca %} buscando{% endif %}" id="kbtit">
-    <h2 class="tt">Funil</h2>
-    <div class="kbnum">{% if conta %}<span class="kbconta">🏢 {{ conta[2] }} · </span>{% endif %}<b>{{ n_quadro }}</b><span class="kbnq"> no quadro</span>{% if entrou_itens and entrou != 'tudo' %}<span class="kbper"> · <span class="kbnq">entraram em </span>{{ entrou_rotulo|lower }}</span>{% endif %}<span class="kbtot"> · <span id="kb-total-n">{{ total_alvos }}</span> leads no total</span>{% if total_valor %}<span class="kbtot"> · pipeline {{ brl(total_valor) }}</span>{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
+    <div class="kbtt">
+      <h2 class="tt">Funil</h2>
+      {%- set _emp = empresa_nome or (conta[2] if conta else '') %}
+      <div class="kbnum">{% if _emp %}<span class="kbconta">{{ _emp|e }}</span><span class="kbsep">·</span>{% endif %}<span class="kbq"><b>{{ n_quadro }}</b> no quadro</span><span class="kbtot"><span class="kbsep">·</span><span id="kb-total-n">{{ total_alvos }}</span> no total</span>{% if total_valor %}<span class="kbtot"><span class="kbsep">·</span>pipeline {{ brl(total_valor) }}</span>{% endif %}
+        {#- A FAIXA DO MODELO DO RAMO (14/09/2026), desde 25/09 um selo nesta linha.
+            Continua só pra dono/gestor, e só quando a diferença NÃO é escolha do
+            dono — `funil_modelo.desencontro` não conta rótulo que ele mesmo
+            escreveu. Some sozinha quando o funil casa com o ramo.
+
+            POR QUE ELE MORA AQUI, no quadro, e não na Régua: o bloco que resolve isso
+            existe desde 11/09 e mora lá dentro. Em 14/09, de 8 contas com funil, UMA
+            tinha as colunas do próprio ramo — a Doce Mell, citada pelo nome no
+            docstring do `funil_modelo` como o caso que ele veio resolver, seguia nas
+            seis genéricas. A ferramenta funcionava; ninguém a encontrava. Continua à
+            vista em toda visita, só sem a faixa inteira todo dia. -#}
+        {% if ramo_fora %}<a class="kbramo" href="/painel/prospeccao/regua#modelo" title="{{ ramo_fora }} coluna{{ '' if ramo_fora == 1 else 's' }} diferente{{ '' if ramo_fora == 1 else 's' }} do modelo de {{ ramo_rotulo }} · nada muda sem você marcar"><span aria-hidden="true">⚠</span><span class="kbramo-l">{{ ramo_fora }} coluna{{ '' if ramo_fora == 1 else 's' }} fora do modelo de {{ ramo_rotulo }} · ver →</span><span class="kbramo-c">modelo</span></a>{% endif %}
+        {%- if n_contextos and n_contextos > 1 %}<span class="kbsep">·</span><a href="/trocar" class="kbtroca">trocar empresa ⇄</a>{% endif %}</div>
+    </div>
     <div class="kbacoes">
       {# A BUSCA: digitar filtra o que está na tela; Enter procura em todos os meses
          (a rota recebe `q`). "/" em qualquer lugar da página põe o foco aqui. #}
@@ -11485,31 +11594,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {#- OS CRÍTICOS POR VENDEDOR (25/09/2026): o dono cobra a equipe sem contar card
      na mão. Mesmo estado do selo "Crítico" do card e da tela de Follow-up — por
      isso só existe em conta que tem aquela tela. Clicar no nome filtra o quadro. -#}
-  {% if criticos %}<div class="kbcrit" id="kbcrit"><span class="rot">Críticos no quadro</span>
-    {% for v in criticos %}<a href="{{ v.url|e }}" class="{% if v.on %}on{% endif %}" title="{% if v.on %}Ver todos os vendedores{% else %}Ver só os cards de {{ v.nome|e }}{% endif %}"><b>{{ v.n }}</b> {{ v.nome|e }}</a>{% if not loop.last %}<span class="pt">·</span>{% endif %}{% endfor %}
+  {#- Desde 25/09/2026 cada vendedor é um chip com o nome escrito normal
+     ("Jacqueline", não "JACQUELINE" — o cadastro guarda em maiúscula). -#}
+  {% if criticos %}<div class="kbcrit" id="kbcrit"><span class="rot"><span aria-hidden="true">🚨</span> Críticos</span>
+    {% for v in criticos %}<a href="{{ v.url|e }}" class="kbcc{% if v.on %} on{% endif %}" title="{% if v.on %}Ver todos os vendedores{% else %}Ver só os cards de {{ v.nome|e }}{% endif %}"><b>{{ v.n }}</b> {{ v.nome|e }}</a>{% endfor %}
     <a class="lk" href="/painel/follow-up">ver fila →</a></div>{% endif %}
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
-
-  {# A FAIXA DO MODELO DO RAMO (14/09/2026). Aparece só pra dono/gestor, e só quando
-     a diferença NÃO é escolha do dono — `funil_modelo.desencontro` não conta rótulo
-     que ele mesmo escreveu. Some sozinha quando o funil casa com o ramo.
-
-     POR QUE ELA MORA AQUI, no quadro, e não na Régua: o bloco que resolve isso
-     existe desde 11/09 e mora lá dentro. Em 14/09, de 8 contas com funil, UMA tinha
-     as colunas do próprio ramo — a Doce Mell, citada pelo nome no docstring do
-     `funil_modelo` como o caso que ele veio resolver, seguia nas seis genéricas.
-     A ferramenta funcionava; ninguém a encontrava. #}
-  {% if ramo_fora %}
-  <div style="margin-top:.8rem;background:#20180a;border:1px solid #5C4418;border-left:3px solid var(--ambar);border-radius:10px;padding:.65rem .85rem;display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">
-    <div style="flex:1;min-width:220px">
-      <div style="font-weight:600;color:var(--ambar);font-size:.9rem">Seu funil não está no modelo de {{ ramo_rotulo }}</div>
-      <div class="mut" style="font-size:.78rem;margin-top:.1rem">{{ ramo_fora }} coluna{% if ramo_fora != 1 %}s{% endif %}
-        diferente{% if ramo_fora != 1 %}s{% endif %} do modelo do seu ramo · nada muda sem você marcar</div>
-    </div>
-    <a href="/painel/prospeccao/regua#modelo" class="pbtn ghost" style="text-decoration:none;padding:.4rem .8rem;font-size:.82rem">Ver o modelo</a>
-  </div>
-  {% endif %}
 
   <!-- painel de captação: gaveta à direita, por cima do quadro (desde 25/09/2026) -->
   <div class="kbgav-fundo" id="kbgav-fundo" hidden onclick="kbGavFecha()"></div>
@@ -11634,8 +11725,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
      em", padrão mês corrente), o vendedor e as pílulas âmbar do que ficou de fora —
      ligou, entram no quadro marcados; desligou, saem. A escolha fica na sessão. #}
   <div class="foco" id="foco">
+    {# desde 25/09/2026 as pílulas do período formam UMA escolha (.kbseg), no mesmo
+       desenho do "Por etapa / Por mês": só uma vale por vez #}
     {% if entrou_itens %}<span class="rot">Entraram em</span>
-    {% for m in entrou_itens %}<a class="pil{% if m.chave == entrou %} on{% endif %}" href="{{ m.url }}">{{ m.rotulo }} <b>{{ m.n }}</b></a>{% endfor %}{% endif %}
+    <span class="kbseg" role="group" aria-label="Entraram em">{% for m in entrou_itens %}<a class="pil{% if m.chave == entrou %} on{% endif %}" href="{{ m.url }}"{% if m.chave == entrou %} aria-current="true"{% endif %}>{{ m.rotulo }} <b>{{ m.n }}</b></a>{% endfor %}</span>{% endif %}
     {# o seletor diz quantos cards cada um tem no quadro, com os filtros de agora
        (25/09/2026) — "Todos · 227", "Jacqueline · 48" #}
     {% if gerencia %}<span class="sep"></span>
@@ -11782,7 +11875,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if c.esperando %} data-esp="1"{% endif %}{% if c.tel_q %} data-tel="{{ c.tel_q }}"{% endif %}{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
              tabindex="0" onkeydown="if(event.key==='Enter'&&event.target===this)kbAbrirLead(event,{{ c.id }},this)"
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
-          <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="{{ c.vendedor or 'Sem responsável' }} · trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor or '+')[:2]|upper }}</button>{% elif gerencia and c.vendedor %}<span class="kbav" title="{{ c.vendedor }}">{{ c.vendedor[:2]|upper }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
+          <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav kbvn{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="Responsável: {{ (c.vendedor or 'ninguém')|e }} · clique pra trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor_curto or c.vendedor or 'livre')|e }}</button>{% elif gerencia and c.vendedor %}<span class="kbav kbvn" title="Responsável: {{ c.vendedor|e }}">{{ (c.vendedor_curto or c.vendedor)|e }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
           <div class="kbl2">
           {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
@@ -11814,12 +11907,12 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              modo fora de 'off' (ver `fu_por_lead` no handler). "Follow-up hoje"
              quer dizer "venceu há menos de 24h", e é isso que o card passa a dizer. #}
           {% if c.fu %}<div class="kbfu {{ c.fu.estado }}" title="{{ c.fu.acao }}">{% if c.fu.estado == 'hoje' and c.fu.atraso %}Venceu há {{ c.fu.atraso }}{% else %}{{ c.fu.rotulo }}{% if c.fu.atraso %} · {{ c.fu.atraso }}{% endif %}{% endif %}</div>{% elif c.proximo and not vista_mes %}<div class="kbprox{% if c.proximo_venceu %} venceu{% endif %}" title="Próximo contato">Próx. contato {{ c.proximo.strftime('%d/%m') }}</div>{% endif %}
-          {% if c.campanha or c.chip_apelido %}<div class="camp">{% if c.campanha %}📣 {{ c.campanha }}{% endif %}{% if c.chip_apelido %}<span class="chip">{% if c.campanha %} · {% endif %}📱 {{ c.chip_apelido }}</span>{% endif %}</div>{% endif %}
+          {% if c.campanha %}<div class="camp">📣 {{ c.campanha }}</div>{% endif %}
           {# O CANAL ACENDE PELA CONVERSA (25/09/2026, parte 3): na ZAQ, 33 leads
              têm conversa de WhatsApp e o campo "whatsapp" do cadastro vazio — o card
              não tinha o 💬 e a conversa só se achava pela Comunicação. Tem conversa,
              tem botão; só o campo, o selo apagado de sempre. #}
-          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido or c.conv_whatsapp or c.conv_email or c.conv_instagram %}<div class="kbch">{% if c.tem_whatsapp or c.conv_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email or c.conv_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram or c.conv_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram or c.conv_whatsapp or c.conv_email or c.conv_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
+          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido or c.conv_whatsapp or c.conv_email or c.conv_instagram %}<div class="kbch">{% if c.tem_whatsapp or c.conv_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb{% if c.chip_zap %} kbb-chip{% if c.chip_zap_outro %} outro{% endif %}{% endif %}" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="{% if c.chip_zap %}Abrir a conversa no {{ c.chip_zap_nome|e }}{% else %}Abrir a conversa de WhatsApp{% endif %}">💬{% if c.chip_zap %}<span class="kbchip">{{ c.chip_zap|e }}</span>{% endif %}</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email or c.conv_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram or c.conv_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram or c.conv_whatsapp or c.conv_email or c.conv_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span class="kbval">{{ brl(c.valor) }}</span>{% endif %}</div></div>
           {# mesmo telefone, outro chip: são dois leads de propósito (cada chip responde
              pelo seu número), mas quem olha o funil precisa saber — senão dois
@@ -11875,7 +11968,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div id="kbmenu" class="kbpop" role="menu" hidden></div>
   {% if pode_atribuir %}<div id="kbvpop" class="kbpop" role="menu" hidden>
     <button type="button" class="kbpi" data-v="" onclick="kbVendEscolhe(this)">— sem responsável —</button>
-    {% for v in vendedores %}<button type="button" class="kbpi" data-v="{{ v.id }}" data-nome="{{ v.nome }}" onclick="kbVendEscolhe(this)"><span class="kbav">{{ v.nome[:2]|upper }}</span>{{ v.nome }}</button>{% endfor %}
+    {% for v in vendedores %}<button type="button" class="kbpi" data-v="{{ v.id }}" data-nome="{{ v.nome|e }}" data-curto="{{ (v.curto or v.nome)|e }}" onclick="kbVendEscolhe(this)"><span class="kbav">{{ v.nome[:2]|upper }}</span>{{ v.nome|e }}</button>{% endfor %}
   </div>{% endif %}
 </div>
 
@@ -12081,6 +12174,18 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 button.kbav{cursor:pointer}
 button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
 .kbav.livre{background:transparent;border:1px dashed #5E6F66;color:var(--txt-mut)}
+/* o NOME do vendedor no lugar das iniciais (25/09/2026): um chip que cabe o primeiro
+   nome; o nome da empresa encolhe antes dele */
+.kbav.kbvn{flex:0 0 auto;width:auto;max-width:96px;height:18px;border-radius:999px;padding:0 .5rem;font-size:.66rem;
+  font-weight:600;letter-spacing:0;line-height:18px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:#c7d6cd;background:#1f2c26;box-sizing:border-box}
+.kbav.kbvn.livre{line-height:16px;color:var(--txt-mut)}
+/* o número da conversa no 💬 (opção A, 25/09/2026): o principal discreto, o outro
+   número em azul */
+.kbl4 .kbch .kbb.kbb-chip{display:inline-flex;align-items:center;gap:.28rem;padding:0 .4rem}
+.kbchip{font-size:.66rem;color:var(--txt-mut);white-space:nowrap;max-width:76px;overflow:hidden;text-overflow:ellipsis}
+.kbl4 .kbch .kbb.kbb-chip.outro{background:#122029;border-color:#1f3a4d}
+.kbb-chip.outro .kbchip{color:#bfe0ff}
 .kbmais{flex:none;background:none;border:0;color:var(--txt-mut);opacity:.5;cursor:pointer;padding:0 .2rem;
   font-size:.95rem;line-height:1;letter-spacing:.05em;border-radius:5px}
 .kbmais:hover,.kbmais:focus-visible,.kbcard:focus-within .kbmais{opacity:1;color:var(--txt)}
@@ -12146,11 +12251,21 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
    — e, em quem vende data, a régua dos meses. Os botões daqui também não herdam
    o `button{width:100%;min-height:48px}` global. */
 :where(#kbtit,.kbgav) button{width:auto;min-height:0;margin:0;font-family:inherit}
-.kbtit{display:flex;align-items:center;gap:.4rem .7rem;flex-wrap:wrap;min-height:44px}
-.kbtit h2.tt{font-size:1.35rem;flex:none}
-.kbnum{flex:1 1 260px;min-width:0;font-size:.82rem;color:var(--txt-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbtit{display:flex;align-items:center;gap:.4rem .9rem;flex-wrap:wrap;min-height:44px}
+/* o título e, embaixo dele, o nome da empresa e os números (25/09/2026): numa
+   linha própria eles quebram em vez de cortar em "490 lea…" */
+.kbtt{flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:.18rem}
+.kbtit h2.tt{font-size:1.45rem;line-height:1.15}
+.kbnum{display:flex;align-items:center;flex-wrap:wrap;gap:.15rem .45rem;min-width:0;font-size:.82rem;color:var(--txt-mut)}
 .kbnum b{color:var(--txt)}
-.kbconta{color:var(--verde-claro);font-weight:600}
+.kbconta{color:var(--verde-claro);font-weight:650;letter-spacing:.02em}
+.kbsep{opacity:.55}
+.kbtot .kbsep{margin-right:.45rem}
+.kbramo{display:inline-flex;align-items:center;gap:.35rem;margin-left:.25rem;color:#e0b45f;border:1px solid rgba(224,180,95,.32);
+  background:rgba(224,180,95,.08);border-radius:999px;padding:.05rem .6rem;font-size:.76rem;text-decoration:none;white-space:nowrap}
+.kbramo:hover{border-color:var(--ambar);color:var(--ambar)}
+.kbramo-c{display:none}
+.kbtroca{color:var(--verde-claro)}
 .kbacoes{display:flex;align-items:center;gap:.45rem;margin-left:auto;flex-wrap:wrap}
 .kbbusca{display:flex;align-items:center;gap:.45rem;width:250px;height:34px;padding:0 .6rem;border:1px solid var(--borda);
   border-radius:9px;background:var(--bg);color:var(--txt-mut);font-size:.82rem;cursor:text;margin:0}
@@ -12173,13 +12288,26 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
 .kbcard.kbnao,#kbrow .kbnao{display:none}
 .kbcrit{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.3rem;font-size:.8rem;color:var(--txt-mut);min-height:26px}
 .kbcrit .rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-right:.1rem}
-.kbcrit a{color:var(--txt);text-decoration:underline dotted #3a4a40;text-underline-offset:3px;white-space:nowrap;border-radius:5px;padding:0 .15rem}
-.kbcrit a b{color:#e0574f;font-family:var(--mono,ui-monospace,monospace);font-weight:600}
-.kbcrit a.on{background:var(--neon-fundo);text-decoration:none}
-.kbcrit .pt{opacity:.6}
+/* cada vendedor é um chip (25/09/2026): o número em coral, o nome escrito normal */
+.kbcrit a.kbcc{display:inline-flex;align-items:center;gap:.4rem;height:26px;padding:0 .7rem 0 .55rem;border-radius:999px;flex:none;
+  background:rgba(224,87,79,.08);border:1px solid #5A2B2B;color:#f0c8c3;text-decoration:none;white-space:nowrap}
+.kbcrit a.kbcc b{color:#ff7a70;font-family:var(--mono,ui-monospace,monospace);font-size:.74rem;font-weight:600}
+.kbcrit a.kbcc:hover{border-color:#e0574f;color:var(--txt)}
+.kbcrit a.kbcc.on{background:rgba(224,87,79,.2);border-color:#e0574f;color:var(--txt)}
 .kbcrit a.lk{color:var(--verde-claro);text-decoration:none;margin-left:.2rem}
 .foco{margin-top:.5rem}
-.foco .vendf select{width:auto;min-height:0;margin:0;padding:.28rem .55rem;border-radius:8px;font-size:.8rem;height:30px}
+.foco .vendf select{width:auto;min-height:0;margin:0;padding:0 1.7rem 0 .8rem;border-radius:999px;font-size:.8rem;height:30px;
+  -webkit-appearance:none;appearance:none;cursor:pointer}
+/* sem a aparência nativa o Chromium arredonda o seletor — e a setinha vem daqui */
+.foco .vendf{position:relative}
+.foco .vendf::after{content:"▾";position:absolute;right:.7rem;top:50%;transform:translateY(-50%);pointer-events:none;
+  color:var(--txt-mut);font-size:.7rem}
+/* "Entraram em" como UMA escolha (25/09/2026), no desenho do "Por etapa / Por mês" */
+.foco .kbseg{display:inline-flex;align-items:center;border:1px solid var(--borda);border-radius:999px;padding:2px;gap:2px;flex:none}
+.foco .kbseg .pil{border:0;background:transparent;padding:.22rem .7rem}
+.foco .kbseg .pil:hover{color:var(--txt)}
+.foco .kbseg .pil.on{background:var(--neon-fundo);color:var(--verde-claro);box-shadow:inset 0 0 0 1px var(--neon-borda);font-weight:600}
+.foco .kbseg .pil.on b{color:var(--verde-claro)}
 .kbleg{margin-left:auto;display:inline-flex;gap:.7rem;font-size:.7rem;color:var(--txt-mut);align-items:center;white-space:nowrap}
 .kbleg span{display:inline-flex;align-items:center;gap:.3rem}
 .kbleg .tdot{width:8px;height:8px;flex:0 0 8px}
@@ -12217,7 +12345,9 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
   .kbtit{flex-wrap:nowrap;gap:.4rem}
   .kbtit h2.tt{font-size:1.2rem}
   .kbnum{flex:1 1 auto;font-size:.74rem}
-  .kbconta,.kbtot,.kbnq{display:none}
+  .kbtot,.kbramo-l{display:none}
+  .kbramo-c{display:inline}
+  .kbnum{font-size:.74rem}
   .kbacoes{flex-wrap:nowrap;gap:.35rem}
   .kbtit .tx{display:none}
   .kbtit .vseg{display:none}
@@ -12373,6 +12503,9 @@ function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove
 // ---- captação inline (sem reload) ----
 var TEMPCOR={frio:'#5b9bd5',morno:'var(--ambar)',quente:'var(--coral)'};
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
+// o primeiro nome escrito normal ("JACQUELINE PRIME" → "Jacqueline"), a mesma regra
+// do `_nomes_curtos` do servidor (sem o desempate, que só o servidor sabe fazer)
+function _kbCurto(n){var p=String(n||'').trim().split(/\\s+/)[0]||'';return p?p.charAt(0).toUpperCase()+p.slice(1).toLowerCase():'';}
 function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
 function cardGo(ev,id,el){if(!window._kbMoved)kbAbrirLead(ev,id,el);}
 function kbExcluir(ev,id){if(ev){ev.stopPropagation();ev.preventDefault();}
@@ -12435,13 +12568,14 @@ function _kbAbertasGrava(l){try{localStorage.setItem(_KB_AB_CH,JSON.stringify(l)
 // Desde 24/09/2026 quem chama é o AVATAR do card (via kbVendEscolhe), não um
 // <select> em cada card. O avatar só muda depois do OK do servidor — num erro
 // ele continua mostrando quem estava, que é quem de fato está salvo.
-function kbAtribuirVendedor(av,id,novo,nome){
+function kbAtribuirVendedor(av,id,novo,nome,curto){
   var fd=new FormData();fd.append('vendedor_id',novo);
   zapFetch('/painel/prospeccao/'+id+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d)return;
       if(!d.ok){alert(d.erro||'Não consegui trocar o vendedor.');return;}
       av.setAttribute('data-vend',novo);av.classList.toggle('livre',!novo);
-      av.textContent=novo?(nome||'').slice(0,2).toUpperCase():'+';
-      av.title=(novo?nome:'Sem responsável')+' · trocar';
+      // o NOME curto do vendedor (desde 25/09/2026), o mesmo que o servidor escreve
+      av.textContent=novo?(curto||nome||''):'livre';
+      av.title='Responsável: '+(novo?nome:'ninguém')+' · clique pra trocar';
     });
 }
 // ---- OS POPOVERS (24/09/2026): um menu ⋯ e uma lista de responsáveis pra página
@@ -12469,7 +12603,7 @@ function kbVendPop(ev,av){ev.stopPropagation();var pop=document.getElementById('
   kbPopAbre(pop,av);}
 function kbVendEscolhe(b){var av=_kbPopDe;kbPopFecha();if(!av)return;var novo=b.getAttribute('data-v')||'';
   if(novo===(av.getAttribute('data-vend')||''))return;
-  kbAtribuirVendedor(av,av.getAttribute('data-lead'),novo,b.getAttribute('data-nome')||'');}
+  kbAtribuirVendedor(av,av.getAttribute('data-lead'),novo,b.getAttribute('data-nome')||'',b.getAttribute('data-curto')||'');}
 function _kbEsc(t){return String(t==null?'':t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 // O ⋯ DO CARD: o que se faz de vez em quando, com nome. Excluir fica no fim, em
 // vermelho, e só pra dono e gestor (o servidor confere a mesma regra).
@@ -12512,10 +12646,9 @@ function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]')
   // ainda não existe num lead que acabou de nascer.
   var t=(l.temperatura||'sem');
   var sub=(l.segmento||l.cidade)?('<div class="sub">'+(l.segmento?jsEsc(l.segmento):'')+(l.cidade?(' · '+jsEsc(l.cidade)+(l.uf?('/'+jsEsc(l.uf)):'')):'')+'</div>'):'';
-  var camp=(l.campanha||l.chip_apelido)?('<div class="camp">'+(l.campanha?('📣 '+jsEsc(l.campanha)):'')
-    +(l.chip_apelido?('<span class="chip">'+(l.campanha?' · ':'')+'📱 '+jsEsc(l.chip_apelido)+'</span>'):'')+'</div>'):'';
+  var camp=l.campanha?('<div class="camp">📣 '+jsEsc(l.campanha)+'</div>'):'';
   var ft='<div class="ft">'+(l.valor?('<span class="kbval">'+jsBrl(l.valor)+'</span>'):'')+'</div>';
-  var av=l.vendedor?('<span class="kbav" title="'+jsEsc(l.vendedor)+'">'+jsEsc(l.vendedor.slice(0,2).toUpperCase())+'</span>'):'';
+  var av=l.vendedor?('<span class="kbav kbvn" title="Responsável: '+jsEsc(l.vendedor)+'">'+jsEsc(_kbCurto(l.vendedor))+'</span>'):'';
   var html='<div class="kbcard chegou" draggable="true" data-id="'+l.id+'" tabindex="0" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo(event,'+l.id+',this)">'
     +'<div class="kbl1"><span class="tdot t-'+jsEsc(t)+'" title="'+jsEsc(t)+'"></span><span class="emp" title="'+jsEsc(l.empresa)+'">'+jsEsc(l.empresa)+'</span>'+av
     +'<button type="button" class="kbmais" data-lead="'+l.id+'" data-conv="" data-mail="" data-st="'+jsEsc(l.status||'novo')+'" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>'

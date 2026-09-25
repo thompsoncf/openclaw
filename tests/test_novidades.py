@@ -1262,3 +1262,18 @@ def test_os_ajustes_por_nicho_do_funil_avisam_cada_um_no_seu_alcance(pool):
     assert rows["funil-grupos-por-entrada"][0] == "recorrente"
     assert "eventos" not in nv.nichos_alcancados("recorrente")
     assert "consultoria" in nv.nichos_alcancados("recorrente")
+
+
+def test_o_cabecalho_do_funil_avisa_quem_tem_funil(pool):
+    """343: o nome do vendedor no card, o número no 💬 e o topo mais leve — pra
+    quem tem funil (`servico`), sem palavra de festa (a consultoria recebe)."""
+    with pool.connection() as c:
+        c.execute((BASE / "343_novidade_funil_cabecalho.sql").read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select publico, pra_quem, titulo, resumo, corpo, link from novidades
+                          where chave='funil-cabecalho'""").fetchone()
+    pub, pq, tit, res, corpo, link = r
+    assert pub == "servico" and sorted(pq) == ["dono", "gestor", "vendedor"]
+    assert "festa" not in (tit + res + corpo).lower()
+    assert res and link == "/painel/prospeccao"
+    assert "DONO E GESTOR" in corpo, "o que é só da gerência tem que dizer que é"

@@ -874,21 +874,19 @@ def test_quadro_do_funil_avisa_quando_da_pra_rolar_pro_lado():
     assert "scrollWidth" in fonte.split("function kbCheckScroll")[1].split("}")[0]
 
 
-def test_nome_do_chip_nao_quebra_no_meio_mesmo_com_o_selo_em_2_linhas():
+def test_nome_do_chip_nao_quebra_no_meio():
     """Relato em produção depois do clamp de 2 linhas (PR #551): um apelido de
-    chip CURTO ("CP Zarb") ainda quebrava no meio — "CP" numa linha, "Zarb" na
-    outra — porque o clamp vale pro <div class="camp"> inteiro, e sem
-    white-space:nowrap o navegador quebra em qualquer espaço que não coube.
-    O clamp de 2 linhas é pro nome da CAMPANHA, que pode ser grande; o chip é
-    sempre curto e não devia quebrar sozinho — só o span inteiro pode pular
-    pra linha 2, nunca partir no meio da palavra."""
+    chip CURTO ("CP Zarb") quebrava no meio — "CP" numa linha, "Zarb" na outra.
+    Desde 25/09/2026 o nome do número mora no 💬 da conversa (.kbchip, opção A do
+    mockup docs/mockups/funil_cabecalho.html) e não mais no selo de campanha; a
+    regra continua: o nome do número nunca parte no meio."""
     fonte = inspect.getsource(pp)
-    regra = fonte.split(".kbcard .camp .chip{")[1].split("}")[0]
+    regra = fonte.split(".kbchip{")[1].split("}")[0]
     assert "white-space:nowrap" in regra, (
-        "sem nowrap no span do chip, um apelido curto pode quebrar no meio")
+        "sem nowrap, o nome do número pode quebrar no meio")
 
 
-def test_selo_de_campanha_so_aparece_no_template_quando_tem_campanha_ou_chip():
+def test_selo_de_campanha_so_com_campanha_e_o_numero_no_botao_da_conversa():
     """O selo não pode ser incondicional — boa parte dos leads vem da Base
     manual, sem campanha nenhuma associada (ver docs/mockups/, seção 2).
 
@@ -898,12 +896,18 @@ def test_selo_de_campanha_so_aparece_no_template_quando_tem_campanha_ou_chip():
     esses leads, só o chip que recebeu. O selo original só nascia atrás de
     `{% if c.campanha %}`, então pra esses leads o apelido do chip nunca
     tinha chance de aparecer, mesmo resolvendo certo no Python. Selo e chip
-    viraram independentes: aparece com qualquer um dos dois, ou os dois."""
+    viraram independentes: aparece com qualquer um dos dois, ou os dois.
+
+    25/09/2026: o número saiu do selo e foi pro 💬 da conversa (opção A do mockup
+    docs/mockups/funil_cabecalho.html, escolhida pelo dono) — e continua sem
+    depender de campanha: o botão da conversa existe em todo lead com conversa."""
     fonte = inspect.getsource(pp)
-    assert '{% if c.campanha or c.chip_apelido %}<div class="camp">' in fonte, (
-        "o selo no card Jinja precisa aparecer com campanha OU chip, não só com campanha")
-    assert '(l.campanha||l.chip_apelido)?(\'<div class="camp">\'' in fonte, (
-        "o addCard() em JS (lead capturado sem recarregar a página) precisa da mesma condição")
+    assert '{% if c.campanha %}<div class="camp">📣 {{ c.campanha }}</div>{% endif %}' in fonte, (
+        "o selo de campanha só aparece com campanha")
+    assert '<span class="kbchip">{{ c.chip_zap|e }}</span>' in fonte, (
+        "o número da conversa tem que estar no botão 💬")
+    assert "var camp=l.campanha?('<div class=\"camp\">📣 '" in fonte, (
+        "o addCard() em JS (lead capturado sem recarregar a página) segue a mesma regra")
 
 
 # ─────────────────────── um jeito só de mudar a situação (19/09/2026) ────────

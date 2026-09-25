@@ -191,7 +191,7 @@ def test_os_criticos_por_vendedor_saem_do_mesmo_estado_do_card(monkeypatch, pool
     # todos os vendedores, mesmo com um só escolhido, do maior pro menor
     assert linha.index("<b>3</b> Jacqueline") < linha.index("<b>1</b> Thiago")
     assert f'href="/painel/prospeccao?vendedor={ja}"' in linha
-    assert 'class="on"' in linha.split("Thiago")[0].rsplit("<a", 1)[1], "o escolhido acende"
+    assert 'class="kbcc on"' in linha.split("Thiago")[0].rsplit("<a", 1)[1], "o escolhido acende"
     assert 'href="/painel/follow-up"' in linha
     assert "Crítico" in html, "o selo do card é o mesmo estado"
 

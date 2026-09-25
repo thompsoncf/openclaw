@@ -154,9 +154,12 @@ def resolver(c, conta_id: int, agora: datetime | None = None) -> int:
 def entrar(c, conta_id: int, agora: datetime | None = None, cfg: dict | None = None) -> list[dict]:
     """Põe na esteira os `por_dia` leads mais antigos de CADA vendedor.
 
-    Só entra quem está numa etapa com prazo, com a bola CONOSCO e fora da esteira.
-    A bola é o mesmo portão de sempre: cliente esperando resposta nunca é cobrança
-    do vendedor — é dívida nossa, e ele vê isso na Fila, não aqui.
+    Só entra quem está numa etapa com prazo, com a bola CONOSCO, fora da esteira e
+    SEM MENSAGEM NOSSA recente. A bola é o mesmo portão de sempre: cliente esperando
+    resposta nunca é cobrança do vendedor — é dívida nossa, e ele vê isso na Fila,
+    não aqui. O descanso é o portão novo, e está explicado no SQL: falar com o lead
+    recomeça o relógio, senão quem faz follow-up sem mover o card é cobrado pelo
+    mesmo lead todo dia.
 
     Idempotente pelo índice único: rodar de novo no mesmo dia não duplica ninguém,
     e a contagem do dia sai de quem JÁ entrou hoje, não de um contador à parte.
@@ -211,7 +214,22 @@ def entrar(c, conta_id: int, agora: datetime | None = None, cfg: dict | None = N
                                where cv.prospeccao_id = p.id), 0)
                  >= coalesce((select max(m.id) filter (where m.direcao='in')
                                 from conversas cv join mensagens m on m.conversa_id = cv.id
-                               where cv.prospeccao_id = p.id), 0))
+                               where cv.prospeccao_id = p.id), 0)
+                -- DESCANSO: falar recomeça o relógio. O prazo acima conta o tempo
+                -- parado NA ETAPA, e mandar mensagem não move etapa — então sem
+                -- esta linha quem faz follow-up sem mover o card é cobrado pelo
+                -- mesmo lead todo dia, e o placar dele marca zero porque o
+                -- trabalho é anterior à entrada (`resolver` só olha o que veio
+                -- DEPOIS de `entrou_em`). Foi o que aconteceu com a Jacqueline da
+                -- Prime em 23/09/2026: 233 mensagens para 64 leads num dia, e os
+                -- 10 cobrados no dia seguinte eram os 10 que ela já tinha tratado.
+                -- O descanso é o teto da própria etapa: falar compra o mesmo prazo
+                -- que a etapa dá. Lead que nunca recebeu mensagem entra igual — é
+                -- por ele que a esteira existe.
+                and coalesce((select max(m.criado_em) filter (where m.direcao='out')
+                                from conversas cv join mensagens m on m.conversa_id = cv.id
+                               where cv.prospeccao_id = p.id), '-infinity'::timestamptz)
+                    < %(agora)s - make_interval(days => t.dias))
            select f.id, f.vendedor_id, f.status, f.quem
              from fila f left join ja_hoje j on j.membro_id is not distinct from f.vendedor_id
             where f.pos <= (%(por_dia)s - coalesce(j.n, 0))

@@ -12452,7 +12452,14 @@ function kbPopAbre(pop,ancora){pop.hidden=false;var r=ancora.getBoundingClientRe
   var w=pop.offsetWidth,h=pop.offsetHeight,x=Math.min(r.right-w,window.innerWidth-w-8),y=r.bottom+4;
   if(y+h>window.innerHeight-8)y=Math.max(8,r.top-h-4);
   pop.style.left=Math.max(8,x)+'px';pop.style.top=y+'px';var b=pop.querySelector('button');if(b)b.focus({preventScroll:true});}
-document.addEventListener('click',function(e){if(e.target.closest&&(e.target.closest('.kbpop')||e.target.closest('.kbmais')||e.target.closest('button.kbav')))return;kbPopFecha();});
+// CLICOU FORA, FECHA — pelo CAMINHO do clique (composedPath), não pelo `closest` do
+// alvo. O "Mover para" troca o conteúdo do próprio menu (innerHTML) no clique; quando
+// o clique chega aqui o botão clicado já saiu da página, `closest` num nó solto não
+// acha o menu, e o submenu fechava no mesmo instante em que abria (25/09/2026: "a
+// parte de mover para não abre nada"). O caminho é o de quando o clique aconteceu.
+document.addEventListener('click',function(e){var cam=e.composedPath?e.composedPath():[e.target];
+  for(var i=0;i<cam.length;i++){var n=cam[i];if(n&&n.matches&&(n.matches('.kbpop')||n.matches('.kbmais')||n.matches('button.kbav')))return;}
+  kbPopFecha();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')kbPopFecha();});
 window.addEventListener('scroll',kbPopFecha,true);
 function kbVendPop(ev,av){ev.stopPropagation();var pop=document.getElementById('kbvpop');if(!pop)return;

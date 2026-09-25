@@ -337,12 +337,15 @@ def _depois(alias: str, mid: str) -> str:
             f"(select px.criado_em, px.id from mensagens px where px.id = {mid})")
 
 
-def _n8_da_conversa(conv: str) -> str:
-    """O número (8 dígitos) da conversa `conv`, pela mesma regra do `_N8`."""
+def _n8_da_conversa(conv: str, conta: str) -> str:
+    """O número (8 dígitos) da conversa `conv` da conta `conta`, pela mesma regra
+    do `_N8`. A conta vai no filtro mesmo com o id em mãos: é o escopo que
+    tests/test_escopo_conta cobra de toda query em tabela multi-tenant."""
     return (r"(select right(regexp_replace(coalesce(nullif(px.whatsapp,''), nullif(px.telefone,''),"
             r" cx.contato_ref, ''), '\D', '', 'g'), 8)"
-            f" from conversas cx left join prospeccao px on px.id = cx.prospeccao_id"
-            f" where cx.id = {conv})")
+            f" from conversas cx left join prospeccao px"
+            f" on px.id = cx.prospeccao_id and px.conta_id = cx.conta_id"
+            f" where cx.id = {conv} and cx.conta_id = {conta})")
 
 # O número do paciente, na mesma ordem em que o agente escolhe o destino
 # (`agente._atender`): o WhatsApp do lead, o telefone, e o contato da conversa.
@@ -404,7 +407,7 @@ def _marcou_sql(conv: str, mid: str, lead: str) -> str:
     return ("""(
    exists (select 1 from mensagens mm where mm.conversa_id = """ + conv + """ and mm.direcao = 'out'
             and """ + _depois("mm", mid) + """ and mm.texto ~* %(re_marcou)s)
-   or exists (select 1 from prospeccao pp where pp.id = """ + lead + """
+   or exists (select 1 from prospeccao pp where pp.conta_id = %(conta)s and pp.id = """ + lead + """
                and (pp.status in ('qualificado','proposta') or pp.status in """
             + fr.sql_fechadas("pp") + ")))")
 
@@ -569,7 +572,7 @@ _NAO_MANDADO_HOJE = """
    not exists (select 1 from voltar_a_chamar_toques o
                 where o.conta_id = t.conta_id and o.estado = 'enviado' and o.enviado_em >= %(hoje)s
                   and (o.conversa_id = t.conversa_id
-                       or """ + _n8_da_conversa("o.conversa_id") + " = " + _n8_da_conversa("t.conversa_id") + "))"
+                       or """ + _n8_da_conversa("o.conversa_id", "o.conta_id") + " = " + _n8_da_conversa("t.conversa_id", "t.conta_id") + "))"
 
 def _inicio_do_dia(agora: datetime) -> datetime:
     return _utc(datetime.combine(_local(agora).date(), time(0, 0)))
@@ -630,7 +633,8 @@ def enviar(c, conta_id: int, toque_id: int, cfg: dict, *, por: str,
            values (%s, 'whatsapp', 'out', %s, %s, %s, %s, %s) returning id""",
         (conversa_id, "bot" if por == "agente" else "humano", texto, membro_id,
          res.get("sid"), agora)).fetchone()[0]
-    c.execute("update conversas set ultima_msg_em=now() where id=%s", (conversa_id,))
+    c.execute("update conversas set ultima_msg_em=now() where id=%s and conta_id=%s",
+              (conversa_id, conta_id))
     c.execute("update voltar_a_chamar_toques set mensagem_id=%s where id=%s", (mid, toque_id))
     try:
         if lead is None:
@@ -832,8 +836,8 @@ def ja_marcou(pool, conta_id: int, toque_id: int, membro_id: int | None) -> bool
         antes = lead and c.execute("select status from prospeccao where id=%s and conta_id=%s for update",
                                    (lead, conta_id)).fetchone()
         if antes and antes[0] in ("novo", "contatado", "follow_up"):
-            c.execute("update prospeccao set status='qualificado', atualizado_em=now() where id=%s",
-                      (lead,))
+            c.execute("update prospeccao set status='qualificado', atualizado_em=now() "
+                      "where id=%s and conta_id=%s", (lead, conta_id))
             fr.registrar_movimento(c, conta_id, lead, antes[0], "qualificado", "manual", membro_id)
         c.commit()
         return True

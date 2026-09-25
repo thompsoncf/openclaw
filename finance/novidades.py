@@ -101,6 +101,18 @@ def _suplementos(slug) -> bool:
     return (slug or "") == "suplementos"
 
 
+def _construcao(slug) -> bool:
+    """Construção e reforma — o terceiro portão de UM nicho só.
+
+    Obra, casa de Minha Casa Minha Vida, visita técnica e crédito da Caixa não
+    existem em nenhum outro ramo. `servico` alcançaria advocacia e contabilidade,
+    e `recorrente` alcançaria as consultorias — o perfil `obras` e o que vier
+    depois dele (a aba Obras, o caminho do dinheiro da casa) não abrem pra
+    nenhuma delas.
+    """
+    return (slug or "") == "construcao"
+
+
 def _canal_proprio(pool, conta_id: int) -> bool:
     """A conta fala pelo WhatsApp DELA, conectado por QR code.
 
@@ -167,6 +179,7 @@ PUBLICOS_NICHO = {
     "recorrente": _recorrente,
     "seguros": _seguros,
     "suplementos": _suplementos,
+    "construcao": _construcao,
 }
 
 PUBLICOS_CONTA = {

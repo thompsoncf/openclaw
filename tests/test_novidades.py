@@ -133,6 +133,9 @@ def pool():
         # 338 amplia pela quarta vez, com `empresa` — o segundo portão de CONTA
         # (quem tem a aba Empresa). Mesmo motivo das anteriores.
         c.execute((BASE / "338_novidade_empresa_reorganizada.sql").read_text(encoding="utf-8"))
+        # 346 amplia pela quinta vez, com `construcao` — o terceiro portão de UM
+        # nicho só. Mesmo motivo das anteriores.
+        c.execute((BASE / "346_novidade_nicho_construcao.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

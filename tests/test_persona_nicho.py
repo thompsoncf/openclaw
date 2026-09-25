@@ -19,7 +19,8 @@ _MIGRACOES = ("053_modulo_pj.sql", "031_fornecedor_fase0.sql",
               "091_nichos_servico_profissional.sql",
               "092_funcionario_cbo.sql", "093_folha_beneficios_e_org.sql",
               "094_funcionario_demissao.sql",
-              "095_funcionario_cpf.sql", "109_nicho_construcao.sql")
+              "095_funcionario_cpf.sql", "109_nicho_construcao.sql",
+              "344_nicho_construcao_e_reforma.sql")
 
 
 # ── parte pura ────────────────────────────────────────────────────────────
@@ -52,7 +53,8 @@ def test_rotulo_receber_por_nicho():
     assert nichos.rotulo_receber("alimentacao") == "Fiado"        # varejo
     assert nichos.rotulo_receber("advocacia") == "Honorários"
     assert nichos.rotulo_receber("agencia") == "Mensalidades"
-    assert nichos.rotulo_receber("construcao") == "Medições"        # obra fatura por medição
+    # quem deve à construtora é o comprador da casa ou o cliente da reforma (25/09)
+    assert nichos.rotulo_receber("construcao") == "A receber"
     assert nichos.rotulo_receber("servicos_gerais") == "A receber"  # serviço sem molde
 
 
@@ -80,9 +82,10 @@ def test_todos_os_ramos_servico_tem_molde():
     for s in ("advocacia", "consultoria", "arquitetura", "agencia", "tecnologia",
               "construcao"):
         assert nichos.tem_persona(s), s
-    # o molde de construção fala de MEDIÇÃO/OBRA
-    assert "MEDIÇÃO" in nichos.persona_do_nicho("construcao")
-    assert "OBRAS" in nichos.persona_do_nicho("construcao")
+    # construção tem persona PRÓPRIA desde 25/09 (casa de MCMV + reforma): os
+    # detalhes estão em tests/test_nicho_construcao.py
+    assert "CONSTRUÇÃO E REFORMA" in nichos.persona_do_nicho("construcao")
+    assert "DE QUAL OBRA" in nichos.persona_do_nicho("construcao")
 
 
 # ── parte com banco: bloco_persona_pj molda ao nicho ──────────────────────
@@ -143,8 +146,8 @@ def test_persona_generica_sem_nicho(pool):
 def test_persona_molda_para_construcao(pool):
     cid = _conta_com_nicho(pool, "construcao")   # seed vem da migração 109
     txt = bloco_persona_pj(pool, cid, "Construtora Costa")
-    assert "CONSTRUÇÃO CIVIL / OBRAS" in txt
-    assert "MEDIÇÃO" in txt
+    assert "CONSTRUÇÃO E REFORMA" in txt
+    assert "DE QUAL OBRA" in txt
 
 
 # ── raio-x: departamento de construção (lista branca do consumo) ──────────

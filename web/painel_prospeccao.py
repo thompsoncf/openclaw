@@ -823,21 +823,17 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                 logging.getLogger("prospeccao.funil").warning(
                     "não deu pra ler a última mensagem dos cards", exc_info=True)
                 ult_por_lead = {}
-        # apelido de cada chip usado no board + o do chip principal (mesmo par de
-        # colunas que o Inbox lê: contas.nome pro secundário, canais_config.rotulo
-        # pro principal — ver comunicacao_chip_apelido).
+        # apelido de cada chip SECUNDÁRIO usado no board (contas.nome, o mesmo que o
+        # Inbox lê — ver comunicacao_chip_apelido). O rótulo do principal não é
+        # mais lido aqui: desde 25/09/2026 o card só mostra o chip que NÃO é o
+        # principal (ver o selo, no laço dos cards).
         chip_nomes: dict[int, str] = {}
-        rotulo_principal = ""
         if dois_chips and chip_por_lead:
             ids_chip = [v for v in set(chip_por_lead.values()) if v]
             if ids_chip:
                 chip_nomes = dict(c.execute(
                     "select id, coalesce(nullif(btrim(nome),''),'') from contas where id = any(%s)",
                     (ids_chip,)).fetchall())
-            r = c.execute(
-                "select coalesce(nullif(btrim(rotulo),''),'') from canais_config "
-                "where conta_id=%s and canal='whatsapp'", (conta_id,)).fetchone()
-            rotulo_principal = (r[0] if r else "") or ""
         # o mesmo número atendido pelo OUTRO chip — uma consulta pro funil inteiro, e
         # nenhuma numa empresa de um chip só (que é o caso de quase todas)
         gemeos = _gemeos_de_outro_chip(c, conta_id, [r[0] for r in rows])
@@ -946,10 +942,14 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         # só resolve apelido quando o lead TEM conversa de WhatsApp de verdade — sem
         # isso, "sem chip nenhum" e "chip principal" ficavam indistinguíveis e o selo
         # mostrava "· 📱 <rótulo do principal>" até pra quem nunca trocou mensagem.
-        if dois_chips and r[0] in chip_por_lead:
-            chip_id_lead = chip_por_lead[r[0]]
-            chip_apelido = (chip_nomes.get(chip_id_lead) if chip_id_lead
-                            else rotulo_principal) or None
+        #
+        # E SÓ QUANDO NÃO É O PRINCIPAL (25/09/2026, parte 3 do funil enxuto). Na
+        # Prime, 472 das 485 conversas de lead estão no chip principal: o "📱 CP
+        # Zarb" aparecia em quase todo card e parecia botão. O selo existe pra
+        # dizer "este aqui veio pelo OUTRO número" — e é isso que ele diz agora.
+        # O rótulo do principal continua lido (o Inbox e os relatórios usam).
+        if dois_chips and chip_por_lead.get(r[0]):
+            chip_apelido = chip_nomes.get(chip_por_lead[r[0]]) or None
         card = {"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3],
                 "uf": r[4], "status": r[5], "temperatura": r[6], "valor": r[7],
                 "proximo": r[8], "telefone": r[9], "whatsapp": r[10],
@@ -1142,7 +1142,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # porquê, com os números da Prime, está no docstring de `evento_lead.agrupar`).
     # É o MESMO portão que já decide o resto do modo evento, então nenhuma conta de
     # outro nicho muda de ordem por causa desta entrega.
-    grupos = {chave: _evl.agrupar(cards, agora, por_semana=por_semana, por_festa=modo_evento)
+    grupos = {chave: _evl.agrupar(cards, agora, por_semana=por_semana, por_festa=modo_evento,
+                                vende_data=modo_evento)
               for chave, cards in colunas.items()}
     # a vista por mês: as colunas viram meses (e "Sem data"), a etapa vai pro card
     vista_cols = None
@@ -1183,7 +1184,9 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    vend_cont=vend_cont, vend_total=vend_total, criticos=criticos,
                    mes_vazio=mes_vazio,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
-                   totais_col=totais_col, modo_evento=modo_evento, pergunta_data=_evl.PERGUNTA_DATA,
+                   totais_col=totais_col, modo_evento=modo_evento,
+                   # a pergunta da data da festa só vai pra página de quem vende data (§6)
+                   pergunta_data=(_evl.PERGUNTA_DATA if modo_evento else ""),
                    status=status_tpl, colunas_tpl=colunas_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
@@ -11805,7 +11808,11 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              quer dizer "venceu há menos de 24h", e é isso que o card passa a dizer. #}
           {% if c.fu %}<div class="kbfu {{ c.fu.estado }}" title="{{ c.fu.acao }}">{% if c.fu.estado == 'hoje' and c.fu.atraso %}Venceu há {{ c.fu.atraso }}{% else %}{{ c.fu.rotulo }}{% if c.fu.atraso %} · {{ c.fu.atraso }}{% endif %}{% endif %}</div>{% elif c.proximo and not vista_mes %}<div class="kbprox{% if c.proximo_venceu %} venceu{% endif %}" title="Próximo contato">Próx. contato {{ c.proximo.strftime('%d/%m') }}</div>{% endif %}
           {% if c.campanha or c.chip_apelido %}<div class="camp">{% if c.campanha %}📣 {{ c.campanha }}{% endif %}{% if c.chip_apelido %}<span class="chip">{% if c.campanha %} · {% endif %}📱 {{ c.chip_apelido }}</span>{% endif %}</div>{% endif %}
-          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
+          {# O CANAL ACENDE PELA CONVERSA (25/09/2026, parte 3): na ZAQ, 33 leads
+             têm conversa de WhatsApp e o campo "whatsapp" do cadastro vazio — o card
+             não tinha o 💬 e a conversa só se achava pela Comunicação. Tem conversa,
+             tem botão; só o campo, o selo apagado de sempre. #}
+          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido or c.conv_whatsapp or c.conv_email or c.conv_instagram %}<div class="kbch">{% if c.tem_whatsapp or c.conv_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email or c.conv_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram or c.conv_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram or c.conv_whatsapp or c.conv_email or c.conv_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span class="kbval">{{ brl(c.valor) }}</span>{% endif %}</div></div>
           {# mesmo telefone, outro chip: são dois leads de propósito (cada chip responde
              pelo seu número), mas quem olha o funil precisa saber — senão dois
@@ -12258,8 +12265,10 @@ function kbLerConversas(btn){btn.disabled=true;var t=btn.textContent;btn.textCon
 window.KB_VISTA={{ ('mes' if vista_mes else '')|tojson }};
 // excluir apaga o lead de vez: só dono e gestor (decisão do dono, 24/09/2026)
 window.KB_EXCLUI={{ 'true' if gerencia else 'false' }};
-var KB_PERGUNTA_DATA={{ (pergunta_data or '')|tojson }};
-function kbPerguntarData(ev,convId,btn){_cpPrefill=KB_PERGUNTA_DATA;kbAbrirChat(ev,convId,'conversas',btn);}
+// a pergunta da data da festa: só em quem vende data (§6) — quem vende mensalidade
+// não recebe nem o texto na página (desde 25/09/2026, parte 3 do funil enxuto)
+{% if modo_evento %}var KB_PERGUNTA_DATA={{ (pergunta_data or '')|tojson }};
+function kbPerguntarData(ev,convId,btn){_cpPrefill=KB_PERGUNTA_DATA;kbAbrirChat(ev,convId,'conversas',btn);}{% endif %}
 // a janela do lead (abrir, dados, corrigir, histórico, mudar a situação) mora em
 // web/janela_lead.py: o Follow-up abre a MESMA janela, e duas cópias divergem.
 // O PORTÃO DO §6 lá dentro: os campos do evento (rótulo, exemplo e tudo) são

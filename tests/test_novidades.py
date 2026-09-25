@@ -1242,3 +1242,23 @@ def test_o_topo_do_funil_avisa_em_dois_alcances(pool):
     pub, pq, tit, res, corpo, link = rows["funil-regua-festa"]
     assert pub == "eventos" and nv.nichos_alcancados(pub) == {"eventos"}
     assert sorted(pq) == ["dono", "gestor", "vendedor"] and res and link == "/painel/prospeccao"
+
+
+def test_os_ajustes_por_nicho_do_funil_avisam_cada_um_no_seu_alcance(pool):
+    """341: o 💬 pela conversa e o selo do chip valem pra todo funil (`servico`);
+    os grupos sem "Sem data" só pra quem não vende data (`recorrente`). Nenhum dos
+    dois fala de festa, e o de recorrente não chega em quem vende evento."""
+    with pool.connection() as c:
+        c.execute((BASE / "341_novidade_funil_por_nicho.sql").read_text(encoding="utf-8"))
+        c.commit()
+        rows = {r[0]: r[1:] for r in c.execute(
+            """select chave, publico, pra_quem, titulo, resumo, corpo, link from novidades
+                where chave in ('funil-canal-pela-conversa', 'funil-grupos-por-entrada')""").fetchall()}
+    assert set(rows) == {"funil-canal-pela-conversa", "funil-grupos-por-entrada"}
+    for chave, (pub, pq, tit, res, corpo, link) in rows.items():
+        assert "festa" not in (tit + res + corpo).lower(), chave
+        assert sorted(pq) == ["dono", "gestor", "vendedor"] and res and link == "/painel/prospeccao", chave
+    assert rows["funil-canal-pela-conversa"][0] == "servico"
+    assert rows["funil-grupos-por-entrada"][0] == "recorrente"
+    assert "eventos" not in nv.nichos_alcancados("recorrente")
+    assert "consultoria" in nv.nichos_alcancados("recorrente")

@@ -1,0 +1,381 @@
+<title>Cabeçalho do funil</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+:root{
+  --bg:#eef2ef; --card:#ffffff; --linha:#d9e1dc; --texto:#16201a; --fraco:#5a6a61;
+  --acento:#0c8a47; --acento-fraco:#dff1e6; --ruim:#a8352b; --ruim-fraco:#fae6e3;
+  /* a tela do app é sempre escura: são as cores do próprio ZAQ */
+  --a-bg:#0A0F0C; --a-bg2:#0E1512; --a-card:#121A16; --a-linha:#1E2A23; --a-txt:#EAF2ED;
+  --a-mut:#8FA197; --a-faint:#5E6F66; --a-verde:#25D366; --a-verde-cl:#46F58A; --a-sobre:#04150C;
+  --a-neon-f:#10241A; --a-neon-b:#1E4A3A; --a-amb:#E0A32E; --a-amb-f:#20180a; --a-amb-b:#5C4418;
+  --a-cor:#E0574F; --a-cor-f:#241313; --a-cor-b:#5A2B2B; --a-azul:#7bb8e6; --a-azul-f:#122029; --a-azul-b:#1f3a4d;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:#0f1512; --card:#161e1a; --linha:#27332c; --texto:#e6eee9; --fraco:#98a79e;
+  --acento:#4fd18a; --acento-fraco:#123022; --ruim:#ec8e82; --ruim-fraco:#361c18;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f1512; --card:#161e1a; --linha:#27332c; --texto:#e6eee9; --fraco:#98a79e;
+  --acento:#4fd18a; --acento-fraco:#123022; --ruim:#ec8e82; --ruim-fraco:#361c18;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--texto);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:32px 40px}
+h1{font-family:var(--display);font-size:clamp(26px,5vw,38px);line-height:1.1;letter-spacing:-.02em;margin:0 0 10px;text-wrap:balance}
+h2{font-family:var(--display);font-size:22px;letter-spacing:-.01em;margin:44px 0 6px;text-wrap:balance}
+.sub{color:var(--fraco);max-width:72ch;margin:0}
+h2 + .sub{margin-bottom:16px}
+.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--acento);font-weight:600;margin:0 0 8px}
+.legenda{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--fraco);margin:10px 0 0}
+.legenda i{width:22px;height:12px;border:2px dashed #3d9be0;border-radius:4px;display:inline-block}
+
+/* a resposta do chip, em destaque */
+.resp{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:18px 20px;display:grid;gap:10px;max-width:880px}
+.resp b{font-weight:650}
+.resp .num{font-family:var(--mono);font-size:13px;color:var(--fraco)}
+.barra{display:flex;height:12px;border-radius:99px;overflow:hidden;background:var(--linha);max-width:560px}
+.barra i{display:block}
+.barra .z{background:#2f6f55}.barra .t{background:#3d86c7}.barra .s{background:#9aa8a0}
+.barra-leg{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--fraco)}
+.barra-leg span{display:inline-flex;align-items:center;gap:6px}
+.barra-leg i{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+/* ---------- moldura do app: a tela do dono tem ~1600 px; encolhe pra caber ---------- */
+.largo{max-width:min(1640px,100%);margin-inline:auto;padding-inline:16px}
+.pc-caixa{overflow:hidden;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.22);border:1px solid var(--linha)}
+.pc{width:1600px;background:var(--a-bg);color:var(--a-txt);font-family:var(--body);font-size:14px;padding:18px 24px 20px}
+.rotulo-moldura{display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600;margin:0 0 8px}
+.tag{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:99px;padding:2px 8px}
+.tag.a{background:var(--ruim-fraco);color:var(--ruim)} .tag.d{background:var(--acento-fraco);color:var(--acento)}
+.medida{font-family:var(--mono);font-size:12px;color:var(--fraco);font-weight:500}
+
+/* marcações do mockup */
+.novo{outline:2px dashed #7cc4ff;outline-offset:4px;border-radius:10px;position:relative}
+.nota{position:absolute;top:-12px;right:10px;background:#7cc4ff;color:#07203a;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;letter-spacing:.02em;z-index:7;white-space:nowrap;font-family:var(--body)}
+
+/* ===== HOJE (réplica do print) ===== */
+.nav-hoje{display:flex;gap:8px;align-items:center;margin-bottom:22px}
+.nav-hoje span{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:15px;padding:9px 14px;border-radius:9px;border:1px solid #26332b;white-space:nowrap}
+.nav-hoje span.on{background:var(--a-verde);border-color:var(--a-verde);color:var(--a-sobre)}
+.nav-hoje .cfg{margin-left:auto;padding:9px 11px}
+.tit-hoje{display:flex;align-items:center;gap:14px;min-height:48px}
+.tit-hoje h3{font-family:var(--display);font-size:26px;margin:0}
+.tit-hoje .num{font-size:15px;color:var(--a-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.tit-hoje .num b{color:var(--a-txt)} .tit-hoje .num .c{color:var(--a-verde-cl);font-weight:700}
+.dir{display:flex;gap:10px;align-items:center;flex:none}
+.busca{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border:1px solid #26332b;border-radius:10px;background:var(--a-bg2);color:var(--a-faint);font-size:15px;width:330px;white-space:nowrap}
+.busca kbd{margin-left:auto;font-family:var(--mono);font-size:11px;border:1px solid #2c3a32;border-radius:4px;padding:0 5px;color:var(--a-mut)}
+.seg{display:inline-flex;border:1px solid #26332b;border-radius:10px;padding:3px;gap:2px;font-size:14.5px;white-space:nowrap}
+.seg span{padding:6px 12px;border-radius:7px;color:var(--a-mut)}
+.seg span.on{background:var(--a-verde);color:var(--a-sobre);font-weight:600}
+.bt{height:40px;display:inline-flex;align-items:center;gap:6px;padding:0 14px;border-radius:10px;border:1px solid #26332b;font-size:15px;white-space:nowrap}
+.bt.v{background:var(--a-verde);border-color:var(--a-verde);color:var(--a-sobre);font-weight:700}
+.crit-hoje{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:15px;color:var(--a-mut)}
+.rot{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--a-mut);font-weight:600}
+.crit-hoje a{color:var(--a-txt);text-decoration:underline dotted #3a4a40;text-underline-offset:4px}
+.crit-hoje a b{color:var(--a-cor);font-family:var(--mono);font-weight:600}
+.crit-hoje .lk{color:var(--a-verde-cl);text-decoration:none}
+.ramo-hoje{margin-top:16px;background:var(--a-amb-f);border:1px solid var(--a-amb-b);border-left:3px solid var(--a-amb);border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px}
+.ramo-hoje b{color:var(--a-amb);font-size:16px;display:block}
+.ramo-hoje small{color:var(--a-mut);font-size:14px}
+.ramo-hoje .bt{margin-left:auto;height:36px;color:var(--a-mut)}
+.foco-hoje{display:flex;align-items:center;gap:8px;margin-top:14px;white-space:nowrap}
+.pil{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 13px;border-radius:999px;border:1px solid #26332b;color:var(--a-mut);font-size:15px}
+.pil b{color:var(--a-txt);font-family:var(--mono);font-size:13px;font-weight:600}
+.pil.on{background:var(--a-verde);border-color:var(--a-verde);color:var(--a-sobre);font-weight:600}
+.pil.on b{color:var(--a-sobre)}
+.pil.fora{border-color:var(--a-amb-b);background:rgba(224,163,46,.08);color:#e0b45f}
+.pil.fora b{color:#e0b45f}
+.sep{width:1px;height:22px;background:var(--a-linha);margin:0 6px}
+.sel{height:38px;display:inline-flex;align-items:center;gap:40px;padding:0 12px;border:1px solid #33413a;border-radius:9px;font-size:15px}
+
+/* ===== PROPOSTA ===== */
+.nav-novo{display:flex;align-items:flex-end;gap:2px;border-bottom:1px solid var(--a-linha);margin-bottom:14px}
+.nav-novo span{display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:500;color:var(--a-mut);padding:10px 13px;white-space:nowrap}
+.nav-novo span.on{color:var(--a-txt);box-shadow:inset 0 -2px 0 var(--a-verde);font-weight:600}
+.nav-novo .cfg{margin-left:auto}
+.tit-novo{display:flex;align-items:center;gap:16px}
+.tit-novo .tt{flex:1;min-width:0}
+.tit-novo h3{font-family:var(--display);font-size:26px;margin:0;line-height:1.15}
+.subt{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:13.5px;color:var(--a-mut);margin-top:3px}
+.subt b{color:var(--a-txt);font-weight:600} .subt .conta{color:var(--a-verde-cl);font-weight:650;letter-spacing:.02em}
+.subt .ramo{display:inline-flex;align-items:center;gap:6px;color:#e0b45f;border:1px solid var(--a-amb-b);background:rgba(224,163,46,.08);border-radius:999px;padding:1px 10px;font-size:12.5px;white-space:nowrap}
+.acoes{display:flex;gap:8px;align-items:center;flex:none}
+.acoes .busca{height:36px;width:280px;font-size:14px}
+.acoes .seg{font-size:13.5px}
+.acoes .seg span{padding:5px 11px}
+.acoes .bt{height:36px;font-size:14px}
+.crit-novo{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13.5px;flex-wrap:wrap}
+.cc{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px 0 9px;border-radius:999px;background:var(--a-cor-f);border:1px solid var(--a-cor-b);color:#f0c8c3;white-space:nowrap}
+.cc b{font-family:var(--mono);font-size:12.5px;color:#ff7a70;font-weight:600}
+.crit-novo .lk{color:var(--a-verde-cl);margin-left:4px}
+.crit-novo .rot{margin-right:2px}
+.foco-novo{display:flex;align-items:center;gap:8px;margin-top:12px;white-space:nowrap}
+.segm{display:inline-flex;border:1px solid #26332b;border-radius:999px;padding:2px;gap:2px;font-size:13.5px}
+.segm span{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;color:var(--a-mut)}
+.segm span b{font-family:var(--mono);font-size:12px;color:var(--a-txt);font-weight:600}
+.segm span.on{background:var(--a-neon-f);color:var(--a-verde-cl);font-weight:600;box-shadow:inset 0 0 0 1px var(--a-neon-b)}
+.segm span.on b{color:var(--a-verde-cl)}
+.selp{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;border:1px solid #26332b;border-radius:999px;font-size:13.5px;color:var(--a-txt)}
+.selp::after{content:"▾";color:var(--a-mut);font-size:11px}
+.foco-novo .pil{height:30px;font-size:13.5px;padding:0 11px}
+.foco-novo .pil b{font-size:12px}
+.leg{margin-left:auto;display:flex;gap:12px;font-size:12px;color:var(--a-mut);align-items:center}
+.leg span{display:inline-flex;align-items:center;gap:5px}
+.t{width:8px;height:8px;border-radius:50%;display:inline-block}
+.t.q{background:var(--a-cor)} .t.m{background:linear-gradient(90deg,var(--a-amb) 50%,transparent 50%);box-shadow:inset 0 0 0 1.5px var(--a-amb)}
+.t.f{box-shadow:inset 0 0 0 1.5px var(--a-azul)} .t.s{border:1.5px dotted #6d7d74}
+.regua{display:flex;align-items:flex-end;gap:4px;height:56px;margin-top:12px;padding:4px 0 2px;border-top:1px solid var(--a-linha);border-bottom:1px solid var(--a-linha);opacity:.55}
+.regua .rot{align-self:center;margin-right:6px}
+.mes{width:40px;display:grid;grid-template-rows:14px 22px 14px;justify-items:center;align-items:end;font-size:10.5px;color:var(--a-mut)}
+.mes b{font-family:var(--mono);font-size:10.5px;color:var(--a-txt);font-weight:600}
+.mes i{display:block;width:16px;border-radius:3px 3px 0 0;background:#2f6f55}
+.mes.todos{width:54px}.mes.todos i{background:var(--a-verde)}
+.mes.sem{width:60px;color:var(--a-amb)} .mes.sem i{background:var(--a-amb)} .mes.sem b{color:var(--a-amb)}
+.ano{font-size:10px;color:var(--a-faint);border-left:1px dashed #2c3a32;padding-left:4px;height:40px;display:flex;align-items:flex-end;margin:0 2px}
+.cola{font-size:12px;color:var(--fraco);margin:8px 0 0}
+
+/* antes × depois lado a lado em números */
+.medidas{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px}
+.med{background:var(--card);border:1px solid var(--linha);border-radius:12px;padding:12px 14px}
+.med b{display:block;font-family:var(--display);font-size:22px}
+.med span{color:var(--fraco);font-size:13.5px}
+
+/* ===== as opções do chip ===== */
+.opcoes{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:14px}
+.op{background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:14px 16px;display:grid;gap:10px;align-content:start}
+.op.rec{border-color:var(--acento);box-shadow:0 0 0 1px var(--acento) inset}
+.op h3{margin:0;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.op h3 .tag{font-size:10.5px}
+.op p{margin:0;color:var(--fraco);font-size:14px}
+.op ul{margin:0;padding-left:18px;font-size:14px;color:var(--fraco)} .op li + li{margin-top:3px}
+.tela{background:var(--a-bg);border-radius:10px;padding:12px;color:var(--a-txt);font-size:13px;display:grid;gap:8px}
+/* o cartão de 4 linhas, igual ao do funil */
+.k{background:var(--a-card);border:1px solid var(--a-linha);border-radius:10px;padding:8px 10px;display:grid;gap:4px;font-size:12.5px;max-width:280px}
+.l1{display:flex;align-items:center;gap:6px;min-width:0;height:18px}
+.l1 .nm{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.av{width:18px;height:18px;border-radius:50%;background:#1f2c26;color:#b9c8bf;font-size:8.5px;font-weight:700;display:grid;place-items:center;flex:0 0 18px}
+.mn{color:var(--a-mut);opacity:.55;font-size:13px;letter-spacing:.04em}
+.l2{color:#cfdad3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.l2 .d{font-family:var(--mono);color:var(--a-verde-cl);font-size:11.5px}
+.l3{display:flex;gap:6px;align-items:center;min-width:0}
+.l3 .ms{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.l3 .h{font-family:var(--mono);font-size:10.5px;color:var(--a-faint)}
+.l4{display:flex;align-items:center;gap:6px;font-size:11.5px;min-width:0}
+.fu{color:var(--a-cor);font-weight:600;white-space:nowrap}
+.fu.ho{color:var(--a-amb);font-weight:500}
+.ch{margin-left:auto;display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:6px;border:1px solid var(--a-neon-b);background:rgba(37,211,102,.06);font-size:11px;white-space:nowrap}
+.ch.z{color:var(--a-mut)}
+.ch.outro{color:#bfe0ff;border-color:var(--a-azul-b);background:var(--a-azul-f)}
+.selo-hoje{font-size:11px;color:var(--a-faint)}
+.filtro-num{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:13px}
+
+/* ===== o que muda ===== */
+.rola{overflow-x:auto}
+.tab-onde{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);border:1px solid var(--linha);border-radius:12px;overflow:hidden;min-width:640px}
+.tab-onde th,.tab-onde td{text-align:left;padding:9px 12px;border-top:1px solid var(--linha);vertical-align:top}
+.tab-onde th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--fraco);border-top:0;background:var(--bg)}
+.tab-onde td:first-child{font-weight:600;white-space:nowrap}
+.tab-onde td:nth-child(2){color:var(--fraco)}
+
+/* ===== celular ===== */
+.fones{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+.fone{width:340px;max-width:100%;background:#050806;border-radius:30px;padding:10px;box-shadow:0 18px 44px rgba(0,0,0,.28)}
+.scr{background:var(--a-bg);border-radius:22px;padding:10px 10px 14px;color:var(--a-txt);font-size:13px;min-height:420px;overflow:hidden}
+.fone-leg{text-align:center;font-size:13px;color:var(--fraco);margin-top:8px;max-width:340px}
+.f-nav{display:flex;gap:2px;border-bottom:1px solid var(--a-linha);font-size:12.5px;color:var(--a-mut);overflow:hidden;white-space:nowrap;margin-bottom:8px;-webkit-mask-image:linear-gradient(90deg,#000 85%,transparent);mask-image:linear-gradient(90deg,#000 85%,transparent)}
+.f-nav span{padding:8px 9px}
+.f-nav span.on{color:var(--a-txt);box-shadow:inset 0 -2px 0 var(--a-verde);font-weight:600}
+.f-top{display:flex;align-items:center;gap:8px}
+.f-top .tt{flex:1;min-width:0}
+.f-top h3{font-family:var(--display);font-size:20px;margin:0;line-height:1.1}
+.f-top small{display:block;color:var(--a-mut);font-size:11.5px}
+.f-top small .ramo{color:#e0b45f}
+.f-top .ic{display:flex;gap:6px}
+.f-top .ic span{width:34px;height:34px;border-radius:9px;border:1px solid #26332b;display:grid;place-items:center}
+.f-top .ic span.v{background:var(--a-verde);color:var(--a-sobre);border-color:var(--a-verde);font-weight:800}
+.f-rol{display:flex;gap:6px;overflow:hidden;white-space:nowrap;align-items:center;margin-top:8px;-webkit-mask-image:linear-gradient(90deg,#000 85%,transparent);mask-image:linear-gradient(90deg,#000 85%,transparent)}
+.f-rol .cc{height:26px;font-size:12px}
+.f-rol .segm{font-size:12px}
+.tabs{display:flex;gap:6px;overflow:hidden;margin:10px 0 8px;-webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)}
+.tabs span{flex:0 0 auto;border:1px solid #26332b;border-radius:10px;padding:5px 10px;font-size:12px;line-height:1.25;color:var(--a-mut);text-align:center}
+.tabs span b{display:block;font-family:var(--mono);font-size:11.5px;color:var(--a-txt);font-weight:600}
+.tabs span i{font-style:normal;color:var(--a-verde-cl)}
+.tabs span.on{background:var(--a-neon-f);border-color:var(--a-neon-b);color:var(--a-verde-cl)}
+
+/* ===== decisões ===== */
+.dec{counter-reset:d;display:grid;gap:10px}
+.dec div{background:var(--card);border:1px solid var(--linha);border-radius:12px;padding:12px 16px 12px 52px;position:relative}
+.dec div::before{counter-increment:d;content:counter(d);position:absolute;left:16px;top:12px;width:24px;height:24px;border-radius:50%;background:var(--acento-fraco);color:var(--acento);font-weight:700;font-size:13px;display:grid;place-items:center}
+.dec b{display:block}
+.dec span{color:var(--fraco);font-size:14px}
+.rod{margin-top:36px;color:var(--fraco);font-size:13px}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Aprovado pelo dono em 25/09/2026 · chip: opção A · abas leves em todas as telas · e o nome do vendedor no card</p>
+  <h1>O cabeçalho do funil, mais leve</h1>
+  <p class="sub">O topo da tela Funil no seu print, peça por peça, e a proposta pra ele ficar mais limpo sem tirar nada do lugar onde você procura. Números da Prime Eventos lidos de produção em 25/09, só leitura. Antes disso, a resposta sobre o chip.</p>
+
+  <h2>Como saber de qual chip é a conversa</h2>
+  <p class="sub">Desde ontem à noite o funil só marca o cartão quando a conversa está no <b>outro</b> número. O cartão sem marca é do principal.</p>
+  <div class="resp">
+    <div><b>Hoje:</b> cartão sem selo = conversa no <b>CP Zarb</b> (o número principal). Cartão com “📱 CP Thiago” = conversa no outro número.</div>
+    <div>Por isso você não viu selo nenhum: no quadro de setembro, quase tudo está no CP Zarb.</div>
+    <div class="barra" role="img" aria-label="234 no CP Zarb, 1 no CP Thiago, 4 sem conversa"><i class="z" style="width:97.9%"></i><i class="t" style="width:.9%;min-width:4px"></i><i class="s" style="width:1.7%"></i></div>
+    <div class="barra-leg"><span><i style="background:#2f6f55"></i>CP Zarb · 234</span><span><i style="background:#3d86c7"></i>CP Thiago · 1</span><span><i style="background:#9aa8a0"></i>sem conversa · 4</span><span class="num">239 leads no quadro de setembro</span></div>
+    <div>Deixar a resposta só na ausência de selo é pouco claro, como o seu print mostrou. Duas formas de deixar isso explícito:</div>
+  </div>
+
+  <div class="opcoes">
+    <div class="op rec">
+      <h3>A · O botão da conversa diz o número <span class="tag d">recomendado</span></h3>
+      <div class="tela">
+        <div class="k">
+          <div class="l1"><i class="t m"></i><span class="nm">Nayra C.</span><span class="av">JA</span><span class="mn">⋯</span></div>
+          <div class="l2">🎂 <b>Aniversário</b> · <span class="d">25 out</span></div>
+          <div class="l3"><span class="ms">Show demais</span><span class="h">18/09</span></div>
+          <div class="l4"><span class="fu">Crítico · 5d</span><span class="ch z">💬 Zarb</span></div>
+        </div>
+        <div class="k">
+          <div class="l1"><i class="t q"></i><span class="nm">Aliny C.</span><span class="av">TH</span><span class="mn">⋯</span></div>
+          <div class="l2">🎀 <b>Batizado</b> · <span class="d">27 dez</span></div>
+          <div class="l3"><span class="ms">Qual o valor pra 80 pessoas?</span><span class="h">ontem</span></div>
+          <div class="l4"><span class="fu ho">Venceu há 4h</span><span class="ch outro">💬 Thiago</span></div>
+        </div>
+      </div>
+      <ul>
+        <li>Todo cartão com conversa mostra o número no próprio 💬, que é o botão que abre a conversa.</li>
+        <li>O principal fica discreto (cinza); o outro número aparece em azul, que é o caso que pede atenção.</li>
+        <li>Só em conta com dois números. Com um só, o 💬 continua como está.</li>
+      </ul>
+    </div>
+    <div class="op">
+      <h3>B · Um filtro de número no topo</h3>
+      <div class="tela">
+        <div class="filtro-num"><span class="rot">Número</span><span class="segm"><span class="on">Todos</span><span>CP Zarb <b>234</b></span><span>CP Thiago <b>1</b></span></span></div>
+        <div class="k">
+          <div class="l1"><i class="t q"></i><span class="nm">Aliny C.</span><span class="av">TH</span><span class="mn">⋯</span></div>
+          <div class="l2">🎀 <b>Batizado</b> · <span class="d">27 dez</span></div>
+          <div class="l4"><span class="fu ho">Venceu há 4h</span><span class="selo-hoje">📱 CP Thiago</span><span class="ch" style="margin-left:auto">💬</span></div>
+        </div>
+      </div>
+      <ul>
+        <li>Clicar em “CP Thiago” mostra só os leads que falam por aquele número; “Todos” volta.</li>
+        <li>O filtro também serve de legenda: sem selo é o CP Zarb.</li>
+        <li>O cartão continua como está hoje.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>O cabeçalho hoje</h2>
+  <p class="sub">O seu print, redesenhado na mesma largura. Do topo até a régua são cinco faixas: as abas, o título, os críticos, o aviso do modelo e a barra de foco.</p>
+</div>
+
+<div class="largo">
+  <p class="rotulo-moldura"><span class="tag a">hoje</span> <span class="medida">~300 px até a régua</span></p>
+  <div class="pc-caixa" id="cx-hoje"><div class="pc" id="pc-hoje">
+    <div class="nav-hoje"><span class="on">🔥 Funil</span><span>📅 Follow-up</span><span>💬 Comunicação</span><span>📇 Base</span><span>📣 Campanhas</span><span>🎯 Quem atacar</span><span>📊 Anúncios</span><span>✨ IA Insta</span><span>⏱️ Régua</span><span class="cfg">⚙️</span></div>
+    <div class="tit-hoje">
+      <h3>Funil</h3>
+      <span class="num">🏢 <span class="c">MANOEL SOARES</span> · <b>239</b> no quadro · entraram em setembro · 490 leads no total</span>
+      <span class="dir"><span class="busca">🔍 Buscar nome ou telefone <kbd>/</kbd></span><span class="seg"><span class="on">Por etapa</span><span>Por mês do evento</span></span><span class="bt">⚙ Etapas</span><span class="bt v">+ Captar lead</span></span>
+    </div>
+    <div class="crit-hoje"><span class="rot">Críticos no quadro</span><a><b>48</b> JACQUELINE</a> · <a><b>46</b> THIAGO</a> · <a><b>25</b> PEDRO</a><a class="lk">ver fila →</a></div>
+    <div class="ramo-hoje"><div><b>Seu funil não está no modelo de eventos</b><small>1 coluna diferente do modelo do seu ramo · nada muda sem você marcar</small></div><span class="bt">Ver o modelo</span></div>
+    <div class="foco-hoje"><span class="rot">Entraram em</span><span class="pil on">Setembro <b>239</b></span><span class="pil">Agosto <b>251</b></span><span class="pil">Tudo <b>490</b></span><span class="sep"></span><span class="rot">Vendedor</span><span class="sel">Todos · 239 <span style="color:var(--a-mut)">▾</span></span><span class="sep"></span><span class="rot">+ de outros meses</span><span class="pil fora">🟢 esperando resposta <b>11</b></span><span class="pil fora">🎉 festa em 30 dias <b>10</b></span></div>
+  </div></div>
+</div>
+
+<div class="wrap" style="padding-block:14px 0">
+  <div class="medidas">
+    <div class="med"><b>MANOEL SOARES</b><span>O título mostra o nome do dono da conta, e não o da empresa (PRIME EVENTOS).</span></div>
+    <div class="med"><b>“490 lea…”</b><span>A linha dos números corta no fim: busca, vista e botões ocupam o resto.</span></div>
+    <div class="med"><b>2 linhas + botão</b><span>O aviso do modelo ocupa uma faixa inteira todos os dias, pra uma coluna fora do modelo.</span></div>
+    <div class="med"><b>9 abas com borda</b><span>Cada aba é um botão contornado; a barra pesa mais que o próprio título.</span></div>
+  </div>
+
+  <h2>A proposta</h2>
+  <p class="sub">As mesmas peças, em quatro faixas mais baixas. Nada sai da tela: o aviso do modelo vira um selo na linha de baixo do título, e os números saem da linha do título pra não cortar mais.</p>
+  <p class="legenda"><i></i> tracejado azul = peça que mudou</p>
+</div>
+
+<div class="largo" style="margin-top:12px">
+  <p class="rotulo-moldura"><span class="tag d">proposta</span> <span class="medida">~205 px até a régua</span></p>
+  <div class="pc-caixa" id="cx-novo"><div class="pc" id="pc-novo">
+    <div class="nav-novo novo"><span class="nota">abas sem contorno: a ativa ganha um sublinhado verde</span><span class="on">🔥 Funil</span><span>📅 Follow-up</span><span>💬 Comunicação</span><span>📇 Base</span><span>📣 Campanhas</span><span>🎯 Quem atacar</span><span>📊 Anúncios</span><span>✨ IA Insta</span><span>⏱️ Régua</span><span class="cfg">⚙️</span></div>
+    <div class="tit-novo">
+      <div class="tt novo"><span class="nota" style="right:auto;left:120px">o nome da empresa e os números embaixo do título: não cortam mais</span>
+        <h3>Funil</h3>
+        <div class="subt"><span class="conta">PRIME EVENTOS</span> · <span><b>239</b> no quadro</span> · <span>490 no total</span><span class="ramo">⚠ 1 coluna fora do modelo de eventos · ver →</span></div>
+      </div>
+      <div class="acoes"><span class="busca">🔍 Buscar nome ou telefone <kbd>/</kbd></span><span class="seg"><span class="on">Por etapa</span><span>Por mês do evento</span></span><span class="bt">⚙ Etapas</span><span class="bt v">+ Captar lead</span></div>
+    </div>
+    <div class="crit-novo novo"><span class="nota">cada vendedor num chip, com o nome escrito normal</span><span class="rot">🚨 Críticos</span><span class="cc"><b>48</b> Jacqueline</span><span class="cc"><b>46</b> Thiago</span><span class="cc"><b>25</b> Pedro</span><a class="lk">ver fila →</a></div>
+    <div class="foco-novo novo"><span class="nota">o período vira uma escolha só (como Por etapa / Por mês)</span><span class="rot">Entraram em</span><span class="segm"><span class="on">Setembro <b>239</b></span><span>Agosto <b>251</b></span><span>Tudo <b>490</b></span></span><span class="sep"></span><span class="rot">Vendedor</span><span class="selp">Todos · 239</span><span class="sep"></span><span class="rot">+ de outros meses</span><span class="pil fora">🟢 esperando resposta <b>11</b></span><span class="pil fora">🎉 festa em 30 dias <b>10</b></span><span class="leg"><span><i class="t q"></i>quente</span><span><i class="t m"></i>morno</span><span><i class="t f"></i>frio</span><span><i class="t s"></i>sem</span></span></div>
+    <div class="regua"><span class="rot">Festa em</span><span class="mes todos"><b>223</b><i style="height:22px"></i>Todos</span><span class="mes"><b>4</b><i style="height:6px"></i>Set</span><span class="mes"><b>13</b><i style="height:19px"></i>Out</span><span class="mes"><b>13</b><i style="height:19px"></i>Nov</span><span class="mes"><b>15</b><i style="height:22px"></i>Dez</span><span class="ano">2027</span><span class="mes"><b>12</b><i style="height:18px"></i>Jan</span><span class="mes"><b>11</b><i style="height:16px"></i>Fev</span><span class="mes"><b>3</b><i style="height:4px"></i>Mar</span><span class="mes"><b>6</b><i style="height:9px"></i>Abr</span><span class="mes"><b>3</b><i style="height:4px"></i>Mai</span><span class="mes"><b>3</b><i style="height:4px"></i>Jun</span><span class="mes"><b>7</b><i style="height:10px"></i>Jul</span><span class="mes"><b>3</b><i style="height:4px"></i>Set</span><span class="mes"><b>1</b><i style="height:2px"></i>Out</span><span class="mes"><b>2</b><i style="height:3px"></i>Dez</span><span class="ano">2028</span><span class="mes"><b>1</b><i style="height:2px"></i>Jan</span><span class="mes"><b>1</b><i style="height:2px"></i>Fev</span><span class="mes"><b>1</b><i style="height:2px"></i>Mai</span><span class="mes"><b>1</b><i style="height:2px"></i>Set</span><span class="mes sem"><b>123</b><i style="height:12px"></i>Sem data</span></div>
+  </div></div>
+  <p class="cola">A régua “Festa em” (apagada aqui) não muda: entrou na parte 2.</p>
+</div>
+
+<div class="wrap" style="padding-block:0 40px">
+  <h2>O que muda, peça por peça</h2>
+  <div class="rola">
+  <table class="tab-onde">
+    <tr><th>Peça</th><th>Hoje</th><th>Na proposta</th></tr>
+    <tr><td>Abas da Prospecção</td><td>Nove botões contornados, a ativa em verde cheio</td><td>Texto com ícone, sem contorno; a ativa em branco com sublinhado verde. É a mesma barra em todas as abas da Prospecção</td></tr>
+    <tr><td>Nome no título</td><td>MANOEL SOARES (o nome do dono da conta)</td><td>PRIME EVENTOS (o nome fantasia da empresa)</td></tr>
+    <tr><td>Números</td><td>Na linha do título, cortados em “490 lea…”</td><td>Numa linha própria embaixo do título: “239 no quadro · 490 no total”. O mês não se repete: a pílula de setembro já diz</td></tr>
+    <tr><td>Aviso do modelo do ramo</td><td>Faixa âmbar de duas linhas com botão, todo dia</td><td>Selo âmbar no fim da linha dos números: “⚠ 1 coluna fora do modelo de eventos · ver →”. Continua só pra dono e gestor, e some quando o funil casar com o modelo</td></tr>
+    <tr><td>Críticos por vendedor</td><td>Texto sublinhado, nomes em maiúscula</td><td>Um chip por vendedor, com o nome escrito normal (“Jacqueline”); clicar filtra, como hoje</td></tr>
+    <tr><td>Entraram em</td><td>Três pílulas soltas</td><td>Uma escolha só (Setembro · Agosto · Tudo), no mesmo desenho do Por etapa / Por mês</td></tr>
+    <tr><td>Vendedor</td><td>Seletor quadrado, mais alto que as pílulas</td><td>O mesmo seletor, redondo e da altura das pílulas</td></tr>
+    <tr><td>Legenda da temperatura</td><td>Só na tela larga</td><td>Igual</td></tr>
+  </table>
+  </div>
+
+  <h2>No celular</h2>
+  <p class="sub">As mesmas mudanças no topo do celular: abas leves, o nome e o número embaixo do título, e os críticos em chips que rolam de lado.</p>
+  <div class="fones">
+    <div>
+      <div class="fone"><div class="scr">
+        <div class="f-nav"><span class="on">🔥 Funil</span><span>📅 Follow-up</span><span>💬 Comunicação</span><span>📇 Base</span></div>
+        <div class="f-top"><div class="tt"><h3>Funil</h3><small>PRIME EVENTOS · 239 no quadro · <span class="ramo">⚠ modelo</span></small></div><span class="ic"><span>🔍</span><span>⚙</span><span class="v">+</span></span></div>
+        <div class="f-rol"><span class="rot">🚨</span><span class="cc"><b>48</b> Jacqueline</span><span class="cc"><b>46</b> Thiago</span><span class="cc"><b>25</b> Pedro</span></div>
+        <div class="f-rol"><span class="segm"><span class="on">Setembro <b>239</b></span><span>Agosto <b>251</b></span><span>Tudo <b>490</b></span></span></div>
+        <div class="tabs"><span>Novo<b>3 <i>●3</i></b></span><span class="on">Contatado<b>119 <i>●7</i></b></span><span>Agendado<b>4 <i>●1</i></b></span><span>Negociação<b>82 <i>●6</i></b></span></div>
+        <div class="k" style="max-width:none">
+          <div class="l1"><i class="t q"></i><span class="nm">Jacque/Cassiano R.</span><span class="av">TH</span><span class="mn">⋯</span></div>
+          <div class="l2">📅 falou de fevereiro · confirmar</div>
+          <div class="l3"><span class="ms">Opa, boa tarde Nós mudamos o formato do evento…</span><span class="h">22h</span></div>
+          <div class="l4"><span class="fu ho">Venceu há 18h</span><span class="ch z">💬 Zarb</span></div>
+        </div>
+      </div></div>
+      <p class="fone-leg">Com a opção A do chip: o 💬 diz o número também no celular</p>
+    </div>
+  </div>
+
+  <h2>O que preciso que você decida</h2>
+  <div class="dec">
+    <div><b>Como mostrar o chip de cada conversa?</b><span>A: o número escrito no 💬 de todo cartão (recomendo: responde na hora, no botão que abre a conversa). B: um filtro “Número” no topo, com o cartão como está. Ou as duas.</span></div>
+    <div><b>As abas leves valem pra todas as telas da Prospecção?</b><span>A barra de abas é uma só pra Funil, Follow-up, Comunicação, Base, Campanhas, Quem atacar, Anúncios, IA Insta e Régua. Mudando no Funil, muda em todas, e fica igual em qualquer aba que você abrir.</span></div>
+  </div>
+  <p class="rod">Aprovando, entrego num PR só, com o aviso em Novidades. O “Mover para” do ⋯ já foi corrigido à parte, porque é defeito e não mudança de visual. Números da Prime Eventos lidos de produção em 25/09/2026, só leitura.</p>
+</div>
+
+<script>
+(function(){
+  function ajusta(cx, pc, w){
+    var c=document.getElementById(cx), p=document.getElementById(pc); if(!c||!p) return;
+    var z=Math.min(1,(c.clientWidth||w)/w); p.style.zoom=z;
+  }
+  function tudo(){ ajusta('cx-hoje','pc-hoje',1600); ajusta('cx-novo','pc-novo',1600); }
+  tudo(); window.addEventListener('resize',tudo);
+})();
+</script>

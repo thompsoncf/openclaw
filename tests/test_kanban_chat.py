@@ -256,7 +256,9 @@ def test_apelido_do_chip_aparece_com_dois_chips_na_conta(monkeypatch, pool):
         c.commit()
     trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Doce & Cia")
     assert "📣 Black Friday Padarias" in trecho
-    assert "· 📱 Chip Vendas" in trecho
+    # desde 25/09/2026 o número mora no 💬 da conversa (opção A do mockup
+    # docs/mockups/funil_cabecalho.html), não mais em "· 📱 apelido" no selo
+    assert '<span class="kbchip">Chip Vendas</span>' in trecho
 
 
 def test_chip_sem_apelido_batizado_nao_vira_sufixo_vazio(monkeypatch, pool):
@@ -311,7 +313,9 @@ def test_apelido_do_chip_aparece_mesmo_sem_campanha_interna_nenhuma(monkeypatch,
                   "values (%s,%s,'whatsapp',%s,now())", (CONTA, lid, chip2))
         c.commit()
     trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Empório Sabor Norte")
-    assert "📱 Chip 2 - Ads" in trecho, "apelido do chip não apareceu pra lead sem campanha interna"
+    # desde 25/09/2026 o número mora no 💬 da conversa — e continua sem depender de
+    # campanha nenhuma, que era o ponto deste teste
+    assert '<span class="kbchip">Chip 2 - Ads</span>' in trecho, "o número não apareceu pra lead sem campanha interna"
     assert "📣" not in trecho, "não tem campanha_alvos nenhuma, não devia ter selo de campanha"
 
 

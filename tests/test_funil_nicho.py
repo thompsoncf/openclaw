@@ -32,25 +32,32 @@ def _dois_chips(pool, rotulo_principal="CP Zarb"):
 
 
 # ------------------------------------------------------------------ o selo do chip
-def test_conversa_no_chip_principal_nao_ganha_selo(monkeypatch, pool):
+def test_conversa_no_chip_principal_diz_o_numero_no_botao_da_conversa(monkeypatch, pool):
+    """25/09/2026: sem selo nenhum no principal, o dono perguntou "como vou saber de
+    qual chip é?". Opção A do mockup (docs/mockups/funil_cabecalho.html), escolhida
+    por ele: o 💬 de todo card diz o número — o principal discreto. O "📱" grande
+    no selo de campanha não volta (na Prime ele estava em 472 de 485 cards), e o
+    "CP" que os dois nomes da Prime têm em comum sai do botão."""
     _dois_chips(pool)
     lid = _lead(pool, empresa="Nayra Cruz")
     _alvo(pool, _campanha(pool), lid)
     _conversa(pool, lid, "whatsapp")                    # chip_id nulo = o principal
     trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Nayra Cruz")
-    assert "📣 Black Friday Padarias" in trecho, "a campanha continua no card"
-    assert "📱" not in trecho and "CP Zarb" not in trecho, (
-        "o selo do chip principal voltou — na Prime ele aparecia em 472 de 485 cards")
+    assert '<div class="camp">📣 Black Friday Padarias</div>' in trecho, "a campanha continua no card"
+    assert '<span class="kbchip">Zarb</span>' in trecho and "kbb-chip outro" not in trecho
+    assert 'title="Abrir a conversa no CP Zarb"' in trecho, "o nome inteiro fica no title"
+    assert "📱" not in trecho, "o selo do número no selo de campanha voltou"
 
 
-def test_conversa_no_outro_chip_continua_com_selo(monkeypatch, pool):
+def test_conversa_no_outro_chip_diz_o_outro_numero_em_destaque(monkeypatch, pool):
     chip2 = _dois_chips(pool)
     lid = _lead(pool, empresa="Aliny Carvalho")
     with pool.connection() as c:
         c.execute("insert into conversas (conta_id, prospeccao_id, canal, chip_id, ultima_msg_em) "
                   "values (%s,%s,'whatsapp',%s,now())", (CONTA, lid, chip2))
         c.commit()
-    assert "📱 CP Thiago" in _trecho_card(_kanban_html(monkeypatch, pool), "Aliny Carvalho")
+    trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Aliny Carvalho")
+    assert 'class="kbb kbb-chip outro"' in trecho and '<span class="kbchip">Thiago</span>' in trecho
 
 
 # ------------------------------------------------------------------ o canal pela conversa

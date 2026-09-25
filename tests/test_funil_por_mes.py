@@ -511,14 +511,15 @@ def test_o_quadro_abre_no_mes_atual_e_o_resto_fica_a_um_clique(monkeypatch, pool
     velho = _lead(pool, "Do Mês Passado", criado_em=datetime.now(timezone.utc) - timedelta(days=40))
     html = _html(monkeypatch, pool, entrou="")
     assert "Deste Mês" in html and "Do Mês Passado" not in html
-    assert '<b>1</b><span class="kbnq"> no quadro</span><span class="kbper"> · <span class="kbnq">entraram em </span>' in html
+    # desde 25/09/2026 o título diz só quantos estão no quadro; o mês fica na pílula
+    assert '<span class="kbq"><b>1</b> no quadro</span>' in html
     assert '<span class="kbcnt">1 <i>de 2</i></span>' in _coluna(html, "contatado")
     # as pílulas: o mês corrente (ligado), o mês do outro lead e Tudo
     foco = html.split('id="foco"')[1].split("</div>")[0]
     assert 'class="pil on" href="/painel/prospeccao?entrou=' in foco
     assert "Tudo <b>2</b>" in foco
     tudo = _html(monkeypatch, pool, entrou="tudo")
-    assert "Deste Mês" in tudo and "Do Mês Passado" in tudo and 'class="kbper"' not in tudo
+    assert "Deste Mês" in tudo and "Do Mês Passado" in tudo and '<span class="kbq"><b>2</b> no quadro</span>' in tudo
 
 
 def test_a_escolha_do_periodo_fica_na_sessao(monkeypatch, pool, vende_data):

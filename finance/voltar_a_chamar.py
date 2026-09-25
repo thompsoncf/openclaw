@@ -86,7 +86,16 @@ _REPESCAGEM_PARADA_H = 24      # e pra repescagem, parada há um dia
 RE_MARCOU = r"(prontinho|agendamento foi realizado)"
 # A MENSAGEM INTEIRA tem que ser o pedido de saída: "Não quero esperar muito, tem
 # horário?" e "Sair do trabalho às 18h, tem 19h?" começam igual e querem marcar.
-RE_SAIR = r"^\s*(sair|parar|pare|n[ãa]o quero( mais)?)\s*[.!,]*\s*(obrigad[oa])?\s*[.!]*\s*$"
+RE_SAIR = r"^\s*(sair|parar|pare|n[ãaÃA]o quero( mais)?)\s*[.!,]*\s*(obrigad[oa])?\s*[.!]*\s*$"
+# A RECUSA EM FRASE ("Não, obrigada", "Não tenho interesse", "Não quero mais receber
+# mensagens") encerra a SEQUÊNCIA — não bloqueia o número. Mais estreita que a
+# `prospec_inbound._RECUSA`: aqui "cancelar" é desmarcar consulta e "não tenho" sozinho
+# é "não tenho horário essa semana". Só vale em mensagem SEM '?'. Errar pra este lado
+# deixa de chamar alguém; nunca chama a mais.
+RE_RECUSA = (r"(\y(n[ãaÃA]o|nem|sem)\s+(quero|queria|tenho interesse|desejo|preciso|interesse)\y"
+             r"|\yagora\s+n[ãaÃA]o\y|\ysem\s+interesse\y"
+             r"|\y(pare|parar|para\s+de|sair|remov\w*|descadastr\w*)\y"
+             r"|^\s*n[ãaÃA]o[\s,.!]*(obrigad[oa])?[\s.!]*$)")
 
 _RE_MARCOU_PY = re.compile(RE_MARCOU, re.I)
 _RE_SAIR_PY = re.compile(RE_SAIR, re.I)
@@ -108,6 +117,11 @@ def eh_preco_de_consulta(texto: str | None, re_contexto: str) -> bool:
 
 def marcou(texto: str | None) -> bool:
     return bool(_RE_MARCOU_PY.search(texto or ""))
+
+
+def recusou(texto: str | None) -> bool:
+    t = texto or ""
+    return "?" not in t and bool(re.search(_py(RE_RECUSA), t, re.I))
 
 
 def quer_sair(texto: str | None) -> bool:
@@ -312,6 +326,24 @@ def salvar_config(c, conta_id: int, modo: str, textos: dict | None = None,
 
 
 # ------------------------------------------------------------------ SQL
+# ANTES/DEPOIS É PELA DATA, NÃO PELO ID. O histórico que o WhatsApp importou ao
+# conectar (conta 39, 23/09/2026) chegou em ondas e fora de ordem: medido em
+# 25/09, 1.379 de 2.046 mensagens têm id menor que a anterior na conversa, em 71
+# de 104 conversas, com recuo de até 22 dias. Pelo id, um "Prontinho" ou um "Sair"
+# de depois do preço podia parecer de antes. O id só desempata o mesmo instante.
+def _depois(alias: str, mid: str) -> str:
+    """`alias` veio depois da mensagem `mid`, pela data (desempate pelo id)."""
+    return (f"({alias}.criado_em, {alias}.id) > "
+            f"(select px.criado_em, px.id from mensagens px where px.id = {mid})")
+
+
+def _n8_da_conversa(conv: str) -> str:
+    """O número (8 dígitos) da conversa `conv`, pela mesma regra do `_N8`."""
+    return (r"(select right(regexp_replace(coalesce(nullif(px.whatsapp,''), nullif(px.telefone,''),"
+            r" cx.contato_ref, ''), '\D', '', 'g'), 8)"
+            f" from conversas cx left join prospeccao px on px.id = cx.prospeccao_id"
+            f" where cx.id = {conv})")
+
 # O número do paciente, na mesma ordem em que o agente escolhe o destino
 # (`agente._atender`): o WhatsApp do lead, o telefone, e o contato da conversa.
 _DESTINO = "coalesce(nullif(p.whatsapp,''), nullif(p.telefone,''), cv.contato_ref, '')"
@@ -348,18 +380,18 @@ _NAO_E_TOQUE = """
 # propósito: gatilho e métrica que lessem "preço" diferente dariam um placar que
 # ninguém conseguiria conferir.
 _SQL_FATOS_BASE = """
-  select pr.conversa_id, cv.prospeccao_id, pr.mid, m.criado_em
-    from (select m.conversa_id, min(m.id) as mid
+  select pr.conversa_id, cv.prospeccao_id, pr.mid, pr.criado_em
+    from (select distinct on (m.conversa_id) m.conversa_id, m.id as mid, m.criado_em
             from mensagens m join conversas cv on cv.id = m.conversa_id
            where cv.conta_id = %(conta)s and cv.canal = 'whatsapp'
              and m.direcao = 'out' and m.autor <> 'bot'
              and m.criado_em >= %(desde)s and m.criado_em < %(ate)s
              and m.texto ~* %(re_preco)s and m.texto ~* %(re_ctx)s
              and exists (select 1 from mensagens f
-                          where f.conversa_id = m.conversa_id and f.direcao = 'in' and f.id < m.id)
+                          where f.conversa_id = m.conversa_id and f.direcao = 'in'
+                            and (f.criado_em, f.id) < (m.criado_em, m.id))
              and """ + _NAO_E_TOQUE + """
-           group by m.conversa_id) pr
-    join mensagens m on m.id = pr.mid
+           order by m.conversa_id, m.criado_em, m.id) pr
     join conversas cv on cv.id = pr.conversa_id
     left join prospeccao p on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
    where length(""" + _N8 + """) = 8
@@ -368,11 +400,13 @@ _SQL_FATOS = _SQL_FATOS_BASE + " and " + _NAO_BLOQUEADO
 
 # "Marcou" pelo que está na conversa ou no card. As chaves `qualificado` e
 # `proposta` são "Consulta agendada" e "Plano de tratamento" no funil da clínica.
-_MARCOU_SQL = """(
-   exists (select 1 from mensagens mm where mm.conversa_id = {conv} and mm.direcao = 'out'
-            and mm.id > {mid} and mm.texto ~* %(re_marcou)s)
-   or exists (select 1 from prospeccao pp where pp.id = {lead}
-               and (pp.status in ('qualificado','proposta') or pp.status in """ + fr.sql_fechadas("pp") + """)))"""
+def _marcou_sql(conv: str, mid: str, lead: str) -> str:
+    return ("""(
+   exists (select 1 from mensagens mm where mm.conversa_id = """ + conv + """ and mm.direcao = 'out'
+            and """ + _depois("mm", mid) + """ and mm.texto ~* %(re_marcou)s)
+   or exists (select 1 from prospeccao pp where pp.id = """ + lead + """
+               and (pp.status in ('qualificado','proposta') or pp.status in """
+            + fr.sql_fechadas("pp") + ")))")
 
 
 # Card em aberto — ou nenhum card. Conversa sem card é paciente que ninguém pôs no
@@ -383,7 +417,7 @@ _EM_ABERTO = ("(p.id is null or (p.status not in ('qualificado','proposta') and 
 
 def _params(conta_id: int, cfg: dict, **extra) -> dict:
     return dict(conta=conta_id, re_preco=fr.RE_PRECO, re_ctx=cfg["re_contexto"],
-                re_marcou=RE_MARCOU, re_sair=RE_SAIR, **extra)
+                re_marcou=RE_MARCOU, re_sair=RE_SAIR, re_recusa=RE_RECUSA, **extra)
 
 
 # ------------------------------------------------------------------ registro
@@ -420,8 +454,9 @@ def registrar_fatos(c, conta_id: int, agora: datetime, cfg: dict, janela: dict) 
      and (select max(x.criado_em) from mensagens x where x.conversa_id = cv.id)
          < %(agora)s - interval '""" + str(_REPESCAGEM_PARADA_H) + """ hours'
      and not exists (select 1 from mensagens r where r.conversa_id = cv.id
-                      and r.direcao = 'in' and r.id > pr.mid and r.texto ~* %(re_sair)s)
-     and not """ + _MARCOU_SQL.format(conv="cv.id", mid="pr.mid", lead="cv.prospeccao_id") + """
+                      and r.direcao = 'in' and """ + _depois("r", "pr.mid") + """
+                      and r.texto ~* %(re_sair)s)
+     and not """ + _marcou_sql("cv.id", "pr.mid", "cv.prospeccao_id") + """
      and not exists (select 1 from voltar_a_chamar_toques t
                       where t.conta_id = cv.conta_id and t.conversa_id = cv.id)""",
         _params(conta_id, cfg, agora=agora, desde=ligado_em - timedelta(days=_REPESCAGEM_DIAS),
@@ -444,16 +479,18 @@ def atualizar_estados(c, conta_id: int, agora: datetime, cfg: dict) -> None:
     base = """ from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                where t.conta_id = %(conta)s and t.estado = 'pendente'
                  and cv.id = t.conversa_id """
-    # pediu pra sair: o número entra na lista e não recebe mais nada, nunca
+    # pediu pra sair: o número entra na lista e não recebe mais nada, nunca. De
+    # QUALQUER toque, não só dos pendentes: o "Pare" em resposta ao último toque (ou à
+    # repescagem, que é um só) é justamente o mais provável.
     c.execute("""insert into voltar_a_chamar_bloqueios (conta_id, numero8, motivo)
                  select distinct t.conta_id, """ + _N8 + """, 'saiu'
                    from voltar_a_chamar_toques t
                    join conversas cv on cv.id = t.conversa_id
                    left join prospeccao p on p.id = cv.prospeccao_id
-                  where t.conta_id = %(conta)s and t.estado = 'pendente'
+                  where t.conta_id = %(conta)s
                     and length(""" + _N8 + """) = 8
                     and exists (select 1 from mensagens m where m.conversa_id = t.conversa_id
-                                 and m.direcao = 'in' and m.id > t.preco_msg_id
+                                 and m.direcao = 'in' and """ + _depois("m", "t.preco_msg_id") + """
                                  and m.texto ~* %(re_sair)s)
                  on conflict (conta_id, numero8) do nothing""", p)
     c.execute("""update voltar_a_chamar_toques t set estado = b.motivo
@@ -463,16 +500,21 @@ def atualizar_estados(c, conta_id: int, agora: datetime, cfg: dict) -> None:
                     and cv.id = t.conversa_id
                     and b.conta_id = t.conta_id and b.numero8 = """ + _N8, p)
     c.execute("update voltar_a_chamar_toques t set estado = 'marcou'" + base + " and "
-              + _MARCOU_SQL.format(conv="t.conversa_id", mid="t.preco_msg_id", lead="cv.prospeccao_id"), p)
+              + _marcou_sql("t.conversa_id", "t.preco_msg_id", "cv.prospeccao_id"), p)
     c.execute("update voltar_a_chamar_toques t set estado = 'dispensado'" + base
               + " and p.status = 'perdido'", p)
+    # "Não, obrigada" / "Não tenho interesse": encerra esta sequência (não bloqueia)
+    c.execute("update voltar_a_chamar_toques t set estado = 'dispensado'" + base + """
+                and exists (select 1 from mensagens m where m.conversa_id = t.conversa_id
+                             and m.direcao = 'in' and """ + _depois("m", "t.preco_msg_id") + """
+                             and m.texto ~* %(re_recusa)s and m.texto not like '%%?%%')""", p)
     # alguém da equipe já voltou a falar com ele: o toque de hoje seria repetição.
     # A rajada logo depois do preço ("a consulta dura 40 minutos...") não conta.
     c.execute("update voltar_a_chamar_toques t set estado = 'pulado'" + base + """
                 and t.devido_em <= %(agora)s
                 and exists (select 1 from mensagens m, mensagens pm
                              where pm.id = t.preco_msg_id and m.conversa_id = t.conversa_id
-                               and m.direcao = 'out' and m.autor <> 'bot' and m.id > t.preco_msg_id
+                               and m.direcao = 'out' and m.autor <> 'bot'
                                and m.criado_em > pm.criado_em + interval '""" + str(_RAJADA_MIN) + """ minutes'
                                and m.criado_em > %(agora)s - interval '""" + str(_HUMANO_RECENTE_H) + """ hours'
                                and """ + _NAO_E_TOQUE + ")", p)
@@ -481,6 +523,12 @@ def atualizar_estados(c, conta_id: int, agora: datetime, cfg: dict) -> None:
     c.execute("""update voltar_a_chamar_toques t set estado = 'pulado'
                   where t.conta_id = %(conta)s and t.estado = 'pendente' and t.toque = 1
                     and t.devido_em < %(hoje)s""", dict(p, hoje=_inicio_do_dia(agora)))
+    # toque encalhado não sai semanas depois: 2 dias pros toques, 14 pra repescagem.
+    # Sem isso, passar de 'sugere' pra 'ligado' mandaria primeiro os mais velhos.
+    c.execute("""update voltar_a_chamar_toques t set estado = 'pulado'
+                  where t.conta_id = %(conta)s and t.estado = 'pendente'
+                    and t.devido_em < %(agora)s - case when t.toque = 0 then interval '14 days'
+                                                       else interval '2 days' end""", p)
     # venceu um toque mais novo antes deste sair: fica só o mais novo
     c.execute("""update voltar_a_chamar_toques t set estado = 'pulado'
                   where t.conta_id = %(conta)s and t.estado = 'pendente' and t.devido_em <= %(agora)s
@@ -501,8 +549,9 @@ _PARADA = """(
    and not exists (
        select 1 from mensagens q
         where q.conversa_id = t.conversa_id and q.direcao = 'in'
-          and q.id > coalesce((select max(o.id) from mensagens o
-                                where o.conversa_id = t.conversa_id and o.direcao = 'out'), 0)
+          and q.criado_em > coalesce((select max(o.criado_em) from mensagens o
+                                       where o.conversa_id = t.conversa_id and o.direcao = 'out'),
+                                      '-infinity'::timestamptz)
           and (q.texto like '%%?%%' or q.midia_tipo is not null
                or q.texto ~ '^(🎤|🎵|📷|🎥|📎)')))"""
 
@@ -512,13 +561,15 @@ _PARADA = """(
 # palavra do paciente, o toque fica na tela e a recepção lê antes de mandar.
 _ULTIMA_E_NOSSA = """(
    (select m.direcao from mensagens m where m.conversa_id = t.conversa_id
-     order by m.id desc limit 1) = 'out')"""
+     order by m.criado_em desc, m.id desc limit 1) = 'out')"""
 
-# 1 por paciente por dia — na tela, no clique e no automático, a mesma regra
+# 1 por paciente por dia — na tela, no clique e no automático, a mesma regra. Por
+# NÚMERO, não por conversa: o mesmo telefone pode ter duas conversas (dois chips).
 _NAO_MANDADO_HOJE = """
    not exists (select 1 from voltar_a_chamar_toques o
-                where o.conta_id = t.conta_id and o.conversa_id = t.conversa_id
-                  and o.estado = 'enviado' and o.enviado_em >= %(hoje)s)"""
+                where o.conta_id = t.conta_id and o.estado = 'enviado' and o.enviado_em >= %(hoje)s
+                  and (o.conversa_id = t.conversa_id
+                       or """ + _n8_da_conversa("o.conversa_id") + " = " + _n8_da_conversa("t.conversa_id") + "))"
 
 def _inicio_do_dia(agora: datetime) -> datetime:
     return _utc(datetime.combine(_local(agora).date(), time(0, 0)))
@@ -809,13 +860,12 @@ def placar(c, conta_id: int, desde: datetime, ate: datetime, cfg: dict) -> dict:
                 count(*) filter (where not f.marcou and not f.chamado
                                    and f.criado_em < %(ate)s - interval '1 day')
            from (select fa.*,
-                        (""" + _MARCOU_SQL.format(conv="fa.conversa_id", mid="fa.mid",
-                                                  lead="fa.prospeccao_id") + """
+                        (""" + _marcou_sql("fa.conversa_id", "fa.mid", "fa.prospeccao_id") + """
                          or exists (select 1 from voltar_a_chamar_toques t
                                      where t.conversa_id = fa.conversa_id and t.preco_msg_id = fa.mid
                                        and t.estado = 'marcou')) as marcou,
                         exists (select 1 from mensagens mm where mm.conversa_id = fa.conversa_id
-                                 and mm.direcao = 'out' and mm.id > fa.mid
+                                 and mm.direcao = 'out'
                                  and mm.criado_em > fa.criado_em + interval '""" + str(_RAJADA_MIN) + """ minutes') as chamado
                    from fatos fa) f""",
         _params(conta_id, cfg, desde=desde, ate=ate)).fetchone()
@@ -844,7 +894,8 @@ def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
                  from conversas cv
                  left join prospeccao p on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
                  join lateral (select m.direcao, m.texto, m.criado_em from mensagens m
-                                where m.conversa_id = cv.id order by m.id desc limit 1) ult on true
+                                where m.conversa_id = cv.id
+                                order by m.criado_em desc, m.id desc limit 1) ult on true
                 where cv.conta_id = %(conta)s and cv.canal = 'whatsapp'
                   and ult.direcao = 'in' and ult.criado_em > %(agora)s - interval '3 days'
                   and """ + _FORA_DA_EQUIPE + " and " + _nao_bloqueado(True) + """
@@ -857,7 +908,10 @@ def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
         for r in c.execute(
                 """select t.id, t.toque, t.devido_em, t.conversa_id, cv.prospeccao_id,
                           coalesce(nullif(p.contato,''), nullif(cv.contato_nome,''), p.empresa, ''),
-                          pm.criado_em
+                          pm.criado_em,
+                          (select m.texto from mensagens m where m.conversa_id = t.conversa_id
+                            and m.direcao = 'in' and """ + _depois("m", "t.preco_msg_id") + """
+                            order by m.criado_em desc, m.id desc limit 1)
                      from voltar_a_chamar_toques t
                      join conversas cv on cv.id = t.conversa_id
                      left join prospeccao p on p.id = cv.prospeccao_id
@@ -867,6 +921,9 @@ def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
             out.append({"id": r[0], "toque": r[1], "rotulo": _ROTULO_TOQUE.get(r[1], ""),
                         "devido": _fmt(r[2]), "conversa_id": r[3], "lead": r[4],
                         "nome": r[5] or "Sem nome", "preco_em": _fmt(r[6]),
+                        # o que o paciente disse depois do preço: a recepção lê antes
+                        # de apertar Mandar (uma recusa em frase passaria despercebida)
+                        "ultima": (r[7] or "")[:160],
                         "texto": texto_do_toque(cfg["textos"][str(r[1])], r[5])})
         return out
 
@@ -876,7 +933,7 @@ def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
                       t.id, t.conversa_id, cv.prospeccao_id,
                       coalesce(nullif(p.contato,''), nullif(cv.contato_nome,''), p.empresa, ''),
                       (select m.texto from mensagens m where m.conversa_id = t.conversa_id
-                        and m.direcao = 'in' order by m.id desc limit 1),
+                        and m.direcao = 'in' order by m.criado_em desc, m.id desc limit 1),
                       (select max(m.criado_em) from mensagens m where m.conversa_id = t.conversa_id
                         and m.direcao = 'in')
                  from voltar_a_chamar_toques t
@@ -884,13 +941,12 @@ def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
                  left join prospeccao p on p.id = cv.prospeccao_id
                 where t.conta_id = %(conta)s and t.criado_em > %(agora)s - interval '30 days'
                   and exists (select 1 from mensagens m where m.conversa_id = t.conversa_id
-                               and m.direcao = 'in' and m.id > t.preco_msg_id)
+                               and m.direcao = 'in' and """ + _depois("m", "t.preco_msg_id") + """)
                   and not exists (select 1 from voltar_a_chamar_toques o
                                    where o.conta_id = t.conta_id and o.conversa_id = t.conversa_id
                                      and o.preco_msg_id = t.preco_msg_id
                                      and o.estado in ('marcou','dispensado','nao_paciente','saiu'))
-                  and not """ + _MARCOU_SQL.format(conv="t.conversa_id", mid="t.preco_msg_id",
-                                                   lead="cv.prospeccao_id") + """
+                  and not """ + _marcou_sql("t.conversa_id", "t.preco_msg_id", "cv.prospeccao_id") + """
                   and coalesce(p.status, '') <> 'perdido'
                 order by t.conversa_id, t.preco_msg_id, t.toque""", p).fetchall():
         responderam.append({"id": r[0], "conversa_id": r[1], "lead": r[2],

@@ -663,3 +663,100 @@ def test_placar_conta_quem_marca_depois_de_7_dias_e_mantem_quem_saiu(pool, sem_e
     with pool.connection() as c:
         p = vac.placar(c, CLINICA, _br(1, 0), _br(30, 0), vac.config(c, CLINICA))
     assert (p["receberam"], p["marcaram"]) == (3, 2)
+
+
+# ------------------------------------------------------------------ 2ª revisão do #843
+
+def _msg_id(pool, mid, conv, direcao, texto, quando):
+    """Mensagem com id escolhido — o histórico importado chega com id fora da ordem
+    da data (medido na conta 39: 1.379 de 2.046 mensagens)."""
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (id, conversa_id, canal, direcao, autor, texto, criado_em)
+                     values (%s,%s,'whatsapp',%s,%s,%s,%s)""",
+                  (mid, conv, direcao, "lead" if direcao == "in" else "humano", texto, quando))
+        c.commit()
+
+
+def test_historico_fora_de_ordem_vale_a_data_e_nao_o_id(pool, sem_envio):
+    _modo(pool, CLINICA, "sugere", ligado_em=_br(21, 8))
+    # o paciente escreveu ANTES (pela data), mas ficou com id MAIOR que o preço
+    _, conv = _lead(pool, fone="5586999990031", nome="Ana")
+    _msg_id(pool, 9000, conv, "out", PRECO, _br(10, 10))
+    _msg_id(pool, 9500, conv, "in", "quanto é a consulta?", _br(10, 9, 50))
+    # e o "Prontinho" de DEPOIS ficou com id MENOR que o preço
+    _, conv2 = _lead(pool, fone="5586999990032", nome="Bia")
+    _msg_id(pool, 8001, conv2, "in", "valor da consulta?", _br(11, 9, 50))
+    _msg_id(pool, 8003, conv2, "out", PRECO, _br(11, 10))
+    _msg_id(pool, 8002, conv2, "out", "Prontinho!! Te espero sexta", _br(11, 11))
+    vac.rodar(pool, agora=_br(21, 10))
+    with pool.connection() as c:
+        linhas = c.execute("select conversa_id, toque from voltar_a_chamar_toques").fetchall()
+    assert linhas == [(conv, 0)]        # Ana é repescagem; Bia marcou e fica de fora
+
+
+def test_pare_depois_do_ultimo_toque_bloqueia(pool, envios):
+    _modo(pool, CLINICA, "sugere", ligado_em=_br(21, 8))
+    _, conv = _paciente_recebe_preco(pool, quando=_br(12, 10))
+    vac.rodar(pool, agora=_br(21, 10))
+    with pool.connection() as c:
+        tid = c.execute("select id from voltar_a_chamar_toques").fetchone()[0]
+    assert vac.mandar_sugerido(pool, CLINICA, tid, None, agora=_br(21, 10, 1))["ok"]
+    _msg(pool, conv, "in", "Pare", _br(21, 11))
+    vac.rodar(pool, agora=_br(21, 11, 5))
+    with pool.connection() as c:
+        assert c.execute("select motivo from voltar_a_chamar_bloqueios").fetchall() == [("saiu",)]
+
+
+def test_recusa_em_frase_encerra_a_sequencia(pool, envios):
+    _modo(pool, CLINICA, "ligado")
+    _, conv = _paciente_recebe_preco(pool)
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    _msg(pool, conv, "in", "Não, obrigada", _br(21, 10, 40))
+    _msg(pool, conv, "out", "Tudo bem! Qualquer coisa estamos aqui 😊", _br(21, 10, 45))
+    for dia, h in ((21, 14), (22, 10), (24, 10), (28, 10)):
+        vac.rodar(pool, agora=_br(dia, h, 5))
+    assert envios == []
+    assert {x[1] for x in _toques(pool)} == {"dispensado"}
+
+
+def test_o_cartao_mostra_o_que_o_paciente_disse(pool, sem_envio):
+    _modo(pool, CLINICA, "sugere")
+    _, conv = _paciente_recebe_preco(pool)
+    _msg(pool, conv, "in", "Vou ver com meu marido", _br(21, 10, 40))
+    vac.rodar(pool, agora=_br(21, 10, 50))
+    with pool.connection() as c:
+        tela = vac.hoje(c, CLINICA, _br(21, 14, 5), vac.config(c, CLINICA))
+    assert tela["voltar"][0]["ultima"] == "Vou ver com meu marido"
+
+
+def test_toque_encalhado_vence(pool, envios):
+    """Ninguém clicou por semanas: ao passar pra 'ligado', não sai o toque velho."""
+    _modo(pool, CLINICA, "sugere")
+    _paciente_recebe_preco(pool)
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    _modo(pool, CLINICA, "ligado")
+    vac.rodar(pool, agora=datetime(2026, 10, 14, 13, 5, tzinfo=timezone.utc))   # 3 semanas depois
+    assert envios == []
+    assert {x[1] for x in _toques(pool)} == {"pulado"}
+
+
+def test_um_por_dia_e_por_numero_nao_por_conversa(pool, envios):
+    """O mesmo telefone com duas conversas (dois chips): uma mensagem por dia só."""
+    _modo(pool, CLINICA, "ligado")
+    _paciente_recebe_preco(pool, fone="5586999990041", nome="Carla")
+    _paciente_recebe_preco(pool, fone="(86) 99999-0041", nome="Carla")
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    for minuto in range(5, 10):
+        vac.rodar(pool, agora=_br(21, 13, minuto))
+    assert len(envios) == 1
+
+
+def test_excluir_o_card_nao_trava_e_guarda_o_historico(pool, sem_envio):
+    _modo(pool, CLINICA, "sugere")
+    lead, conv = _paciente_recebe_preco(pool)
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    with pool.connection() as c:
+        c.execute("update conversas set prospeccao_id = null where id=%s", (conv,))
+        c.execute("delete from prospeccao where id=%s", (lead,))
+        c.commit()
+        assert c.execute("""select count(*), count(prospeccao_id) from voltar_a_chamar_toques""").fetchone() == (4, 0)

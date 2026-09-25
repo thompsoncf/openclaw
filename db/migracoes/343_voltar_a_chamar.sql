@@ -18,6 +18,8 @@
 --
 -- SEM `on delete cascade`: apagar um lead não pode apagar o histórico do que foi
 -- mandado pra ele — é o que responde "quem mandou isto?" quando o paciente reclama.
+-- O card vira `set null` (como em `conversas`): a sequência é da conversa, e um
+-- NO ACTION aqui faria o Excluir do card dar 500 pra todo lead que já teve toque.
 --
 -- Aditiva e idempotente.
 
@@ -37,7 +39,7 @@ create table if not exists public.voltar_a_chamar_toques (
   -- (23/09/2026) entraram sem card, e 8 dos 11 pacientes que receberam o preço
   -- estão entre elas. A sequência é da CONVERSA; o card, quando existe, é lido de
   -- `conversas.prospeccao_id` na hora.
-  prospeccao_id bigint references public.prospeccao(id),
+  prospeccao_id bigint references public.prospeccao(id) on delete set null,
   conversa_id bigint not null,
   preco_msg_id bigint not null,
   toque smallint not null check (toque between 0 and 4),   -- 0 = repescagem

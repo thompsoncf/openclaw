@@ -297,6 +297,7 @@ _TPL_TOQUE = r"""<div class="hj-card quente">
   <div class="cab"><a class="quem" href="/painel/prospeccao/comunicacao?abrir={{ t.conversa_id }}">{{ t.nome }}</a>
     <span class="chip">{{ t.rotulo }}</span>
     <span class="meta">preço em {{ t.preco_em }}</span></div>
+  {% if t.ultima %}<div class="frase">Paciente: “{{ t.ultima }}”</div>{% endif %}
   <div class="msg">{{ t.texto }}</div>
   <div class="hj-acoes">
     <form method="post" action="/painel/hoje/toque/{{ t.id }}/mandar"><button>Mandar</button></form>

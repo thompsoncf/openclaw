@@ -112,3 +112,14 @@ def test_so_a_clinica_tem_o_padrao():
     assert rxp.voltar_padrao("clinica")
     for outro in ("eventos", "recorrente", "seguros", "produto", "xpto"):
         assert rxp.voltar_padrao(outro) is None
+
+
+def test_recusa_em_frase_e_estreita():
+    """Encerra a sequência (não bloqueia): errar pra este lado deixa de chamar."""
+    for sim in ("Não, obrigada", "Não tenho interesse", "Não quero mais receber mensagens",
+                "Agora não", "sem interesse", "NÃO QUERO"):
+        assert vac.recusou(sim), sim
+    for nao in ("Não tenho horário essa semana, pode ser semana que vem",
+                "Vou cancelar a consulta de amanhã", "Não tenho interesse?",
+                "ok obrigada", "Vou ver com meu marido"):
+        assert not vac.recusou(nao), nao

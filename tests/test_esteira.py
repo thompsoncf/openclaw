@@ -805,3 +805,132 @@ def test_o_rotulo_do_saldo_aparece_no_texto():
     _, corpo = es.texto("THIAGO", _itens(1),
                         {"tratou": 3, "na_esteira": 8, "rotulo": "Desde a última cobrança"})
     assert corpo.startswith("Desde a última cobrança você tratou 3. Na sua esteira: 8.")
+
+
+# ------------------------------------------------- falar recomeça o relógio
+# Medido na Prime em 25/09/2026, e é a queixa da JACQUELINE: na quarta 23/09 ela
+# mandou 233 mensagens para 64 leads — um mutirão de follow-up. Na quinta e na
+# sexta a esteira cobrou dela 10 leads por dia, e nos dois dias os 10 eram leads
+# que ela JÁ tinha tratado na quarta. O aviso da manhã abria com "Ontem você
+# tratou 0", porque `resolver` só enxerga ação DEPOIS de `entrou_em`.
+#
+# A causa não era a contagem: era a entrada. O prazo da etapa conta o tempo parado
+# NA ETAPA, e mandar mensagem não move etapa — então quem faz follow-up sem mover
+# o card é cobrado pelo mesmo lead todo dia, para sempre. Até 22/09 ela resolvia 8
+# e 9 de 10; nos dois dias do mutirão, 0 de 10, com 10 de 10 já falados.
+#
+# Quem NÃO pode ser poupado por esta regra é a carteira abandonada: no mesmo dia o
+# THIAGO tinha 52 leads na esteira e ZERO com mensagem prévia. É por ele que a
+# esteira existe, e o último teste deste bloco é o que garante que ela não perdeu
+# o dente ao ganhar o descanso.
+
+def _falamos_ha(c, dias, **kw):
+    """Um lead parado na etapa há muito, mas com mensagem NOSSA há `dias` dias."""
+    lid = _lead(c, **kw)
+    _msg(c, lid, "in", quando=AGORA - timedelta(days=dias + 1))
+    _msg(c, lid, "out", quando=AGORA - timedelta(days=dias))
+    return lid
+
+
+def test_lead_falado_ontem_nao_entra_na_esteira(c):
+    """O caso da Jacqueline: tratou na quarta, a esteira cobraria na quinta."""
+    _falamos_ha(c, 1, nome="Ana Carolina")
+    assert es.entrar(c, CONTA, AGORA) == []
+
+
+def test_o_mutirao_inteiro_fica_de_fora(c):
+    """Não é um lead: são os 10 do dia. A assinatura em produção foi 10 de 10."""
+    for i in range(10):
+        _falamos_ha(c, 2, nome=f"M{i}")
+    assert es.entrar(c, CONTA, AGORA) == []
+    assert es.resumo(c, CONTA, VEND, AGORA)["na_esteira"] == 0
+
+
+def test_passado_o_descanso_o_lead_volta_a_ser_cobrado(c):
+    """O descanso adia, não perdoa: o teto aqui é 7, e aos 8 dias ele volta."""
+    _falamos_ha(c, 8, nome="Volta")
+    assert [n["quem"] for n in es.entrar(c, CONTA, AGORA)] == ["Volta"]
+
+
+def test_lead_que_nunca_recebeu_mensagem_entra(c):
+    """O caso do THIAGO: carteira nunca tocada é exatamente o alvo da esteira."""
+    _lead(c, nome="Nunca falado")
+    assert [n["quem"] for n in es.entrar(c, CONTA, AGORA)] == ["Nunca falado"]
+
+
+def test_o_descanso_e_o_teto_DA_ETAPA_e_nao_um_numero_fixo(c):
+    """Duas etapas com tetos diferentes descansam por prazos diferentes. Se alguém
+    trocar `t.dias` por uma constante, é aqui que quebra."""
+    c.execute("update funil_etapas set teto_dias=3 where conta_id=%s and chave='proposta'", (CONTA,))
+    _falamos_ha(c, 5, etapa="proposta", nome="Proposta rápida")   # 5 > teto 3: entra
+    _falamos_ha(c, 5, etapa="contatado", nome="Contatado lento")  # 5 < teto 7: descansa
+    assert [n["quem"] for n in es.entrar(c, CONTA, AGORA)] == ["Proposta rápida"]
+
+
+def test_o_placar_nao_diz_zero_pra_quem_adiantou_o_trabalho(c):
+    """O sintoma que a vendedora viu. Com o portão, o lead tratado nem entra — então
+    não existe linha aberta pra contar como não-tratada."""
+    for i in range(10):
+        _falamos_ha(c, 2, nome=f"J{i}")
+    es.entrar(c, CONTA, AGORA)
+    r = es.resumo(c, CONTA, VEND, AGORA)
+    assert (r["na_esteira"], r["fechados_sem_tratativa"]) == (0, 0)
+
+
+def test_cliente_que_respondeu_depois_segue_fora_pela_bola(c):
+    """O portão da bola é anterior e continua valendo: se o cliente respondeu, a
+    dívida é nossa e some da esteira mesmo dentro do descanso."""
+    lid = _falamos_ha(c, 10, nome="Respondeu")
+    _msg(c, lid, "in", quando=AGORA - timedelta(days=9))
+    assert es.entrar(c, CONTA, AGORA) == []
+
+
+# ------------------------------------------------- a limpeza única (migração 344)
+# A 344 resolve o que já está aberto e que, sob a regra nova, nunca teria entrado.
+# Ela é perigosa por dois lados: limpar demais apaga cobrança legítima, e carimbar
+# `resolvido_em` com now() cria um pico de "tratados" que ninguém trabalhou.
+
+def _replay_344(c):
+    c.execute((MIG / "344_esteira_descanso_da_ultima_conversa.sql").read_text(encoding="utf-8"))
+
+
+def _na_esteira_desde(c, lead, quando):
+    c.execute("""insert into follow_up_esteira (conta_id, prospeccao_id, membro_id, etapa, entrou_em)
+                 values (%s,%s,%s,'contatado',%s)""", (CONTA, lead, VEND, quando))
+
+
+def test_a_344_resolve_quem_ja_tinha_sido_tratado(c):
+    lid = _lead(c, nome="Tratada antes")
+    _msg(c, lid, "out", quando=AGORA - timedelta(days=2))
+    _na_esteira_desde(c, lid, AGORA)
+    _replay_344(c)
+    r = c.execute("select resolucao, resolvido_em from follow_up_esteira "
+                  "where prospeccao_id=%s", (lid,)).fetchone()
+    assert r[0] == "falou"
+    # a data é a da MENSAGEM, não a de agora — senão o aviso de amanhã mostra um
+    # pico de tratados que ninguém trabalhou
+    assert r[1] == AGORA - timedelta(days=2)
+
+
+def test_a_344_nao_encosta_em_cobranca_legitima(c):
+    velho = _lead(c, nome="Falado ha muito")
+    _msg(c, velho, "out", quando=AGORA - timedelta(days=20))
+    _na_esteira_desde(c, velho, AGORA)
+    nunca = _lead(c, nome="Nunca falado")
+    _na_esteira_desde(c, nunca, AGORA)
+    _replay_344(c)
+    abertos = c.execute("select count(*) from follow_up_esteira where resolvido_em is null").fetchone()[0]
+    assert abertos == 2, "a 344 limpou cobrança que ainda vale"
+
+
+def test_a_344_nao_mexe_em_quem_ja_estava_resolvido(c):
+    lid = _lead(c, nome="Ja resolvido")
+    _msg(c, lid, "out", quando=AGORA - timedelta(days=2))
+    _na_esteira_desde(c, lid, AGORA)
+    antes = AGORA - timedelta(hours=1)
+    c.execute("update follow_up_esteira set resolvido_em=%s, resolucao='moveu' "
+              "where prospeccao_id=%s", (antes, lid))
+    _replay_344(c)
+    r = c.execute("select resolucao, resolvido_em from follow_up_esteira "
+                  "where prospeccao_id=%s", (lid,)).fetchone()
+    assert r == ("moveu", antes), "a 344 reescreveu uma resolução que já existia"

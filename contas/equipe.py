@@ -163,6 +163,10 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # quem barra conta de outro perfil, e a recepção entra com papel de vendedor.
     if caps["vendas"]:
         permitido += ["/painel/hoje"]
+    # Configurar › Clínica (profissionais, atendimentos, locais, grade): de quem
+    # manda na conta — o gestor entra, como no Raio-X. A rota barra o nicho.
+    if caps["vendas"] and caps["financeiro"]:
+        permitido += ["/painel/clinica"]
     # Origens: dono, gestor e o convidado da agência. Mesmo erro do Follow-up, meu,
     # no #650 — o link entrou no menu e a rota ficou de fora.
     if caps["origens"]:

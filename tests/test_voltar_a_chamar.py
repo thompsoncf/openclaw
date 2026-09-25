@@ -4,7 +4,7 @@ Cada teste monta a conversa da clínica como ela acontece: o paciente escreve, a
 recepção passa o preço da consulta, e o relógio anda. As regras sem banco estão em
 test_voltar_a_chamar_regras.py.
 
-Schema mínimo dos caminhos exercitados, e a migração 343 de verdade por cima.
+Schema mínimo dos caminhos exercitados, e a migração 344 de verdade por cima.
 """
 import os
 from datetime import datetime, timedelta, timezone
@@ -64,7 +64,7 @@ def pool():
     p = ConnectionPool(url, min_size=1, max_size=4, open=True, kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_SQL)
-        c.execute((BASE / "343_voltar_a_chamar.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "344_voltar_a_chamar.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()

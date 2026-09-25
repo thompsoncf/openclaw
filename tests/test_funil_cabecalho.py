@@ -120,3 +120,13 @@ def test_o_numero_da_conversa_tira_a_palavra_que_todos_tem_em_comum():
     assert pp._rotulos_de_chip("CP Zarb", {9: "CP"}) == {None: "CP Zarb", 9: "CP"}
     # o principal sem nome e o filho sem nome ganham um nome que se entende
     assert pp._rotulos_de_chip("", {9: ""}) == {None: "principal", 9: "outro número"}
+
+
+def test_vendedor_sem_nome_no_cadastro_nao_vira_livre(monkeypatch, pool):
+    """"livre" quer dizer SEM responsável. Um vendedor com o nome em branco no
+    cadastro tem responsável, só não tem nome — o card não pode dizer "livre"."""
+    anon = _vendedor(pool, "")
+    lid = _lead(pool, "Do Sem Nome")
+    _de(pool, lid, anon)
+    card = _card(_html(monkeypatch, pool), lid)
+    assert ">sem nome</button>" in card and "kbvn livre" not in card

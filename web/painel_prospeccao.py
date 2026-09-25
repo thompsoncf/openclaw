@@ -1013,11 +1013,12 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # quadro e os da lista de troca —, pra que o card e a lista digam o mesmo, e pra
     # dois "Pedro" virarem "Pedro Y." e "Pedro L." (ver `_nomes_curtos`).
     vends = _vendedores(pool, conta_id) if ctx["gerencia"] else []
-    _nomes_vend = {v["id"]: v["nome"].removesuffix(" (você)") for v in vends}
+    # `nome` pode vir vazio (membro sem nome e sem e-mail): a tela não pode cair por isso
+    _nomes_vend = {v["id"]: (v["nome"] or "").removesuffix(" (você)") for v in vends}
     _nomes_vend.update({r[11]: r[12] for r in rows if r[11] and r[12]})
     curtos_vend = _nomes_curtos(_nomes_vend)
     for v in vends:
-        v["curto"] = curtos_vend.get(v["id"]) or v["nome"]
+        v["curto"] = curtos_vend.get(v["id"]) or v["nome"] or "sem nome"
     for r in rows:
         conv = conv_por_lead.get(r[0], {})
         # O NÚMERO NO 💬 (ver `chip_rotulos`, lá em cima). Só quando o lead TEM
@@ -11875,7 +11876,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if c.esperando %} data-esp="1"{% endif %}{% if c.tel_q %} data-tel="{{ c.tel_q }}"{% endif %}{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
              tabindex="0" onkeydown="if(event.key==='Enter'&&event.target===this)kbAbrirLead(event,{{ c.id }},this)"
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
-          <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav kbvn{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="Responsável: {{ (c.vendedor or 'ninguém')|e }} · clique pra trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor_curto or c.vendedor or 'livre')|e }}</button>{% elif gerencia and c.vendedor %}<span class="kbav kbvn" title="Responsável: {{ c.vendedor|e }}">{{ (c.vendedor_curto or c.vendedor)|e }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
+          <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav kbvn{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="Responsável: {{ (c.vendedor or 'ninguém')|e }} · clique pra trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor_curto or c.vendedor or ('livre' if not c.vendedor_id else 'sem nome'))|e }}</button>{% elif gerencia and c.vendedor %}<span class="kbav kbvn" title="Responsável: {{ c.vendedor|e }}">{{ (c.vendedor_curto or c.vendedor)|e }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
           <div class="kbl2">
           {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
@@ -11968,7 +11969,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div id="kbmenu" class="kbpop" role="menu" hidden></div>
   {% if pode_atribuir %}<div id="kbvpop" class="kbpop" role="menu" hidden>
     <button type="button" class="kbpi" data-v="" onclick="kbVendEscolhe(this)">— sem responsável —</button>
-    {% for v in vendedores %}<button type="button" class="kbpi" data-v="{{ v.id }}" data-nome="{{ v.nome|e }}" data-curto="{{ (v.curto or v.nome)|e }}" onclick="kbVendEscolhe(this)"><span class="kbav">{{ v.nome[:2]|upper }}</span>{{ v.nome|e }}</button>{% endfor %}
+    {% for v in vendedores %}<button type="button" class="kbpi" data-v="{{ v.id }}" data-nome="{{ (v.nome or '')|e }}" data-curto="{{ (v.curto or v.nome or 'sem nome')|e }}" onclick="kbVendEscolhe(this)"><span class="kbav">{{ (v.nome or '?')[:2]|upper }}</span>{{ (v.nome or 'sem nome')|e }}</button>{% endfor %}
   </div>{% endif %}
 </div>
 

@@ -434,6 +434,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('hoje','/painel/hoje','agenda','Hoje') }}{% endif %}
+  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -489,6 +490,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('hoje','/painel/hoje','agenda','Hoje') }}{% endif %}
+  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -8480,6 +8482,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("origens", "/painel/origens"),
                  ("renovacoes", "/painel/renovacoes"),
                  ("hoje", "/painel/hoje"),
+                 ("clinica", "/painel/clinica"),
                  ("follow_up", "/painel/follow-up"),
                  ("novidades", "/painel/novidades"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),

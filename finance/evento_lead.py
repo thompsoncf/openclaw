@@ -337,7 +337,8 @@ def _ordem_por_festa(card: dict, agora: datetime) -> tuple:
 
 
 def agrupar(cards: list[dict], agora: datetime | None = None, *,
-            por_semana: bool = False, por_festa: bool = False) -> list[dict]:
+            por_semana: bool = False, por_festa: bool = False,
+            vende_data: bool = True) -> list[dict]:
     """Separa os cards de UMA coluna em grupos, na ordem em que aparecem:
 
       0. esperando resposta (o cliente falou por último) — é o que pede ação;
@@ -360,7 +361,12 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
     esperando há mais tempo. Em quem vende data é a data que tranca a venda, então
     ali a festa mais próxima vem primeiro. Quem não vende data (perfil recorrente)
     continua na ordem de sempre: não há o que comparar, e mexer nisso seria mudar
-    a tela de quem não pediu."""
+    a tela de quem não pediu.
+
+    `vende_data=False` (perfil recorrente, 25/09/2026) tira o "Sem data ·" do rótulo
+    da entrada: numa consultoria nenhum lead TEM data de evento, e "Sem data" em todo
+    grupo cobrava uma coisa que não existe no negócio dela (§6). O grupo vira
+    "Entrou na semana de 14/09" / "Entrou em ago" — a mesma chave, a mesma ordem."""
     agora = agora or datetime.now(timezone.utc)
     limite = agora - timedelta(days=PARADO_DIAS)
     esperando: list = []
@@ -396,9 +402,10 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
     for k in sorted(entrada, reverse=True):
         if por_semana:
             seg = date.fromisoformat(k)
-            rot = f"Sem data · semana de {seg.day:02d}/{seg.month:02d}"
+            rot = (f"Sem data · semana de {seg.day:02d}/{seg.month:02d}" if vende_data
+                   else f"Entrou na semana de {seg.day:02d}/{seg.month:02d}")
         else:
-            rot = "Sem data · entrou em " + _MESES[int(k[5:7]) - 1]
+            rot = ("Sem data · entrou em " if vende_data else "Entrou em ") + _MESES[int(k[5:7]) - 1]
         grupos.append({"tipo": "entrada", "chave": k, "rotulo": rot,
                        "cards": entrada[k], "n": len(entrada[k])})
     if parados:

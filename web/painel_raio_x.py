@@ -350,7 +350,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       {% if comp.contratos %}<em class="{{ comp.contratos[0] }}">{{ comp.contratos[1] }}</em>{% endif %}</div>
     <div class="kpi {{ 'ok' if p.visitas_pct is not none and p.visitas_pct >= 70 else 'amb' if p.visitas_pct is not none else '' }}">
       <b>{% if p.visitas_pct is not none %}{{ p.visitas_pct }}%{% else %}—{% endif %}</b><span>{{ perfil.vocab.compromisso_kpi }}</span>
-      <em>{% if p.visitas_ok + p.visitas_nao + p.visitas_sem_resposta %}{{ p.visitas_ok }} sim · {{ p.visitas_nao }} não · {{ p.visitas_sem_resposta }} sem resposta{% if not p.visitas_confiavel %} · pouco confiável{% endif %}{% else %}nenhuma {{ perfil.vocab.compromisso }} no período{% endif %}</em></div>
+      <em>{% if p.visitas_ok + p.visitas_nao + p.visitas_sem_resposta %}{{ p.visitas_ok }} sim · {{ p.visitas_nao }} não · {{ p.visitas_sem_resposta }} sem resposta{% if not p.visitas_confiavel %} · pouco confiável{% endif %}{% else %}nenhuma {{ perfil.vocab.compromisso }} no período{% endif %}{% if p.visitas_futuras %} · {{ p.visitas_futuras }} ainda por vir{% endif %}</em></div>
   </div>
   {% else %}
   <div class="rx-dado">Não deu pra montar o placar agora. Tenta de novo em instantes.</div>
@@ -379,6 +379,10 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="rx-dv-cli">
     {% if dv.sem_orcamento %}<div class="grp"><h4>{{ perfil.vocab.compromissos|capitalize }} sem orçamento ainda · {{ dv.sem_orcamento|length }}</h4>
       {% for n in dv.sem_orcamento %}<span class="chip">{{ n }}</span>{% endfor %}</div>{% endif %}
+    {#- Marcada na Agenda sem dizer de qual card é: conta como {{ compromisso }},
+        mas não dá pra saber se virou orçamento. Ligar ao card resolve. -#}
+    {% if dv.sem_card %}<div class="grp"><h4>{{ perfil.vocab.compromissos|capitalize }} sem card no funil · {{ dv.sem_card|length }}</h4>
+      {% for n in dv.sem_card %}<span class="chip amb">{{ n }}</span>{% endfor %}</div>{% endif %}
     {% if dv.em_jogo %}<div class="grp"><h4>Com orçamento, sem contrato ainda · {{ dv.em_jogo|length }} · {{ brl(dv.em_jogo_valor) }} em jogo</h4>
       {% for i in dv.em_jogo %}<span class="chip amb">{{ i.nome }} · {{ brl(i.valor_centavos) }}</span>{% endfor %}</div>{% endif %}
     {% if dv.assinaram %}<div class="grp"><h4>{{ perfil.vocab.compromissos|capitalize }} que viraram contrato · {{ dv.assinaram|length }}</h4>

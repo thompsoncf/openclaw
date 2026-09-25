@@ -46,6 +46,17 @@ def _pos_assinatura(d: dict, assinante: str) -> None:
     # sobrava rastro em lugar nenhum: nem log, nem tela. Foi assim que um
     # orçamento aprovado apareceu sem pré-reserva e ninguém soube dizer por quê.
     # Continua sem derrubar a assinatura — só para de ser invisível.
+    #
+    # O CARD vem ANTES da data (24/09/2026): a festa nasce ligada a ele, e sem
+    # card não há a quê ligar. Proposta mandada por fora do "enviar" (o link colado
+    # no WhatsApp do celular) chegava aqui sem card nenhum — ver
+    # `proposta_lead.garantir_pelo_orcamento`. Tolerante e idempotente.
+    try:
+        from finance import proposta_lead as _pl
+        _pl.garantir_pelo_orcamento(get_pool(), d["conta_id"], d["id"])
+    except Exception as e:  # noqa: BLE001
+        _log.warning("proposta %s: não garanti o card na aprovação: %s: %s",
+                     d.get("id"), type(e).__name__, e)
     try:
         if _reservar_na_agenda(d) is None:
             _log.info("proposta %s: aprovada sem reservar data (ver motivo acima)", d.get("id"))
@@ -132,6 +143,24 @@ def _vendedor_do_orcamento(pool, conta_id: int, criado_por) -> int | None:
         return None
 
 
+def _card_e_cliente(pool, conta_id: int, orcamento_id) -> tuple[int | None, int | None]:
+    """O card do funil e o cadastro deste orçamento, pra festa nascer ligada aos
+    dois. Tolerante: sem eles a festa nasce como nascia antes."""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select (select p.id from prospeccao p
+                            where p.orcamento_id = o.id and p.conta_id = o.conta_id
+                            order by p.id limit 1),
+                          o.cliente_id
+                     from orcamentos o where o.id = %s and o.conta_id = %s""",
+                (int(orcamento_id), conta_id)).fetchone()
+        return (r[0], r[1]) if r else (None, None)
+    except Exception as e:  # noqa: BLE001 — vínculo não derruba aprovação
+        _log.warning("proposta %s: card/cliente da festa: %s: %s", orcamento_id, type(e).__name__, e)
+        return None, None
+
+
 def _reservar_na_agenda(d: dict, pool=None) -> int | None:
     """Cliente aprovou o orçamento de EVENTO -> a data entra na agenda da empresa.
 
@@ -189,9 +218,18 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
         choques = ag.conflitos(pool, d["conta_id"], inicio, fim)
     except Exception:  # noqa: BLE001
         choques = []
+    # A FESTA NASCE DIZENDO QUE É FESTA, E DE QUEM (24/09/2026). Sem `tipo_evento`
+    # o compromisso tinha cara de visita: 10 das 11 festas aprovadas da Prime
+    # nasceram assim, e o Raio-X passava a contá-las como visita "sem resposta"
+    # assim que o dia da festa passava (a Renata viraria mais uma visita do Pedro
+    # no domingo dela). E sem `prospeccao_id` nem `cliente_id` a festa não sabia de
+    # qual card nem de qual cliente era — o card e o cadastro já existiam.
+    lead_id, cliente_id = _card_e_cliente(pool, d["conta_id"], d["id"])
     novo = ag.criar_evento(pool, d["conta_id"], titulo, inicio, fim=fim,
                            local=(ev.get("local") or None), descricao=descricao,
                            tipo="empresa", pre_reserva_ate=ate,
+                           tipo_evento=(ev.get("tipo") or "Evento"),
+                           prospeccao_id=lead_id, cliente_id=cliente_id,
                            membro_id=_vendedor_do_orcamento(pool, d["conta_id"],
                                                             d.get("criado_por")))
     if choques:

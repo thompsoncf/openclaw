@@ -33,6 +33,7 @@ from finance import empresa as emp
 from finance import periodo as _per
 from finance import models as mod
 from finance import vendas
+from finance import visita as _vis
 from web.portal import _render, _env, conta_logada, brl as _brl, _mascara_cnpj
 
 _log = logging.getLogger("painel.relatorios")
@@ -1038,11 +1039,17 @@ AGENDA_TIPO_ROTULO = {"pessoal": "Pessoal", "empresa": "Empresa", "fornecedor": 
 # espécie desta aba leem daqui: duas cópias da mesma pergunta acertam no primeiro
 # dia e divergem no terceiro.
 #
-# Título começando com "Visita" é como o Cockpit batiza ("Visita — {quem}") e
-# como o time batiza na mão ("VISITA TÉCNICA - PEDRO"). `tipo_evento` vazio
-# desempata: quando esse campo vem preenchido (Casamento, Locação...) o
-# compromisso é a FESTA do cliente, não a visita dele ao espaço.
-_E_VISITA = "(e.titulo ilike 'visita%%' and e.tipo_evento is null)"
+# E desde 24/09/2026 ela não mora mais aqui, e sim em `finance.visita` — porque
+# as duas cópias que este comentário temia existiam: o Raio-X tinha a dele
+# (`tipo = 'empresa'` e só com card) e dava ao Pedro Yan da Prime 3 visitas em
+# setembro onde este relatório dava 4. Título começando com "Visita" continua
+# valendo (é como o Cockpit e o time batizam); ligada a um card também vale;
+# `tipo_evento` preenchido continua sendo a FESTA, nunca a visita.
+_E_VISITA = _vis.sql_e_visita("e")
+
+#: DE QUEM É A VISITA: do dono do card; sem card, de quem marcou (decisão do dono,
+#: 24/09/2026 — a mesma do Raio-X). Pede o `p` do lead em LEFT JOIN na consulta.
+_VIS_VENDEDOR = "coalesce(p.vendedor_id, e.membro_id)"
 
 #: EVENTO é o COMPLEMENTO da visita, e não `tipo_evento is not null`. A régua
 #: óbvia apagaria festa: medido na Prime em 31/08/2026, 12 das 43 festas estavam
@@ -1166,7 +1173,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
         where.append("not " + _E_VISITA)
     if vendedor_sel:
         try:
-            where.append("e.membro_id = %s")
+            where.append(_VIS_VENDEDOR + " = %s")
             params.append(int(vendedor_sel))
         except (TypeError, ValueError):
             where.pop()
@@ -1200,8 +1207,8 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                      where o.evento_agenda_id = e.id
                      order by o.id desc limit 1
                   ) oc on true
-                  left join prospeccao p on p.id = e.prospeccao_id
-                  left join membros mb on mb.id = e.membro_id"""
+                  left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                  left join membros mb on mb.id = coalesce(p.vendedor_id, e.membro_id)"""
     if busca:
         where.append("coalesce(pe.nome, cl.nome, oc.nome, p.contato, p.empresa) ilike %s")
         params.append(f"%{busca}%")
@@ -1712,7 +1719,8 @@ def _fmt_hora(d) -> str:
 #: duas espécies de lead e faria a taxa de conversão despencar por artifício.
 _SQL_VISITAS = """
     select e.id,
-           coalesce(p.empresa, replace(e.titulo, 'Visita — ', '')) as lead,
+           coalesce(nullif(p.empresa, ''), nullif(p.contato, ''), """ + _vis.sql_nome_sem_card("e") + """,
+                    e.titulo) as lead,
            (e.prospeccao_id is not null) as ligado,
            coalesce(mb.nome, '—') as vendedor,
            e.inicio, (e.inicio < now()) as passou, e.desfecho,
@@ -1726,10 +1734,9 @@ _SQL_VISITAS = """
            e.criado_em
       from eventos_agenda e
       left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
-      left join membros mb on mb.id = e.membro_id
+      left join membros mb on mb.id = """ + _VIS_VENDEDOR + """
      where e.conta_id = %s
-       and """ + _E_VISITA + """
-       and coalesce(e.status,'') <> 'cancelado'
+       and """ + _vis.sql_conta("e") + """
 """
 
 
@@ -1743,10 +1750,13 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
     ini, fim = _intervalo(periodo)
     where, params = "", [conta_id]
     if periodo != "todos":
-        where += " and e.inicio::date >= %s and e.inicio::date <= %s"
+        # o dia de Teresina, como o Raio-X: `e.inicio::date` é o dia do banco
+        # (UTC), e a visita das 21h do dia 30 caía no mês seguinte
+        where += (" and (e.inicio at time zone 'America/Sao_Paulo')::date >= %s"
+                  " and (e.inicio at time zone 'America/Sao_Paulo')::date <= %s")
         params += [ini, fim]
     if vendedor_sel:
-        where += " and e.membro_id = %s"
+        where += " and " + _VIS_VENDEDOR + " = %s"
         params.append(int(vendedor_sel))
     if busca:
         where += " and (p.empresa ilike %s or e.titulo ilike %s)"

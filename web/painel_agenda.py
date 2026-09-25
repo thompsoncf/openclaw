@@ -487,6 +487,9 @@ _ROT_PADRAO = {
     "salvar": "Marcar", "salvando": "⏳ Marcando…",
     "proximos": "Próximos compromissos",
     "cta_dia": "＋ Marcar novo compromisso nesse dia",
+    # DE QUAL CARD É (24/09/2026): o compromisso ligado a um card conta pro vendedor
+    # daquele card no Raio-X e no Relatório (ver finance/visita.py)
+    "card_dica": "Ligado ao card, o compromisso conta pro vendedor do cliente no Raio-X e no Relatório.",
 }
 _ROT_EVENTO = dict(_ROT_PADRAO, **{
     "novo": "Novo evento", "novo_btn": "＋ Novo evento",
@@ -509,6 +512,7 @@ _ROT_EVENTO = dict(_ROT_PADRAO, **{
     # visita ao espaço, a degustação, o fornecedor — o que não é venda de data.
     "proximos": "🚶 Visitas",
     "cta_dia": "＋ Marcar evento nesse dia",
+    "card_dica": "Ligada ao card, a visita conta pro vendedor do cliente no Raio-X e no Relatório.",
 })
 
 
@@ -542,6 +546,20 @@ def _txt(v) -> str:
     de exigir que todo chamador passe todos os campos opcionais, o handler
     aceita a ausência — que é o que "opcional" quer dizer."""
     return v if isinstance(v, str) else ""
+
+
+def _tem_cards(pool, conta_id: int) -> bool:
+    """A conta tem funil com gente dentro? — é o que decide se o campo "Card do
+    funil" aparece (24/09/2026). Loja de produto e conta que nunca teve lead não
+    ganham um campo que não teria o que achar (regra 6: a tela segue o nicho).
+    Tolerante pelo mesmo motivo de `_tem_clientes`: a agenda abre sem ele."""
+    try:
+        with pool.connection() as c:
+            r = c.execute("select exists(select 1 from prospeccao where conta_id=%s "
+                          "and coalesce(estagio,'lead')='lead')", (conta_id,)).fetchone()
+        return bool(r and r[0])
+    except Exception:  # noqa: BLE001 — ver docstring
+        return False
 
 
 def _tem_clientes(pool, conta_id: int) -> bool:
@@ -862,6 +880,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    # duas listas divergindo).
                    tipos_evento=_cat.TIPOS_EVENTO,
                    tem_clientes=_tem_clientes(pool, conta_id),
+                   tem_cards=_tem_cards(pool, conta_id),
                    # atalho do campo Local: o endereço da própria empresa, num toque.
                    # `pode_cadastrar` decide quem vê o convite pra preencher quando
                    # ainda não há endereço — só quem mexe nos dados da empresa. Pra
@@ -1009,6 +1028,66 @@ def _resolver_cliente(pool, conta_id: int, cliente_id: str, cliente_nome: str):
         return None, nome
 
 
+def _card_do_compromisso(pool, ctx: dict, prospeccao_id: str) -> int | None:
+    """O card escolhido no formulário, se for MESMO desta conta — e, pra quem é
+    vendedor, se for DELE (a mesma posse da busca). O form vem do navegador, e
+    navegador não é fonte confiável. Qualquer outra coisa vira "sem card", que é
+    como o compromisso nascia antes."""
+    pid = _txt(prospeccao_id).strip()
+    if not pid.isdigit():
+        return None
+    try:
+        with pool.connection() as c:
+            r = c.execute("select vendedor_id from prospeccao where id=%s and conta_id=%s",
+                          (int(pid), ctx["conta_id"])).fetchone()
+    except Exception:  # noqa: BLE001 — o vínculo é acessório; a data não é
+        return None
+    if not r:
+        return None
+    if ctx.get("papel") == "vendedor" and r[0] != ctx.get("membro_id"):
+        return None
+    return int(pid)
+
+
+@router.get("/painel/agenda/buscar-card")
+def agenda_buscar_card(request: Request, q: str = ""):
+    """Os cards do funil pro campo "Card do funil" do novo compromisso: por nome ou
+    pelos dígitos do telefone. Vendedor acha só os dele; dono e gestor, todos. O
+    perdido entra por último — cliente que volta pra visitar existe."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"itens": []}, status_code=401)
+    termo = (q or "").strip()
+    if len(termo) < 2:
+        return JSONResponse({"itens": []})
+    digitos = "".join(ch for ch in termo if ch.isdigit())
+    sql = """select p.id, coalesce(nullif(p.contato, ''), nullif(p.empresa, ''), 'Lead'),
+                    coalesce(p.whatsapp, p.telefone, ''), coalesce(fe.rotulo, p.status),
+                    coalesce(m.nome, '')
+               from prospeccao p
+               left join funil_etapas fe on fe.conta_id = p.conta_id and fe.chave = p.status
+               left join membros m on m.id = p.vendedor_id
+              where p.conta_id = %s and coalesce(p.estagio, 'lead') = 'lead'
+                and (p.contato ilike %s or p.empresa ilike %s"""
+    args: list = [ctx["conta_id"], f"%{termo}%", f"%{termo}%"]
+    if len(digitos) >= 4:
+        sql += (" or regexp_replace(coalesce(p.whatsapp, '') || ' ' || coalesce(p.telefone, ''),"
+                " '\\D', '', 'g') like %s")
+        args.append(f"%{digitos}%")
+    sql += ")"
+    if ctx.get("papel") == "vendedor":
+        sql += " and p.vendedor_id = %s"
+        args.append(ctx.get("membro_id"))
+    sql += " order by (p.status = 'perdido'), p.atualizado_em desc nulls last limit 8"
+    try:
+        with get_pool().connection() as c:
+            rows = c.execute(sql, args).fetchall()
+    except Exception:  # noqa: BLE001
+        rows = []
+    return JSONResponse({"itens": [{"id": r[0], "nome": r[1], "telefone": r[2], "etapa": r[3],
+                                    "vendedor": r[4]} for r in rows]})
+
+
 @router.post("/painel/agenda/novo")
 def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                 hora: str = Form(""), hora_fim: str = Form(""),
@@ -1020,6 +1099,7 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                 sinal_esperado: str = Form(""),
                 cliente_id: str = Form(""), cliente_nome: str = Form(""),
                 tipo_evento: str = Form(""), convidados: str = Form(""),
+                prospeccao_id: str = Form(""),
                 m: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -1067,6 +1147,9 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
     # DE QUEM é (migração 192). O cliente é opcional de propósito: reunião interna
     # e compromisso pessoal não têm dono, e exigir um transformaria o campo em ruído.
     cli_id, _cli_nome = _resolver_cliente(pool, ctx["conta_id"], cliente_id, cliente_nome)
+    # DE QUAL CARD É (24/09/2026). A visita digitada aqui nascia sem card, e visita
+    # sem card era a que sumia do Raio-X — foi a da Renata, na Prime.
+    lead_id = _card_do_compromisso(pool, ctx, prospeccao_id)
     # Tipo da festa e quantidade de gente só valem no nicho que vende data — é a
     # mesma regra da migração 179, e o gate está aqui no SERVIDOR porque o form vem
     # do navegador, e navegador não é fonte confiável.
@@ -1081,7 +1164,8 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                          tipo=tipo if tipo in ag.TIPOS else "pessoal",
                          link_online=(link_online or "").strip() or None if ag.eh_online(local) else None,
                          pre_reserva_ate=ate, sinal_centavos=sinal_cent,
-                         cliente_id=cli_id, tipo_evento=tp_ev, convidados=n_conv)
+                         cliente_id=cli_id, tipo_evento=tp_ev, convidados=n_conv,
+                         prospeccao_id=lead_id)
     destino = f"/painel/agenda?m={inicio.year:04d}-{inicio.month:02d}"
     if ate is not None:
         request.session["agenda_aviso"] = (
@@ -2621,6 +2705,40 @@ function cliPick(i){
   montaTitulo();
 }
 function cliNovo(){ cliSug().style.display='none'; montaTitulo(); }
+// ── card do compromisso (24/09/2026) ─────────────────────────────────────
+// Só o id viaja: escolher da lista liga; digitar e não escolher não liga nada —
+// ligar no card errado daria a visita pro vendedor errado, em silêncio.
+var CARD_T = null, CARD_RES = [];
+function cardSug(){ return document.getElementById('fCardSug'); }
+function cardBusca(q){
+  var el = document.getElementById('fCardId'); if(el) el.value = '';
+  q = (q||'').trim();
+  if(CARD_T) clearTimeout(CARD_T);
+  var sug = cardSug(); if(!sug) return;
+  if(q.length < 2){ sug.style.display='none'; return; }
+  CARD_T = setTimeout(function(){
+    zapFetch('/painel/agenda/buscar-card?q='+encodeURIComponent(q)).then(function(d){if(!d)return;
+        CARD_RES = d.itens || [];
+        var h = '';
+        CARD_RES.forEach(function(c, i){
+          var det = [c.telefone, c.etapa, c.vendedor].filter(function(x){return x;}).join(' · ');
+          h += '<div onclick="cardPick('+i+')">'+_esc(c.nome)+'<span class="leg"> · '+_esc(det)+'</span></div>';
+        });
+        if(!CARD_RES.length) h = '<div class="leg">Nenhum card com esse nome ou telefone.</div>';
+        sug.innerHTML = h; sug.style.display='block';
+      });
+  }, 250);
+}
+function cardPick(i){
+  var c = CARD_RES[i]; if(!c) return;
+  document.getElementById('fCard').value = c.nome;
+  document.getElementById('fCardId').value = c.id;
+  cardSug().style.display = 'none';
+}
+document.addEventListener('click', function(ev){
+  var s = cardSug(), i = document.getElementById('fCard');
+  if(s && i && ev.target !== i && !s.contains(ev.target)) s.style.display='none';
+});
 // O título se monta sozinho no formato que a equipe JÁ digita hoje
 // ("Locação — Fulano"), e para de se montar assim que alguém o reescreve: o
 // vínculo mora no cliente_id, o texto é só o nome que a festa tem no grupo.
@@ -3527,6 +3645,17 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                  autocomplete="off" oninput="cliBusca(this.value)">
           <input type="hidden" name="cliente_id" id="fCliId">
           <div id="fCliSug" class="cli-sug" style="display:none"></div>
+          {% endif %}
+          {#- DE QUAL CARD É (24/09/2026). A visita digitada aqui nascia sem card e
+              sumia do Raio-X (a da Renata, na Prime). Opcional: reunião interna e
+              festa por telefonema não têm card. -#}
+          {% if tem_cards %}
+          <label>Card do funil <span style="font-weight:400">(opcional)</span></label>
+          <input id="fCard" placeholder="De qual lead é? Nome ou telefone…"
+                 autocomplete="off" oninput="cardBusca(this.value)">
+          <input type="hidden" name="prospeccao_id" id="fCardId">
+          <div id="fCardSug" class="cli-sug" style="display:none"></div>
+          <div class="cli-dica">{{ rot.card_dica }}</div>
           {% endif %}
           {% if vende_data %}
           <label>{{ rot.tipo }}</label>

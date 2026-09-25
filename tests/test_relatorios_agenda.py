@@ -25,7 +25,7 @@ create table orcamentos (id bigserial primary key, conta_id bigint,
 -- relatório nem roda.
 create table prospeccao (id bigserial primary key, conta_id bigint,
   contato text, empresa text not null default 'Empresa',
-  evento_convidados int, evento_tipo text);
+  evento_convidados int, evento_tipo text, vendedor_id bigint);
 create table eventos_agenda (id bigserial primary key, conta_id bigint,
   membro_id bigint, titulo text not null, inicio timestamptz not null,
   tipo text default 'pessoal', tipo_evento text, status text default 'ativo',

@@ -74,7 +74,7 @@ def ligar(c, conta_id: int, lead_id: int, orcamento_id: int,
     if not r:
         return False
     status = r[0]
-    novo = status if status in _INTOCAVEIS else ETAPA_PROPOSTA
+    novo = status if (status in _INTOCAVEIS or _passou_da_venda(c, conta_id, status)) else ETAPA_PROPOSTA
     c.execute(
         "update prospeccao set orcamento_id=%s, status=%s, atualizado_em=now() "
         "where id=%s and conta_id=%s and orcamento_id is null",
@@ -92,6 +92,27 @@ def ligar(c, conta_id: int, lead_id: int, orcamento_id: int,
         except Exception:  # noqa: BLE001
             _log.warning("não registrei o movimento do lead %s", lead_id, exc_info=True)
     return True
+
+
+def _passou_da_venda(c, conta_id: int, status: str | None) -> bool:
+    """O lead está numa etapa na altura do fechamento ou depois (a Prime tem
+    "Evento A Realizar" e "Evento Realizado" depois do ganho)? Aí a proposta se
+    amarra, mas o card não volta pra "Proposta" — é a mesma trava do
+    `funil_ganho` ("nunca anda pra trás"). Importa desde 24/09/2026, quando a
+    aprovação e a assinatura passaram a chamar o `garantir` também.
+
+    Savepoint e tolerante: base sem `funil_etapas` responde "não passou", que é
+    como a função se comportava antes."""
+    if not status:
+        return False
+    try:
+        with c.transaction():
+            alturas = dict(c.execute("select chave, ordem from funil_etapas where conta_id=%s",
+                                     (conta_id,)).fetchall() or [])
+    except Exception:  # noqa: BLE001
+        return False
+    piso = alturas.get("ganho", 900)
+    return alturas.get(status) is not None and alturas[status] >= piso
 
 
 def _candidatos(c, conta_id: int, telefone: str, email: str) -> list[int]:
@@ -122,13 +143,19 @@ def _criar(c, conta_id: int, orc: dict, membro_id: int | None) -> int:
     na prática: o card apareceria na primeira coluna com uma proposta já enviada em
     cima, e alguém ia trabalhar um lead que não precisa de primeiro contato."""
     nome = (orc.get("empresa") or orc.get("cliente") or "Cliente sem nome").strip()
+    # CNPJ VAZIO É NULO, NUNCA ''. `prospeccao` tem único parcial em (conta_id, cnpj)
+    # "where cnpj is not null" — e '' não é nulo. Até 24/09/2026 isto gravava '', e o
+    # primeiro card sem CNPJ de cada conta ocupava a vaga: na Prime ele nasceu em
+    # 14/09 (Lillian Paz) e, dali em diante, TODO card de proposta sem CNPJ batia no
+    # único e morria calado dentro do `garantir`. Três propostas ficaram sem card,
+    # duas delas já com contrato assinado.
     return c.execute(
         """insert into prospeccao (conta_id, vendedor_id, empresa, contato, cnpj,
               whatsapp, telefone, email, cidade, uf, segmento, origem, status,
               estagio, orcamento_id, criado_por, atualizado_em)
            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'proposta',%s,'lead',%s,%s,now())
            returning id""",
-        (conta_id, membro_id, nome, orc.get("cliente") or "", orc.get("cnpj") or "",
+        (conta_id, membro_id, nome, orc.get("cliente") or "", (orc.get("cnpj") or "").strip() or None,
          orc.get("whatsapp") or "", orc.get("telefone") or "", orc.get("email") or "",
          orc.get("cidade") or "", orc.get("uf") or "", orc.get("segmento") or "",
          ETAPA_PROPOSTA, orc.get("id"), membro_id)).fetchone()[0]
@@ -181,9 +208,46 @@ def garantir(pool, conta_id: int, orcamento_id: int,
             if not (orc["empresa"] or orc["cliente"]):
                 return {"lead_id": None, "como": "sem_dados"}
             novo = _criar(c, conta_id, orc, membro_id)
+            # a data, o tipo e os convidados da festa vão pro card que nasce, como
+            # vão pro card que é amarrado (`ligar`) — tolerante por dentro
+            from finance import evento_lead as _evl
+            _evl.sincronizar_do_orcamento(c, conta_id, orcamento_id)
             c.commit()
             return {"lead_id": novo, "como": "criado"}
     except Exception as ex:  # noqa: BLE001 — o funil não derruba o envio
         _log.warning("proposta %s: não consegui garantir o card: %s: %s",
                      orcamento_id, type(ex).__name__, ex)
         return {"lead_id": None, "como": "sem_dados"}
+
+
+def garantir_pelo_orcamento(pool, conta_id: int, orcamento_id: int) -> dict:
+    """O `garantir` pra quando ninguém apertou "enviar": a APROVAÇÃO pelo link e a
+    ASSINATURA do contrato (decisão do dono, 24/09/2026 — "sim pode criar").
+
+    O card nascia só no registro de envio. Proposta mandada por fora (o link
+    copiado e colado no WhatsApp do celular) nunca passava por lá: na Prime, as
+    propostas da Josinalva e da Viviane foram aprovadas, pagas e assinadas sem
+    card nenhum, e os dois contratos sumiam de toda tela que parte do funil.
+    Aprovação e assinatura provam que a proposta saiu — são portas tão boas
+    quanto o envio.
+
+    O VENDEDOR do card é quem fez o orçamento (`criado_por` com o id de um membro
+    DESTA conta) — a mesma régua de `cockpit_dono.SQL_CT_VENDEDOR`. 'dono' ou vazio
+    fica sem vendedor, que é visível e se conserta na tela.
+
+    Nunca levanta, e é idempotente: orçamento que já tem card devolve 'ja_tinha'.
+    """
+    membro_id = None
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select m.id from orcamentos o
+                     join membros m on m.conta_id = o.conta_id
+                                   and o.criado_por ~ '^[0-9]+$' and m.id = o.criado_por::bigint
+                    where o.id = %s and o.conta_id = %s""",
+                (int(orcamento_id), conta_id)).fetchone()
+        membro_id = r[0] if r else None
+    except Exception as ex:  # noqa: BLE001 — sem vendedor o card nasce assim mesmo
+        _log.warning("proposta %s: não li quem fez o orçamento: %s: %s",
+                     orcamento_id, type(ex).__name__, ex)
+    return garantir(pool, conta_id, int(orcamento_id), membro_id)

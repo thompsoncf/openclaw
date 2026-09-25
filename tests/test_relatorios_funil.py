@@ -30,7 +30,8 @@ create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
   sinal_pago_em timestamptz);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
-  whatsapp text, telefone text, criado_em timestamptz not null default now());
+  whatsapp text, telefone text, criado_em timestamptz not null default now(),
+  contato text, vendedor_id bigint);
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   criado_em timestamptz not null default now(), visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
@@ -38,6 +39,7 @@ create table mensagens (id bigserial primary key, conversa_id bigint, direcao te
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_id bigint,
   titulo text, inicio timestamptz, status text default 'ativo', desfecho text,
+  tipo text default 'pessoal',
   tipo_evento text, prospeccao_id bigint, criado_em timestamptz not null default now(),
   -- as colunas que a agenda do Cockpit lê junto (finance/cockpit.agenda_da_conta)
   local text, ics_token text, pre_reserva_ate timestamptz,

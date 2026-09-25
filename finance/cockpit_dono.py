@@ -13,6 +13,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from finance import funil_regua as _fr
+from finance import visita as _vis
 
 _log_cd = logging.getLogger("finance.cockpit_dono")
 
@@ -264,9 +265,11 @@ def visao(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> di
             (conta_id, agora.replace(hour=0, minute=0, second=0, microsecond=0))).fetchone()[0]
         propostas = c.execute("select count(*) from orcamentos where conta_id=%s and status='enviado'",
                               (conta_id,)).fetchone()[0]
+        # a visita de hoje pela régua de `finance.visita` (24/09/2026): com ou sem
+        # card, e a festa do dia não entra
         visitas = c.execute(
-            "select count(*) from eventos_agenda where conta_id=%s and status='ativo' and prospeccao_id is not null "
-            "and inicio >= %s and inicio < %s",
+            "select count(*) from eventos_agenda e where e.conta_id=%s and " + _vis.sql_conta("e")
+            + " and e.inicio >= %s and e.inicio < %s",
             (conta_id, agora.replace(hour=0, minute=0, second=0, microsecond=0),
              agora.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))).fetchone()[0]
     return {

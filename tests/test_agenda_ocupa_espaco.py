@@ -38,17 +38,31 @@ def test_visita_nao_ocupa_o_espaco():
     assert ag.estado_da_data(_ev("Visita — Shirley Cristina")) == ag.LIVRE
 
 
-def test_a_regua_da_visita_e_a_mesma_de_relatorios():
-    """`web/painel_relatorios._E_VISITA` diz, em SQL:
+def test_a_regua_de_ocupar_e_mais_estreita_que_a_de_contar_visita():
+    """Até 24/09/2026 este teste fixava que esta régua era a MESMA de
+    `web/painel_relatorios._E_VISITA` — "se alguém mudar uma, a outra grite". Ela
+    gritou: a de CONTAR visita foi pra `finance.visita` e ficou mais larga (vale
+    também o compromisso ligado a um card, sem olhar o título), porque o Raio-X e o
+    Relatório davam números diferentes pra mesma semana.
 
-        (e.titulo ilike 'visita%' and e.tipo_evento is null)
-
-    Duas cópias da mesma pergunta acertam no primeiro dia e divergem no terceiro.
-    Este teste existe pra que, se alguém mudar uma, a outra grite.
+    A de OCUPAR a data ficou estreita de propósito, e o que se fixa agora é a
+    relação entre as duas:
+      - toda visita pelo título é visita pras duas;
+      - o contrário não: uma festa digitada sem tipo e ligada ao card do cliente
+        CONTA como visita (é o que a régua de contar decidiu), mas NÃO libera o
+        sábado — liberar errado vende a mesma data duas vezes.
     """
+    from finance import visita as vis
     from web import painel_relatorios as pr
-    assert "titulo ilike 'visita%%'" in pr._E_VISITA
-    assert "tipo_evento is null" in pr._E_VISITA
+    assert pr._E_VISITA == vis.sql_e_visita("e")
+    for titulo, tipo_evento in (("Visita — Shirley", None), ("VISITA TÉCNICA - PEDRO", None),
+                                ("Visita — Ana", "Casamento"), ("Aniversário", None),
+                                ("Reunião com a engenheira", None)):
+        if ag.eh_visita(titulo=titulo, tipo_evento=tipo_evento):
+            assert vis.eh_visita(titulo=titulo, tipo_evento=tipo_evento), titulo
+    assert vis.eh_visita(titulo="ANIVERSÁRIO", prospeccao_id=7)
+    assert not ag.eh_visita(titulo="ANIVERSÁRIO")
+    assert ag.estado_da_data(_ev("ANIVERSÁRIO", prospeccao_id=7)) != ag.LIVRE
 
 
 def test_a_equipe_tambem_batiza_visita_na_mao():

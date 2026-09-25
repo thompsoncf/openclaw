@@ -106,17 +106,41 @@ def _hora(m: int) -> time:
     return time(m // 60, m % 60)
 
 
+def _cortar(faixas: list[dict], bi: int, bf: int) -> list[dict]:
+    """Tira o intervalo [bi, bf) (minutos) de cada faixa."""
+    out = []
+    for f in faixas:
+        if bf <= f["inicio"] or bi >= f["fim"]:
+            out.append(f)
+            continue
+        if f["inicio"] < bi:
+            out.append(dict(f, fim=bi))
+        if bf < f["fim"]:
+            out.append(dict(f, inicio=bf))
+    return out
+
+
 def faixas_do_dia(grade: list[dict], bloqueios: list[dict], profissional_id: int,
                   dia: date) -> list[dict]:
     """As faixas em que o profissional atende neste dia, já sem os bloqueios.
 
     Devolve [{inicio, fim, local_id, encaixes}], em hora de Brasília, ordenadas.
     """
-    faixas = [{"inicio": _min(g["inicio"]), "fim": _min(g["fim"]),
-               "local_id": g["local_id"], "encaixes": g.get("encaixes") or 0}
-              for g in grade
+    do_dia = [g for g in grade
               if g["profissional_id"] == profissional_id and g.get("ativo", True)
               and acontece(g, dia)]
+    faixas = [{"inicio": _min(g["inicio"]), "fim": _min(g["fim"]),
+               "local_id": g["local_id"], "encaixes": g.get("encaixes") or 0}
+              for g in do_dia if (g.get("repete") or "semanal") == "semanal"]
+    # A EXCEÇÃO VENCE A REGRA: a 3ª quinta em Bacabal tira a sede daquele horário.
+    # Sem isso o mesmo horário saía duas vezes, um em cada lugar, e a agenda podia
+    # marcar paciente na sede com o médico viajando.
+    for g in do_dia:
+        if (g.get("repete") or "semanal") == "semanal":
+            continue
+        faixas = _cortar(faixas, _min(g["inicio"]), _min(g["fim"]))
+        faixas.append({"inicio": _min(g["inicio"]), "fim": _min(g["fim"]),
+                       "local_id": g["local_id"], "encaixes": g.get("encaixes") or 0})
     for b in bloqueios:
         if b.get("profissional_id") not in (None, profissional_id):
             continue
@@ -124,17 +148,7 @@ def faixas_do_dia(grade: list[dict], bloqueios: list[dict], profissional_id: int
             continue
         if b.get("inicio") is None:
             return []                                   # o dia todo
-        bi, bf = _min(b["inicio"]), _min(b["fim"])
-        cortadas = []
-        for f in faixas:
-            if bf <= f["inicio"] or bi >= f["fim"]:
-                cortadas.append(f)
-                continue
-            if f["inicio"] < bi:
-                cortadas.append(dict(f, fim=bi))
-            if bf < f["fim"]:
-                cortadas.append(dict(f, inicio=bf))
-        faixas = cortadas
+        faixas = _cortar(faixas, _min(b["inicio"]), _min(b["fim"]))
     return sorted(({**f, "inicio": _hora(f["inicio"]), "fim": _hora(f["fim"])} for f in faixas),
                   key=lambda f: f["inicio"])
 
@@ -176,6 +190,8 @@ def livres_puros(grade: list[dict], bloqueios: list[dict], profissional_id: int,
                     continue
                 if any(ini < of and oi < fim for oi, of in ocupados):
                     continue
+                if out and any(x["inicio"] == ini for x in out[-8:]):
+                    continue
                 out.append({"inicio": ini, "fim": fim, "local_id": f["local_id"]})
                 if limite and len(out) >= limite:
                     return out
@@ -190,11 +206,12 @@ def centavos(txt: str | None) -> int | None:
         return 0
     if "," in t:
         t = t.replace(".", "").replace(",", ".")
-    try:
-        v = round(float(t) * 100)
-    except ValueError:
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", t):
+        t = t.replace(".", "")       # "1.200" é mil e duzentos, não um e vinte
+    if not re.fullmatch(r"\d+(\.\d{1,2})?", t):
         return None
-    return v if v >= 0 else None
+    v = round(float(t) * 100)
+    return v if 0 <= v <= 10_000_000 else None     # até R$ 100 mil
 
 
 def reais(c: int | None) -> str:
@@ -238,10 +255,13 @@ def listar_locais(c, conta_id: int, so_ativos: bool = True) -> list[dict]:
 
 def listar_grade(c, conta_id: int) -> list[dict]:
     rows = c.execute(
-        """select id, profissional_id, local_id, dias, inicio, fim, repete, semana_do_mes,
-                  referencia, encaixes
-             from clinica_grade where conta_id=%s and ativo
-            order by profissional_id, inicio""", (conta_id,)).fetchall()
+        """select g.id, g.profissional_id, g.local_id, g.dias, g.inicio, g.fim, g.repete,
+                  g.semana_do_mes, g.referencia, g.encaixes
+             from clinica_grade g
+             join clinica_profissionais p on p.id = g.profissional_id and p.conta_id = g.conta_id
+             join clinica_locais l on l.id = g.local_id and l.conta_id = g.conta_id
+            where g.conta_id=%s and g.ativo and p.ativo and l.ativo
+            order by g.profissional_id, g.inicio""", (conta_id,)).fetchall()
     return [{"id": r[0], "profissional_id": r[1], "local_id": r[2], "dias": r[3],
              "inicio": r[4], "fim": r[5], "repete": r[6], "semana_do_mes": r[7],
              "referencia": r[8], "encaixes": r[9], "ativo": True} for r in rows]
@@ -264,7 +284,9 @@ def listar_profissionais(c, conta_id: int, so_ativos: bool = True) -> list[dict]
         + " order by ordem, id", (conta_id,)).fetchall()
     tipos: dict[int, list[int]] = {}
     for p, s in c.execute(
-            "select profissional_id, servico_id from clinica_profissional_tipos where conta_id=%s",
+            """select pt.profissional_id, pt.servico_id from clinica_profissional_tipos pt
+                 join servicos_catalogo s on s.id = pt.servico_id and s.conta_id = pt.conta_id
+                where pt.conta_id=%s and s.ativo""",
             (conta_id,)).fetchall():
         tipos.setdefault(p, []).append(s)
     return [{"id": r[0], "nome": r[1], "funcao": r[2], "especialidade": r[3],
@@ -375,8 +397,14 @@ def desativar(c, conta_id: int, tabela: str, id_: int) -> bool:
     """Tira da tela sem apagar: agendamento antigo continua apontando pra ele."""
     if tabela not in ("clinica_profissionais", "clinica_locais", "clinica_grade"):
         raise ValueError(tabela)
-    return bool(c.execute(f"update {tabela} set ativo=false where id=%s and conta_id=%s returning id",
-                          (id_, conta_id)).fetchone())
+    ok = bool(c.execute(f"update {tabela} set ativo=false where id=%s and conta_id=%s returning id",
+                        (id_, conta_id)).fetchone())
+    # a grade de quem saiu (ou do local que saiu) para de valer junto
+    coluna = {"clinica_profissionais": "profissional_id", "clinica_locais": "local_id"}.get(tabela)
+    if ok and coluna:
+        c.execute(f"update clinica_grade set ativo=false where conta_id=%s and {coluna}=%s",
+                  (conta_id, id_))
+    return ok
 
 
 def salvar_local(c, conta_id: int, *, id: int | None = None, nome: str,
@@ -404,7 +432,13 @@ def salvar_tipo(c, conta_id: int, *, id: int | None = None, nome: str,
     nome = (nome or "").strip()
     if not nome:
         return "Informe o nome do atendimento."
-    if categoria not in dict(CATEGORIAS):
+    atual = None
+    if id:
+        r = c.execute("select coalesce(categoria,'') from servicos_catalogo where id=%s and conta_id=%s",
+                      (id, conta_id)).fetchone()
+        atual = r[0] if r else None
+    # categoria fora da lista só se já era a dela (linha antiga do catálogo)
+    if categoria not in dict(CATEGORIAS) and not (atual is not None and categoria == atual):
         return "Categoria inválida."
     try:
         duracao_min = int(duracao_min)
@@ -421,7 +455,7 @@ def salvar_tipo(c, conta_id: int, *, id: int | None = None, nome: str,
         return "Cor inválida."
     # o agente só diz preço que existe: zero é "sob consulta"
     diz = bool(agente_diz_preco) and preco_centavos > 0
-    campos = (nome[:80], duracao_min, categoria, cor, int(preco_centavos),
+    campos = (nome[:80], duracao_min, categoria or None, cor, int(preco_centavos),
               int(volta_dias) if volta_dias else None, (volta_motivo or "").strip()[:200] or None,
               diz, bool(agente_marca))
     if id:
@@ -485,9 +519,9 @@ def salvar_grade(c, conta_id: int, *, profissional_id: int, local_id: int, dias:
         encaixes = 0
     if not 0 <= encaixes <= 20:
         return "Encaixes vão de 0 a 20 por dia."
-    # a mesma pessoa em dois lugares ao mesmo tempo: só pega o caso certo (as duas
-    # semanais); quinzenal e mensal cruzando semanal é escolha consciente de quem
-    # viaja, e o bloqueio resolve
+    # a mesma pessoa em dois lugares ao mesmo tempo: só entre duas SEMANAIS. Uma
+    # quinzenal ou mensal por cima da semanal é a viagem, e vence a sede naquele
+    # horário (ver `faixas_do_dia`)
     if repete == "semanal":
         for g in listar_grade(c, conta_id):
             if (g["profissional_id"] == profissional_id and g["repete"] == "semanal"

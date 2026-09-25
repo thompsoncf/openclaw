@@ -104,3 +104,28 @@ def test_preco_em_centavos():
     assert cc.centavos("") == 0
     assert cc.centavos("abc") is None
     assert cc.reais(50000) == "R$ 500" and cc.reais(0) == "sob consulta"
+
+
+# ------------------------------------------------------------------ revisão do #848
+
+def test_preco_com_ponto_de_milhar():
+    assert cc.centavos("1.200") == 120000
+    assert cc.centavos("R$ 1.500") == 150000
+    assert cc.centavos("1.200.000") is None          # acima do teto (R$ 100 mil)
+    assert cc.centavos("500.50") == 50050
+    assert cc.centavos("inf") is None and cc.centavos("1e9") is None
+
+
+def test_a_viagem_vence_a_sede_no_mesmo_horario():
+    """3ª quinta em Bacabal, 08:00–12:00: naquela manhã ele não está na sede."""
+    bacabal = {"profissional_id": MANOEL, "local_id": 20, "dias": "4", "inicio": time(8),
+               "fim": time(12), "repete": "mensal", "semana_do_mes": 3}
+    quinta = date(2026, 10, 15)
+    f = cc.faixas_do_dia(GRADE + [bacabal], [], MANOEL, quinta)
+    assert [(x["inicio"], x["local_id"]) for x in f] == [(time(8), 20), (time(13, 30), 10)]
+    livres = cc.livres_puros(GRADE + [bacabal], [], MANOEL, 30, quinta, 1, AGORA)
+    inicios = [x["inicio"] for x in livres]
+    assert len(inicios) == len(set(inicios))            # nenhum horário em dois lugares
+    # na outra quinta, a sede de sempre
+    f = cc.faixas_do_dia(GRADE + [bacabal], [], MANOEL, date(2026, 10, 8))
+    assert {x["local_id"] for x in f} == {10}

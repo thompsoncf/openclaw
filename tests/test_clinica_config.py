@@ -223,3 +223,60 @@ def test_nao_ha_festa_na_tela(cli):
         miolo = html.split('class="cl-pag"', 1)[1].lower()
         for palavra in ("festa", "convidado", "orçamento"):
             assert palavra not in miolo, (aba, palavra)
+
+
+# ------------------------------------------------------------------ revisão do #848
+
+def test_tirar_local_ou_profissional_derruba_a_grade(pool):
+    with pool.connection() as c:
+        manoel = cc.listar_profissionais(c, CLINICA)[0]
+        consulta = next(t for t in cc.listar_tipos(c, CLINICA) if t["nome"] == "Consulta")
+        sede = cc.listar_locais(c, CLINICA)[0]
+        assert cc.livres(c, CLINICA, manoel["id"], consulta["id"], SEG, dias=1, agora=AGORA)
+        assert cc.desativar(c, CLINICA, "clinica_locais", sede["id"])
+        assert cc.listar_grade(c, CLINICA) == []
+        assert cc.livres(c, CLINICA, manoel["id"], consulta["id"], SEG, dias=1, agora=AGORA) == []
+
+
+def test_atendimento_tirado_nao_conta_mais(pool):
+    with pool.connection() as c:
+        juliana = cc.listar_profissionais(c, CLINICA)[1]
+        for t in juliana["tipos"]:
+            cc.desativar_tipo(c, CLINICA, t)
+        assert "Juliana" in cc.resumo(c, CLINICA)["sem_tipo"]
+
+
+def test_categoria_antiga_nao_vira_consulta(pool):
+    with pool.connection() as c:
+        c.execute("""insert into servicos_catalogo (conta_id, slug, nome, categoria)
+                     values (%s, 'buffet-velho', 'Linha antiga', 'Buffet')""", (CLINICA,))
+        velho = next(t for t in cc.listar_tipos(c, CLINICA) if t["slug"] == "buffet-velho")
+        assert cc.salvar_tipo(c, CLINICA, id=velho["id"], nome="Linha antiga", duracao_min=30,
+                              categoria="Buffet") is None
+        assert next(t for t in cc.listar_tipos(c, CLINICA) if t["slug"] == "buffet-velho")["categoria"] == "Buffet"
+        # e uma categoria inventada numa linha nova continua recusada
+        assert cc.salvar_tipo(c, CLINICA, nome="Novo", categoria="Buffet") is not None
+
+
+def test_bloqueio_de_quem_saiu_nao_vira_a_clinica_toda(cli, pool):
+    with pool.connection() as c:
+        brenda = cc.listar_profissionais(c, CLINICA)[2]
+        cc.salvar_bloqueio(c, CLINICA, profissional_id=brenda["id"], de=date(2030, 1, 2), ate=None,
+                           motivo="férias")
+        cc.desativar(c, CLINICA, "clinica_profissionais", brenda["id"])
+        c.commit()
+    html = cli.get("/painel/clinica/configurar?aba=grade").text
+    assert "Brenda (fora da agenda)" in html
+
+
+def test_o_agente_respeita_o_preco_escondido(pool):
+    from finance import agente
+    with pool.connection() as c:
+        escondidos = agente._precos_escondidos(c, CLINICA)
+    # a consulta pode (semente), o resto da clínica não
+    assert "consulta" not in escondidos and "procedimento-estetico" in escondidos
+    linha = agente._linha_catalogo({"nome": "Procedimento estético", "slug": "procedimento-estetico",
+                                    "setup_centavos": 150000}, True)
+    assert "sob consulta" in linha and "1.500" not in linha
+    # sem a trava, o de sempre (as outras contas não mudam)
+    assert "R$" in agente._linha_catalogo({"nome": "X", "slug": "x", "setup_centavos": 150000})

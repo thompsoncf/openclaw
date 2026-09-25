@@ -96,6 +96,7 @@ def configurar(request: Request):
         bloqueios = cc.listar_bloqueios(c, conta_id, hoje)
         membros = cc.membros_da_conta(c, conta_id)
         resumo = cc.resumo(c, conta_id)
+        todos_profs = cc.listar_profissionais(c, conta_id, so_ativos=False)
         # a prova de que a grade funciona: os próximos horários livres de cada um,
         # no primeiro atendimento que ele faz
         amostra = {}
@@ -108,7 +109,8 @@ def configurar(request: Request):
                                                                      for x in livres]}
     nome_tipo = {t["id"]: t["nome"] for t in tipos}
     nome_local = {x["id"]: x["nome"] for x in locais}
-    nome_prof = {p["id"]: p["nome"] for p in profs}
+    nome_prof = {p["id"]: p["nome"] + ("" if p["ativo"] else " (fora da agenda)")
+                 for p in todos_profs}
     grade_de = {}
     for g in grade:
         grade_de.setdefault(g["profissional_id"], []).append(dict(
@@ -373,7 +375,7 @@ details.cl-ed summary::-webkit-details-marker{display:none}
   {% for b in bloqueios %}
     <div class="cl-card"><div class="cl-gl"><b>{{ b.de.strftime('%d/%m/%Y') }}{% if b.ate != b.de %} a {{ b.ate.strftime('%d/%m/%Y') }}{% endif %}</b>
       <span>{% if b.inicio %}{{ '%02d:%02d'|format(b.inicio.hour, b.inicio.minute) }}–{{ '%02d:%02d'|format(b.fim.hour, b.fim.minute) }}{% else %}dia todo{% endif %}</span>
-      <span class="mut">{{ nome_prof.get(b.profissional_id, 'a clínica toda') if b.profissional_id else 'a clínica toda' }}{% if b.motivo %} · {{ b.motivo }}{% endif %}</span>
+      <span class="mut">{{ nome_prof.get(b.profissional_id, 'profissional removido') if b.profissional_id else 'a clínica toda' }}{% if b.motivo %} · {{ b.motivo }}{% endif %}</span>
       <form class="cl-rm" method="post" action="/painel/clinica/bloqueio/{{ b.id }}/remover"><button>Tirar</button></form></div></div>
   {% else %}<div class="meta">Nenhum bloqueio daqui pra frente.</div>{% endfor %}
   </div>
@@ -410,13 +412,13 @@ _TPL_PROF = r"""<form class="cl-form" method="post" action="/painel/clinica/prof
 _TPL_TIPO = r"""<form class="cl-form" method="post" action="/painel/clinica/tipo">
   {% if f %}<input type="hidden" name="id" value="{{ f.id }}">{% endif %}
   <label>Nome<input name="nome" maxlength="80" required value="{{ f.nome if f else '' }}" placeholder="Consulta"></label>
-  <label>Categoria<select name="categoria">{% for k, rot in CAT %}<option value="{{ k }}" {% if f and f.categoria == k %}selected{% endif %}>{{ rot }}</option>{% endfor %}</select></label>
+  <label>Categoria<select name="categoria">{% if f and f.categoria not in CAT_D %}<option value="{{ f.categoria }}" selected>{{ f.categoria or '— sem categoria —' }}</option>{% endif %}{% for k, rot in CAT %}<option value="{{ k }}" {% if f and f.categoria == k %}selected{% endif %}>{{ rot }}</option>{% endfor %}</select></label>
   <label>Duração (min)<input type="number" name="duracao_min" min="5" max="480" step="5" inputmode="numeric" value="{{ f.duracao_min if f else 30 }}"></label>
   <label>Preço particular (em branco = sob consulta)<input name="preco" inputmode="decimal" value="{{ ('%.2f'|format(f.preco_centavos/100)).replace('.', ',') if f and f.preco_centavos else '' }}" placeholder="500,00"></label>
   <label>Volta em (dias, opcional)<input type="number" name="volta_dias" min="1" max="730" inputmode="numeric" value="{{ f.volta_dias if f and f.volta_dias else '' }}"></label>
   <label>Por que volta (só pra recepção)<input name="volta_motivo" maxlength="200" value="{{ f.volta_motivo if f else '' }}" placeholder="reaplicação, resultado da biópsia"></label>
   <div class="inteira"><span class="meta">Cor na agenda</span><div class="cl-cores">{% for c in CORES %}<label class="cx"><input type="radio" name="cor" value="{{ c }}" {% if (f and f.cor == c) or (not f and loop.first) %}checked{% endif %}><span class="cl-cor" style="background:{{ c }}"></span></label>{% endfor %}</div></div>
-  <label class="cx inteira"><input type="checkbox" name="agente_diz_preco" value="1" {% if f and f.agente_diz_preco %}checked{% endif %}> O agente pode dizer este preço no WhatsApp</label>
+  <label class="cx inteira"><input type="checkbox" name="agente_diz_preco" value="1" {% if f and f.agente_diz_preco %}checked{% endif %}> O agente pode dizer este preço no WhatsApp (desmarcado, ele responde "sob consulta" e a recepção informa)</label>
   <label class="cx inteira"><input type="checkbox" name="agente_marca" value="1" {% if f and f.agente_marca %}checked{% endif %}> O agente pode marcar este atendimento sozinho (quando o agente de agenda estiver no ar)</label>
   <div class="cl-acoes"><button>Salvar</button></div>
 </form>"""

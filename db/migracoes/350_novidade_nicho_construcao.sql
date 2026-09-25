@@ -1,12 +1,14 @@
--- 346_novidade_nicho_construcao.sql
+-- 350_novidade_nicho_construcao.sql
 -- O aviso do nicho de construção e reforma, seguindo a seção 5 do CLAUDE.md: PR
--- que muda tela leva o aviso, no mesmo PR. Precisa da 344 (o nome novo do nicho),
--- da 345 (as contas do plano que o assistente passa a usar) e da 199 (pra_quem,
+-- que muda tela leva o aviso, no mesmo PR. Precisa da 348 (o nome novo do nicho),
+-- da 349 (as contas do plano que o assistente passa a usar) e da 199 (pra_quem,
 -- resumo, link). Desenho aprovado pelo dono em 25/09/2026:
 -- docs/mockups/nicho_construcao.html.
 --
--- O PORTÃO É NOVO E É `construcao`, o terceiro portão de um nicho só (depois de
--- `seguros`, na 243, e `suplementos`, na 251). Nenhum dos que existiam descrevia
+-- O PORTÃO É NOVO E É `construcao`, o quarto portão de um nicho só (depois de
+-- `seguros`, na 243, `suplementos`, na 251, e `clinica`, na 347). A lista do
+-- check abaixo é a da 347 com `construcao` no fim — por isso esta roda depois
+-- dela: rodando antes, a 347 tiraria `construcao` da lista. Nenhum dos que existiam descrevia
 -- o alcance: 'servico' pegaria advocacia e contabilidade, e 'recorrente' as
 -- consultorias. O perfil `obras` e o que vier depois dele não abrem pra nenhuma
 -- delas. O portão mora em finance/novidades._construcao.
@@ -26,7 +28,7 @@ alter table public.novidades drop constraint if exists novidades_publico_check;
 alter table public.novidades add constraint novidades_publico_check
   check (publico in ('todos','produto','servico','eventos','recorrente',
                      'canal_proprio','seguros','suplementos','empresa',
-                     'construcao'));
+                     'clinica','construcao'));
 
 -- ────────────────────────────────────────────── 2. o aviso
 insert into public.novidades (chave, tipo, publico, pra_quem, titulo, resumo, link, corpo, publicado_em) values
@@ -63,4 +65,5 @@ on conflict (chave) do nothing;
 --   alter table public.novidades drop constraint if exists novidades_publico_check;
 --   alter table public.novidades add constraint novidades_publico_check
 --     check (publico in ('todos','produto','servico','eventos','recorrente',
---                        'canal_proprio','seguros','suplementos','empresa'));
+--                        'canal_proprio','seguros','suplementos','empresa',
+--                        'clinica'));

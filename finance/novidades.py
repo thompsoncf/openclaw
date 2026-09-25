@@ -101,8 +101,20 @@ def _suplementos(slug) -> bool:
     return (slug or "") == "suplementos"
 
 
+def _clinica(slug) -> bool:
+    """Clínica — o terceiro portão de UM nicho só, e o primeiro que pergunta ao
+    PERFIL e não ao slug cru. Hoje os dois coincidem (o nicho `clinica` é o único
+    do perfil), mas a tela que o aviso anuncia (/painel/hoje) abre pelo perfil; se
+    um dia entrar "odontologia" no mesmo perfil, o aviso acompanha a tela sozinho.
+    """
+    from finance import raio_x_perfil as _rxp
+    return bool(slug) and _rxp.perfil_por_nicho(slug) == "clinica"
+
+
 def _construcao(slug) -> bool:
-    """Construção e reforma — o terceiro portão de UM nicho só.
+    """Construção e reforma — o quarto portão de UM nicho só, e o segundo que
+    pergunta ao PERFIL, como o `_clinica` logo acima: a aba Obras abre pelo perfil
+    `obras` (web/painel_obras._acesso), e o aviso tem que acompanhar a tela.
 
     Obra, casa de Minha Casa Minha Vida, visita técnica e crédito da Caixa não
     existem em nenhum outro ramo. `servico` alcançaria advocacia e contabilidade,
@@ -110,7 +122,8 @@ def _construcao(slug) -> bool:
     depois dele (a aba Obras, o caminho do dinheiro da casa) não abrem pra
     nenhuma delas.
     """
-    return (slug or "") == "construcao"
+    from finance import raio_x_perfil as _rxp
+    return bool(slug) and _rxp.perfil_por_nicho(slug) == "obras"
 
 
 def _canal_proprio(pool, conta_id: int) -> bool:
@@ -179,6 +192,7 @@ PUBLICOS_NICHO = {
     "recorrente": _recorrente,
     "seguros": _seguros,
     "suplementos": _suplementos,
+    "clinica": _clinica,
     "construcao": _construcao,
 }
 

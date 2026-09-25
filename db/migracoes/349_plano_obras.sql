@@ -1,4 +1,4 @@
--- 345_plano_obras.sql
+-- 349_plano_obras.sql
 -- Duas contas novas no plano de contas, pra construção e reforma:
 --   1.1.04 Venda de Imóveis     (Receita Operacional Bruta)
 --   3.1.04 Mão de Obra de Obras (Custos — CMV / CSP)

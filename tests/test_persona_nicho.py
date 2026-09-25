@@ -20,7 +20,7 @@ _MIGRACOES = ("053_modulo_pj.sql", "031_fornecedor_fase0.sql",
               "092_funcionario_cbo.sql", "093_folha_beneficios_e_org.sql",
               "094_funcionario_demissao.sql",
               "095_funcionario_cpf.sql", "109_nicho_construcao.sql",
-              "344_nicho_construcao_e_reforma.sql")
+              "348_nicho_construcao_e_reforma.sql")
 
 
 # ── parte pura ────────────────────────────────────────────────────────────

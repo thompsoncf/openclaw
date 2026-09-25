@@ -128,6 +128,7 @@ from web.painel_agenda import router as agenda_router
 from web.painel_cockpit import router as cockpit_router
 from web.painel_origens import router as origens_router
 from web.painel_apolices import router as apolices_router
+from web.painel_hoje import router as hoje_router
 from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
@@ -309,6 +310,7 @@ app.include_router(cockpit_router)
 app.include_router(relatorios_router)
 app.include_router(origens_router)
 app.include_router(apolices_router)
+app.include_router(hoje_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)
@@ -547,6 +549,19 @@ def _iniciar_poller_email() -> None:
                              _f["represados"], _f["sincronizados"])
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — follow-up falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
+                # Voltar a chamar depois do preço (migração 346): só perfil clínica e
+                # só conta que saiu do 'off'. Depois do follow-up, que é quem cuida
+                # do mesmo lead em festa e mensalidade.
+                from finance import voltar_a_chamar as _vac
+                _v = _vac.rodar(pool)
+                if _v["contas"]:
+                    log.info("poller: ciclo #%d — voltar a chamar: %d conta(s), %d toque(s) "
+                             "novo(s), %d enviado(s), %d falha(s)",
+                             ciclo, _v["contas"], _v["novos"], _v["enviados"], _v["falhas"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — voltar a chamar falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
 
     try:
         threading.Thread(target=_loop, daemon=True, name="email-poller").start()

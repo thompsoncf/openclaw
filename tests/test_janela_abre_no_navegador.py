@@ -348,3 +348,191 @@ def test_o_lugar_da_janela_e_decidido_depois_de_medir():
         "ganha a altura de verdade")
     assert "overflow-y:auto" in css[css.index(".leadpop{"):css.index("}", css.index(".leadpop{"))]
     assert "body.lp-aberta .wa-suporte{visibility:hidden}" in css
+
+
+# ── o RESUMO DA IA (25/09/2026, docs/mockups/funil_resumo_ia.html) ────────────
+# A mesma moldura da janela do lead, aberta pelo ⋯ do card. Medido no navegador,
+# na página do quadro de verdade, com a rede trocada por um dublê que responde por
+# URL e por método — o que se mede é: o GET lê o guardado sem gastar, o POST só
+# vai quando não há resumo, a janela fica inteira na tela, e "Usar na conversa"
+# SÓ PREENCHE o campo do balão (decisão 1 do dono).
+
+_PACOTE = {
+    "ok": True, "lead": {"nome": "Camila Rocha", "etapa": "Negociação", "vendedor": "Jacqueline"},
+    "fatos": {"n_total": 23, "n_lidas": 23,
+              "bola": {"quem": "voce", "txt": "A bola está com você há 2 dias"}},
+    "tem_conversa": True, "conv": {"id": 501, "canal": "whatsapp", "aba": "conversas"},
+    "resumo": None, "resumo_id": None, "voto": None, "feito_txt": "", "novas": 0, "ia": True,
+    "compromisso": "visita",
+}
+_RESUMO_IA = {
+    "quer": "Contratar o pacote de sábado.",
+    "em_que_pe": ["Recebeu a proposta nº 212 em 22/09.", "Perguntou se parcela em 10x."],
+    "pode_travar": ["Achou o valor alto.", "Vai ver outro espaço no sábado."],
+    "proximo_passo": "Responder o parcelamento hoje.",
+    "nao_sei": ["A conversa e o orçamento não dizem se parcela em 10x. Confirme antes de prometer."],
+    "mensagem": "Oi, Camila! Sobre o parcelamento, vou confirmar e te respondo hoje. "
+                "Que tal vir conhecer o espaço antes de sábado?",
+}
+
+_DUBLE_IA = """(a) => {
+  window.__rede = [];
+  window.__erros = [];
+  window.onerror = function(m){ window.__erros.push(String(m)); };
+  function resp(o){ return Promise.resolve({ok: true, status: 200,
+      headers: {get: function(){ return null; }},
+      text: function(){ return Promise.resolve(JSON.stringify(o)); }}); }
+  window.fetch = function(url, op){
+    var m = ((op && op.method) || 'GET').toUpperCase();
+    window.__rede.push(m + ' ' + url);
+    if (String(url).indexOf('/comunicacao/thread/') >= 0)
+      return resp({ok: true, msgs: [], pode_responder: true, conversa_id: 501});
+    if (String(url).indexOf('/resumo-ia') >= 0 && m === 'GET') return resp(a.get);
+    if (String(url).indexOf('/resumo-ia') >= 0 && m === 'POST') return resp(a.post);
+    return resp({ok: true});
+  };
+  var d = document.createElement('div');
+  d.className = 'kbcard'; d.id = 'card-ia'; d.setAttribute('data-id', '1438');
+  d.style.cssText = 'position:fixed;top:' + a.top + 'px;left:' + a.left + 'px;width:240px';
+  d.innerHTML = '<span class="emp">Camila Rocha</span>';
+  document.body.appendChild(d);
+  kbAbrirResumoIA(null, 1438, d);
+  return true;
+}"""
+
+
+def _abre_resumo(navegador, tmp_path, *, get, post=None, top=505, left=900,
+                 largura=1280, altura=860, depois=None):
+    alvo = tmp_path / "resumo_ia.html"
+    alvo.write_text(_render("prospeccao"), encoding="utf-8")
+    pag = navegador.new_page(viewport={"width": largura, "height": altura})
+    quebras: list[str] = []
+    pag.on("pageerror", lambda e: quebras.append(str(e)))
+    pag.goto(alvo.as_uri())
+    pag.wait_for_timeout(200)
+    pag.evaluate(_DUBLE_IA, {"get": get, "post": post or get, "top": top, "left": left})
+    pag.wait_for_timeout(400)
+    fora = pag.evaluate("""() => {
+      var pop = document.querySelector('.leadpop.lpia'), c = document.getElementById('card-ia');
+      if (!pop) return null;
+      var r = pop.getBoundingClientRect(), b = c.getBoundingClientRect();
+      var ta = pop.querySelector('#lpia-msg');
+      return {top: r.top, bottom: r.bottom, left: r.left, right: r.right, vh: innerHeight, vw: innerWidth,
+              escondido: pop.scrollHeight - pop.clientHeight, texto: pop.innerText,
+              caixa: ta ? ta.value : null, naosei: pop.querySelectorAll('.lpia-naosei').length,
+              cobre: !(r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom),
+              rede: window.__rede.slice()};
+    }""")
+    extra = pag.evaluate(depois) if depois else None
+    fora = dict(fora or {}, erros=quebras + (pag.evaluate("() => window.__erros") or []), extra=extra)
+    pag.close()
+    return fora
+
+
+def test_o_resumo_guardado_abre_sem_gastar_e_inteiro(navegador, tmp_path):
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, resumo=_RESUMO_IA, resumo_id=9,
+                                                   feito_txt="feito há 2 h"))
+    assert not m["erros"], m["erros"]
+    assert m["rede"] == ["GET /painel/prospeccao/1438/resumo-ia"], "gastou IA ao reabrir"
+    for pedaco in ("Camila Rocha", "A bola está com você há 2 dias", "leu as 23 mensagens",
+                   "O que o cliente quer", "Em que pé está", "O que pode travar",
+                   "Próximo passo", "Confirme antes de prometer", "Nada é enviado sozinho"):
+        assert pedaco.lower() in m["texto"].lower(), pedaco   # os rótulos saem em caixa alta
+    assert m["caixa"] == _RESUMO_IA["mensagem"] and m["naosei"] == 1
+    assert m["top"] >= 0 and m["bottom"] <= m["vh"] + .5 and m["right"] <= m["vw"] + .5
+    assert m["escondido"] <= 1, "a janela do resumo cortou conteúdo"
+    assert not m["cobre"], "a janela abriu por cima do card"
+
+
+def test_sem_resumo_guardado_a_janela_pede_um(navegador, tmp_path):
+    m = _abre_resumo(navegador, tmp_path, get=_PACOTE,
+                     post=dict(_PACOTE, resumo=_RESUMO_IA, resumo_id=9, feito_txt="feito há 1 min"))
+    assert not m["erros"], m["erros"]
+    assert m["rede"] == ["GET /painel/prospeccao/1438/resumo-ia",
+                         "POST /painel/prospeccao/1438/resumo-ia"]
+    assert m["caixa"] == _RESUMO_IA["mensagem"]
+
+
+def test_chegou_mensagem_nova_avisa_e_nao_gasta_sozinho(navegador, tmp_path):
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, resumo=_RESUMO_IA, resumo_id=9, novas=2,
+                                                   feito_txt="feito há 3 h"))
+    assert "2 mensagens novas depois deste resumo" in m["texto"] and "Atualizar" in m["texto"]
+    assert len(m["rede"]) == 1
+
+
+def test_sem_conversa_oferece_a_primeira_mensagem(navegador, tmp_path):
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, tem_conversa=False,
+                                                   fatos={"n_total": 0, "n_lidas": 0, "bola": {}}))
+    assert not m["erros"], m["erros"]
+    assert "ainda não trocou mensagem" in m["texto"] and "Sugerir a primeira mensagem" in m["texto"]
+    assert len(m["rede"]) == 1, "chamou a IA de resumo sem conversa"
+
+
+def test_usar_na_conversa_so_preenche_o_balao(navegador, tmp_path):
+    """Decisão 1: o texto vai pro campo do balão; ninguém envia. `kbResponderChat`
+    (o envio) não pode ser chamado, e o texto tem que estar inteiro no campo."""
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, resumo=_RESUMO_IA, resumo_id=9),
+                     depois="""() => new Promise(function(ok){
+                       window.__enviou = 0;
+                       var orig = window.kbResponderChat;
+                       window.kbResponderChat = function(){ window.__enviou++; };
+                       document.querySelector('.leadpop.lpia .lpia-bt.pri').click();
+                       setTimeout(function(){
+                         var ta = document.getElementById('cp-input');
+                         ok({campo: ta ? ta.value : null, enviou: window.__enviou,
+                             janela: !!document.querySelector('.leadpop.lpia'),
+                             rede: window.__rede.slice()});
+                       }, 500);
+                     })""")
+    assert not m["erros"], m["erros"]
+    e = m["extra"]
+    assert e["campo"] == _RESUMO_IA["mensagem"], "o texto não chegou ao campo do balão"
+    assert e["enviou"] == 0 and not e["janela"]
+    assert "POST /painel/prospeccao/1438/resumo-ia/9/usado" in e["rede"]
+    assert not any("responder" in u for u in e["rede"]), "mandou mensagem"
+
+
+def test_no_celular_o_resumo_cabe_inteiro(navegador, tmp_path):
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, resumo=_RESUMO_IA, resumo_id=9),
+                     top=420, left=20, largura=390, altura=780)
+    assert m["left"] >= 0 and m["right"] <= m["vw"] + .5
+    assert m["top"] >= 0 and m["bottom"] <= m["vh"] + .5
+
+
+def test_o_texto_de_um_cliente_nao_nasce_na_conversa_de_outro(navegador, tmp_path):
+    """Achado da revisão: "Usar" no lead A e, antes de a conversa dele chegar, o
+    💬 do lead B. O texto do A nascia no campo do B — um Enter e ia pro cliente
+    errado. O prefill agora é da CHAMADA."""
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, resumo=_RESUMO_IA, resumo_id=9),
+                     depois="""() => new Promise(function(ok){
+                       var orig = window.fetch;
+                       window.fetch = function(url, op){
+                         if (String(url).indexOf('/thread/501') >= 0)
+                           return new Promise(function(r){ setTimeout(function(){ r(orig(url, op)); }, 400); });
+                         return orig(url, op);
+                       };
+                       document.querySelector('.leadpop.lpia .lpia-bt.pri').click();
+                       setTimeout(function(){
+                         var b = document.createElement('button'); b.id = 'card-b'; b.title = 'B';
+                         b.style.cssText = 'position:fixed;top:40px;left:40px';
+                         document.body.appendChild(b);
+                         window.kbAbrirChat({stopPropagation: function(){}}, 777, 'conversas', b, 'Bruno');
+                         setTimeout(function(){
+                           var ta = document.getElementById('cp-input');
+                           ok({campoB: ta ? ta.value : null});
+                         }, 700);
+                       }, 50);
+                     })""")
+    assert not m["erros"], m["erros"]
+    assert m["extra"]["campoB"] == "", m["extra"]
+
+
+def test_o_que_a_ia_escreve_aparece_como_texto_e_nunca_como_html(navegador, tmp_path):
+    """O texto da IA vem de uma conversa que o cliente escreve: HTML ali tem que
+    aparecer literal na janela, não virar código."""
+    mal = "<img src=x onerror=window.__xss=1>"
+    r = dict(_RESUMO_IA, quer=mal, em_que_pe=[mal], proximo_passo=mal, mensagem=mal)
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, resumo=r, resumo_id=9,
+                                                   lead=dict(_PACOTE["lead"], nome=mal)),
+                     depois="() => ({xss: window.__xss || 0})")
+    assert m["extra"]["xss"] == 0 and mal in m["texto"] and m["caixa"] == mal

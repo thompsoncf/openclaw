@@ -1264,6 +1264,25 @@ def test_os_ajustes_por_nicho_do_funil_avisam_cada_um_no_seu_alcance(pool):
     assert "consultoria" in nv.nichos_alcancados("recorrente")
 
 
+def test_o_resumo_da_ia_avisa_toda_conta_com_funil_e_o_vendedor(pool):
+    """345: o ✨ do card é do funil (`servico`), e muda a rotina do vendedor — então
+    vai pra ele também. O texto não fala de festa: o que a IA escreve já sai no
+    vocabulário de cada conta, e o aviso só diz onde está o botão (regra 6)."""
+    with pool.connection() as c:
+        c.execute((BASE / "345_novidade_resumo_ia_do_lead.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "345_novidade_resumo_ia_do_lead.sql").read_text(encoding="utf-8"))
+        c.commit()
+        rows = c.execute(
+            """select tipo, publico, pra_quem, titulo, resumo, corpo, link from novidades
+                where chave = 'resumo-ia-no-card-do-lead'""").fetchall()
+    assert len(rows) == 1, "a migração tem que ser idempotente"
+    tipo, pub, pq, tit, res, corpo, link = rows[0]
+    assert tipo == "novidade" and pub == "servico" and link == "/painel/prospeccao"
+    assert sorted(pq) == ["dono", "gestor", "vendedor"] and res
+    for palavra in ("festa", "convidados", "casamento", "reunião"):
+        assert palavra not in (tit + res + corpo).lower(), palavra
+    assert "Quem envia é você" in corpo and "não inventa" in corpo.lower()
+    assert {"eventos", "consultoria"} <= nv.nichos_alcancados("servico")
 def test_o_cabecalho_do_funil_avisa_quem_tem_funil(pool):
     """343: o nome do vendedor no card, o número no 💬 e o topo mais leve — pra
     quem tem funil (`servico`), sem palavra de festa (a consultoria recebe)."""

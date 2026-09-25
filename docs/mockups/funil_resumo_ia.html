@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Resumo da conversa com IA</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde) — o mockup mostra a tela como ela vai ficar.
+   Escolha deliberada de um tema só: o painel não tem modo claro. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,textarea:focus-visible{outline:2px solid var(--neon);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:78ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head .quem{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+.pill{font-size:.72rem;border:1px solid var(--line-2);border-radius:999px;padding:.15rem .6rem;color:var(--dim);white-space:nowrap}
+.pill.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.pill.fato{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:80ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+
+/* palco: a tela do produto em tamanho real, rolando de lado no celular */
+.palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
+.tela{width:1040px;padding:22px;display:flex;gap:18px;align-items:flex-start;position:relative}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:80ch}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+
+/* coluna do funil */
+.col{width:262px;flex:none;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.colh{display:flex;justify-content:space-between;font-size:.78rem;color:var(--dim);padding:2px 4px 4px}
+.colh b{color:var(--text);font-size:.82rem}
+.card{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:3px;font-size:.78rem;position:relative}
+.card.ativo{border-color:var(--neon-borda);box-shadow:0 0 0 1px var(--neon-borda)}
+.l1{display:flex;align-items:center;gap:6px}
+.l1 .nome{font-weight:600;font-size:.84rem;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ambar);flex:none}
+.dot.quente{background:var(--coral)}
+.av{width:22px;height:22px;border-radius:50%;background:#1d3a30;color:var(--neon-2);font-size:.62rem;display:grid;place-items:center;font-weight:600}
+.mais{width:24px;height:22px;border-radius:6px;border:1px solid var(--line-2);display:grid;place-items:center;color:var(--dim);font-size:.9rem;line-height:1}
+.mais.on{border-color:var(--neon);color:var(--neon-2);background:var(--neon-fundo)}
+.ev{color:var(--text)}
+.ev .d{color:var(--neon-2)}
+.msg{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.l4{display:flex;justify-content:space-between;color:var(--faint);font-size:.72rem}
+.l4 .v{color:var(--text)}
+
+/* menu ⋯ */
+.menu{position:absolute;top:34px;left:236px;width:296px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:12px;padding:6px;box-shadow:0 16px 40px rgba(0,0,0,.55);z-index:3;display:flex;flex-direction:column;gap:2px}
+.mi{display:flex;align-items:center;gap:.55rem;padding:.48rem .6rem;border-radius:8px;font-size:.82rem;color:var(--text)}
+.mi .s{margin-left:auto;color:var(--faint)}
+.mi.novo{background:var(--ia-fundo);border:1px solid var(--ia-borda);color:var(--ia-2)}
+.mi.novo small{margin-left:auto;font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;color:var(--bg);background:var(--ia);border-radius:4px;padding:.05rem .3rem}
+.mi.perigo{color:#f0a9a2}
+.sep{height:1px;background:var(--line);margin:3px 4px}
+
+/* a janela do resumo (moldura da ficha do lead) */
+.jan{width:392px;flex:none;background:var(--surface);border:1px solid var(--line-2);border-radius:14px;box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;font-size:.84rem}
+.jh{padding:.8rem .95rem .7rem;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:.45rem}
+.jt{display:flex;align-items:center;gap:.5rem}
+.jt h3{font-size:1rem;flex:1}
+.jt .ic{color:var(--ia)}
+.xb{width:28px;height:28px;border-radius:50%;border:1px solid var(--line-2);display:grid;place-items:center;color:var(--dim);font-size:.8rem;background:none}
+.jsub{color:var(--dim);font-size:.76rem}
+.fatos{display:flex;flex-wrap:wrap;gap:.35rem}
+.chip{font-size:.7rem;border-radius:999px;padding:.12rem .55rem;border:1px solid var(--line-2);color:var(--dim);white-space:nowrap}
+.chip.bola{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F2C66E}
+.chip.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.jb{padding:.75rem .95rem;display:flex;flex-direction:column;gap:.8rem}
+.bl{display:flex;flex-direction:column;gap:.3rem}
+.rot{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);display:flex;align-items:center;gap:.4rem}
+.rot.ia{color:var(--ia)}
+.bl ul{margin:0;padding-left:1.05rem;display:flex;flex-direction:column;gap:.2rem}
+.bl li::marker{color:var(--ia)}
+.quer{color:var(--text)}
+.passo{border:1px solid var(--ia-borda);background:var(--ia-fundo);border-radius:10px;padding:.6rem .7rem;color:var(--ia-2)}
+.passo b{color:#fff}
+.naosei{border:1px dashed var(--ambar-borda);border-radius:10px;padding:.5rem .65rem;font-size:.78rem;color:#F2C66E}
+.caixa{width:100%;min-height:124px;resize:vertical;background:var(--bg);border:1px solid var(--line-2);border-radius:10px;color:var(--text);padding:.6rem .65rem;font:inherit;font-size:.84rem;line-height:1.5}
+.bts{display:flex;flex-wrap:wrap;gap:.4rem}
+.bt{border:1px solid var(--line-2);background:var(--bg-2);border-radius:8px;padding:.38rem .7rem;font-size:.78rem;color:var(--text)}
+.bt.pri{background:var(--neon);border-color:var(--neon);color:#062312;font-weight:600}
+.jf{border-top:1px solid var(--line);padding:.6rem .95rem;display:flex;align-items:center;gap:.6rem;font-size:.72rem;color:var(--faint)}
+.jf span{flex:1}
+.voto{display:flex;gap:.25rem}
+.voto button{border:1px solid var(--line-2);background:none;border-radius:7px;padding:.12rem .4rem;font-size:.75rem}
+
+/* celulares */
+.fones{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start}
+.fone{width:330px;max-width:100%;height:680px;border:1px solid var(--line-2);border-radius:34px;background:var(--bg);padding:10px;flex:none;position:relative;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.45)}
+.fone .in{height:100%;border-radius:26px;overflow:hidden;background:var(--bg-2);display:flex;flex-direction:column;position:relative}
+.ah{padding:14px 14px 10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:3px}
+.ah .n{font-family:var(--display);font-weight:600;font-size:1.02rem}
+.ah .s{font-size:.72rem;color:var(--dim)}
+.acoes{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);overflow:hidden}
+.ac{font-size:.7rem;border:1px solid var(--line-2);border-radius:999px;padding:.2rem .55rem;color:var(--dim);white-space:nowrap}
+.ac.ia{border-color:var(--ia);color:var(--ia-2);background:var(--ia-fundo)}
+.chat{flex:1;padding:12px;display:flex;flex-direction:column;gap:7px;font-size:.76rem}
+.bub{max-width:80%;padding:.45rem .6rem;border-radius:12px;background:var(--surface-2);line-height:1.4}
+.bub.out{align-self:flex-end;background:#14362a}
+.comp{border-top:1px solid var(--line);padding:9px 10px;display:flex;gap:7px;align-items:flex-end}
+.campo{flex:1;background:var(--bg);border:1px solid var(--line-2);border-radius:18px;padding:.45rem .7rem;font-size:.76rem;color:var(--faint);min-height:34px}
+.campo.cheio{color:var(--text);border-color:var(--ia-borda);line-height:1.45}
+.env{width:34px;height:34px;border-radius:50%;background:var(--neon);color:#062312;display:grid;place-items:center;flex:none;font-size:.9rem}
+.tagia{font-size:.66rem;color:var(--ia-2);padding:0 12px 6px;display:flex;gap:.4rem;align-items:center}
+.tagia a{color:var(--dim);text-decoration:underline;cursor:pointer}
+.veu{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+.folha{position:absolute;left:0;right:0;bottom:0;height:82%;background:var(--surface);border-top:1px solid var(--line-2);border-radius:20px 20px 0 0;display:flex;flex-direction:column;font-size:.78rem}
+.folha .alca{width:40px;height:4px;border-radius:4px;background:var(--line-2);margin:8px auto 2px}
+.folha .jh{padding:.5rem .85rem .6rem}
+.folha .jb{padding:.6rem .85rem;gap:.6rem;overflow:hidden;flex:1}
+.folha .caixa{min-height:84px;font-size:.76rem}
+.folha .rodape{border-top:1px solid var(--line);padding:.55rem .85rem calc(.55rem + env(safe-area-inset-bottom,0px));display:flex;gap:.4rem}
+.folha .rodape .bt{flex:1;text-align:center}
+.legfone{font-size:.8rem;color:var(--dim);max-width:330px;margin-top:.6rem}
+.legfone b{color:var(--text)}
+
+/* nicho */
+.duas{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+.duas .jan{width:auto}
+.nichot{font-size:.78rem;color:var(--dim);margin-bottom:.45rem}
+.nichot b{color:var(--text)}
+
+/* estados */
+.est{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+.e{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem .9rem;display:flex;flex-direction:column;gap:.5rem;font-size:.8rem}
+.e h3{font-size:.9rem}
+.e p{margin:0;color:var(--dim)}
+.sk{height:9px;border-radius:5px;background:linear-gradient(90deg,var(--surface-2),var(--line-2),var(--surface-2));background-size:200% 100%;animation:sk 1.4s linear infinite}
+@keyframes sk{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.sk{animation:none}}
+.faixa{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#F2C66E;border-radius:8px;padding:.4rem .55rem;font-size:.75rem;display:flex;gap:.4rem;align-items:center}
+.faixa button{margin-left:auto;border:1px solid var(--ambar-borda);background:none;border-radius:6px;padding:.1rem .4rem;font-size:.72rem;color:#F2C66E}
+
+/* regras e decisões */
+.regras{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.r{border-top:1px solid var(--line-2);padding-top:.7rem;display:flex;flex-direction:column;gap:.3rem}
+.r h3{font-size:.95rem}
+.r p{margin:0;color:var(--dim);font-size:.86rem}
+.r p b{color:var(--text)}
+.num{font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:.8rem;color:var(--neon-2)}
+.dec{display:flex;flex-direction:column;gap:10px}
+.q{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.2rem .8rem}
+.q .qn{font-family:var(--mono);font-size:.75rem;color:var(--neon);grid-row:span 2;padding-top:.15rem}
+.q h3{font-size:.95rem}
+.q p{margin:0;color:var(--dim);font-size:.86rem}
+.q p b{color:var(--neon-2);font-weight:600}
+@media (max-width:520px){.q{grid-template-columns:1fr}.q .qn{grid-row:auto}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="head">
+  <div class="k">Mockup pra aprovar · 25/09/2026</div>
+  <h1>Resumo da conversa e sugestão da IA, no card do lead</h1>
+  <p>Um toque no <b>⋯</b> do card e a IA lê a conversa inteira do lead: diz o que o cliente quer, em que pé está, o que pode travar a venda, qual o próximo passo e deixa uma mensagem pronta pro vendedor revisar e mandar. No painel e no app do vendedor.</p>
+  <div class="quem"><span class="pill ia">✨ lilás = escrito pela IA</span><span class="pill fato">verde = fato do sistema, sem IA</span><span class="pill">exemplo com cliente fictícia</span></div>
+</header>
+
+<!-- 1. menu -->
+<section class="sec">
+  <header>
+    <div class="k">No painel · computador</div>
+    <h2>Onde fica: um item novo no ⋯ do card</h2>
+    <p>O ⋯ de hoje ganha <b>“✨ Resumo e sugestão da IA”</b>, logo abaixo de “Abrir conversa”. Só aparece em card que tem conversa (WhatsApp, Instagram ou e-mail). O mesmo botão entra na ficha do lead, ao lado de Ligar e WhatsApp.</p>
+  </header>
+  <div class="palco"><div class="tela" style="min-height:360px">
+    <div class="col">
+      <div class="colh"><b>Negociação</b><span>14 · R$ 212 mil</span></div>
+      <div class="card ativo">
+        <div class="l1"><span class="dot quente"></span><span class="nome">Camila Rocha</span><span class="av">JA</span><span class="mais on">⋯</span></div>
+        <div class="ev">💍 <b>Casamento</b> · <span class="d">sáb 14/11</span> · 150 conv.</div>
+        <div class="msg">💬 “Dá pra parcelar em 10x?”</div>
+        <div class="l4"><span>responder hoje</span><span class="v">R$ 18.900</span></div>
+      </div>
+      <div class="card">
+        <div class="l1"><span class="dot"></span><span class="nome">Rodrigo Mendes</span><span class="av">PE</span><span class="mais">⋯</span></div>
+        <div class="ev">🎓 <b>Formatura</b> · <span class="d">sex 12/12</span> · 220 conv.</div>
+        <div class="msg">💬 Você: “Te mandei a proposta 👆”</div>
+        <div class="l4"><span>esperando ele</span><span class="v">R$ 24.300</span></div>
+      </div>
+      <div class="card">
+        <div class="l1"><span class="dot"></span><span class="nome">Ana Beatriz</span><span class="av">TH</span><span class="mais">⋯</span></div>
+        <div class="ev">🎂 <b>15 anos</b> · <span class="d">sáb 07/03</span> · 120 conv.</div>
+        <div class="msg">💬 “Vou falar com meu pai e te aviso”</div>
+        <div class="l4"><span>ligar sexta</span><span class="v">R$ 15.600</span></div>
+      </div>
+    </div>
+    <div class="menu" role="menu">
+      <div class="mi">💬 Abrir conversa</div>
+      <div class="mi novo">✨ Resumo e sugestão da IA <small>NOVO</small></div>
+      <div class="sep"></div>
+      <div class="mi">↔ Mover para <span class="s">▸</span></div>
+      <div class="mi">👤 Trocar responsável <span class="s">▸</span></div>
+      <div class="mi">↗ Abrir ficha do lead</div>
+      <div class="sep"></div>
+      <div class="mi perigo">🗑 Excluir lead…</div>
+    </div>
+  </div></div>
+</section>
+
+<!-- 2. janela -->
+<section class="sec">
+  <header>
+    <div class="k">No painel · o que abre</div>
+    <h2>A janela do resumo, ao lado do card</h2>
+    <p>Mesma moldura e mesma regra de posição da ficha do lead (abre inteira, sem cobrir o card). Em cima, <b>fatos do sistema</b>: há quanto tempo a bola está com a gente, quantas mensagens foram lidas. Embaixo, o que a <b>IA</b> leu, separado em blocos curtos, e a mensagem pronta, que dá pra editar antes de usar.</p>
+  </header>
+  <div class="palco"><div class="tela">
+    <div class="col" style="opacity:.55">
+      <div class="colh"><b>Negociação</b><span>14</span></div>
+      <div class="card ativo">
+        <div class="l1"><span class="dot quente"></span><span class="nome">Camila Rocha</span><span class="av">JA</span><span class="mais">⋯</span></div>
+        <div class="ev">💍 <b>Casamento</b> · <span class="d">sáb 14/11</span> · 150 conv.</div>
+        <div class="msg">💬 “Dá pra parcelar em 10x?”</div>
+        <div class="l4"><span>responder hoje</span><span class="v">R$ 18.900</span></div>
+      </div>
+      <div class="card"><div class="l1"><span class="dot"></span><span class="nome">Rodrigo Mendes</span><span class="av">PE</span><span class="mais">⋯</span></div><div class="msg">💬 Você: “Te mandei a proposta 👆”</div></div>
+    </div>
+
+    <div class="jan" aria-label="Resumo da conversa">
+      <div class="jh">
+        <div class="jt"><span class="ic">✨</span><h3>Camila Rocha</h3><button class="xb" type="button" title="Refazer o resumo">↻</button><button class="xb" type="button" title="Fechar">✕</button></div>
+        <div class="jsub">Negociação · Jacqueline · WhatsApp</div>
+        <div class="fatos"><span class="chip bola">A bola está com você há 2 dias</span><span class="chip ok">leu as 23 mensagens</span><span class="chip">feito agora</span></div>
+      </div>
+      <div class="jb">
+        <div class="bl"><div class="rot ia">✨ O que ela quer</div>
+          <div class="quer">Casamento no sábado 14/11/2026, cerca de 150 convidados, salão com buffet completo.</div></div>
+        <div class="bl"><div class="rot ia">✨ Em que pé está</div>
+          <ul><li>Recebeu o preço do pacote Sábado (R$ 18.900) em 20/09.</li>
+              <li>Recebeu a proposta nº 212 em 22/09 e abriu 3 vezes. Ainda não aprovou.</li>
+              <li>Perguntou se dá pra parcelar em 10x (ter 23/09, 19:42). Ninguém respondeu.</li></ul></div>
+        <div class="bl"><div class="rot ia">✨ O que pode travar</div>
+          <ul><li>Achou o valor acima do que pensava.</li>
+              <li>Disse que vai conhecer outro espaço no sábado.</li></ul></div>
+        <div class="passo"><div class="rot ia" style="margin-bottom:.2rem">✨ Próximo passo</div><b>Responder o parcelamento hoje e chamar pra conhecer o salão antes de sábado.</b></div>
+        <div class="naosei">A conversa e o orçamento não dizem se parcela em 10x. <b>Confirme antes de prometer.</b></div>
+        <div class="bl"><div class="rot ia">✨ Mensagem sugerida · dá pra editar</div>
+          <textarea class="caixa" id="msg-painel" aria-label="Mensagem sugerida">Oi, Camila! Sobre o parcelamento, vou confirmar as condições e te respondo ainda hoje. Enquanto isso, que tal vir conhecer o salão antes de sábado? Me diz o melhor dia e horário pra você 😊</textarea>
+          <div class="bts"><button class="bt pri" type="button">Usar na conversa</button><button class="bt" type="button" id="copiar">Copiar</button><button class="bt" type="button">↻ Outra versão</button></div></div>
+      </div>
+      <div class="jf"><span>A IA leu só a conversa e o card deste lead. Nada é enviado sozinho.</span><div class="voto"><button type="button" title="Ajudou">👍</button><button type="button" title="Não ajudou">👎</button></div></div>
+    </div>
+
+    <div style="flex:1;display:flex;flex-direction:column;gap:.7rem;padding-top:.3rem;font-size:.8rem;color:var(--dim);min-width:0">
+      <div class="nota"><i>1</i><span><b style="color:var(--text)">“Usar na conversa”</b> abre o balão do WhatsApp com o texto já no campo. O vendedor lê, ajusta e aperta enviar.</span></div>
+      <div class="nota"><i>2</i><span>A IA <b style="color:var(--text)">não inventa</b> preço, desconto, parcela nem horário livre. Quando a conversa pede algo que ela não sabe, aparece a caixa tracejada.</span></div>
+      <div class="nota"><i>3</i><span>O resumo fica guardado até chegar mensagem nova. Abrir de novo não gasta IA.</span></div>
+      <div class="nota"><i>4</i><span>👍 👎 medem se está ajudando. Dá pra ver por vendedor depois.</span></div>
+    </div>
+  </div></div>
+</section>
+
+<!-- 3. app -->
+<section class="sec">
+  <header>
+    <div class="k">No app do vendedor · celular</div>
+    <h2>Um botão ✨ na tela do lead, e a folha de baixo pra cima</h2>
+    <p>Na fileira de hoje (WhatsApp · Ficha · Orçamento · Visita) entra o <b>✨ IA</b>. A folha mostra o mesmo conteúdo, mais enxuto. <b>“Usar resposta”</b> fecha a folha e deixa o texto no campo de mensagem, marcado como sugerido.</p>
+  </header>
+  <div class="fones">
+    <div>
+      <div class="fone"><div class="in">
+        <div class="ah"><div class="n">Camila Rocha</div><div class="s">💍 Casamento · 14/11 · 150 convidados · Negociação</div></div>
+        <div class="acoes"><span class="ac">WhatsApp</span><span class="ac">Ficha</span><span class="ac">Orçamento</span><span class="ac ia">✨ IA</span></div>
+        <div class="chat">
+          <div class="bub out">Segue a proposta do pacote Sábado 👆</div>
+          <div class="bub">Tá um pouco acima do que eu pensei…</div>
+          <div class="bub">Dá pra parcelar em 10x?</div>
+        </div>
+        <div class="veu"></div>
+        <div class="folha">
+          <div class="alca"></div>
+          <div class="jh">
+            <div class="jt"><span class="ic">✨</span><h3 style="font-size:.92rem">Resumo da conversa</h3><button class="xb" type="button" title="Fechar">✕</button></div>
+            <div class="fatos"><span class="chip bola">Bola com você há 2 dias</span><span class="chip ok">23 mensagens</span></div>
+          </div>
+          <div class="jb">
+            <div class="bl"><div class="rot ia">✨ Em que pé está</div>
+              <ul><li>Recebeu a proposta nº 212 e abriu 3 vezes.</li><li>Pediu parcelamento em 10x. Sem resposta.</li><li>Vai ver outro espaço no sábado.</li></ul></div>
+            <div class="passo" style="font-size:.76rem"><b>Responder o parcelamento hoje e chamar pra conhecer o salão.</b></div>
+            <textarea class="caixa" id="msg-app" aria-label="Mensagem sugerida no app">Oi, Camila! Sobre o parcelamento, vou confirmar as condições e te respondo ainda hoje. Que tal vir conhecer o salão antes de sábado?</textarea>
+          </div>
+          <div class="rodape"><button class="bt" type="button">↻ Outra</button><button class="bt pri" type="button">Usar resposta</button></div>
+        </div>
+      </div></div>
+      <p class="legfone"><b>1.</b> Tocou no ✨ IA: a folha sobe por cima da conversa.</p>
+    </div>
+    <div>
+      <div class="fone"><div class="in">
+        <div class="ah"><div class="n">Camila Rocha</div><div class="s">💍 Casamento · 14/11 · 150 convidados · Negociação</div></div>
+        <div class="acoes"><span class="ac">WhatsApp</span><span class="ac">Ficha</span><span class="ac">Orçamento</span><span class="ac ia">✨ IA</span></div>
+        <div class="chat">
+          <div class="bub out">Segue a proposta do pacote Sábado 👆</div>
+          <div class="bub">Tá um pouco acima do que eu pensei…</div>
+          <div class="bub">Dá pra parcelar em 10x?</div>
+        </div>
+        <div class="tagia">✨ Sugerida pela IA. Revise antes de enviar. <a>desfazer</a></div>
+        <div class="comp"><div class="campo cheio">Oi, Camila! Sobre o parcelamento, vou confirmar as condições e te respondo ainda hoje. Que tal vir conhecer o salão antes de sábado?</div><div class="env">➤</div></div>
+      </div></div>
+      <p class="legfone"><b>2.</b> “Usar resposta”: o texto vai pro campo. Quem envia é o vendedor.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4. nicho -->
+<section class="sec">
+  <header>
+    <div class="k">Regra 6 · cada nicho no seu lugar</div>
+    <h2>O mesmo recurso fala a língua de cada conta</h2>
+    <p>A IA recebe o perfil da conta. Pra quem vende festa, fala de data, convidados e visita. Pra quem vende serviço recorrente, fala de <b>reunião, setup e mensalidade</b>, e festa nunca aparece. Abaixo, o mesmo bloco numa conta como a ZAQ.</p>
+  </header>
+  <div class="duas">
+    <div>
+      <div class="nichot"><b>Eventos</b> · Prime</div>
+      <div class="jan"><div class="jb">
+        <div class="bl"><div class="rot ia">✨ O que ela quer</div><div class="quer">Casamento, sáb 14/11, cerca de 150 convidados.</div></div>
+        <div class="passo"><b>Chamar pra conhecer o salão antes de sábado.</b></div>
+      </div></div>
+    </div>
+    <div>
+      <div class="nichot"><b>Recorrente</b> · ZAQ</div>
+      <div class="jan"><div class="jb">
+        <div class="bl"><div class="rot ia">✨ O que ela quer</div><div class="quer">Sistema de gestão pra clínica com 3 unidades, com agenda e financeiro. Recebeu setup de R$ 2.500 + R$ 490/mês em 18/09.</div></div>
+        <div class="bl"><div class="rot ia">✨ O que pode travar</div><ul><li>Quer saber se dá pra trazer os dados do sistema atual.</li></ul></div>
+        <div class="passo"><b>Responder sobre a importação e marcar a reunião de demonstração.</b></div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. estados -->
+<section class="sec">
+  <header>
+    <div class="k">Os outros momentos da janela</div>
+    <h2>Carregando, sem conversa, mensagem nova, erro</h2>
+  </header>
+  <div class="est">
+    <div class="e"><h3>Lendo a conversa</h3><div class="sk" style="width:90%"></div><div class="sk" style="width:70%"></div><div class="sk" style="width:80%"></div><p>Leva uns 5 segundos. A janela já abre com os fatos do sistema.</p></div>
+    <div class="e"><h3>Sem conversa ainda</h3><p>Este lead ainda não trocou mensagem.</p><div class="bts"><button class="bt" type="button">✨ Sugerir a primeira mensagem</button></div><p>Usa a IA de 1º contato que já existe.</p></div>
+    <div class="e"><h3>Chegou mensagem nova</h3><div class="faixa">Resumo de 2 h atrás · 1 mensagem nova <button type="button">↻ Atualizar</button></div><p>O resumo guardado continua visível até o vendedor atualizar.</p></div>
+    <div class="e"><h3>Não deu pra ler</h3><p>Não consegui ler a conversa agora. Tente de novo em instantes.</p><div class="bts"><button class="bt" type="button">Tentar de novo</button></div><p>Fica registrado na trilha de erros.</p></div>
+  </div>
+</section>
+
+<!-- 6. por trás -->
+<section class="sec">
+  <header>
+    <div class="k">Como funciona por trás</div>
+    <h2>O que a IA lê, e o que ela nunca faz</h2>
+  </header>
+  <div class="regras">
+    <div class="r"><h3>O que ela lê</h3><p>As <b>últimas 60 mensagens</b> do lead em todos os canais (áudio já transcrito), o card (etapa, evento ou serviço, valor), o orçamento (enviado, aberto, aprovado), a próxima visita ou reunião na agenda e o prazo do follow-up.</p></div>
+    <div class="r"><h3>Por que 60</h3><p>Medido em 25/09: na Prime a mediana é <span class="num">10</span> mensagens por lead e 90% têm até <span class="num">36</span>. O maior tem <span class="num">229</span>: aí lê as 60 últimas e avisa “leu as 60 mais recentes de 229”.</p></div>
+    <div class="r"><h3>Quando roda</h3><p><b>Só no clique.</b> O resultado fica guardado até chegar mensagem nova, então abrir de novo não gasta. Há um teto técnico por conta por dia, só pra barrar laço.</p></div>
+    <div class="r"><h3>O que nunca faz</h3><p>Não envia nada sozinho. Não inventa preço, desconto, parcela nem horário. Não obedece pedido escrito dentro da conversa: a conversa é dado, não instrução, a mesma guarda do motivo de perda lido.</p></div>
+    <div class="r"><h3>Quem vê</h3><p>O vendedor dono do lead, o gestor e o dono. A mesma regra da ficha: vendedor não vê resumo de lead de outro.</p></div>
+    <div class="r"><h3>Quando sair</h3><p>Aviso de novidade pra dono, gestor e vendedor das contas com funil (público <code style="font-family:var(--mono);color:var(--ia)">servico</code>), com “Ver como ficou” apontando pro funil.</p></div>
+  </div>
+</section>
+
+<!-- 7. decisões -->
+<section class="sec">
+  <header>
+    <div class="k">Pra vocês decidirem</div>
+    <h2>Quatro escolhas antes de construir</h2>
+    <p>Em verde, o que eu recomendo.</p>
+  </header>
+  <div class="dec">
+    <div class="q"><span class="qn">1</span><h3>“Usar na conversa” envia ou só preenche?</h3><p><b>Só preenche o campo</b>, e o vendedor aperta enviar. A alternativa é um botão “Enviar” direto na janela.</p></div>
+    <div class="q"><span class="qn">2</span><h3>Só no clique, ou um resumo automático ao abrir o lead no app?</h3><p><b>Só no clique</b> por enquanto. Automático em todo lead aberto gasta IA em conversa que o vendedor já sabe de cor.</p></div>
+    <div class="q"><span class="qn">3</span><h3>Quem vê?</h3><p><b>Vendedor do lead, gestor e dono.</b> Ou só o vendedor, se o gestor não deve ver a leitura da IA das conversas.</p></div>
+    <div class="q"><span class="qn">4</span><h3>A mensagem sugerida pode citar valores do orçamento?</h3><p><b>Sim, só os que estão no orçamento ou no catálogo da conta</b>, com o valor exato. Fora disso, a caixa tracejada pede pra confirmar.</p></div>
+  </div>
+</section>
+
+</div>
+<script>
+(function(){
+  var b=document.getElementById('copiar');
+  if(!b)return;
+  b.addEventListener('click',function(){
+    var t=document.getElementById('msg-painel');
+    function ok(){b.textContent='Copiado';setTimeout(function(){b.textContent='Copiar';},1600);}
+    try{navigator.clipboard.writeText(t.value).then(ok,function(){t.select();});}catch(e){t.select();}
+  });
+})();
+</script>
+</body>
+</html>

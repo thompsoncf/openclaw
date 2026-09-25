@@ -51,6 +51,21 @@ def apagar_historico_whatsapp(pool, conta_id: int) -> dict:
     conta_id = int(conta_id)
     with pool.connection() as c:
         with c.transaction():
+            # O RESUMO DA IA (migração 344) é feito DESTAS mensagens: apagar a
+            # conversa e deixar o resumo seria guardar o conteúdo dela por outro
+            # caminho. Vai junto, na mesma transação. Savepoint porque a tabela é
+            # nova — num banco sem ela, apagar o histórico não pode parar aqui.
+            try:
+                with c.transaction():
+                    c.execute(
+                        """delete from lead_resumo_ia
+                            where conta_id=%s and prospeccao_id in (
+                                  select prospeccao_id from conversas
+                                   where conta_id=%s and canal='whatsapp'
+                                     and prospeccao_id is not null)""",
+                        (conta_id, conta_id))
+            except Exception:  # noqa: BLE001
+                _log.info("retencao: sem lead_resumo_ia nesta base", exc_info=True)
             # mensagens ANTES das conversas: a FK mensagens.conversa_id aponta pra
             # conversas, e a ordem inversa esbarraria nela.
             n_msg = c.execute(

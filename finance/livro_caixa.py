@@ -736,11 +736,20 @@ class LivroCaixa:
     def definir_centro_custo(self, lancamento_id: int,
                              centro_custo_id: int | None) -> bool:
         """Define (ou limpa, com None) o centro de custo de UM lançamento.
-        Multi-tenant: só mexe em lançamento DESTA conta."""
+        Multi-tenant: só mexe em lançamento DESTA conta.
+
+        Pôr o lançamento INTEIRO num centro desfaz a divisão entre obras
+        (`lancamento_rateio`, migração 347), se houver — senão a divisão velha
+        continuaria valendo por baixo do centro escolhido agora (ver
+        finance/obras.py)."""
         with self.pool.connection() as conn:
             cur = conn.execute(
                 "update lancamentos set centro_custo_id = %s where id = %s and conta_id = %s",
                 (centro_custo_id, lancamento_id, self.conta_id))
+            if cur.rowcount and centro_custo_id is not None and conn.execute(
+                    "select to_regclass('public.lancamento_rateio')").fetchone()[0]:
+                conn.execute("delete from lancamento_rateio where lancamento_id = %s "
+                             "and conta_id = %s", (lancamento_id, self.conta_id))
             conn.commit()
             return cur.rowcount > 0
 

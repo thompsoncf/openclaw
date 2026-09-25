@@ -91,3 +91,18 @@ def test_o_funil_usa_a_tela_inteira_so_ele():
     assert '<div class="pw funil">' in TPL
     assert ".pw.funil{max-width:none" in TPL
     assert ".pw{width:100%;max-width:1240px" in pp._CSS, "as outras telas seguem nos 1240 px"
+
+
+def test_o_submenu_mover_para_nao_fecha_no_proprio_clique():
+    """25/09/2026, relato do dono: "a parte de mover para não abre nada". O "Mover
+    para" troca o conteúdo do próprio menu (innerHTML) no clique; quando o clique
+    chegava na regra "clicou fora, fecha", o botão clicado já tinha saído da página
+    e `closest('.kbpop')` num nó solto não achava o menu — o submenu fechava no
+    mesmo instante. A regra tem que olhar o CAMINHO do clique (composedPath), que
+    é o de quando ele aconteceu. Conferido num Chromium de verdade, no computador
+    e no celular, contra o servidor: abre, move, grava e pede o motivo da perda."""
+    regra = FONTE.split("CLICOU FORA, FECHA")[1][:1100]
+    assert "e.composedPath" in regra and "n.matches('.kbpop')" in regra
+    assert "e.target.closest('.kbpop')" not in FONTE, "voltou o closest do alvo, que falha com nó solto"
+    mover = FONTE.split("function kbMenuMover(")[1][:700]
+    assert "pop.innerHTML=h" in mover, "se o submenu parar de trocar o innerHTML, reveja este teste"

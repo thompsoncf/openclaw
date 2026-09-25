@@ -849,7 +849,7 @@ let FUNIL = {
   'Recebeu o preço':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s · hoje 08:12','g'],['1ª rodada da vaga das 10:30','b']]},{n:'Renata Dias',s:'Consulta · R$ 500 · há 5 dias',t:[['sem resposta','r'],['2º toque enviado',''],['2ª rodada da vaga das 10:30 (se sair)','b']]},{n:'Márcio Luz',s:'Consulta · R$ 500 · há 12 dias',t:[['nunca chamado de novo','r'],['2ª rodada da vaga das 10:30 (se sair)','b']]},{n:'Joice Prado',s:'Consulta · R$ 500 · hoje',t:[['respondeu: "vou ver e te falo"','a']]}],
   'Voltar a chamar':[{n:'Heitor Lima',s:'Consulta social',t:[['esfriando','a'],['lista de espera · manhãs','b']]}],
   'Consulta agendada':[{n:'Sônia Pires',s:'Consulta · Dr. Manoel',t:[['qua 14:00 · confirmado','g']]},{n:'Joana Prado',s:'Consulta · Dr. Manoel',t:[['qua 10:00 · remarcou a falta de 16/09','g'],['qua 11:00 · peeling · vaga','g']]},{n:'Marcos Teixeira',s:'Consulta · Dr. Manoel',t:[['qua 09:30 · segurado','a']]},{n:'Paula Viana',s:'Procedimento estético · Juliana',t:[['qua 13:30','']]},{n:'Beatriz Souza',s:'Avaliação · Juliana',t:[['qua 15:00','']]}],
-  'Plano de tratamento':[{n:'Rogério Alves',s:'Botox · R$ 1.600',t:[['proposta há 3 dias','a']]},{n:'Bianca Lemos',s:'Laser 10 sessões · R$ 2.400',t:[['vence amanhã','r']]},{n:'Fernando Sá',s:'Criolipólise · 4 sessões · R$ 3.200',t:[['visualizou hoje','']]},{n:'Denise Rocha',s:'Botox · 2 áreas · R$ 1.800',t:[['respondeu: "vou ver e te aviso"','a'],['há 2 dias','']]},{n:'Gilberto Nunes',s:'Cauterização química · 3 sessões · R$ 900',t:[['proposta enviada há 1 dia','']]}],
+  'Plano de tratamento':[{n:'Rogério Alves',s:'Botox · R$ 1.600',t:[['proposta há 3 dias','a']]},{n:'Bianca Lemos',s:'Laser 10 sessões · R$ 2.400',t:[['vence amanhã','r']]},{n:'Fernando Sá',s:'Criolipólise · 4 sessões · R$ 3.200',t:[['visualizou hoje','']]},{n:'Débora Nunes',s:'Botox · 2 áreas · R$ 1.800',t:[['respondeu: "vou ver e te aviso"','a'],['há 2 dias','']]},{n:'Gilberto Nunes',s:'Cauterização química · 3 sessões · R$ 900',t:[['proposta enviada há 1 dia','']]}],
 };
 /* ===== ROTEIRO · dados (a tela está na seção 3 · ROTEIRO)
    Fonte de cada número (vira etiqueta na tela): real = RX_WA (WhatsApp 24/08–23/09:
@@ -1067,7 +1067,7 @@ let CONV=[
   {id:1,n:'Joice Prado',t:'vou ver e te falo',q:'2 min',tipo:'paciente',et:'Recebeu o preço',ag:true,nl:1},
   {id:4,n:'Marcos Teixeira',t:'[agente] Reservei quarta às 9h30. A recepção confirma em instantes',q:'08:44',tipo:'paciente',et:'Consulta agendada',ag:true,ev:4}, // ev: a conversa segue o horário da Agenda (cvTexto)
   {id:5,n:'Recepção 2',t:'tem dinheiro em caixa pra pagar a água?',q:'08:31',tipo:'interna',sub:'equipe',ag:false},
-  {id:3,n:'Matheus (contador)',t:'a nota de junho foi aquela?',q:'08:12',tipo:'interna',sub:'fornecedor',ag:false},
+  {id:3,n:'Escritório de contabilidade',t:'segue o fechamento do mês para conferir',q:'08:12',tipo:'interna',sub:'fornecedor',ag:false},
   {id:2,n:'Sônia Pires',t:'[agente] Confirmado! Até amanhã às 14h 🤝',q:'ontem',tipo:'paciente',et:'Consulta agendada',ag:true},
   {id:6,n:'Número novo (99) 9····-··17',t:'bom dia, o doutor atende em Codó?',q:'ontem',tipo:'sugerida',et:'Novo',ag:true,cid:'Codó'}, // cid: o agente respondeu e pôs na fila da cidade (rtZapCodo, a mesma conversa do Roteiro)
   {id:7,n:'Filtros Maranhão',t:'orçamento da manutenção do filtro',q:'ontem',tipo:'sugerida-interna',sub:'fornecedor',ag:false},
@@ -3419,7 +3419,7 @@ const brl2=v=>'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:v%1?2:0,maxi
    As abertas (Enviada, Visualizada, Negociando) são os mesmos cards de Funil › Plano de tratamento. */
 const PROPS={
   'Enviada':[{n:'Gilberto Nunes',pl:'Cauterização química · 3 sessões',v:900,d:'há 1 dia',fu:['lembrete hoje às 10h','']}],
-  'Visualizada':[{n:'Fernando Sá',pl:'Criolipólise · 4 sessões',v:3200,d:'visualizou hoje',fu:['lembrete amanhã','']},{n:'Rogério Alves',pl:'Botox (lift)',v:1600,d:'há 3 dias',fu:['2º lembrete já foi','a']},{n:'Denise Rocha',pl:'Botox · 2 áreas',v:1800,d:'há 2 dias',fu:['disse “vou ver” · com a recepção','a']}],
+  'Visualizada':[{n:'Fernando Sá',pl:'Criolipólise · 4 sessões',v:3200,d:'visualizou hoje',fu:['lembrete amanhã','']},{n:'Rogério Alves',pl:'Botox (lift)',v:1600,d:'há 3 dias',fu:['2º lembrete já foi','a']},{n:'Débora Nunes',pl:'Botox · 2 áreas',v:1800,d:'há 2 dias',fu:['disse “vou ver” · com a recepção','a']}],
   'Negociando':[{n:'Bianca Lemos',pl:'Depilação a laser · 10 sessões',v:2400,d:'vence amanhã',fu:['pediu 6× no cartão','a']}],
   'Aceita':[{n:'Lúcia Ferraz',pl:'Criolipólise + protocolo',v:3620,d:'01/09',fu:['entrada + 3 no Pix','g']},{n:'Rita Alves',pl:'Botox (lift)',v:1600,d:'05/09',fu:['Pix à vista','g']},{n:'Ana Paula Rocha',pl:'Depilação a laser · 10',v:2400,d:'12/09',fu:['4× cartão','g']}],
   'Perdida':[{n:'Paulo Nunes',pl:'Bioplastia',v:2200,d:'14/09',fu:['achou caro','r']},{n:'Tereza Luz',pl:'Peeling · 3 sessões',v:1050,d:'10/09',fu:['sumiu depois da proposta','r']}],

@@ -351,10 +351,15 @@ def test_o_corpo_gigante_e_cortado(banco):
     assert len(linhas[0][0]) <= 400 and len(linhas[0][3]) <= 300
 
 
-def test_um_laco_na_tela_nao_vira_um_laco_no_banco(banco):
+def test_um_laco_na_tela_nao_vira_um_laco_no_banco(banco, monkeypatch):
     """Uma tela que entre em erro dentro de um `setInterval` mandaria um registro
     por segundo — e o que era pra ser a trilha do incidente vira o incidente."""
+    import time
     from web import portal as _portal
+    # Relógio congelado no MEIO de um minuto. A janela da rota é por minuto de
+    # parede: sem isto, um laço que atravesse a virada do minuto zera o contador
+    # e grava mais que o teto (CI de 22/09/2026, PR #805: `assert 37 == 30`).
+    monkeypatch.setattr(time, "time", lambda: 60 * 29_000_000 + 30.0)
     _portal._erro_janela.clear()
     c = _cliente()
     for _ in range(_portal._ERRO_TETO + 15):

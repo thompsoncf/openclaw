@@ -1,4 +1,4 @@
-"""O resumo da conversa e a sugestão da IA (finance/resumo_ia.py, migração 343).
+"""O resumo da conversa e a sugestão da IA (finance/resumo_ia.py, migração 344).
 
 Mockup aprovado em 25/09/2026: docs/mockups/funil_resumo_ia.html. O que estes
 testes protegem, um por decisão do dono e por regra da casa:
@@ -113,7 +113,7 @@ def _banco():
         c.execute(_SQL)
         # a migração DE VERDADE: é o único jeito de o teste perceber se ela não
         # chegou, ou se a FK dela quebra a exclusão de lead
-        c.execute((MIG / "343_resumo_ia_do_lead.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "344_resumo_ia_do_lead.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (id, slug) values (1,'eventos'), (2,'consultoria')")
         c.execute("insert into contas (id, nome, nome_fantasia, nicho_id) values "
                   "(%s,'MANOEL','Prime Eventos',1), (%s,'Outra','Outra',1)", (CONTA, OUTRA_CONTA))
@@ -513,7 +513,7 @@ def test_voto_e_uso_ficam_presos_ao_lead_e_a_conta(pool, ia):
 
 
 def test_excluir_o_lead_leva_o_resumo_junto(pool, ia):
-    """A FK da 343 é CASCADE pra prospeccao: sem isso, excluir o lead dava erro."""
+    """A FK da 344 é CASCADE pra prospeccao: sem isso, excluir o lead dava erro."""
     lid = _lead(pool)
     _conversa(pool, lid, _MSGS)
     ria.gerar(pool, CONTA, lid, VEND, EVENTOS, agora=AGORA)

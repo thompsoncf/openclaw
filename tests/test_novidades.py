@@ -1265,12 +1265,12 @@ def test_os_ajustes_por_nicho_do_funil_avisam_cada_um_no_seu_alcance(pool):
 
 
 def test_o_resumo_da_ia_avisa_toda_conta_com_funil_e_o_vendedor(pool):
-    """344: o ✨ do card é do funil (`servico`), e muda a rotina do vendedor — então
+    """345: o ✨ do card é do funil (`servico`), e muda a rotina do vendedor — então
     vai pra ele também. O texto não fala de festa: o que a IA escreve já sai no
     vocabulário de cada conta, e o aviso só diz onde está o botão (regra 6)."""
     with pool.connection() as c:
-        c.execute((BASE / "344_novidade_resumo_ia_do_lead.sql").read_text(encoding="utf-8"))
-        c.execute((BASE / "344_novidade_resumo_ia_do_lead.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "345_novidade_resumo_ia_do_lead.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "345_novidade_resumo_ia_do_lead.sql").read_text(encoding="utf-8"))
         c.commit()
         rows = c.execute(
             """select tipo, publico, pra_quem, titulo, resumo, corpo, link from novidades
@@ -1283,3 +1283,16 @@ def test_o_resumo_da_ia_avisa_toda_conta_com_funil_e_o_vendedor(pool):
         assert palavra not in (tit + res + corpo).lower(), palavra
     assert "Quem envia é você" in corpo and "não inventa" in corpo.lower()
     assert {"eventos", "consultoria"} <= nv.nichos_alcancados("servico")
+def test_o_cabecalho_do_funil_avisa_quem_tem_funil(pool):
+    """343: o nome do vendedor no card, o número no 💬 e o topo mais leve — pra
+    quem tem funil (`servico`), sem palavra de festa (a consultoria recebe)."""
+    with pool.connection() as c:
+        c.execute((BASE / "343_novidade_funil_cabecalho.sql").read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select publico, pra_quem, titulo, resumo, corpo, link from novidades
+                          where chave='funil-cabecalho'""").fetchone()
+    pub, pq, tit, res, corpo, link = r
+    assert pub == "servico" and sorted(pq) == ["dono", "gestor", "vendedor"]
+    assert "festa" not in (tit + res + corpo).lower()
+    assert res and link == "/painel/prospeccao"
+    assert "DONO E GESTOR" in corpo, "o que é só da gerência tem que dizer que é"

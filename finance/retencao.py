@@ -51,7 +51,7 @@ def apagar_historico_whatsapp(pool, conta_id: int) -> dict:
     conta_id = int(conta_id)
     with pool.connection() as c:
         with c.transaction():
-            # O RESUMO DA IA (migração 343) é feito DESTAS mensagens: apagar a
+            # O RESUMO DA IA (migração 344) é feito DESTAS mensagens: apagar a
             # conversa e deixar o resumo seria guardar o conteúdo dela por outro
             # caminho. Vai junto, na mesma transação. Savepoint porque a tabela é
             # nova — num banco sem ela, apagar o histórico não pode parar aqui.

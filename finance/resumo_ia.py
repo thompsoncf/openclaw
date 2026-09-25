@@ -10,7 +10,7 @@ AS QUATRO DECISÕES DO DONO, e onde cada uma mora:
   1. "Usar na conversa" SÓ PREENCHE o campo; quem envia é o vendedor. Este módulo
      não envia nada, em lugar nenhum — nem tem como.
   2. SÓ NO CLIQUE. Nada aqui roda sozinho: `gerar` é chamado por uma rota POST, e
-     o resultado fica guardado (migração 343) até chegar mensagem nova — abrir de
+     o resultado fica guardado (migração 344) até chegar mensagem nova — abrir de
      novo lê o guardado, de graça (`estado`).
   3. QUEM VÊ: o vendedor do lead, o gestor e o dono. A posse é conferida nas
      rotas (`_pode_ver` no painel, `_posse`/gerência no app), não aqui.

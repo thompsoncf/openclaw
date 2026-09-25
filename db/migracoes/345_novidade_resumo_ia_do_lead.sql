@@ -1,5 +1,5 @@
--- 344_novidade_resumo_ia_do_lead.sql
--- O aviso do resumo da conversa e da sugestão da IA no card do lead (migração 343,
+-- 345_novidade_resumo_ia_do_lead.sql
+-- O aviso do resumo da conversa e da sugestão da IA no card do lead (migração 344,
 -- finance/resumo_ia.py).
 --
 -- QUEM RECEBE (CLAUDE.md §5 e §6). Público `servico`: o ⋯ do card é do funil, que

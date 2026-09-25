@@ -1,4 +1,4 @@
--- 343_resumo_ia_do_lead.sql
+-- 344_resumo_ia_do_lead.sql
 -- O resumo da conversa e a sugestão da IA, guardados por lead.
 --
 -- O PEDIDO (dono, 25/09/2026, mockup docs/mockups/funil_resumo_ia.html aprovado
@@ -59,10 +59,10 @@ create table if not exists public.lead_resumo_ia_uso (
 );
 
 comment on table public.lead_resumo_ia is
-  'Resumo da conversa e sugestão da IA por lead, guardado até chegar mensagem nova. Ver a migração 343.';
+  'Resumo da conversa e sugestão da IA por lead, guardado até chegar mensagem nova. Ver a migração 344.';
 
 comment on table public.lead_resumo_ia_uso is
-  'Tentativas de resumo por IA por conta e dia (teto contra laço). Ver a migração 343.';
+  'Tentativas de resumo por IA por conta e dia (teto contra laço). Ver a migração 344.';
 
 -- rollback:
 --   drop table if exists public.lead_resumo_ia_uso;

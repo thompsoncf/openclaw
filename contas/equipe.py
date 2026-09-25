@@ -171,6 +171,11 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # no #650 — o link entrou no menu e a rota ficou de fora.
     if caps["origens"]:
         permitido += ["/painel/origens"]
+    # Obras (a casa e a reforma da construtora): custo é financeiro, então entra
+    # quem tem financeiro. Quem barra conta de outro nicho é a rota (só o perfil
+    # `obras` abre), não esta lista — a mesma divisão de Renovações.
+    if caps["financeiro"]:
+        permitido += ["/painel/obras"]
     if caps["gerir"]:
         permitido += ["/painel/equipe", "/membros"]
     if recebe_novidades(papel):

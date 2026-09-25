@@ -71,6 +71,14 @@ def bloco_persona_pj(pool, conta_id: int, empresa_nome: str = "") -> str:
     from .nichos import persona_do_nicho
     slug = _nicho_da_conta(pool, conta_id)
     bloco_nicho = persona_do_nicho(slug)
+    # A CONSTRUTORA fala das obras DELA: a lista e o que fazer com cada pedido
+    # (finance/obras.py). É o que liga a persona do ramo ("de qual obra?") às
+    # ferramentas que só esta conta recebe.
+    if slug == "construcao":
+        from . import obras as _obras
+        bloco_obras = _obras.bloco_persona(pool, conta_id)
+        if bloco_obras:
+            bloco_nicho = f"{bloco_nicho}\n{bloco_obras}" if bloco_nicho else bloco_obras
     bloco_nicho = f"\n{bloco_nicho}\n" if bloco_nicho else ""
     # a linha "a folha oficial é do contador" não faz sentido pra um contador:
     # pro ramo contabilidade, o próprio molde do nicho já reenquadra a folha.
@@ -404,7 +412,7 @@ def construir_ferramentas_pj(pool, conta_id: int,
                 + (", ".join(centros) if centros else "nenhum cadastrado"))
 
     valor_s = {"type": "number", "description": "valor em reais, ex 1500.50"}
-    return [
+    ferramentas = [
         Ferramenta(
             nome="plano_de_contas",
             descricao=("Lista as CONTAS CONTÁBEIS habilitadas e os CENTROS DE CUSTO "
@@ -521,5 +529,172 @@ def construir_ferramentas_pj(pool, conta_id: int,
                 },
             },
             executar=relatorio_separado,
+        ),
+    ]
+    # As ferramentas de OBRA são só da construtora (§6: o vocabulário de um ramo
+    # nunca vaza pro outro). Numa clínica, "dividir_entre_obras" seria uma porta
+    # aberta pra um erro que não tem como acontecer.
+    if _nicho_da_conta(pool, conta_id) == "construcao":
+        ferramentas += construir_ferramentas_obras(pool, conta_id)
+    return ferramentas
+
+
+def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
+    """consultar_obra, dividir_entre_obras, por_na_obra, marcar_etapa e
+    gastos_sem_obra — o dia do encarregado (docs/mockups/nicho_construcao.html,
+    seção 07). Nenhuma cria obra: obra nasce no painel (decisão 1 do dono)."""
+    from . import obras as ob
+
+    def _obra(ref) -> tuple[dict | None, str]:
+        o = ob.obra_por_nome(pool, conta_id, ref)
+        if o:
+            return o, ""
+        nomes = ", ".join(x["nome"] for x in ob.listar_obras(pool, conta_id, com_custos=False))
+        if not nomes:
+            return None, (f"Ainda não tem obra cadastrada. Quem cadastra é a empresa, "
+                          f"no painel: {ob.LINK_OBRAS}")
+        return None, f"Não achei a obra “{ref}”. As obras são: {nomes}. Qual delas?"
+
+    def consultar_obra(e: dict) -> str:
+        ref = (e.get("obra") or "").strip()
+        if ref:
+            o, erro = _obra(ref)
+            return ob.resumo_da_obra(ob.obter_obra(pool, conta_id, o["id"])) if o else erro
+        obras = ob.listar_obras(pool, conta_id)
+        if not obras:
+            return f"Ainda não tem obra cadastrada. Cadastro no painel: {ob.LINK_OBRAS}"
+        partes = [ob.resumo_da_obra(o) for o in obras]
+        falta = ob.sem_obra(pool, conta_id, limite=0)
+        if falta["n"]:
+            partes.append(f"Sem obra: {falta['n']} despesa(s) de obra, "
+                          f"{ob._brl(falta['total_centavos'])}.")
+        return "\n".join(partes)
+
+    def dividir_entre_obras(e: dict) -> str:
+        try:
+            lid = int(e.get("lancamento_id"))
+        except (TypeError, ValueError):
+            return "Preciso do id do lançamento que vai ser dividido."
+        nomes = [n for n in (e.get("obras") or []) if str(n).strip()]
+        if e.get("todas") or not nomes:
+            alvo = [o for o in ob.listar_obras(pool, conta_id, com_custos=False)
+                    if o["status"] == "em_obra"]
+        else:
+            alvo = []
+            for n in nomes:
+                o, erro = _obra(n)
+                if not o:
+                    return erro
+                alvo.append(o)
+        if len(alvo) < 2:
+            return ("Pra dividir preciso de pelo menos duas obras em andamento. "
+                    "De qual obra é esse gasto?")
+        try:
+            partes = ob.dividir(pool, conta_id, lid, [o["id"] for o in alvo])
+        except ValueError as err:
+            return f"Não dividi: {err}"
+        return "Dividi: " + "; ".join(
+            f"{ob._brl(p['valor_centavos'])} em {p['obra']}" for p in partes) + ". ✅"
+
+    def por_na_obra(e: dict) -> str:
+        try:
+            lid = int(e.get("lancamento_id"))
+        except (TypeError, ValueError):
+            return "Preciso do id do lançamento."
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
+        try:
+            r = ob.por_na_obra(pool, conta_id, lid, o["id"])
+        except ValueError as err:
+            return f"Não mudei: {err}"
+        return f"Pus {ob._brl(r['valor_centavos'])} na {r['obra']}. ✅"
+
+    def marcar_etapa(e: dict) -> str:
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
+        concluida = e.get("concluida")
+        try:
+            r = ob.marcar_etapa(pool, conta_id, o["id"], (e.get("etapa") or "").strip(),
+                                concluida=True if concluida is None else bool(concluida))
+        except ValueError as err:
+            return str(err)
+        verbo = "concluída" if r["concluida"] else "desmarcada"
+        txt = f"{r['etapa']} {verbo} em {r['obra']}: a obra está em {r['pct']}%."
+        if r["status"] == "pronta":
+            txt += " Todas as etapas feitas — marquei a obra como PRONTA."
+        return txt
+
+    def gastos_sem_obra(_e: dict) -> str:
+        f = ob.sem_obra(pool, conta_id, limite=10)
+        if not f["n"]:
+            return "Nenhuma despesa de obra sem obra. ✅"
+        linhas = [f"id={i['id']} · {i['data'].strftime('%d/%m')} · "
+                  f"{ob._brl(i['valor_centavos'])} · {i['descricao'][:70]}"
+                  for i in f["itens"]]
+        mais = f" (mostrando {len(f['itens'])})" if f["n"] > len(f["itens"]) else ""
+        return (f"{f['n']} despesa(s) de obra sem obra, {ob._brl(f['total_centavos'])}"
+                f"{mais}:\n" + "\n".join(linhas))
+
+    obra_s = {"type": "string", "description": "o nome da obra, como a pessoa falou (ex: Casa 2)"}
+    return [
+        Ferramenta(
+            nome="consultar_obra",
+            descricao=("Quanto já foi gasto numa obra (material, mão de obra, outros), "
+                       "contra o previsto, e em que etapa ela está. Sem 'obra', resume "
+                       "todas as obras abertas."),
+            parametros={"type": "object", "properties": {"obra": obra_s}},
+            executar=consultar_obra,
+        ),
+        Ferramenta(
+            nome="dividir_entre_obras",
+            descricao=("Divide um lançamento JÁ REGISTRADO em partes iguais entre obras "
+                       "(a nota de material que é de várias casas). Use o lancamento_id "
+                       "que o registro devolveu. 'todas' = todas as obras em andamento."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "lancamento_id": {"type": "integer"},
+                    "obras": {"type": "array", "items": {"type": "string"},
+                              "description": "os nomes das obras; vazio com todas=true"},
+                    "todas": {"type": "boolean"},
+                },
+                "required": ["lancamento_id"],
+            },
+            executar=dividir_entre_obras,
+        ),
+        Ferramenta(
+            nome="por_na_obra",
+            descricao=("Põe um lançamento já registrado INTEIRO numa obra (desfaz divisão "
+                       "anterior). Serve pra distribuir os gastos sem obra."),
+            parametros={
+                "type": "object",
+                "properties": {"lancamento_id": {"type": "integer"}, "obra": obra_s},
+                "required": ["lancamento_id", "obra"],
+            },
+            executar=por_na_obra,
+        ),
+        Ferramenta(
+            nome="marcar_etapa",
+            descricao=("Marca uma etapa da obra como concluída (ou desmarca, com "
+                       "concluida=false). 'etapa' pode vir do jeito que a pessoa falou: "
+                       "telhado, laje, reboco, piso, pintura."),
+            parametros={
+                "type": "object",
+                "properties": {"obra": obra_s,
+                               "etapa": {"type": "string"},
+                               "concluida": {"type": "boolean"}},
+                "required": ["obra", "etapa"],
+            },
+            executar=marcar_etapa,
+        ),
+        Ferramenta(
+            nome="gastos_sem_obra",
+            descricao=("Lista as despesas de obra da empresa que ainda não têm obra "
+                       "(com o id de cada uma), pra distribuir com por_na_obra ou "
+                       "dividir_entre_obras."),
+            parametros={"type": "object", "properties": {}},
+            executar=gastos_sem_obra,
         ),
     ]

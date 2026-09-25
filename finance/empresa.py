@@ -2573,14 +2573,29 @@ def dre_por_centro(pool, conta_id: int, ano: int, mes: int) -> dict:
     fim = _mes_seguinte(ini)
     try:
         with pool.connection() as c:
-            rows = c.execute(
-                """select p.grupo, l.centro_custo_id, p.natureza, sum(l.valor_centavos)
-                     from lancamentos l
-                     join plano_contas p on p.id = l.plano_conta_id
-                    where l.conta_id=%s and l.data >= %s and l.data < %s
-                      and l.natureza='empresa'
-                    group by p.grupo, l.centro_custo_id, p.natureza""",
-                (conta_id, ini, fim)).fetchall()
+            # A NOTA DIVIDIDA ENTRE OBRAS (migração 351) entra em cada coluna com a
+            # parte dela: o lançamento continua um só, e é o rateio que diz quanto é
+            # de cada centro. Sem a tabela (base anterior à 351), o de sempre.
+            if c.execute("select to_regclass('public.lancamento_rateio')").fetchone()[0]:
+                rows = c.execute(
+                    """select p.grupo, coalesce(r.centro_custo_id, l.centro_custo_id),
+                              p.natureza, sum(coalesce(r.valor_centavos, l.valor_centavos))
+                         from lancamentos l
+                         join plano_contas p on p.id = l.plano_conta_id
+                         left join lancamento_rateio r on r.lancamento_id = l.id
+                        where l.conta_id=%s and l.data >= %s and l.data < %s
+                          and l.natureza='empresa'
+                        group by 1, 2, 3""",
+                    (conta_id, ini, fim)).fetchall()
+            else:
+                rows = c.execute(
+                    """select p.grupo, l.centro_custo_id, p.natureza, sum(l.valor_centavos)
+                         from lancamentos l
+                         join plano_contas p on p.id = l.plano_conta_id
+                        where l.conta_id=%s and l.data >= %s and l.data < %s
+                          and l.natureza='empresa'
+                        group by p.grupo, l.centro_custo_id, p.natureza""",
+                    (conta_id, ini, fim)).fetchall()
     except Exception:
         return {"ano": ano, "mes": mes, "centros": [], "linhas": [],
                 "disponivel": False}

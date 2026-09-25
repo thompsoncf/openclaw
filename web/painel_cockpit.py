@@ -1036,6 +1036,42 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .resphdr{display:flex;align-items:center;justify-content:space-between}
 .resphdr b{font-family:var(--display);font-size:.95rem}
 .respfecha{background:none;border:0;color:var(--text-dim);font-size:1rem;cursor:pointer}
+/* O RESUMO DA IA (25/09/2026, docs/mockups/funil_resumo_ia.html). O botão ✨ mora
+   no cabeçalho da conversa — visível sempre, até com o agente atendendo — e abre
+   uma folha no molde da .resp. Lilás é o que a IA escreveu; verde é fato do
+   sistema. A linha do [hidden] é obrigatória pelo mesmo motivo da .resp. */
+.iabtn{flex-shrink:0;font:600 .72rem var(--body);color:var(--roxo);border:1px solid #3a2b52;
+  background:#1a1226;border-radius:999px;padding:.28rem .6rem;cursor:pointer;white-space:nowrap}
+.iafundo{position:fixed;inset:0;z-index:29;background:rgba(0,0,0,.5)}
+.iafolha{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:520px;
+  z-index:30;background:var(--bg-2);border-top:1px solid var(--line);border-radius:18px 18px 0 0;
+  padding:.6rem .9rem 1rem;padding-bottom:calc(1rem + var(--fundo-seguro));max-height:84%;
+  display:flex;flex-direction:column;gap:.55rem}
+.iafolha[hidden],.iafundo[hidden]{display:none}
+.iacorpo{overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:.6rem;
+  font-size:.84rem;line-height:1.45}
+.iafatos{display:flex;flex-wrap:wrap;gap:.3rem}
+.iachip{font-size:.68rem;border-radius:999px;padding:.1rem .5rem;border:1px solid var(--line);color:var(--text-dim)}
+.iachip.bola{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F2C66E}
+.iachip.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.iarot{font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--roxo);margin-bottom:.15rem}
+.iabl ul{margin:0;padding-left:1.05rem}
+.iabl li::marker{color:var(--roxo)}
+.iapasso{border:1px solid #4a3163;background:#1c1428;border-radius:10px;padding:.5rem .65rem;color:#E3CCF2;font-weight:600}
+.ianaosei{border:1px dashed var(--ambar-borda);border-radius:10px;padding:.45rem .6rem;font-size:.78rem;color:#F2C66E}
+.iacaixa{width:100%;min-height:6rem;resize:vertical;background:var(--bg);border:1px solid var(--line);border-radius:10px;
+  color:var(--text);padding:.55rem .6rem;font-family:inherit;font-size:.84rem;line-height:1.45}
+.iafaixa{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#F2C66E;border-radius:8px;padding:.4rem .55rem;font-size:.76rem}
+.iaerro{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:#F5C9C4;border-radius:8px;padding:.4rem .55rem;font-size:.76rem}
+.iask{height:9px;border-radius:5px;background:linear-gradient(90deg,var(--surface),var(--line),var(--surface));
+  background-size:200% 100%;animation:iask 1.4s linear infinite}
+@keyframes iask{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.iask{animation:none}}
+.iape{display:flex;gap:.45rem}
+.iape .btn{flex:1;margin:0}
+.iadica{font-size:.7rem;color:var(--text-dim)}
+.iatag{font-size:.7rem;color:#E3CCF2;display:flex;gap:.45rem;align-items:center;padding:0 .2rem .35rem}
+.iatag button{background:none;border:0;color:var(--text-dim);text-decoration:underline;font:inherit;cursor:pointer;padding:0}
 /* o aviso de quem é o quê: a folha mistura as da empresa com as do vendedor, e
    sem uma linha explicando ele lê a diferença (umas com ✕, outras com 🔒) como
    defeito em vez de regra */
@@ -5483,6 +5519,105 @@ _FOLHA_JS = (
 #: A FOLHA DAS RESPOSTAS RÁPIDAS. Abre por JS (e não por `:target`, como a de
 #: ações): o salto de âncora rola o `.wrap` e empurra a tela — foi o defeito que
 #: o #759 consertou, e não vale repetir num lugar novo.
+#: O RESUMO DA IA no app (25/09/2026, docs/mockups/funil_resumo_ia.html). Molde das
+#: respostas rápidas: abre por JS (nunca por :target, que empurra o .wrap — #759),
+#: fecha no fundo, no ✕ e no Esc. "Usar resposta" TROCA o texto da caixa (as
+#: rápidas acrescentam) e deixa o "desfazer" logo acima: é a decisão 1 do dono —
+#: o texto vai pro campo, quem envia é o vendedor. Sem caixa (o agente atendendo),
+#: a folha só lê. `zapFetch` vem com defer: só é chamado dentro de clique.
+_IA_JS = r"""<script>
+(function(){
+  var BASE="__BASE__", LEAD=__LEAD__;
+  var btn=document.getElementById("iaBtn"), folha=document.getElementById("iafolha"),
+      fundo=document.getElementById("iafundo"), corpo=document.getElementById("iacorpo"),
+      pe=document.getElementById("iape");
+  if(!btn||!folha||!fundo||!corpo||!pe)return;
+  var caixa=document.querySelector("form.composer [name=texto]");
+  var d=null, gerando=false, falha="";
+  function esc(t){return String(t==null?"":t).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function abrir(){folha.hidden=false;fundo.hidden=false;if(d&&!falha){pinta();return;}carregar();}
+  function fechar(){folha.hidden=true;fundo.hidden=true;}
+  function carregando(){return '<div class=iabl><div class=iarot>✨ Lendo a conversa…</div>'
+    +'<div class=iask style="width:92%"></div><div class=iask style="width:74%;margin-top:.4rem"></div>'
+    +'<div class=iask style="width:84%;margin-top:.4rem"></div></div>';}
+  function carregar(){
+    falha=""; corpo.innerHTML=carregando(); pe.innerHTML="";
+    zapFetch(BASE+"/lead/"+LEAD+"/resumo-ia",{headers:{"x-cockpit":"1"}}).then(function(j){
+      if(!j){falha="Não deu pra abrir.";pinta();return;}
+      if(!j.ok){falha=j.msg||"Não consegui abrir.";pinta();return;}
+      d=j;
+      if(!d.resumo&&d.tem_conversa&&d.ia){gerar({});return;}
+      pinta();
+    });
+  }
+  function gerar(op){
+    gerando=true; falha=""; pinta();
+    var fd=new FormData(); if(op.forcar)fd.append("forcar","1"); if(op.variar)fd.append("variar","1");
+    zapFetch(BASE+"/lead/"+LEAD+"/resumo-ia",{method:"POST",headers:{"x-cockpit":"1"},body:fd}).then(function(j){
+      gerando=false;
+      if(!j){falha="Não consegui ler a conversa agora. Tente de novo em instantes.";pinta();return;}
+      if(!j.ok){falha=j.msg||"Não consegui ler a conversa agora.";if(j.fatos)d=j;pinta();return;}
+      d=j; pinta();
+    });
+  }
+  function lista(xs){var h="<ul>";(xs||[]).forEach(function(t){h+="<li>"+esc(t)+"</li>";});return h+"</ul>";}
+  function pinta(){
+    var F=(d&&d.fatos)||{}, B=F.bola||{}, R=d&&d.resumo, h="";
+    var ch="";
+    if(B.txt)ch+="<span class='iachip"+(B.quem==="voce"?" bola":"")+"'>"+esc(B.txt)+"</span>";
+    if(F.n_total)ch+="<span class='iachip ok'>"+(F.n_total>F.n_lidas?"leu as "+F.n_lidas+" mais recentes de "+F.n_total:F.n_total+(F.n_total===1?" mensagem":" mensagens"))+"</span>";
+    if(R&&d.feito_txt&&!gerando)ch+="<span class=iachip>"+esc(d.feito_txt)+"</span>";
+    if(ch)h+="<div class=iafatos>"+ch+"</div>";
+    if(d&&d.novas&&R&&!gerando)h+="<div class=iafaixa>"+d.novas+(d.novas===1?" mensagem nova":" mensagens novas")+" depois deste resumo. Toque em ↻ Atualizar.</div>";
+    if(falha)h+="<div class=iaerro>"+esc(falha)+"</div>";
+    if(gerando)h+=carregando();
+    else if(d&&!d.tem_conversa)h+="<div class=iadica>Este lead ainda não trocou mensagem, então não há conversa pra resumir.</div>";
+    else if(R){
+      if(R.quer)h+="<div class=iabl><div class=iarot>✨ O que o cliente quer</div>"+esc(R.quer)+"</div>";
+      if((R.em_que_pe||[]).length)h+="<div class=iabl><div class=iarot>✨ Em que pé está</div>"+lista(R.em_que_pe)+"</div>";
+      if((R.pode_travar||[]).length)h+="<div class=iabl><div class=iarot>✨ O que pode travar</div>"+lista(R.pode_travar)+"</div>";
+      if(R.proximo_passo)h+="<div class=iapasso>"+esc(R.proximo_passo)+"</div>";
+      (R.nao_sei||[]).forEach(function(t){h+="<div class=ianaosei>"+esc(t)+"</div>";});
+      if(R.mensagem)h+="<div class=iabl><div class=iarot>✨ Mensagem sugerida · dá pra editar</div>"
+        +"<textarea class=iacaixa id=iamsg aria-label='Mensagem sugerida'>"+esc(R.mensagem)+"</textarea></div>";
+      if(!caixa)h+="<div class=iadica>O agente está atendendo. Assuma a conversa pra usar a resposta.</div>";
+      h+="<div class=iadica>A IA leu só a conversa e o card deste lead. Nada é enviado sozinho.</div>";
+    }
+    corpo.innerHTML=h;
+    var p="";
+    if(!gerando&&d&&d.tem_conversa&&(R||falha))p+="<button type=button class='btn ghost' id=iaOutra>"+(R?"↻ Outra":"Tentar de novo")+"</button>";
+    if(!gerando&&R&&R.mensagem)p+="<button type=button class=btn id=iaUsar"+(caixa?"":" disabled")+">Usar resposta</button>";
+    pe.innerHTML=p;
+    var o=document.getElementById("iaOutra"); if(o)o.onclick=function(){gerar(R?{variar:1}:{forcar:1});};
+    var u=document.getElementById("iaUsar"); if(u)u.onclick=usar;
+  }
+  function usar(){
+    var ta=document.getElementById("iamsg"); if(!ta||!caixa)return;
+    var antes=caixa.value||"", t=ta.value;
+    caixa.value=t; fechar(); caixa.focus();
+    try{caixa.setSelectionRange(t.length,t.length);}catch(e){}
+    caixa.dispatchEvent(new Event("input"));
+    marcar(antes);
+    if(d&&d.resumo_id)zapFetch(BASE+"/lead/"+LEAD+"/resumo-ia/"+d.resumo_id+"/usado",{method:"POST",headers:{"x-cockpit":"1"},silencioso:true});
+  }
+  function tirarTag(){var v=document.getElementById("iatag");if(v)v.remove();}
+  function marcar(antes){
+    tirarTag();
+    var f=caixa.form; if(!f||!f.parentNode)return;
+    var tag=document.createElement("div"); tag.className="iatag"; tag.id="iatag";
+    tag.innerHTML="✨ Sugerida pela IA. Revise antes de enviar. <button type=button>desfazer</button>";
+    tag.querySelector("button").onclick=function(){caixa.value=antes;caixa.dispatchEvent(new Event("input"));tirarTag();caixa.focus();};
+    f.parentNode.insertBefore(tag,f);
+  }
+  if(caixa&&caixa.form)caixa.form.addEventListener("submit",tirarTag);
+  btn.addEventListener("click",function(e){e.preventDefault();if(folha.hidden)abrir();else fechar();});
+  fundo.addEventListener("click",fechar);
+  var x=document.getElementById("iafecha"); if(x)x.addEventListener("click",fechar);
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!folha.hidden)fechar();});
+})();
+</script>"""
+
+
 _RAPIDAS_JS = r"""
 <script>
 (function(){
@@ -6688,6 +6823,18 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                  f" O histórico dela não aparece aqui.{link}{passa}</div>")
 
     chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")
+    # o resumo da IA (finance/resumo_ia.py): o ✨ no cabeçalho, a folha no fim da
+    # página e o JS. Só com a IA ligada — sem ela, o botão prometeria o que não há.
+    from finance import resumo_ia as _ria
+    ia_html = ""
+    if _ria.ligado():
+        chip += "<button type=button class=iabtn id=iaBtn aria-label='Resumo e sugestão da IA'>✨ IA</button>"
+        ia_html = ("<div class=iafundo id=iafundo hidden></div>"
+                   "<div class=iafolha id=iafolha hidden role=dialog aria-label='Resumo da conversa'>"
+                   "<div class=resphdr><b>✨ Resumo da conversa</b>"
+                   "<button type=button class=respfecha id=iafecha aria-label=Fechar>✕</button></div>"
+                   "<div class=iacorpo id=iacorpo></div><div class=iape id=iape></div></div>"
+                   + _IA_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id)))
     # A PISTA (198): o leitor ouviu o mês (ou uma data diferente) e não gravou. O
     # aviso fica em cima do chat até o vendedor confirmar na ficha ou perguntar o dia.
     pista = ""
@@ -6706,7 +6853,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
              + f"<div class=chat>{chat}</div>{lupa_html}"
              + f"<div class=rodape>{acao}"
              + "<a class='btn ghost' style='margin-top:.5rem' href='#acoes'>Ficha, funil e fechamento</a>"
-             + "</div>" + folha + fim)
+             + "</div>" + folha + ia_html + fim)
     return _page(d["empresa"], corpo)
 
 
@@ -7779,6 +7926,76 @@ def _manda_na_conta(request: Request) -> bool:
     """Dono ou gestor? É quem pode escrever e apagar a resposta DA EQUIPE — a que
     todo mundo vê. Vendedor mexe só nas dele."""
     return (request.session.get("papel") or "dono") in ("dono", "gestor")
+
+
+# ─────────────────────────────────────────────── o resumo da IA (finance/resumo_ia.py)
+def _ia_porta(request: Request, lead_id: int):
+    """(conta_id, membro_id, None) ou (None, None, recusa). A MESMA cascata da tela do
+    lead: o vendedor vê o lead dele; gestor e dono veem os da conta (decisão 3)."""
+    pool = get_pool()
+    sess = _sessao(request)
+    if sess:
+        with pool.connection() as c:
+            if ck._posse(c, sess[0], sess[1], lead_id):
+                return sess[0], sess[1], None
+    g = _gerencia(request)
+    if g:
+        with pool.connection() as c:
+            ok = c.execute("select 1 from prospeccao where id=%s and conta_id=%s",
+                           (lead_id, g[0])).fetchone()
+        if ok:
+            return g[0], g[1], None
+    if not sess and not g:
+        return None, None, JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    return None, None, JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+
+
+def _ia_perfil(conta_id: int) -> dict:
+    from finance.raio_x_perfil import perfil_da_conta
+    return perfil_da_conta(get_pool(), conta_id)
+
+
+@router.get("/cockpit/lead/{lead_id}/resumo-ia")
+def cockpit_resumo_ia(request: Request, lead_id: int):
+    """Os fatos e o resumo GUARDADO, sem chamar a IA (decisão 2: só no clique)."""
+    from finance import resumo_ia as _ria
+    conta_id, _membro, recusa = _ia_porta(request, lead_id)
+    if recusa is not None:
+        return recusa
+    return JSONResponse(_ria.estado(get_pool(), conta_id, lead_id, _ia_perfil(conta_id)))
+
+
+@router.post("/cockpit/lead/{lead_id}/resumo-ia")
+def cockpit_resumo_ia_gerar(request: Request, lead_id: int, forcar: str = Form(""),
+                            variar: str = Form("")):
+    from finance import resumo_ia as _ria
+    conta_id, membro_id, recusa = _ia_porta(request, lead_id)
+    if recusa is not None:
+        return recusa
+    return JSONResponse(_ria.gerar(get_pool(), conta_id, lead_id, membro_id,
+                                   _ia_perfil(conta_id), forcar=forcar == "1",
+                                   variar=variar == "1"))
+
+
+@router.post("/cockpit/lead/{lead_id}/resumo-ia/{resumo_id}/voto")
+def cockpit_resumo_ia_voto(request: Request, lead_id: int, resumo_id: int,
+                           voto: str = Form("")):
+    from finance import resumo_ia as _ria
+    conta_id, _membro, recusa = _ia_porta(request, lead_id)
+    if recusa is not None:
+        return recusa
+    v = {"1": 1, "-1": -1}.get((voto or "").strip())
+    return JSONResponse({"ok": bool(v) and _ria.votar(get_pool(), conta_id, lead_id,
+                                                       resumo_id, v)})
+
+
+@router.post("/cockpit/lead/{lead_id}/resumo-ia/{resumo_id}/usado")
+def cockpit_resumo_ia_usado(request: Request, lead_id: int, resumo_id: int):
+    from finance import resumo_ia as _ria
+    conta_id, _membro, recusa = _ia_porta(request, lead_id)
+    if recusa is not None:
+        return recusa
+    return JSONResponse({"ok": _ria.marcar_usado(get_pool(), conta_id, lead_id, resumo_id)})
 
 
 @router.get("/cockpit/lead/{lead_id}/respostas")

@@ -190,7 +190,7 @@ function kbAbrirChat(ev,convId,aba,btn,nome){
         +'<button type="button" onclick="kbResponderChat('+convId+')">Enviar</button></div>';
       // o "perguntar" do card deixa a pergunta pronta na caixa — o vendedor
       // confere o tom e manda (decisão do dono, 04/09: abre, não dispara)
-      if(_cpPrefill){var ta=comp.querySelector('#cp-input');if(ta){ta.value=_cpPrefill;ta.rows=2;ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);}}
+      if(_cpPrefill){var ta=comp.querySelector('#cp-input');if(ta){ta.value=_cpPrefill;ta.rows=2;if(_cpPrefill.length>60)ta.style.height='5.6rem';ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);}}
     }else if(d.ok){
       comp.innerHTML='<div class="cx-stub">Responder por aqui <span class="lbl2">em breve</span></div>';
     }

@@ -1,5 +1,5 @@
--- 352_novidade_agenda_clinica.sql
--- O aviso da agenda da clínica (web/painel_clinica_agenda.py, migração 351),
+-- 354_novidade_agenda_clinica.sql
+-- O aviso da agenda da clínica (web/painel_clinica_agenda.py, migração 353),
 -- seguindo a seção 5 do CLAUDE.md.
 --
 -- PÚBLICO `clinica`. PRA QUEM: dono, gestor e vendedor — a recepção entra como

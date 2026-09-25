@@ -730,7 +730,7 @@ def remarcar_evento(pool, conta_id: int, evento_id: int, inicio: datetime,
             # prazo intacto), ativo continua ativo, e cancelado volta à vida.
             "       status = case when status='cancelado' then 'ativo' else status end "
             " where id=%s and conta_id=%s "
-            # a consulta da clínica (351) só se remarca pela agenda da clínica, que
+            # a consulta da clínica (353) só se remarca pela agenda da clínica, que
             # confere a grade, trava o horário e zera a confirmação da véspera
             "   and (to_jsonb(eventos_agenda) ->> 'situacao') is null",
             (inicio, fim, evento_id, conta_id),

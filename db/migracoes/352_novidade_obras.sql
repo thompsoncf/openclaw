@@ -1,10 +1,10 @@
--- 348_novidade_obras.sql
+-- 352_novidade_obras.sql
 -- O aviso da aba Obras, seguindo a seção 5 do CLAUDE.md: PR que muda tela leva o
--- aviso, no mesmo PR. Precisa da 347 (as obras) e da 346 (o portão
+-- aviso, no mesmo PR. Precisa da 351 (as obras) e da 350 (o portão
 -- `construcao`). Desenho aprovado pelo dono em 25/09/2026:
 -- docs/mockups/nicho_construcao.html, seções 05 a 07.
 --
--- PORTÃO `construcao`, o mesmo da 346: a aba só abre pro perfil `obras`
+-- PORTÃO `construcao`, o mesmo da 350: a aba só abre pro perfil `obras`
 -- (web/painel_obras._acesso), e avisar qualquer outro ramo seria prometer uma
 -- tela que não abre.
 --

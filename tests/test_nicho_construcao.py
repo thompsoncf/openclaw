@@ -36,7 +36,7 @@ def test_o_ramo_se_chama_construcao_e_reforma():
 
 def test_o_nome_da_tabela_e_o_label_do_codigo_sao_o_mesmo():
     """O painel lê o label do CÓDIGO; o admin lê o nome da TABELA."""
-    sql = (_MIG / "344_nicho_construcao_e_reforma.sql").read_text(encoding="utf-8")
+    sql = (_MIG / "348_nicho_construcao_e_reforma.sql").read_text(encoding="utf-8")
     assert f"update nichos set nome = '{nichos.label_do_nicho('construcao')}'" in sql
     assert f"select '{nichos.label_do_nicho('construcao')}', 'construcao'" in sql
 
@@ -129,9 +129,9 @@ def test_as_categorias_que_a_persona_cita_existem():
 
 
 def test_as_contas_do_plano_que_a_persona_cita_existem():
-    """3.1.03 e 1.1.02 são da 132; 3.1.04 e 1.1.04 nascem na 345."""
+    """3.1.03 e 1.1.02 são da 132; 3.1.04 e 1.1.04 nascem na 349."""
     p = _persona()
-    novas = (_MIG / "345_plano_obras.sql").read_text(encoding="utf-8")
+    novas = (_MIG / "349_plano_obras.sql").read_text(encoding="utf-8")
     for cod in ("3.1.04", "1.1.04"):
         assert cod in p and f"('{cod}'," in novas
     base = (_MIG / "132_plano_contas_centros_custo.sql").read_text(encoding="utf-8")
@@ -279,5 +279,5 @@ def test_a_obra_continua_nos_portoes_de_familia():
 
 
 def test_o_aviso_mira_o_portao_novo_e_quem_configura_a_empresa():
-    sql = (_MIG / "346_novidade_nicho_construcao.sql").read_text(encoding="utf-8")
+    sql = (_MIG / "350_novidade_nicho_construcao.sql").read_text(encoding="utf-8")
     assert "('nicho-construcao-e-reforma', 'novidade', 'construcao', '{dono,gestor}'," in sql

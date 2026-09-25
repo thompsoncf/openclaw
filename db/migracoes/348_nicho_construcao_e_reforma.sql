@@ -1,4 +1,4 @@
--- 344_nicho_construcao_e_reforma.sql
+-- 348_nicho_construcao_e_reforma.sql
 -- O nicho 'construcao' passa a se chamar "Construção e reforma", o nome que o
 -- dono deu ao ramo em 25/09/2026, e o que a primeira conta dele faz: a PX2
 -- Empreendimentos (conta 33, Lago da Pedra-MA) constrói casa popular pra vender

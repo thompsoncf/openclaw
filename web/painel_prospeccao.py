@@ -1275,6 +1275,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    pergunta_data=(_evl.PERGUNTA_DATA if modo_evento else ""),
                    status=status_tpl, colunas_tpl=colunas_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
+                   ia_resumo=_resumo_ia_ligado(ctx.get("conta")),
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
                    total_alvos=len(rows) - len(outros_vend), tem_places=fontes.tem_chave_places(),
                    tem_maps_js=fontes.tem_chave_maps_js(), maps_js_key=fontes.chave_maps_js(),
@@ -9041,6 +9042,8 @@ def prospeccao_resumo(request: Request, alvo_id: int):
         "insta_url": alvo["insta_url"], "maps_url": alvo["maps_url"],
         "canais_contato": [{"ic": x["ic"], "label": x["label"], "respondeu": x["respondeu"]}
                             for x in canais_contato],
+        # o botão "✨ Resumo IA" da janela (finance/resumo_ia.py)
+        "ia_resumo": _resumo_ia_ligado(ctx.get("conta")),
         "atividades": [{"tipo_rot": x["tipo_rot"], "resultado_rot": x["resultado_rot"],
                          "descricao": x["descricao"], "cor": x["cor"],
                          "quando": x["criado_em"].strftime("%d/%m %H:%M") if x["criado_em"] else ""}
@@ -10024,6 +10027,84 @@ def prospeccao_mensagem_ia(request: Request, alvo_id: int, canal: str = Form("em
     return JSONResponse({"ok": True, "canal": "email",
                          "assunto": (d.get("assunto") or "").strip(),
                          "corpo": (d.get("corpo") or "").strip()})
+
+
+# ================================================================ RESUMO E SUGESTÃO (IA)
+# O ⋯ do card e a ficha abrem a janela do resumo (docs/mockups/funil_resumo_ia.html,
+# aprovado em 25/09/2026). O motor mora em finance/resumo_ia.py; aqui só a porta:
+# quem pode ver o lead é quem vê o resumo — a mesma `_pode_ver` da ficha (decisão
+# 3 do dono: vendedor do lead, gestor e dono). Todas `def`: a chamada à IA é
+# síncrona e travaria o event loop (tests/test_event_loop_nao_trava.py).
+def _resumo_ia_ligado(conta=None) -> bool:
+    """A IA ligada E a conta com funil (produto não tem — regra 6). Sem a conta,
+    só a IA: é o que sobra pra quem não tem a linha da conta em mãos."""
+    from finance import resumo_ia as _ria
+    if not _ria.ligado():
+        return False
+    if conta is None:
+        return True
+    from finance import raio_x_perfil as _rxp
+    from web.portal import nicho_da_conta
+    return bool(_rxp.perfil(nicho_da_conta(conta)).get("aplica"))
+
+
+def _resumo_ia_porta(request: Request, alvo_id: int):
+    """(ctx, perfil, None) ou (None, None, resposta de recusa)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return None, None, JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    alvo = _carrega_alvo(get_pool(), ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return None, None, JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    from finance import raio_x_perfil as _rxp
+    from web.portal import nicho_da_conta
+    return ctx, _rxp.perfil(nicho_da_conta(ctx["conta"])), None
+
+
+@router.get("/painel/prospeccao/{alvo_id}/resumo-ia")
+def prospeccao_resumo_ia(request: Request, alvo_id: int):
+    """Os fatos e o resumo GUARDADO — não chama a IA (decisão 2: só no clique)."""
+    from finance import resumo_ia as _ria
+    ctx, perfil, recusa = _resumo_ia_porta(request, alvo_id)
+    if recusa is not None:
+        return recusa
+    return JSONResponse(_ria.estado(get_pool(), ctx["conta_id"], alvo_id, perfil))
+
+
+@router.post("/painel/prospeccao/{alvo_id}/resumo-ia")
+def prospeccao_resumo_ia_gerar(request: Request, alvo_id: int, forcar: str = Form(""),
+                               variar: str = Form("")):
+    """Lê a conversa com a IA. `forcar` = ↻ refazer; `variar` = outra versão da
+    mensagem. Sem os dois, um resumo que ainda vale volta sem gastar."""
+    from finance import resumo_ia as _ria
+    ctx, perfil, recusa = _resumo_ia_porta(request, alvo_id)
+    if recusa is not None:
+        return recusa
+    return JSONResponse(_ria.gerar(
+        get_pool(), ctx["conta_id"], alvo_id, ctx.get("membro_id"), perfil,
+        forcar=forcar == "1", variar=variar == "1"))
+
+
+@router.post("/painel/prospeccao/{alvo_id}/resumo-ia/{resumo_id}/voto")
+def prospeccao_resumo_ia_voto(request: Request, alvo_id: int, resumo_id: int,
+                              voto: str = Form("")):
+    from finance import resumo_ia as _ria
+    ctx, _perfil, recusa = _resumo_ia_porta(request, alvo_id)
+    if recusa is not None:
+        return recusa
+    v = {"1": 1, "-1": -1}.get((voto or "").strip())
+    return JSONResponse({"ok": bool(v) and _ria.votar(get_pool(), ctx["conta_id"], alvo_id,
+                                                       resumo_id, v)})
+
+
+@router.post("/painel/prospeccao/{alvo_id}/resumo-ia/{resumo_id}/usado")
+def prospeccao_resumo_ia_usado(request: Request, alvo_id: int, resumo_id: int):
+    from finance import resumo_ia as _ria
+    ctx, _perfil, recusa = _resumo_ia_porta(request, alvo_id)
+    if recusa is not None:
+        return recusa
+    return JSONResponse({"ok": _ria.marcar_usado(get_pool(), ctx["conta_id"], alvo_id,
+                                                  resumo_id)})
 
 
 @router.post("/painel/prospeccao/{alvo_id}/enviar-email")
@@ -12242,6 +12323,8 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
 .kbpop .kbpi.at::after{content:"atual";margin-left:auto;font-size:.68rem;color:var(--txt-mut)}
 .kbpop .kbpi.sai{opacity:.7;border:1px dashed #2c3a32}
 .kbpop .kbpi.perigo{color:#e8a39b;border-top:1px solid #243029;border-radius:0 0 7px 7px;margin-top:3px}
+.kbpop .kbpi.kbpi-ia{color:#E3CCF2}
+.kbpop .kbpi.kbpi-ia:hover{background:#1c1428}
 .kbpop .kbpt{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);padding:.4rem .6rem .2rem}
 @media(pointer:coarse){.kbpop .kbpi{min-height:44px}}
 
@@ -12403,6 +12486,7 @@ function kbLerConversas(btn){btn.disabled=true;var t=btn.textContent;btn.textCon
 window.KB_VISTA={{ ('mes' if vista_mes else '')|tojson }};
 // excluir apaga o lead de vez: só dono e gestor (decisão do dono, 24/09/2026)
 window.KB_EXCLUI={{ 'true' if gerencia else 'false' }};
+window.KB_IA={{ 'true' if ia_resumo else 'false' }};
 // a pergunta da data da festa: só em quem vende data (§6) — quem vende mensalidade
 // não recebe nem o texto na página (desde 25/09/2026, parte 3 do funil enxuto)
 {% if modo_evento %}var KB_PERGUNTA_DATA={{ (pergunta_data or '')|tojson }};
@@ -12614,6 +12698,7 @@ function kbMenu(ev,btn){ev.stopPropagation();var pop=document.getElementById('kb
   var h='';
   if(conv)h+='<button type="button" class="kbpi" onclick="kbMenuChat(event,'+(+id)+','+(+conv)+',0)">💬 Abrir conversa</button>';
   else if(mail)h+='<button type="button" class="kbpi" onclick="kbMenuChat(event,'+(+id)+','+(+mail)+',1)">✉️ Abrir e-mail</button>';
+  if(window.KB_IA&&(conv||mail))h+='<button type="button" class="kbpi kbpi-ia" onclick="kbMenuResumo(event,'+(+id)+')">✨ Resumo e sugestão da IA</button>';
   if(window.KB_VISTA!=='mes'&&(window._KB_STATUS||[]).length)h+='<button type="button" class="kbpi" onclick="kbMenuMover('+(+id)+')">↔ Mover para <span class="seta">▸</span></button>';
   if(document.getElementById('kbvpop'))h+='<button type="button" class="kbpi" onclick="kbMenuVend('+(+id)+')">👤 Trocar responsável <span class="seta">▸</span></button>';
   h+='<button type="button" class="kbpi" onclick="kbMenuFicha(event,'+(+id)+')">↗ Abrir ficha do lead</button>';
@@ -12622,6 +12707,7 @@ function kbMenu(ev,btn){ev.stopPropagation();var pop=document.getElementById('kb
 function _kbCard(id){return document.querySelector('.kbcard[data-id="'+id+'"]');}
 function kbMenuChat(ev,id,conv,email){kbPopFecha();kbAbrirChat(ev,conv,email?'emails':'conversas',_kbCard(id));}
 function kbMenuFicha(ev,id){kbPopFecha();kbAbrirLead(ev,id,_kbCard(id));}
+function kbMenuResumo(ev,id){kbPopFecha();kbAbrirResumoIA(ev,id,_kbCard(id));}
 function kbMenuMover(id){var pop=document.getElementById('kbmenu');var st=pop.getAttribute('data-st')||'';var ancora=_kbPopDe;
   var h='<div class="kbpt">Mover para</div>';
   (window._KB_STATUS||[]).forEach(function(e,i){h+='<button type="button" class="kbpi'+(e.c===st?' at':'')+(e.sai?' sai':'')+'"'+(e.c===st?' disabled':'')+' onclick="kbMoverPara('+id+','+i+')">'+_kbEsc(e.r)+'</button>';});

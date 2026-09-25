@@ -739,7 +739,7 @@ class LivroCaixa:
         Multi-tenant: só mexe em lançamento DESTA conta.
 
         Pôr o lançamento INTEIRO num centro desfaz a divisão entre obras
-        (`lancamento_rateio`, migração 347), se houver — senão a divisão velha
+        (`lancamento_rateio`, migração 351), se houver — senão a divisão velha
         continuaria valendo por baixo do centro escolhido agora (ver
         finance/obras.py)."""
         with self.pool.connection() as conn:

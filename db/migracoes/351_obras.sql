@@ -1,4 +1,4 @@
--- 347_obras.sql
+-- 351_obras.sql
 -- AS OBRAS da construtora: cada casa pra vender e cada reforma de cliente. PR 2
 -- de 4 do desenho aprovado pelo dono em 25/09/2026 (docs/mockups/nicho_construcao.html,
 -- seções 05 a 07). Primeira conta: PX2 Empreendimentos (conta 33).

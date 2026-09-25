@@ -2573,9 +2573,9 @@ def dre_por_centro(pool, conta_id: int, ano: int, mes: int) -> dict:
     fim = _mes_seguinte(ini)
     try:
         with pool.connection() as c:
-            # A NOTA DIVIDIDA ENTRE OBRAS (migração 347) entra em cada coluna com a
+            # A NOTA DIVIDIDA ENTRE OBRAS (migração 351) entra em cada coluna com a
             # parte dela: o lançamento continua um só, e é o rateio que diz quanto é
-            # de cada centro. Sem a tabela (base anterior à 347), o de sempre.
+            # de cada centro. Sem a tabela (base anterior à 351), o de sempre.
             if c.execute("select to_regclass('public.lancamento_rateio')").fetchone()[0]:
                 rows = c.execute(
                     """select p.grupo, coalesce(r.centro_custo_id, l.centro_custo_id),

@@ -1,4 +1,4 @@
-"""1.1.04 Venda de Imóveis e 3.1.04 Mão de Obra de Obras (migração 345): as duas
+"""1.1.04 Venda de Imóveis e 3.1.04 Mão de Obra de Obras (migração 349): as duas
 contas entram no grupo certo da DRE, no lugar certo da árvore, e ligadas pra
 quem não desligou.
 
@@ -17,7 +17,7 @@ from finance import plano_contas as pc
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "057_natureza_lancamento.sql", "132_plano_contas_centros_custo.sql",
               "143_plano_contas_locacao_buffet_servicos.sql", "186_plano_aporte_socios.sql",
-              "336_plano_fardamentos.sql", "345_plano_obras.sql")
+              "336_plano_fardamentos.sql", "349_plano_obras.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 
 
@@ -69,7 +69,7 @@ def test_as_duas_caem_no_lugar_e_a_ordem_segue_o_codigo(pool):
 def test_rerodar_nao_duplica(pool):
     antes = len(pc.listar_plano(pool))
     with pool.connection() as c:
-        c.execute((_BASE / "345_plano_obras.sql").read_text(encoding="utf-8"))
+        c.execute((_BASE / "349_plano_obras.sql").read_text(encoding="utf-8"))
         c.commit()
     plano = pc.listar_plano(pool)
     assert len(plano) == antes

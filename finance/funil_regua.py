@@ -54,6 +54,7 @@ EVENTOS = {
     "sinal_pago":        "sinal registrado como pago no orçamento",
     "contrato_assinado": "contrato assinado no link público",
     "negociacao_valores": "orçamento enviado, OU a equipe passou preço na conversa e o cliente respondeu",
+    "preco_enviado":     "a equipe passou preço na conversa (com ou sem resposta do cliente)",
 }
 
 _PADRAO = {
@@ -321,6 +322,18 @@ _SQL_RESPONDEU_PRECO = """
           join mensagens m on m.conversa_id = cv.id and m.direcao='in' and m.id > pr.mid
          group by pr.lead"""
 
+# O PREÇO NO VÁCUO também é um fato — só não é Negociação na Prime (ver acima). Na
+# clínica é a coluna "Recebeu o preço": o paciente pergunta quanto é a consulta, a
+# recepção responde, e o que acontece depois disso é o que finance/voltar_a_chamar
+# acompanha. A mesma `RE_PRECO`, pelo mesmo motivo: duas leituras de "preço" no
+# mesmo produto é o card no lugar errado sem ninguém saber qual das duas errou.
+_SQL_PRECO_ENVIADO = """
+        select cv.prospeccao_id, min(m.criado_em)
+          from mensagens m join conversas cv on cv.id = m.conversa_id
+         where cv.conta_id=%(conta)s and cv.prospeccao_id is not null
+           and m.direcao='out' and m.texto ~* '""" + RE_PRECO + """'
+         group by cv.prospeccao_id"""
+
 _SQL_EVENTO = {
     "resposta_nossa": """
         select cv.prospeccao_id, min(m.criado_em)
@@ -395,6 +408,7 @@ _SQL_EVENTO = {
         select u.lead, min(u.quando) from (""" + _SQL_ORCAMENTO_ENVIADO + """
         union all""" + _SQL_RESPONDEU_PRECO + """
         ) u group by u.lead""",
+    "preco_enviado": _SQL_PRECO_ENVIADO,
 }
 
 

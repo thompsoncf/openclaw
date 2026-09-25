@@ -567,11 +567,11 @@ def _brl(centavos) -> str:
 
 def bloco_persona(pool, conta_id: int) -> str:
     """O pedaço do prompt da conta de construção que fala das obras DELA. Vazio
-    se a tabela não existir (base anterior à 347)."""
+    se a tabela não existir (base anterior à 351)."""
     try:
         obras = listar_obras(pool, conta_id, com_custos=False)
         falta = sem_obra(pool, conta_id, limite=0)
-    except Exception:  # noqa: BLE001 — sem a 347, sem bloco
+    except Exception:  # noqa: BLE001 — sem a 351, sem bloco
         return ""
     if obras:
         lista = "; ".join(

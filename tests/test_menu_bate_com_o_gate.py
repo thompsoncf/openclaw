@@ -47,9 +47,9 @@ _LIVRES = {"/trocar", "/sair", "/painel/versao", "/painel/erro-cliente"}
 #: cada tela segue o nicho), então renderizar só `eventos` mede metade do menu — e
 #: a metade que falta vira uma rota liberada que este arquivo acusa de não ter
 #: link, quando ela tem, em outro nicho. Foi o que aconteceu com Renovações
-#: (17/09/2026), que só existe na corretora de seguros.
-#: Obras (25/09/2026) só existe na construção, pelo mesmo motivo.
-_PERFIS_DO_MENU = ("eventos", "recorrente", "seguros", "obras")
+#: (17/09/2026), que só existe na corretora de seguros — e com Hoje (25/09/2026),
+#: que só existe na clínica, e Obras (25/09/2026), que só existe na construção.
+_PERFIS_DO_MENU = ("eventos", "recorrente", "seguros", "clinica", "obras")
 
 
 def _menu(papel: str, chave: str = "eventos") -> str:

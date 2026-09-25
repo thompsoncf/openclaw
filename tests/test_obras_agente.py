@@ -18,7 +18,7 @@ from finance import tools_pj
 
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "057_natureza_lancamento.sql", "132_plano_contas_centros_custo.sql",
-              "345_plano_obras.sql", "347_obras.sql")
+              "349_plano_obras.sql", "351_obras.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 _OBRA = {"consultar_obra", "dividir_entre_obras", "por_na_obra", "marcar_etapa",
          "gastos_sem_obra"}

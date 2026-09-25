@@ -332,7 +332,7 @@ def _visita(pool, lead_id, em_dias=2, hora=10):
     with pool.connection() as c:
         c.execute("""create table if not exists eventos_agenda (id bigserial primary key,
                        conta_id bigint, prospeccao_id bigint, titulo text, inicio timestamptz,
-                       status text default 'ativo')""")
+                       status text default 'ativo', tipo_evento text)""")
         c.execute("insert into eventos_agenda (conta_id, prospeccao_id, titulo, inicio) "
                   "values (%s,%s,'Visita', date_trunc('day', now()) + %s * interval '1 day' + %s * interval '1 hour')",
                   (CONTA, lead_id, em_dias, hora + 3))   # +3: Brasília é UTC-3

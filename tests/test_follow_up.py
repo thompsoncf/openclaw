@@ -1693,3 +1693,25 @@ def test_o_card_nao_derruba_a_tela_quando_a_leitura_falha(monkeypatch):
 
     monkeypatch.setattr(al, "resumo", _explode)
     assert pfu._entrega(None, 1) is None
+
+
+def test_o_cartao_e_o_filtro_mostram_o_NOME_da_etapa_e_nao_a_chave():
+    """25/09/2026: o cartão dizia "📍 negociacao" e o filtro "agendado_visita" — a
+    chave interna. O nome vem da mesma lista da janela do lead, então a conta que
+    renomeou a etapa vê o nome DELA, igual no funil."""
+    rot = {"negociacao": "Negociação", "agendado_visita": "Visita marcada"}
+    html = _tela(fila=[_linha(status="negociacao")], etapas=["agendado_visita", "negociacao"],
+                 rot_etapa=rot)
+    assert "<i>📍</i>Negociação" in html
+    assert "<i>📍</i>negociacao" not in html
+    assert '<option value="agendado_visita" >Visita marcada</option>' in html
+    # sem a lista (tela que não conseguiu ler as etapas), cai na chave — nunca quebra
+    assert "<i>📍</i>negociacao" in _tela(fila=[_linha(status="negociacao")])
+
+
+def test_a_rota_manda_os_nomes_das_etapas_pra_tela():
+    import inspect
+
+    import web.painel_follow_up as pfu
+    fonte = inspect.getsource(pfu.painel_follow_up)
+    assert 'rot_etapa={x["c"]: x["r"] for x in status_tpl}' in fonte

@@ -108,9 +108,18 @@ CSS = _COMUM_POPOVER + """/* o balão do LEAD — resumo pra decidir a próxima 
    últimas atividades). Mesma engenharia do balão de chat: nasce fixed, medido
    do próprio card, sem carregar a ficha inteira num iframe. Edição de cadastro,
    IA, decisor e orçamento continuam só na ficha completa (link no rodapé). */
-.leadpop{position:fixed;z-index:90;width:378px;max-width:calc(100vw - 16px);max-height:70vh;
-  background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden;
+/* A JANELA INTEIRA À VISTA (25/09/2026). Até aqui ela abria no espaço que sobrava
+   embaixo do botão, com a altura desse espaço — e o topo (nome, Ligar/WhatsApp e os
+   dois grupos de situação) não encolhe: com ~300px sobrando, `overflow:hidden`
+   cortava "Encerrar" e o histórico, sem barra pra rolar. O lugar agora é decidido
+   DEPOIS de medir o conteúdo (`_leadPopPosiciona`), e `overflow-y:auto` aqui é a
+   última rede: tela baixa demais pra janela inteira rola a janela, nunca corta. */
+.leadpop{position:fixed;z-index:90;width:378px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);
+  background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow-x:hidden;overflow-y:auto;
   box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column}
+/* o botão de suporte (web/portal.py, z-index 9999) ficava POR CIMA do canto da
+   janela — justamente onde ela abre, ancorada no "Abrir ficha" da direita */
+body.lp-aberta .wa-suporte{visibility:hidden}
 .lp-h{padding:.75rem 2.1rem .65rem .85rem;border-bottom:1px solid var(--borda);flex:none}
 .lp-h .top{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
 .lp-h h3{font-size:1rem;margin:0}
@@ -155,7 +164,7 @@ CSS = _COMUM_POPOVER + """/* o balão do LEAD — resumo pra decidir a próxima 
 .lp-chip.fim.ganho.on{background:rgba(37,211,102,.14)}
 .lp-chip.fim.perdido.on{background:rgba(224,87,79,.14)}
 .lp-chip.indo{opacity:.6}
-.lp-body{padding:.7rem .85rem;overflow-y:auto;flex:1}
+.lp-body{padding:.7rem .85rem;overflow-y:auto;flex:1 1 auto;min-height:6.5rem}
 .lp-sh{display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem}
 .lp-sh b{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut)}
 /* margin:0 0 0 auto (não só margin-left:auto) — sem zerar o topo/baixo, o
@@ -304,9 +313,49 @@ function _leadPopErro(txt){
 var _leadPop=null;
 function kbFecharLead(){
   if(_leadPop){_leadPop.remove();_leadPop=null;}
+  document.body.classList.remove('lp-aberta');
   document.removeEventListener('click',_leadPopFora,true);
   document.removeEventListener('keydown',_leadPopEsc,true);
   window.removeEventListener('scroll',_leadPopRolou,true);
+  window.removeEventListener('resize',_leadPopRedimensionou);
+}
+function _leadPopRedimensionou(){if(_leadPop)_leadPopPosiciona(_leadPop);}
+// ONDE A JANELA ABRE (25/09/2026). Decide pelo tamanho DO CONTEÚDO, medido — não
+// pelo espaço que sobra. Roda duas vezes: no "Carregando…" e de novo quando o
+// resumo chega, que é quando a janela ganha a altura de verdade.
+//
+//   1. cabe inteira embaixo do botão → embaixo (o de sempre);
+//   2. senão, cabe inteira em cima → em cima;
+//   3. senão, em nenhum dos dois → AO LADO do botão (à esquerda; à direita se
+//      não houver espaço), centrada nele e empurrada pra dentro da tela.
+//      Ao lado, e não por cima: por cima, o ponteiro que acabou de clicar em
+//      "Abrir ficha" caía em cima de um chip — no teste, o "✕ Perdido" — e um
+//      clique duplo encerrava o lead sem ninguém querer;
+//   4. tela estreita demais pra ir ao lado (celular) → por cima, inteira. No
+//      toque não existe ponteiro parado em cima de nada.
+//
+// A altura máxima é a tela menos as margens: só quando nem isso basta é que a
+// janela rola (o `overflow-y` da `.leadpop`).
+function _leadPopPosiciona(pop){
+  var el=pop._ancora; if(!el||!el.getBoundingClientRect)return;
+  var r=el.getBoundingClientRect(), MARG=8, GAP=6;
+  var vw=window.innerWidth, vh=window.innerHeight;
+  var larg=Math.min(378, vw-2*MARG);
+  pop.style.left=Math.max(MARG,Math.min(r.left,vw-larg-MARG))+'px';
+  pop.style.bottom='';
+  pop.style.maxHeight=(vh-2*MARG)+'px';
+  pop.style.top=MARG+'px';                      // mede sem esbarrar no pé da tela
+  var h=pop.offsetHeight;
+  var abaixo=vh-r.bottom-GAP-MARG, acima=r.top-GAP-MARG, top;
+  if(h<=abaixo) top=r.bottom+GAP;
+  else if(h<=acima) top=r.top-GAP-h;
+  else{
+    top=Math.max(MARG,Math.min(vh-MARG-h, r.top+r.height/2-h/2));
+    var esq=r.left-GAP-larg, dir=r.right+GAP;
+    if(esq>=MARG) pop.style.left=Math.round(esq)+'px';
+    else if(dir+larg<=vw-MARG) pop.style.left=Math.round(dir)+'px';
+  }
+  pop.style.top=Math.round(top)+'px';
 }
 function _leadPopFora(e){if(_leadPop&&!_leadPop.contains(e.target))kbFecharLead();}
 function _leadPopEsc(e){if(e.key==='Escape')kbFecharLead();}
@@ -324,31 +373,24 @@ function kbAbrirLead(ev,id,cardEl){
   // não pré-requisito.
   if(window.kbFecharChat)kbFecharChat();
   kbFecharLead();
-  var r=cardEl.getBoundingClientRect();
   var pop=document.createElement('div');
   pop.className='leadpop';
-  var MARG=8, GAP=6, LARG=378;
-  var abaixo=window.innerHeight-r.bottom-GAP-MARG, acima=r.top-GAP-MARG;
-  if(abaixo>=260||abaixo>=acima){
-    pop.style.top=(r.bottom+GAP)+'px';
-    pop.style.maxHeight=Math.max(200,Math.min(560,abaixo))+'px';
-  }else{
-    pop.style.bottom=(window.innerHeight-r.top+GAP)+'px';
-    pop.style.maxHeight=Math.max(200,Math.min(560,acima))+'px';
-  }
-  pop.style.left=Math.max(MARG,Math.min(r.left,window.innerWidth-LARG-MARG))+'px';
+  pop._ancora=cardEl;
   pop.innerHTML='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button><div class="cx-empty">Carregando…</div>';
   document.body.appendChild(pop);
   _leadPop=pop;
+  document.body.classList.add('lp-aberta');
+  _leadPopPosiciona(pop);
   setTimeout(function(){document.addEventListener('click',_leadPopFora,true);document.addEventListener('keydown',_leadPopEsc,true);
-    window.addEventListener('scroll',_leadPopRolou,true);},0);
+    window.addEventListener('scroll',_leadPopRolou,true);window.addEventListener('resize',_leadPopRedimensionou);},0);
   zapFetch('/painel/prospeccao/'+id+'/resumo').then(function(d){
     if(_leadPop!==pop)return;
     // `d` nulo = o zapFetch já explicou o que houve, com o recado daquele caso.
     // A caixa aqui só diz que a janela não tem o que mostrar.
-    if(!d||!d.ok){pop.innerHTML=_leadPopErro(d?'Não consegui abrir.':'Não deu pra carregar.');return;}
+    if(!d||!d.ok){pop.innerHTML=_leadPopErro(d?'Não consegui abrir.':'Não deu pra carregar.');_leadPopPosiciona(pop);return;}
     pop._d=d;
     pop.innerHTML=kbLeadHtml(d,id);
+    _leadPopPosiciona(pop);
   });
 }
 function kbLeadHtml(d,id){
@@ -671,25 +713,23 @@ function kbAbrirSegurado(ev,id,el,aba){
   if(ev)ev.stopPropagation();
   if(window.kbFecharChat)kbFecharChat();
   kbFecharLead();
-  var r=el.getBoundingClientRect();
   var pop=document.createElement('div');
   pop.className='leadpop'; pop.setAttribute('role','dialog');
-  var MARG=8, GAP=6, LARG=378;
-  var abaixo=window.innerHeight-r.bottom-GAP-MARG, acima=r.top-GAP-MARG;
-  if(abaixo>=260||abaixo>=acima){pop.style.top=(r.bottom+GAP)+'px';pop.style.maxHeight=Math.max(200,Math.min(560,abaixo))+'px';}
-  else{pop.style.bottom=(window.innerHeight-r.top+GAP)+'px';pop.style.maxHeight=Math.max(200,Math.min(560,acima))+'px';}
-  pop.style.left=Math.max(MARG,Math.min(r.left,window.innerWidth-LARG-MARG))+'px';
+  pop._ancora=el;
   pop.innerHTML='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button><div class="cx-empty">Carregando…</div>';
   document.body.appendChild(pop);
   _leadPop=pop;
+  document.body.classList.add('lp-aberta');
+  _leadPopPosiciona(pop);
   setTimeout(function(){document.addEventListener('click',_leadPopFora,true);document.addEventListener('keydown',_leadPopEsc,true);
-    window.addEventListener('scroll',_leadPopRolou,true);},0);
+    window.addEventListener('scroll',_leadPopRolou,true);window.addEventListener('resize',_leadPopRedimensionou);},0);
   zapFetch('/painel/renovacoes/cliente/'+id+'/resumo').then(function(d){
     if(_leadPop!==pop)return;
-    if(!d||!d.ok){pop.innerHTML=_leadPopErro(d?'Não consegui abrir.':'Não deu pra carregar.');return;}
+    if(!d||!d.ok){pop.innerHTML=_leadPopErro(d?'Não consegui abrir.':'Não deu pra carregar.');_leadPopPosiciona(pop);return;}
     pop._d=d; pop._aba=aba||'cliente';
     pop.innerHTML=kbSegHtml(d,pop._aba);
     kbSegLigarConversa(pop);
+    _leadPopPosiciona(pop);
   });
 }
 function kbSegLigarConversa(pop){
@@ -713,6 +753,7 @@ function kbSegTrocar(aba){
   pop.querySelectorAll('.lp-tabs button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-aba')===aba);});
   pop.querySelector('.lp-body').scrollTop=0;
   kbSegLigarConversa(pop);
+  _leadPopPosiciona(pop);        // a outra aba tem outra altura
 }
 // o estado da carteira, numa palavra: é o único lugar da janela onde a cor fala
 function kbSegEstado(d){

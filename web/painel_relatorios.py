@@ -33,6 +33,7 @@ from finance import empresa as emp
 from finance import periodo as _per
 from finance import models as mod
 from finance import vendas
+from finance import visita as _vis
 from web.portal import _render, _env, conta_logada, brl as _brl, _mascara_cnpj
 
 _log = logging.getLogger("painel.relatorios")
@@ -1038,11 +1039,23 @@ AGENDA_TIPO_ROTULO = {"pessoal": "Pessoal", "empresa": "Empresa", "fornecedor": 
 # espécie desta aba leem daqui: duas cópias da mesma pergunta acertam no primeiro
 # dia e divergem no terceiro.
 #
-# Título começando com "Visita" é como o Cockpit batiza ("Visita — {quem}") e
-# como o time batiza na mão ("VISITA TÉCNICA - PEDRO"). `tipo_evento` vazio
-# desempata: quando esse campo vem preenchido (Casamento, Locação...) o
-# compromisso é a FESTA do cliente, não a visita dele ao espaço.
-_E_VISITA = "(e.titulo ilike 'visita%%' and e.tipo_evento is null)"
+# E desde 24/09/2026 ela não mora mais aqui, e sim em `finance.visita` — porque
+# as duas cópias que este comentário temia existiam: o Raio-X tinha a dele
+# (`tipo = 'empresa'` e só com card) e dava ao Pedro Yan da Prime 3 visitas em
+# setembro onde este relatório dava 4. Título começando com "Visita" continua
+# valendo (é como o Cockpit e o time batizam); ligada a um card também vale;
+# `tipo_evento` preenchido continua sendo a FESTA, nunca a visita.
+#: E ela segue o nicho: quem vende festa conta visita só pelo título (a festa
+#: digitada sem tipo e ligada ao card não vira visita); os outros contam também o
+#: compromisso ligado a um card. As consultas pedem a da conta com `_e_visita`.
+def _e_visita(festa: bool) -> str:
+    return _vis.sql_e_visita("e", festa=festa)
+
+
+#: DE QUEM É A VISITA: do dono do card; sem card, de quem marcou (decisão do dono,
+#: 24/09/2026 — a mesma do Raio-X, `finance.visita.sql_vendedor`). Com card, é do
+#: dono do card mesmo que ele esteja vago. Pede o `p` do lead em LEFT JOIN.
+_VIS_VENDEDOR = "(case when e.prospeccao_id is not null then p.vendedor_id else e.membro_id end)"
 
 #: EVENTO é o COMPLEMENTO da visita, e não `tipo_evento is not null`. A régua
 #: óbvia apagaria festa: medido na Prime em 31/08/2026, 12 das 43 festas estavam
@@ -1106,7 +1119,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
 
     ESPÉCIE (31/08/2026). Visita e festa viviam na mesma lista sem como separar —
     na Prime são 17 visitas e 43 festas, perguntas de negócio diferentes. O filtro
-    usa `_E_VISITA`, a mesma régua do Funil, e define EVENTO como o complemento
+    usa `_e_visita` (a régua de `finance.visita`, a mesma do Funil e do Raio-X), e define EVENTO como o complemento
     (o porquê está no comentário de `AGENDA_ESPECIES`).
 
     A espécie muda as COLUNAS e as MÉTRICAS, não só as linhas, e é de propósito:
@@ -1160,13 +1173,18 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     if periodo != "todos":
         where.append("e.inicio::date >= %s and e.inicio::date <= %s")
         params += [ini, fim]
-    if especie == "visita":
-        where.append(_E_VISITA)
-    elif especie == "evento":
-        where.append("not " + _E_VISITA)
+    e_vis = _e_visita(_vis.vende_festa(pool, conta_id))
+    # DE QUEM É A LINHA: a VISITA é do dono do card (sem card, de quem marcou); a
+    # festa e o resto seguem de quem marcou — a festa aprovada nasce com o vendedor
+    # do orçamento, e dá-la ao dono do card trocaria o nome que o contrato mostra.
+    # A mesma expressão na coluna e no filtro, senão a linha diz um nome e some ao
+    # filtrar por ele.
+    vend_expr = f"(case when {e_vis} then {_VIS_VENDEDOR} else e.membro_id end)"
+    if especie in ("visita", "evento"):
+        where.append(e_vis if especie == "visita" else "not " + e_vis)
     if vendedor_sel:
         try:
-            where.append("e.membro_id = %s")
+            where.append(vend_expr + " = %s")
             params.append(int(vendedor_sel))
         except (TypeError, ValueError):
             where.pop()
@@ -1200,8 +1218,8 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                      where o.evento_agenda_id = e.id
                      order by o.id desc limit 1
                   ) oc on true
-                  left join prospeccao p on p.id = e.prospeccao_id
-                  left join membros mb on mb.id = e.membro_id"""
+                  left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                  left join membros mb on mb.id = """ + vend_expr
     if busca:
         where.append("coalesce(pe.nome, cl.nome, oc.nome, p.contato, p.empresa) ilike %s")
         params.append(f"%{busca}%")
@@ -1712,7 +1730,7 @@ def _fmt_hora(d) -> str:
 #: duas espécies de lead e faria a taxa de conversão despencar por artifício.
 _SQL_VISITAS = """
     select e.id,
-           coalesce(p.empresa, replace(e.titulo, 'Visita — ', '')) as lead,
+           coalesce(nullif(p.empresa, ''), nullif(p.contato, '')) as lead,
            (e.prospeccao_id is not null) as ligado,
            coalesce(mb.nome, '—') as vendedor,
            e.inicio, (e.inicio < now()) as passou, e.desfecho,
@@ -1723,13 +1741,12 @@ _SQL_VISITAS = """
              (select min(m.criado_em) from mensagens m
                 join conversas cv on cv.id = m.conversa_id
                where cv.prospeccao_id = p.id and m.direcao='in') end as lead_chegou,
-           e.criado_em
+           e.criado_em, e.titulo
       from eventos_agenda e
       left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
-      left join membros mb on mb.id = e.membro_id
+      left join membros mb on mb.id = """ + _VIS_VENDEDOR + """
      where e.conta_id = %s
-       and """ + _E_VISITA + """
-       and coalesce(e.status,'') <> 'cancelado'
+       and {visita}
 """
 
 
@@ -1743,10 +1760,13 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
     ini, fim = _intervalo(periodo)
     where, params = "", [conta_id]
     if periodo != "todos":
-        where += " and e.inicio::date >= %s and e.inicio::date <= %s"
+        # o dia de Teresina, como o Raio-X: `e.inicio::date` é o dia do banco
+        # (UTC), e a visita das 21h do dia 30 caía no mês seguinte
+        where += (" and (e.inicio at time zone 'America/Sao_Paulo')::date >= %s"
+                  " and (e.inicio at time zone 'America/Sao_Paulo')::date <= %s")
         params += [ini, fim]
     if vendedor_sel:
-        where += " and e.membro_id = %s"
+        where += " and " + _VIS_VENDEDOR + " = %s"
         params.append(int(vendedor_sel))
     if busca:
         where += " and (p.empresa ilike %s or e.titulo ilike %s)"
@@ -1759,7 +1779,9 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
         where += " and e.prospeccao_id is null"
 
     with pool.connection() as c:
-        rows = c.execute(_SQL_VISITAS + where + " order by e.inicio desc limit 300",
+        rows = c.execute(_SQL_VISITAS.replace("{visita}", _vis.sql_conta(
+                             "e", festa=_vis.vende_festa(pool, conta_id)))
+                         + where + " order by e.inicio desc limit 300",
                          params).fetchall()
         # os leads que entraram por conversa — o topo do funil. Fora do filtro de
         # vendedor de propósito: o lead chega antes de ter dono, e recortar por
@@ -1780,6 +1802,9 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
 
     linhas, esperas = [], []
     n_agendadas = n_ligadas = n_passou = n_respondidas = n_apareceu = 0
+    # a visita sem card tira o nome do título pela régua da aba Agenda, que conhece
+    # a equipe — "VISITA TÉCNICA - PEDRO" não vira o cliente Pedro
+    equipe = [n for _i, n in _vendedores_da_conta(pool, conta_id) if n] if rows else []
     for r in rows:
         n_agendadas += 1
         if r[2]:
@@ -1796,12 +1821,24 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
             espera = max(0, int((r[8] - r[7]).total_seconds() // 60))
             esperas.append(espera)
         linhas.append({
-            "lead": r[1] or "—",
+            "lead": r[1] or _ag.nome_no_titulo(r[9], None, equipe) or r[9] or "—",
             "vendedor": r[3],
             "marcada": _fmt_hora(r[4]),
             "esperou": vendas.duracao_curta(espera) if espera is not None else "sem lead",
             "desfecho": d["texto"], "desfecho_cor": _TOM_TAG[d["tom"]],
         })
+
+    # A PALAVRA É DO NICHO (regra 6): visita pra quem vende festa; reunião,
+    # cotação, avaliação pros outros — é o mesmo vocabulário do Raio-X. Desde
+    # 24/09/2026 a reunião ligada ao card entra nesta lista, e chamá-la de
+    # "visita" seria a tela falando a língua de outro negócio.
+    try:
+        from finance import raio_x_perfil as _rxp
+        _voc = _rxp.perfil_da_conta(pool, conta_id).get("vocab") or {}
+    except Exception:  # noqa: BLE001
+        _voc = {}
+    comp = _voc.get("compromisso") or "visita"
+    comps = _voc.get("compromissos") or "visitas"
 
     # AS TAXAS. `base` é o que revela o buraco — ver vendas.taxa_com_cobertura.
     t_agendou = vendas.taxa_com_cobertura(n_agendadas, n_leads) if n_leads else \
@@ -1814,14 +1851,14 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
     return {
         "label": "Funil", "mock": False,
         "colunas": [_col("lead", "Lead", flex=True), _col("vendedor", "Vendedor"),
-                    _col("marcada", "Visita marcada"),
+                    _col("marcada", f"{comp.capitalize()} marcada"),
                     _col("esperou", "Esperou p/ agendar"),
                     _col("desfecho", "O cliente apareceu?", tag=True)],
         "linhas": linhas,
         # sem dinheiro nesta aba — mesma razão da aba Leads do chip
         "col_total": None, "total_centavos": 0,
         "metricas": [
-            ("Leads → visita agendada",
+            (f"Leads → {comp} agendada",
              f"{t_agendou['texto']} · {n_agendadas} de {n_leads}"),
             ("Compareceram",
              f"{t_compareceu['texto']} · "
@@ -1834,7 +1871,7 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
         # aconteceram estiver sem resposta, a taxa de comparecimento acima não
         # sustenta decisão nenhuma, e a tela tem que dizer isso antes da tabela.
         "aviso_config": (
-            f"{n_passou - n_respondidas} das {n_passou} visitas que já aconteceram "
+            f"{n_passou - n_respondidas} das {n_passou} {comps} que já aconteceram "
             "estão sem resposta — ninguém marcou se o cliente apareceu. Enquanto "
             "isso, a taxa de comparecimento sai de uma amostra pequena demais pra "
             "decidir. O vendedor responde pelo Cockpit, no bloco “Precisa de "

@@ -25,7 +25,7 @@ create table orcamentos (id bigserial primary key, conta_id bigint,
 -- relatório nem roda.
 create table prospeccao (id bigserial primary key, conta_id bigint,
   contato text, empresa text not null default 'Empresa',
-  evento_convidados int, evento_tipo text);
+  evento_convidados int, evento_tipo text, vendedor_id bigint);
 create table eventos_agenda (id bigserial primary key, conta_id bigint,
   membro_id bigint, titulo text not null, inicio timestamptz not null,
   tipo text default 'pessoal', tipo_evento text, status text default 'ativo',
@@ -937,3 +937,62 @@ def test_os_outros_tipos_continuam_cobrando(pool, cen):
         _evento(pool, cen["conta"], titulo="Festa", tipo_evento=tipo)
         l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")["linhas"][0]
         assert l["convidados"] == "—", f"{tipo} não deveria dizer n/a"
+
+
+# ───────── 24/09/2026: a régua única de visita (finance/visita.py), por nicho
+@pytest.fixture()
+def vende_festa(monkeypatch):
+    from finance import visita as vis
+    monkeypatch.setattr(vis, "vende_festa", lambda pool, conta_id: True)
+
+
+@pytest.fixture()
+def vende_servico(monkeypatch):
+    from finance import visita as vis
+    monkeypatch.setattr(vis, "vende_festa", lambda pool, conta_id: False)
+
+
+def _lead_de(pool, conta, vendedor, nome="Beatriz"):
+    with pool.connection() as c:
+        lid = c.execute("insert into prospeccao (conta_id, contato, vendedor_id) values (%s,%s,%s) returning id",
+                        (conta, nome, vendedor)).fetchone()[0]
+        c.commit()
+    return lid
+
+
+def test_na_festa_a_festa_sem_tipo_ligada_ao_card_continua_evento(pool, cen, vende_festa):
+    """12 das 43 festas da Prime foram digitadas sem tipo. Ligada ao card, uma
+    delas contaria como visita pela régua de quem vende serviço — na festa, não."""
+    lid = _lead_de(pool, cen["conta"], cen["pedro"])
+    _evento(pool, cen["conta"], titulo="Formatura - Beatriz", tipo="empresa", prospeccao_id=lid)
+    ev = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")
+    vi = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")
+    assert len(ev["linhas"]) == 1 and vi["linhas"] == []
+
+
+def test_no_servico_o_compromisso_ligado_ao_card_e_visita(pool, cen, vende_servico):
+    lid = _lead_de(pool, cen["conta"], cen["pedro"], nome="Paulo")
+    _evento(pool, cen["conta"], titulo="Reunião com Paulo", tipo="empresa", prospeccao_id=lid)
+    vi = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")
+    assert len(vi["linhas"]) == 1
+
+
+def test_a_coluna_vendedor_e_o_filtro_dizem_o_mesmo(pool, cen, vende_festa):
+    """A visita é do dono do card; a festa, de quem marcou (a aprovada nasce com o
+    vendedor do orçamento). Coluna e filtro pela MESMA régua: antes a linha dizia
+    um nome e sumia ao filtrar por ele."""
+    lid = _lead_de(pool, cen["conta"], cen["pedro"])
+    vago = _lead_de(pool, cen["conta"], None, nome="Vago")
+    _evento(pool, cen["conta"], titulo="Visita — Beatriz", tipo="empresa", prospeccao_id=lid,
+            membro_id=cen["jacqueline"])
+    _evento(pool, cen["conta"], titulo="Casamento — Beatriz", tipo="empresa", tipo_evento="Casamento",
+            prospeccao_id=lid, membro_id=cen["jacqueline"])
+    _evento(pool, cen["conta"], titulo="Visita — Vago", tipo="empresa", prospeccao_id=vago,
+            membro_id=cen["jacqueline"])
+    todas = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"]
+    vend = sorted(x["vendedor"] for x in todas)
+    assert vend == ["Jacqueline", "Pedro", "—"]
+    so_pedro = rel._dados_agenda(pool, cen["conta"], "todos", "", str(cen["pedro"]), "")["linhas"]
+    so_jaque = rel._dados_agenda(pool, cen["conta"], "todos", "", str(cen["jacqueline"]), "")["linhas"]
+    assert [x["vendedor"] for x in so_pedro] == ["Pedro"]
+    assert [x["vendedor"] for x in so_jaque] == ["Jacqueline"]

@@ -30,7 +30,8 @@ create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
   sinal_pago_em timestamptz);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
-  whatsapp text, telefone text, criado_em timestamptz not null default now());
+  whatsapp text, telefone text, criado_em timestamptz not null default now(),
+  contato text, vendedor_id bigint);
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   criado_em timestamptz not null default now(), visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
@@ -38,6 +39,7 @@ create table mensagens (id bigserial primary key, conversa_id bigint, direcao te
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_id bigint,
   titulo text, inicio timestamptz, status text default 'ativo', desfecho text,
+  tipo text default 'pessoal',
   tipo_evento text, prospeccao_id bigint, criado_em timestamptz not null default now(),
   -- as colunas que a agenda do Cockpit lê junto (finance/cockpit.agenda_da_conta)
   local text, ics_token text, pre_reserva_ate timestamptz,
@@ -49,6 +51,15 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
 AGORA = datetime.now(timezone.utc)
 ONTEM = AGORA - timedelta(days=1)
 AMANHA = AGORA + timedelta(days=1)
+
+
+@pytest.fixture(autouse=True)
+def _a_prime_vende_festa(monkeypatch):
+    """A conta daqui é a Prime — nicho de eventos. O banco de teste não tem a
+    tabela de nichos, e conta sem nicho cai no perfil de serviço, que fala
+    "reunião" (regra 6). A palavra da tela vem do perfil desde 24/09/2026."""
+    from finance import raio_x_perfil as rxp
+    monkeypatch.setattr(rxp, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("eventos"))
 
 
 @pytest.fixture(scope="module")
@@ -346,3 +357,13 @@ def test_texto_da_cobertura_fala_em_gente_nao_em_porcentagem():
     assert vendas.texto_da_cobertura(3, 8) == "3 de 8 responderam — faltam 5"
     assert vendas.texto_da_cobertura(8, 8) == "todas as 8 responderam"
     assert vendas.texto_da_cobertura(0, 0) == "sem nenhuma visita no período"
+
+
+def test_a_palavra_do_funil_segue_o_nicho(pool, monkeypatch):
+    """Quem vende serviço lê "reunião" onde a Prime lê "visita"."""
+    from finance import raio_x_perfil as rxp
+    monkeypatch.setattr(rxp, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("consultoria"))
+    d = rel._dados_funil(pool, 1, "todos", "", "", "")
+    rotulos = [c["rotulo"] for c in d["colunas"]] + [m[0] for m in d["metricas"]]
+    assert "Reunião marcada" in rotulos and "Leads → reunião agendada" in rotulos
+    assert not any("isita" in r for r in rotulos)

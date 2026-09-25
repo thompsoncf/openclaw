@@ -662,6 +662,38 @@ def test_assinar_reserva_a_data_na_agenda(pool, conta_id):
     assert gravado == ev_id
 
 
+def test_a_festa_nasce_dizendo_que_e_festa_e_de_qual_card(pool, conta_id, monkeypatch):
+    """24/09/2026: a festa da aprovação nascia sem `tipo_evento`, sem card e sem
+    cliente — 10 das 11 da Prime. Sem o tipo, o Raio-X a contava como visita "sem
+    resposta" depois do dia da festa. O banco deste arquivo não tem as colunas do
+    card (136) nem do cliente (192), então o que se confere é o que a aprovação
+    MANDA gravar."""
+    _, tok = _semear(pool, conta_id)
+    gravado = {}
+    criar = ag.criar_evento
+
+    def espia(*a, **kw):
+        gravado.update(kw)
+        kw.pop("prospeccao_id", None)
+        kw.pop("cliente_id", None)
+        return criar(*a, **kw)
+    monkeypatch.setattr(ag, "criar_evento", espia)
+    monkeypatch.setattr(prop, "_card_e_cliente", lambda pool, conta, oid: (4321, 8765))
+    assert prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    assert gravado["tipo_evento"] == "Aniversário"
+    assert gravado["prospeccao_id"] == 4321 and gravado["cliente_id"] == 8765
+
+
+def test_sem_card_nem_cadastro_a_festa_nasce_como_nascia(pool, conta_id):
+    """O vínculo é acessório: sem as colunas (ou sem card), a data entra assim mesmo."""
+    _, tok = _semear(pool, conta_id)
+    assert prop._card_e_cliente(pool, conta_id, 999999) == (None, None)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        tipo_ev = c.execute("select tipo_evento from eventos_agenda where id=%s", (ev_id,)).fetchone()[0]
+    assert tipo_ev == "Aniversário"
+
+
 # ------------------------------------------------------- pré-reserva pelo sinal
 def test_sinal_do_orcamento_sai_da_primeira_parcela():
     """O valor do sinal já existia — na `obs` que o gerador escreve. Só ali: parcela

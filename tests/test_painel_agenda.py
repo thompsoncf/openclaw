@@ -227,3 +227,11 @@ def test_rota_novo_ignora_link_online_se_nao_marcou_online(pool, conta_id, monke
     assert resp.status_code == 303
     evs = [e for e in ag.proximos(pool, conta_id) if e["titulo"] == "Presencial"]
     assert evs and evs[0]["link_online"] is None
+
+
+def test_o_financeiro_nao_enxerga_o_funil_pela_agenda():
+    """24/09/2026: o campo "Card do funil" e a busca dele. O financeiro abre a
+    Agenda, mas não vê lead (contas.equipe.CAPS) — a busca seria uma porta de lado."""
+    from web import painel_agenda as pa
+    assert not pa._ve_funil({"papel": "financeiro"})
+    assert all(pa._ve_funil({"papel": p}) for p in ("dono", "gestor", "vendedor"))

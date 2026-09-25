@@ -84,7 +84,7 @@ create table contratos (id bigserial primary key, conta_id bigint, orcamento_id 
   numero int, enviado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   titulo text, inicio timestamptz, status text default 'ativo', desfecho text,
-  tipo text default 'empresa', tipo_evento text);
+  tipo text default 'empresa', tipo_evento text, membro_id bigint);
 create table wa_qr_log (id bigserial primary key, conta_id bigint, nivel text default 'warn',
   msg text not null default '', dados jsonb, criado_em timestamptz not null default now());
 create table wa_decifra_diario (dia date not null, conta_id bigint not null, from_me boolean not null,

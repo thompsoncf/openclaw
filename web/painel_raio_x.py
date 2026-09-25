@@ -264,7 +264,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
     </label>
     <label class="{{ 'on' if fl.vendedor }}">Vendedor
       <select name="vendedor" onchange="rxEnviar()"><option value="">todos</option>
-        {% for vid, vnome in vendedores %}<option value="{{ vid }}" {% if fl.vendedor==vid %}selected{% endif %}>{{ vnome }}</option>{% endfor %}
+        {% for vid, vnome in vendedores %}<option value="{{ vid }}" {% if fl.vendedor==vid %}selected{% endif %}>{{ vnome|e }}</option>{% endfor %}
       </select></label>
     {% if 'tipo' in perfil.filtros %}<label class="{{ 'on' if fl.tipo }}">Tipo de festa
       <select name="tipo" onchange="rxEnviar()"><option value="">todos</option>
@@ -350,7 +350,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       {% if comp.contratos %}<em class="{{ comp.contratos[0] }}">{{ comp.contratos[1] }}</em>{% endif %}</div>
     <div class="kpi {{ 'ok' if p.visitas_pct is not none and p.visitas_pct >= 70 else 'amb' if p.visitas_pct is not none else '' }}">
       <b>{% if p.visitas_pct is not none %}{{ p.visitas_pct }}%{% else %}—{% endif %}</b><span>{{ perfil.vocab.compromisso_kpi }}</span>
-      <em>{% if p.visitas_ok + p.visitas_nao + p.visitas_sem_resposta %}{{ p.visitas_ok }} sim · {{ p.visitas_nao }} não · {{ p.visitas_sem_resposta }} sem resposta{% if not p.visitas_confiavel %} · pouco confiável{% endif %}{% else %}nenhuma {{ perfil.vocab.compromisso }} no período{% endif %}</em></div>
+      <em>{% if p.visitas_ok + p.visitas_nao + p.visitas_sem_resposta %}{{ p.visitas_ok }} sim · {{ p.visitas_nao }} não · {{ p.visitas_sem_resposta }} sem resposta{% if not p.visitas_confiavel %} · pouco confiável{% endif %}{% else %}nenhuma {{ perfil.vocab.compromisso }} no período{% endif %}{% if p.visitas_futuras %} · {{ p.visitas_futuras }} ainda por vir{% endif %}</em></div>
   </div>
   {% else %}
   <div class="rx-dado">Não deu pra montar o placar agora. Tenta de novo em instantes.</div>
@@ -367,7 +367,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="st"><span class="l">{{ perfil.vocab.compromissos|capitalize }} realizadas</span><b>{{ dv.visitas }}</b>
       <em>{{ dv.marcadas }} marcada{{ 's' if dv.marcadas != 1 }}</em></div>
     <div class="st"><span class="l">Viraram orçamento</span><b>{{ dv.vis_orc }}</b>
-      <em>{{ brl(dv.vis_orc_valor) }}{% if dv.vis_orc_pct is not none %} · <span class="ok">{{ dv.vis_orc_pct }}% das {{ perfil.vocab.compromissos }}</span>{% endif %}</em></div>
+      <em>{{ brl(dv.vis_orc_valor) }}{% if dv.vis_orc_pct is not none %} · <span class="ok">{{ dv.vis_orc_pct }}% das {{ perfil.vocab.compromissos }}{% if dv.sem_card %} com card{% endif %}</span>{% endif %}</em></div>
     <div class="st"><span class="l">{{ perfil.vocab.proposta_aceita|capitalize }}</span><b>{{ dv.prop_ass }}</b>
       <em>{{ brl(dv.prop_ass_valor) }}</em></div>
     <div class="st fim"><span class="l">Contratos assinados</span><b>{{ dv.contratos }}</b>
@@ -378,17 +378,21 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   {% endif %}
   <div class="rx-dv-cli">
     {% if dv.sem_orcamento %}<div class="grp"><h4>{{ perfil.vocab.compromissos|capitalize }} sem orçamento ainda · {{ dv.sem_orcamento|length }}</h4>
-      {% for n in dv.sem_orcamento %}<span class="chip">{{ n }}</span>{% endfor %}</div>{% endif %}
+      {% for n in dv.sem_orcamento %}<span class="chip">{{ n|e }}</span>{% endfor %}</div>{% endif %}
+    {#- Marcada na Agenda sem dizer de qual card é: conta como {{ compromisso }},
+        mas não dá pra saber se virou orçamento. Ligar ao card resolve. -#}
+    {% if dv.sem_card %}<div class="grp"><h4>{{ perfil.vocab.compromissos|capitalize }} sem card no funil · {{ dv.sem_card|length }}</h4>
+      {% for n in dv.sem_card %}<span class="chip amb">{{ n|e }}</span>{% endfor %}</div>{% endif %}
     {% if dv.em_jogo %}<div class="grp"><h4>Com orçamento, sem contrato ainda · {{ dv.em_jogo|length }} · {{ brl(dv.em_jogo_valor) }} em jogo</h4>
-      {% for i in dv.em_jogo %}<span class="chip amb">{{ i.nome }} · {{ brl(i.valor_centavos) }}</span>{% endfor %}</div>{% endif %}
+      {% for i in dv.em_jogo %}<span class="chip amb">{{ i.nome|e }} · {{ brl(i.valor_centavos) }}</span>{% endfor %}</div>{% endif %}
     {% if dv.assinaram %}<div class="grp"><h4>{{ perfil.vocab.compromissos|capitalize }} que viraram contrato · {{ dv.assinaram|length }}</h4>
-      {% for n in dv.assinaram %}<span class="chip ok">{{ n }}</span>{% endfor %}</div>{% endif %}
+      {% for n in dv.assinaram %}<span class="chip ok">{{ n|e }}</span>{% endfor %}</div>{% endif %}
   </div>
   {% if dv.linhas %}
   <div class="rx-tab"><table class="rx-vend">
     <tr><th>Contrato</th><th>Cliente</th><th>Proposta aceita</th><th>Contrato assinado</th><th class="n">Espera</th><th class="n">Valor</th></tr>
     {% for l in dv.linhas %}
-    <tr><td>nº {{ l.numero }}</td><td>{{ l.nome }}</td>
+    <tr><td>nº {{ l.numero }}</td><td>{{ l.nome|e }}</td>
       <td class="{{ 'amb' if l.proposta_antes }}">{{ l.proposta_em.strftime('%d/%m') if l.proposta_em else '—' }}</td>
       <td>{{ l.contrato_em.strftime('%d/%m') if l.contrato_em else '—' }}</td>
       <td class="n {{ 'ok' if l.espera is not none and l.espera <= 2 else 'amb' if l.espera is not none and l.espera <= 14 else 'ruim' if l.espera is not none else '' }}">{{ (l.espera ~ ' d') if l.espera is not none else '—' }}</td>
@@ -402,7 +406,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="rx-tab"><table class="rx-vend">
     <tr><th>Vendedor</th><th class="n">Leads</th><th class="n">{{ perfil.vocab.compromissos|capitalize }}</th><th class="n">Orçamentos</th><th class="n">{{ perfil.vocab.proposta_aceita|capitalize }}</th><th class="n">Contratos</th><th class="n">Valor</th></tr>
     {% for x in dv_linhas %}
-    <tr><td><b>{{ x.nome }}</b></td><td class="n">{{ x.leads if x.leads is not none else '—' }}</td><td class="n">{{ x.visitas }}</td>
+    <tr><td><b>{{ x.nome|e }}</b></td><td class="n">{{ x.leads if x.leads is not none else '—' }}</td><td class="n">{{ x.visitas }}</td>
       <td class="n {{ 'ruim' if x.visitas and not x.vis_orc }}">{{ x.vis_orc }}</td><td class="n">{{ x.prop_ass }}</td>
       <td class="n">{{ x.contratos }}</td><td class="n">{{ brl(x.contratos_valor) }}</td></tr>
     {% endfor %}
@@ -417,7 +421,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="rx-tab"><table class="rx-vend">
     <tr><th>Vendedor</th><th class="n">Leads</th><th class="n">1ª resposta</th><th class="n">Propostas</th><th class="n">Rascunho</th><th class="n">Toques</th><th class="n">Parou na 1ª</th><th class="n">Responda hoje</th><th>Contratos</th></tr>
     {% for v in d.vendedores %}{% set s = v.semana %}
-    <tr><td><b>{{ v.nome }}</b></td>
+    <tr><td><b>{{ v.nome|e }}</b></td>
       <td class="n">{{ s.leads }}</td>
       <td class="n {{ rxd.cor('primeira', s) if s.primeira_min is not none else '' }}">{{ fmt_min(s.primeira_min) }}{% if s.primeira_n %} <small>({{ s.primeira_em_5 }}/{{ s.primeira_n }})</small>{% endif %}</td>
       <td class="n">{{ s.propostas_enviadas }}</td>
@@ -435,7 +439,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
     <tr class="pend-row fechada" id="rx-{{ v.id }}-rasc"><td colspan="9"><div class="pend">
       <div class="pend-cap">Rascunho · {{ s.rascunhos }} proposta(s) que nunca saíram</div>
       <div class="pend-lista">
-      {% for i in s.rascunhos_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
+      {% for i in s.rascunhos_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome|e }}{% if i.fone %}<span class="fone">{{ i.fone|e }}</span>{% endif %}</div>
         <div class="pend-meta">há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
         <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson|forceescape }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
       </div>
@@ -445,11 +449,11 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
     <tr class="pend-row fechada" id="rx-{{ v.id }}-par"><td colspan="9"><div class="pend">
       <div class="pend-cap">Parou na 1ª resposta · {{ s.paradas_1a }} lead(s) — {% if s.paradas_1a > s.paradas_1a_itens|length %}os {{ s.paradas_1a_itens|length }} que esperam há mais tempo{% else %}quem está esperando{% endif %}</div>
       <div class="pend-lista">
-      {% for i in s.paradas_1a_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
+      {% for i in s.paradas_1a_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome|e }}{% if i.fone %}<span class="fone">{{ i.fone|e }}</span>{% endif %}</div>
         <div class="pend-meta{{ ' velha' if i.horas >= 48 }}">{{ rxd.fmt_espera(i.horas) }}</div>
         <div class="pend-acoes">{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson|forceescape }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
       </div>
-      {% if s.paradas_1a > s.paradas_1a_itens|length %}<div class="pend-mais">+ {{ s.paradas_1a - s.paradas_1a_itens|length }} outro(s) — lista completa em Prospecção, filtrada por {{ v.primeiro_nome }}</div>{% endif %}
+      {% if s.paradas_1a > s.paradas_1a_itens|length %}<div class="pend-mais">+ {{ s.paradas_1a - s.paradas_1a_itens|length }} outro(s) — lista completa em Prospecção, filtrada por {{ v.primeiro_nome|e }}</div>{% endif %}
     </div></td></tr>
     {% endif %}
     {# DE QUEM É A BOLA, e não só "esperando assinatura". O bloco juntava dois
@@ -468,7 +472,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       {% if itens %}
       <div class="pend-cap {{ 'coral' if grupo == 'meu' else '' }}">{{ cap }} · {{ itens|length }}</div>
       <div class="pend-lista">
-      {% for i in itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
+      {% for i in itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome|e }}{% if i.fone %}<span class="fone">{{ i.fone|e }}</span>{% endif %}</div>
         <div class="pend-docs">
           <div class="pd ok"><span>✓</span> Orçamento{% if i.aprovada_em %} · aprovado {{ i.aprovada_em|dia }}{% endif %}{% if i.aprovada_por %} por {{ i.aprovada_por }}{% endif %}</div>
           {% if i.estado == 'aguardando' %}
@@ -539,7 +543,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="bloco">
       <h4>{{ perfil.vocab.oferta|capitalize }} mais proposto <small>{% if d.servicos and d.servicos.historico %}sem proposta no período · tudo que já foi orçado{% else %}itens das propostas{% if 'mrr' in perfil.blocos %} · mensalidade média{% endif %}{% endif %}</small></h4>
       {% if d.servicos and d.servicos.itens %}{% set mxv = maximo(1, d.servicos.itens|map(attribute='n')|max) %}
-      <div class="tipos">{% for sv in d.servicos.itens %}<div><span>{{ sv.nome }}</span><i style="width:{{ (100 * sv.n / mxv)|round|int }}%"></i><span>{{ sv.n }}×{% if sv.mensal_centavos %} · {{ brl(sv.mensal_centavos) }}/mês{% endif %}</span></div>{% endfor %}</div>
+      <div class="tipos">{% for sv in d.servicos.itens %}<div><span>{{ sv.nome|e }}</span><i style="width:{{ (100 * sv.n / mxv)|round|int }}%"></i><span>{{ sv.n }}×{% if sv.mensal_centavos %} · {{ brl(sv.mensal_centavos) }}/mês{% endif %}</span></div>{% endfor %}</div>
       <div class="acha">{% if d.servicos.historico %}Ticket por {{ perfil.vocab.oferta }} só depois da primeira proposta enviada no período. Até lá, o que mais entrou em orçamento.{% else %}<b>{{ d.servicos.itens[0].nome }}</b> é o que mais entra em proposta. É o {{ perfil.vocab.oferta }} pra ter pacote e preço prontos.{% endif %}</div>
       {% else %}<div class="vazio">Nenhum orçamento com itens ainda.</div>{% endif %}
     </div>
@@ -599,7 +603,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="bloco">
       <h4>Do lead à proposta, da proposta ao contrato <small>dias, mediana</small></h4>
       {% if d.ciclo %}
-      <p>Lead → proposta: {% if d.ciclo.lead_proposta_dias is not none %}<b>{{ d.ciclo.lead_proposta_dias }} dias</b> ({{ d.ciclo.lead_proposta_n }} proposta(s)){% for v in d.ciclo.por_vendedor %} · {{ v.nome }} <b>{{ v.dias }}</b>{% endfor %}{% else %}nenhuma proposta enviada no período{% endif %}.
+      <p>Lead → proposta: {% if d.ciclo.lead_proposta_dias is not none %}<b>{{ d.ciclo.lead_proposta_dias }} dias</b> ({{ d.ciclo.lead_proposta_n }} proposta(s)){% for v in d.ciclo.por_vendedor %} · {{ v.nome|e }} <b>{{ v.dias }}</b>{% endfor %}{% else %}nenhuma proposta enviada no período{% endif %}.
         Proposta → contrato: {% if d.ciclo.proposta_contrato_dias is not none %}<b>{{ d.ciclo.proposta_contrato_dias }} dias</b> ({{ d.ciclo.proposta_contrato_n }} contrato(s)){% else %}nenhum contrato assinado no período{% endif %}.</p>
       <div class="acha">{% if d.ciclo.lead_proposta_dias is not none and d.ciclo.lead_proposta_dias > 1 %}Meta sugerida: proposta em 24h depois de data e convidados. Hoje a mediana é {{ d.ciclo.lead_proposta_dias }} dias.{% if d.ciclo.proposta_contrato_dias is not none and d.ciclo.proposta_contrato_dias <= 2 %} Quando a proposta sai, o contrato vem rápido: o gargalo é a proposta sair.{% endif %}{% elif d.ciclo.lead_proposta_dias is not none %}Proposta em até um dia: dentro da meta.{% else %}Sem proposta no período não há ciclo pra medir.{% endif %}</div>
       {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}

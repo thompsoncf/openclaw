@@ -3123,7 +3123,7 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
     # Na Prime, 124 dos 349 leads têm o número.
     #
     # E SÓ a contagem: `evento_tipo` NÃO é copiado, por mais tentador que pareça.
-    # A régua que separa visita de festa é `_E_VISITA` em web/painel_relatorios.py
+    # A régua que separa visita de festa é `finance.visita.sql_e_visita`
     # — "título começa com Visita E `tipo_evento` está vazio". Gravar o tipo aqui
     # tiraria a visita da própria aba Visitas e a jogaria em Eventos, silenciosa-
     # mente. O tipo da festa aparece no relatório por leitura do lead, não por
@@ -3132,10 +3132,14 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
     descricao = (f"Visita de {quem} ao {esp['nome']}.\nLocal: {local}"
                  + (f"\nMapa: {esp['maps']}" if esp["maps"] else ""))
     lembrete = int(lembrete_min) if lembrete_min else None
+    # O VÍNCULO NASCE NO INSERT (24/09/2026). Era gravado depois, por UPDATE, em
+    # outra conexão: se esse segundo passo caísse, a visita ficava sem card pra
+    # sempre — e visita sem card era a que sumia do Raio-X. O UPDATE abaixo
+    # continua, pro `ics_token`.
     ev = ag.criar_evento(pool, conta_id, f"Visita — {quem}", ini, membro_id=membro_id, fim=fim,
                          local=local, descricao=descricao, lembrete_min=lembrete, tipo="empresa",
                          cliente_id=_cliente_do_lead(pool, conta_id, numero),
-                         convidados=n_conv)
+                         convidados=n_conv, prospeccao_id=lead_id)
     token = _secrets.token_urlsafe(12)
     quando = ini.astimezone(ag.BRT).strftime("%d/%m às %H:%M")
     with pool.connection() as c:
@@ -3207,7 +3211,10 @@ def remarcar_visita(pool, conta_id: int, membro_id: int | None, evento_id: int, 
     de uma FESTA — reservada ou segurada — é outra conversa: mexe em contrato, em
     sinal e às vezes na data que outro cliente queria. Fica no painel, com o dono.
     Por isso o portão aqui é `prospeccao_id is not null and status='ativo'`, e não a
-    posse do evento: é a definição de visita no app.
+    posse do evento: é a definição de visita no app. E `tipo_evento is null`
+    (24/09/2026): a festa aprovada passou a nascer LIGADA ao card, e sem essa trava
+    ela viraria "visita" aqui — o vendedor remarcaria o casamento pelo celular e o
+    cliente receberia "sua visita mudou de data".
 
     POSSE. O vendedor remarca a visita do lead DELE; dono e gestor remarcam qualquer
     uma. Mesmo desenho que o app já usa nos leads — e revalidado aqui, porque o id do
@@ -3235,7 +3242,8 @@ def remarcar_visita(pool, conta_id: int, membro_id: int | None, evento_id: int, 
                       coalesce(p.whatsapp, p.telefone, '')
                  from eventos_agenda e
                  join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
-                where e.id=%s and e.conta_id=%s and e.status='ativo'""",
+                where e.id=%s and e.conta_id=%s and e.status='ativo'
+                  and e.tipo_evento is null""",
             (evento_id, conta_id)).fetchone()
     if not ev:
         return {"ok": False, "erro": "Essa visita não existe mais."}
@@ -3311,7 +3319,8 @@ def visita_para_remarcar(pool, conta_id: int, membro_id: int | None, evento_id: 
                       coalesce(p.whatsapp, p.telefone, '')
                  from eventos_agenda e
                  join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
-                where e.id=%s and e.conta_id=%s and e.status='ativo'""",
+                where e.id=%s and e.conta_id=%s and e.status='ativo'
+                  and e.tipo_evento is null""",
             (evento_id, conta_id)).fetchone()
     if not r:
         return None
@@ -3342,7 +3351,8 @@ def excluir_visita(pool, conta_id: int, membro_id: int | None, evento_id: int,
         ev = c.execute(
             """select e.membro_id from eventos_agenda e
                  join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
-                where e.id=%s and e.conta_id=%s and e.status='ativo'""",
+                where e.id=%s and e.conta_id=%s and e.status='ativo'
+                  and e.tipo_evento is null""",
             (evento_id, conta_id)).fetchone()
     if not ev:
         return {"ok": False, "erro": "Essa visita não existe mais."}
@@ -3464,8 +3474,13 @@ def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
     # do outro lado), nunca a festa do cliente — `tipo_evento` preenchido é a festa,
     # e perguntar "apareceu?" pra um casamento não faz sentido.
     args.append(hoje)
+    # a VISITA pela régua de contar (`finance.visita`, 24/09/2026): a reunião ligada
+    # ao card do recorrente conta no Raio-X como "sem resposta" — então é aqui que
+    # ela tem que voltar pra ser respondida. Quem vende festa segue pelo título.
+    from finance import visita as _vis
+    festa = _vis.vende_festa(pool, conta_id)
     volta = ("or (e.inicio < %s and e.desfecho is null and e.status='ativo' "
-             "    and e.titulo ilike 'visita%%' and e.tipo_evento is null) ")
+             "    and " + _vis.sql_e_visita("e", festa=festa) + ") ")
 
     with pool.connection() as c:
         rows = c.execute(
@@ -3498,7 +3513,9 @@ def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
         # o rótulo do card. As palavras são as do dono: no painel e na boca dele a
         # data firme é RESERVADA e a segurada é PRÉ-RESERVA. "visita" continua
         # visita, porque é outra coisa — é o cliente indo conhecer o espaço.
-        tipo_ev = "pre" if pre else ("visita" if r[5] else "reservado")
+        # festa ligada ao card (a aprovação liga desde 24/09/2026) é RESERVADO, não
+        # visita: o rótulo de visita é o que abre o remarcar e o excluir do app
+        tipo_ev = "pre" if pre else ("visita" if (r[5] and not r[16]) else "reservado")
         prazo = ""
         if pre and r[9]:
             horas = (r[9] - agora).total_seconds() / 3600
@@ -3522,9 +3539,9 @@ def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
             # É o que a tela sobe pro topo, e o que some no instante em que for
             # respondida — o vendedor não fica com um lembrete morto na mão.
             "desfecho": r[15],
-            "precisa_resposta": bool(ini and ini < agora and r[15] is None
-                                     and (r[16] is None)
-                                     and (r[1] or "").lower().startswith("visita")),
+            "precisa_resposta": bool(ini and ini < agora and r[15] is None and not pre
+                                     and _vis.eh_visita(titulo=r[1], tipo_evento=r[16],
+                                                        prospeccao_id=r[5], festa=festa)),
         })
     return out
 

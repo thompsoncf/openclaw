@@ -1071,6 +1071,15 @@ def assinar(pool, conta_id: int, contrato_id: int, clausulas,
         # sendo cobrada pelo follow-up cinco dias depois de ter assinado.
         #
         # `funil_ganho` é tolerante por dentro e nunca anda pra trás — ver o módulo.
+        #
+        # E SE NÃO HÁ CARD, ELE NASCE (decisão do dono, 24/09/2026). Contrato feito
+        # direto pelo orçamento não tinha card pra andar: na Prime, Josinalva e
+        # Viviane assinaram em 21/09 e o funil nunca soube. `garantir_pelo_orcamento`
+        # amarra no lead de mesmo telefone/e-mail ou cria o card, com o vendedor que
+        # fez o orçamento; aí o `marcar_por_assinatura` o leva ao fechamento. Nunca
+        # levanta, e orçamento que já tem card sai por 'ja_tinha'.
         from finance import funil_ganho as _fg
+        from finance import proposta_lead as _pl
+        _pl.garantir_pelo_orcamento(pool, conta_id, int(orcamento_id))
         _fg.marcar_por_assinatura(pool, conta_id, int(orcamento_id))
     return True

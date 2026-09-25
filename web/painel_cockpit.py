@@ -3097,8 +3097,27 @@ def cockpit_agenda_novo_tela(request: Request):
     """Compromisso avulso direto do celular. Antes o app só criava evento por DENTRO
     de um lead (a visita) — reunião, entrega ou qualquer coisa fora de lead não tinha
     onde entrar sem abrir o desktop."""
-    if not (_sessao(request) or _gerencia(request)):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not (sess or g):
         return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    # DE QUAL CARD É (24/09/2026): a visita marcada aqui nascia sem card e sumia do
+    # Raio-X. Uma lista, e não uma busca: no celular é um toque, e o vendedor
+    # escolhe entre os DELE (a gestão, entre os da conta). Perdido fica de fora.
+    # gestão pelo PAPEL, como no remarcar: o gestor também entra pelo app (`_sessao`)
+    cards = _cards_pro_compromisso(conta_id, membro_id, gestao=_eh_gestao(request, g))
+    opcoes = "".join(f"<option value='{cid}'>{esc(nome)}{(' · ' + esc(etapa)) if etapa else ''}</option>"
+                     for cid, nome, etapa in cards)
+    # a dica segue o nicho (§6): na festa só a VISITA conta no Raio-X — o card diz de quem é
+    from finance import visita as _vis
+    dica_card = (("Ligada a um card, a visita conta pro vendedor do cliente no Raio-X. "
+                  if _vis.vende_festa(get_pool(), conta_id)
+                  else "Ligado a um card, o compromisso conta pro vendedor do cliente no Raio-X. ")
+                 if cards else "")
+    campo_card = ("<label class=fic-c><span>De qual cliente (card do funil)</span>"
+                  "<select name=prospeccao_id><option value=''>— nenhum —</option>"
+                  + opcoes + "</select></label>") if cards else ""
     corpo = (_hdr("Novo compromisso", "entra na agenda de todos", voltar=f"{_BASE}/agenda")
              + _flash(request)
              + f"<form class=telaform method=post action='{_BASE}/agenda/novo'>"
@@ -3112,17 +3131,51 @@ def cockpit_agenda_novo_tela(request: Request):
                "<input name=hora type=time required></label>"
              + "<label class=fic-c><span>Local (opcional)</span>"
                "<input name=local autocomplete=off placeholder='Endereço ou link'></label>"
-             + "</div><div class=fonte>Aparece pra equipe inteira, com o seu nome. Visita "
-               "de lead continua sendo marcada pelo próprio lead — ali ela já sai ligada "
-               "na ficha.</div></div></div>"
+             + campo_card
+             + "</div><div class=fonte>Aparece pra equipe inteira, com o seu nome. " + dica_card
+             + "Visita de lead também pode ser marcada pelo próprio lead — ali ela já sai "
+               "ligada na ficha.</div></div></div>"
              + "<div class=rodape-b><button class=btn type=submit>Marcar</button></div>"
              + "</form>")
     return _page("Novo compromisso", corpo)
 
 
+def _eh_gestao(request: Request, g) -> bool:
+    """Dono e gestor escolhem entre os cards da conta; o vendedor, entre os dele."""
+    return bool(g) or (request.session.get("papel") in ("dono", "gestor"))
+
+
+def _cards_pro_compromisso(conta_id: int, membro_id, gestao: bool) -> list[tuple]:
+    """Os cards que podem receber o compromisso: os do vendedor (ou, pra gestão,
+    os da conta), sem os perdidos, os mais mexidos primeiro. Tolerante: sem a
+    lista o formulário abre como abria antes."""
+    # loja de produto não tem funil (regra 6): o perfil que decide é o do Raio-X
+    try:
+        from finance import raio_x_perfil as _rxp
+        if not _rxp.perfil_da_conta(get_pool(), conta_id).get("aplica"):
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+    sql = ("select p.id, coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Lead'), "
+           "coalesce(fe.rotulo, p.status) from prospeccao p "
+           "left join funil_etapas fe on fe.conta_id = p.conta_id and fe.chave = p.status "
+           "where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' and p.status <> 'perdido'")
+    args: list = [conta_id]
+    if not gestao:
+        sql += " and p.vendedor_id=%s"
+        args.append(membro_id)
+    try:
+        with get_pool().connection() as c:
+            return c.execute(sql + " order by p.atualizado_em desc nulls last limit 150",
+                             args).fetchall()
+    except Exception:  # noqa: BLE001
+        return []
+
+
 @router.post("/cockpit/agenda/novo")
 def cockpit_agenda_novo(request: Request, titulo: str = Form(""), data: str = Form(""),
-                        hora: str = Form(""), local: str = Form("")):
+                        hora: str = Form(""), local: str = Form(""),
+                        prospeccao_id: str = Form("")):
     sess = _sessao(request)
     g = _gerencia(request)
     if not sess and not g:
@@ -3133,8 +3186,21 @@ def cockpit_agenda_novo(request: Request, titulo: str = Form(""), data: str = Fo
     if not (titulo or "").strip() or not inicio:
         request.session["ck_err"] = "Preencha o que é, a data e a hora."
         return RedirectResponse(f"{_BASE}/agenda/novo", status_code=303)
+    # o card vem do navegador: só liga se for da conta — e, pro vendedor, se for dele
+    lead_id = None
+    pid = (prospeccao_id or "").strip()
+    if pid.isdigit():
+        try:
+            with get_pool().connection() as c:
+                r = c.execute("select vendedor_id from prospeccao where id=%s and conta_id=%s",
+                              (int(pid), conta_id)).fetchone()
+            if r and (_eh_gestao(request, g) or r[0] == membro_id):
+                lead_id = int(pid)
+        except Exception:  # noqa: BLE001 — o vínculo é acessório; a data não é
+            lead_id = None
     ag.criar_evento(get_pool(), conta_id, (titulo or "").strip()[:200], inicio,
-                    membro_id=membro_id, local=(local or "").strip() or None)
+                    membro_id=membro_id, local=(local or "").strip() or None,
+                    prospeccao_id=lead_id)
     request.session["ck_ok"] = "Compromisso marcado ✓"
     return RedirectResponse(f"{_BASE}/agenda", status_code=303)
 
@@ -6898,13 +6964,15 @@ def _bloco_da_visita(pool, conta_id: int, periodo: str, de, ate) -> str:
             return ""
         ini, fim = cd._range(periodo, de, ate)
         with pool.connection() as c:
-            dv = rxd.da_visita(c, conta_id, {}, ini, fim)
+            dv = rxd.da_visita(c, conta_id, {}, ini, fim,
+                               festa=bool((perfil.get("vocab") or {}).get("data")))
     except Exception as e:  # noqa: BLE001
         _log.warning("cockpit: da visita ao contrato da conta %s: %s: %s", conta_id, type(e).__name__, e)
         return ""
     voc = perfil["vocab"]
     comp, comps = voc["compromisso"], voc["compromissos"]
-    pct = f" · {dv['vis_orc_pct']}% viram orçamento" if dv["vis_orc_pct"] is not None else ""
+    pct = (f" · {dv['vis_orc_pct']}% {'das com card ' if dv.get('sem_card') else ''}viram orçamento"
+           if dv["vis_orc_pct"] is not None else "")
 
     def _st(l, v, d, fim=False):
         return (f"<div class='kpi{' hero' if fim else ''}'><div class=v>{v}</div>"
@@ -6924,6 +6992,10 @@ def _bloco_da_visita(pool, conta_id: int, periodo: str, de, ate) -> str:
     if dv["assinaram"]:
         lista += (f"<div class=dv-g><b>{esc(comps.capitalize())} que viraram contrato · {len(dv['assinaram'])}</b>"
                   + _chips(dv["assinaram"]) + "</div>")
+    if dv.get("sem_card"):
+        # marcada na Agenda sem dizer de qual card é — conta, mas não se sabe se orçou
+        lista += (f"<div class=dv-g><b>{esc(comps.capitalize())} sem card no funil · {len(dv['sem_card'])}</b>"
+                  + _chips(dv["sem_card"]) + "</div>")
     resumo = (f"{len(dv['em_jogo'])} com orçamento e sem contrato · "
               f"<b>{esc(_brl(dv['em_jogo_valor']))} em jogo</b>" if dv["em_jogo"]
               else "Ver os clientes de cada degrau")

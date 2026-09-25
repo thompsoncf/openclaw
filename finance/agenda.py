@@ -251,9 +251,12 @@ def prazo_da_pre_reserva(inicio: datetime | None, *, dias_config: int | None = N
 #      pode cair amanhã; é um estado próprio, não um "sim" nem um "não".
 #   3. pessoal e fornecedor — agenda interna da casa. Reunião com o contador não
 #      impede vender o sábado.
-#   4. VISITA — a régua é a MESMA de `web/painel_relatorios._E_VISITA`, e é
-#      importada de lá em espírito de propósito: duas cópias da mesma pergunta
-#      acertam no primeiro dia e divergem no terceiro.
+#   4. VISITA — pelo TÍTULO ("Visita…" sem tipo de festa). NÃO é a régua de
+#      contar visita (`finance.visita`, 24/09/2026), e de propósito: aquela conta
+#      também o compromisso ligado a um card, e aqui isso liberaria o dia de uma
+#      festa digitada sem tipo e ligada ao card do cliente — o sábado apareceria
+#      livre e seria vendido duas vezes. Contar errado custa um número; liberar
+#      errado custa uma data.
 #   5. tem orçamento vinculado OU tem tipo de festa — é venda.
 #   6. o que sobra é A CONFERIR, e a tela PERGUNTA em vez de chutar.
 #
@@ -278,9 +281,14 @@ _TIPOS_INTERNOS = ("pessoal", "fornecedor")
 def eh_visita(*, titulo=None, tipo_evento=None) -> bool:
     """A visita ao espaço — cliente vindo conhecer, o dia continua à venda.
 
-    A MESMA régua de `web/painel_relatorios._E_VISITA`, em Python:
+    Pelo título, em Python:
 
         (e.titulo ilike 'visita%' and e.tipo_evento is null)
+
+    Era a régua de `web/painel_relatorios._E_VISITA`; desde 24/09/2026 a de CONTAR
+    visita é `finance.visita`, mais larga (vale também o compromisso ligado a um
+    card). Esta fica estreita porque responde outra pergunta — se o dia continua à
+    venda — e aí errar pra mais libera data vendida. Ver o passo 4 acima.
 
     O prefixo é marca do próprio sistema: o Cockpit batiza "Visita — {quem}"
     (`finance.cockpit`), e a equipe digita "VISITA TÉCNICA - PEDRO" na mão. O

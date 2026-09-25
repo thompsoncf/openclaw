@@ -326,3 +326,214 @@ def test_envio_sobrevive_a_falha_do_funil(pool, monkeypatch):
     with pool.connection() as c:
         assert c.execute("select count(*) from orcamento_envios where orcamento_id=%s",
                          (oid,)).fetchone()[0] == 1, "o registro do envio se perdeu"
+
+
+# ═════════════ 24/09/2026: o card que não nascia, e as portas novas ═════════════
+
+def _unico_de_cnpj(pool):
+    """O índice que existe em produção (075): único parcial por (conta, cnpj)."""
+    with pool.connection() as c:
+        c.execute("create unique index if not exists uq_prospeccao_conta_cnpj "
+                  "on prospeccao (conta_id, cnpj) where cnpj is not null")
+        c.commit()
+
+
+def _membros(pool):
+    with pool.connection() as c:
+        c.execute("create table if not exists membros (id bigserial primary key, conta_id bigint, nome text)")
+        c.execute("alter table orcamentos add column if not exists criado_por text")
+        c.commit()
+
+
+def test_dois_cards_sem_cnpj_nascem_na_mesma_conta(pool):
+    """O defeito da Prime: `_criar` gravava cnpj '' e o único parcial só perdoa
+    NULO. O primeiro card sem CNPJ (Lillian Paz, 14/09) ocupou a vaga, e daí em
+    diante todo card de proposta sem CNPJ morria calado — três propostas, duas já
+    com contrato assinado, ficaram sem card."""
+    _unico_de_cnpj(pool)
+    o1 = _orc(pool, empresa="Lillian Paz", whatsapp="86999990001")
+    o2 = _orc(pool, empresa="Viviane Alves", whatsapp="86998479896")
+    assert pl.garantir(pool, CONTA, o1)["como"] == "criado"
+    assert pl.garantir(pool, CONTA, o2)["como"] == "criado"
+    with pool.connection() as c:
+        cnpjs = c.execute("select cnpj from prospeccao where conta_id=%s and orcamento_id in (%s,%s)",
+                          (CONTA, o1, o2)).fetchall()
+    assert cnpjs == [(None,), (None,)]
+
+
+def test_na_aprovacao_o_card_nasce_com_quem_fez_o_orcamento(pool):
+    """Proposta mandada pelo link colado no WhatsApp nunca passava pelo "enviar",
+    que era a única porta do card. A aprovação e a assinatura abrem outra — e o
+    vendedor do card é quem fez o orçamento (a régua do contrato)."""
+    _membros(pool)
+    with pool.connection() as c:
+        jaque = c.execute("insert into membros (conta_id, nome) values (%s,'Jacqueline') returning id",
+                          (CONTA,)).fetchone()[0]
+        c.commit()
+    oid = _orc(pool, empresa="Josinalva Costa Gomes", whatsapp="8688400719")
+    with pool.connection() as c:
+        c.execute("update orcamentos set criado_por=%s where id=%s", (str(jaque), oid))
+        c.commit()
+    r = pl.garantir_pelo_orcamento(pool, CONTA, oid)
+    assert r["como"] == "criado"
+    with pool.connection() as c:
+        vend = c.execute("select vendedor_id from prospeccao where id=%s", (r["lead_id"],)).fetchone()[0]
+    assert vend == jaque
+    # a assinatura chama de novo: não duplica
+    assert pl.garantir_pelo_orcamento(pool, CONTA, oid) == {"lead_id": r["lead_id"], "como": "ja_tinha"}
+
+
+def test_quem_fez_o_orcamento_de_outra_conta_nao_vira_vendedor(pool):
+    _membros(pool)
+    with pool.connection() as c:
+        de_fora = c.execute("insert into membros (conta_id, nome) values (%s,'Outro') returning id",
+                            (CONTA + 1,)).fetchone()[0]
+        c.commit()
+    oid = _orc(pool, empresa="Cliente X", whatsapp="86911112222")
+    with pool.connection() as c:
+        c.execute("update orcamentos set criado_por=%s where id=%s", (str(de_fora), oid))
+        c.commit()
+    r = pl.garantir_pelo_orcamento(pool, CONTA, oid)
+    with pool.connection() as c:
+        vend = c.execute("select vendedor_id from prospeccao where id=%s", (r["lead_id"],)).fetchone()[0]
+    assert r["como"] == "criado" and vend is None
+
+
+def test_na_aprovacao_ela_amarra_no_lead_que_ja_existia(pool):
+    """Porta 2 do `garantir`: um lead só com o mesmo telefone — amarra, não cria."""
+    _membros(pool)
+    lid = _lead(pool, empresa="Renata", whatsapp="+5586999461564", status="contatado")
+    oid = _orc(pool, empresa="Renata Costa", whatsapp="86999461564")
+    assert pl.garantir_pelo_orcamento(pool, CONTA, oid) == {"lead_id": lid, "como": "ligado"}
+
+
+def test_a_aprovacao_garante_o_card_antes_de_reservar_a_data(monkeypatch):
+    """A ORDEM importa: sem card, a festa nasce sem a quê se ligar. Pelo que a
+    função FAZ (e não pelo texto dela, que casaria com o comentário)."""
+    from finance import contrato as ctr
+    from web import proposta as prop
+    ordem = []
+    monkeypatch.setattr(pl, "garantir_pelo_orcamento", lambda *a, **k: ordem.append("card") or {})
+    monkeypatch.setattr(prop, "_reservar_na_agenda", lambda d, pool=None: ordem.append("data") or 1)
+    monkeypatch.setattr(ctr, "criar_para_orcamento", lambda *a, **k: ordem.append("contrato"))
+    monkeypatch.setattr(prop, "_notificar_assinatura", lambda *a, **k: None)
+    monkeypatch.setattr(prop, "get_pool", lambda: None)
+    prop._pos_assinatura({"id": 1, "conta_id": CONTA}, "Ana")
+    assert ordem == ["card", "data", "contrato"]
+
+
+def test_a_assinatura_garante_o_card_antes_de_levar_ao_fechamento():
+    """`assinar` monta financeiro e contrato — este arquivo não sobe isso. Então se
+    confere a CHAMADA (com o parêntese, que o comentário não tem)."""
+    import inspect
+    from finance import contrato as ctr
+    src = inspect.getsource(ctr.assinar)
+    assert src.index("_pl.garantir_pelo_orcamento(") < src.index("_fg.marcar_por_assinatura(")
+
+
+def _etapas(pool):
+    with pool.connection() as c:
+        c.execute("create table if not exists funil_etapas (conta_id bigint, chave text, ordem int)")
+        c.execute("delete from funil_etapas where conta_id=%s", (CONTA,))
+        c.execute("insert into funil_etapas values (%s,'contatado',20),(%s,'proposta',50),"
+                  "(%s,'orcamento_assinado',60),(%s,'ganho',900),(%s,'evento_realizado',950),"
+                  "(%s,'perdido',910)", (CONTA,) * 6)
+        c.commit()
+
+
+def test_card_numa_etapa_depois_da_proposta_nao_volta_quando_o_cliente_aprova(pool):
+    """A aprovação passou a chamar o `garantir` (24/09/2026). O vendedor que já
+    tinha levado o card pra uma coluna depois da proposta ("Orçamento assinado")
+    não pode vê-lo voltar pra "Negociação" justo quando o cliente aprovou."""
+    _etapas(pool)
+    lid = _lead(pool, empresa="Carolina", whatsapp="86977776666", status="orcamento_assinado")
+    oid = _orc(pool, empresa="Carolina Costa", whatsapp="86977776666")
+    assert pl.garantir(pool, CONTA, oid) == {"lead_id": lid, "como": "ligado"}
+    assert _lead_do(pool, oid) == (lid, "orcamento_assinado")
+
+
+def test_card_antes_da_proposta_ainda_anda_pra_proposta(pool):
+    _etapas(pool)
+    lid = _lead(pool, empresa="Dora", whatsapp="86955554444", status="contatado")
+    oid = _orc(pool, empresa="Dora Lima", whatsapp="86955554444")
+    assert pl.garantir(pool, CONTA, oid)["como"] == "ligado"
+    assert _lead_do(pool, oid) == (lid, "proposta")
+
+
+def test_o_cliente_que_volta_nao_e_amarrado_a_venda_fechada(pool):
+    """A segunda festa da mesma cliente. O único lead com o telefone dela é o da
+    festa já vendida (pós-venda, sem orçamento amarrado): amarrar esconderia a
+    negociação nova ali e trocaria a data da festa vendida pela da nova (regra 0).
+    Não amarra e não cria outro card: fica "sem card", que é visível."""
+    _etapas(pool)
+    lid = _lead(pool, empresa="Bianca", whatsapp="86988887777", status="evento_realizado")
+    oid = _orc(pool, empresa="Bianca Oliveira", whatsapp="86988887777")
+    assert pl.garantir(pool, CONTA, oid) == {"lead_id": None, "como": "empate"}
+    with pool.connection() as c:
+        r = c.execute("select status, orcamento_id from prospeccao where id=%s", (lid,)).fetchone()
+    assert r == ("evento_realizado", None)
+
+
+def test_o_cliente_perdido_que_volta_e_o_mesmo_cadastro(pool):
+    """Perdido não é venda fechada: a proposta se amarra ao mesmo card (migração
+    236), e é a assinatura que o leva ao fechamento (`funil_ganho`)."""
+    _etapas(pool)
+    lid = _lead(pool, empresa="Elis", whatsapp="86933332222", status="perdido")
+    oid = _orc(pool, empresa="Elis Moura", whatsapp="86933332222")
+    assert pl.garantir(pool, CONTA, oid) == {"lead_id": lid, "como": "ligado"}
+    assert _lead_do(pool, oid) == (lid, "perdido")
+
+
+def test_na_assinatura_a_festa_que_ja_estava_na_agenda_ganha_o_card_e_o_tipo(pool):
+    """Orçamento aprovado ANTES de a festa nascer ligada: a data entrou na agenda
+    sem card (e sem tipo, como nasciam 10 das 11 da Prime). Quando o card chega, a
+    festa passa a saber de quem é — e como FESTA, pra não virar "visita" ligada ao
+    card no app."""
+    _membros(pool)
+    with pool.connection() as c:
+        c.execute("create table if not exists eventos_agenda (id bigserial primary key, conta_id bigint,"
+                  " prospeccao_id bigint, tipo_evento text)")
+        c.execute("alter table orcamentos add column if not exists evento jsonb")
+        c.execute("alter table orcamentos add column if not exists evento_agenda_id bigint")
+        ev = c.execute("insert into eventos_agenda (conta_id) values (%s) returning id", (CONTA,)).fetchone()[0]
+        ev_outra = c.execute("insert into eventos_agenda (conta_id) values (%s) returning id",
+                             (CONTA + 1,)).fetchone()[0]
+        c.commit()
+    # um orçamento DESTA conta apontando pra festa de OUTRA: a trava de conta do
+    # UPDATE é o que impede ligar o card daqui na agenda de lá
+    o_torto = _orc(pool, empresa="Torto", whatsapp="86911110000")
+    with pool.connection() as c:
+        c.execute("update orcamentos set evento_agenda_id=%s where id=%s", (ev_outra, o_torto))
+        c.commit()
+    assert pl.garantir_pelo_orcamento(pool, CONTA, o_torto)["como"] == "criado"
+    with pool.connection() as c:
+        assert c.execute("select prospeccao_id, tipo_evento from eventos_agenda where id=%s",
+                         (ev_outra,)).fetchone() == (None, None)
+    oid = _orc(pool, empresa="Viviane Alves", whatsapp="86998479896")
+    with pool.connection() as c:
+        c.execute("update orcamentos set evento=%s, evento_agenda_id=%s where id=%s",
+                  ('{"tipo": "Casamento", "data": "2026-12-23"}', ev, oid))
+        c.commit()
+    r = pl.garantir_pelo_orcamento(pool, CONTA, oid)
+    assert r["como"] == "criado"
+    with pool.connection() as c:
+        assert c.execute("select prospeccao_id, tipo_evento from eventos_agenda where id=%s",
+                         (ev,)).fetchone() == (r["lead_id"], "Casamento")
+    # de novo (a assinatura depois da aprovação): nada muda
+    assert pl.garantir_pelo_orcamento(pool, CONTA, oid)["como"] == "ja_tinha"
+
+
+def test_a_festa_da_aprovacao_acha_o_card_e_o_cliente_do_orcamento(pool):
+    """`proposta._card_e_cliente` contra o banco: o card que aponta pro orçamento e
+    o cadastro dele; de outra conta, nada."""
+    from web import proposta as prop
+    with pool.connection() as c:
+        c.execute("alter table orcamentos add column if not exists cliente_id bigint")
+        c.commit()
+    oid = _orc(pool, empresa="Josinalva")
+    lid = _lead(pool, empresa="Josinalva", orcamento_id=oid)
+    with pool.connection() as c:
+        c.execute("update orcamentos set cliente_id=94 where id=%s", (oid,))
+        c.commit()
+    assert prop._card_e_cliente(pool, CONTA, oid) == (lid, 94)
+    assert prop._card_e_cliente(pool, CONTA + 1, oid) == (None, None)

@@ -62,7 +62,7 @@ create table mensagens (id bigserial primary key, conversa_id bigint, direcao te
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   inicio timestamptz, fim timestamptz, status text default 'ativo', desfecho text,
-  criado_em timestamptz default now());
+  criado_em timestamptz default now(), tipo_evento text);
 create table orcamentos (id bigserial primary key, conta_id bigint, status text,
   atualizado_em timestamptz, aprovada_em timestamptz, sinal_pago_em timestamptz,
   contrato_assinado_em timestamptz);
@@ -302,6 +302,25 @@ def test_ligado_move_o_card_e_deixa_a_linha_no_historico(pool):
         assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"
         assert c.execute("select motivo from funil_movimentos where prospeccao_id=%s",
                          (lead,)).fetchone()[0] == "gatilho:resposta_nossa"
+
+
+def test_a_festa_ligada_ao_card_nao_e_compromisso_marcado(pool):
+    """24/09/2026: a festa aprovada passou a nascer ligada ao card. Sem o
+    `tipo_evento is null`, ela dispararia o gatilho "compromisso" como se alguém
+    tivesse marcado uma visita. A visita (sem tipo) continua disparando."""
+    with pool.connection() as c:
+        festa = _lead(c, "Festa"); visita = _lead(c, "Visita")
+        c.execute("insert into eventos_agenda (conta_id, prospeccao_id, inicio, tipo_evento, criado_em) "
+                  "values (%s,%s,%s,'Casamento',%s), (%s,%s,%s,null,%s)",
+                  (CONTA, festa, AGORA + timedelta(days=60), AGORA,
+                   CONTA, visita, AGORA + timedelta(days=2), AGORA))
+        _ligar(c, "qualificado")
+        c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        st = dict(c.execute("select id, status from prospeccao where id in (%s,%s)",
+                            (festa, visita)).fetchall())
+    assert st[visita] == "qualificado"
+    assert st[festa] == "novo"
 
 
 def test_sinal_pago_leva_direto_pro_fechamento(pool):

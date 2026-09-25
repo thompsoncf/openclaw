@@ -880,7 +880,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    # duas listas divergindo).
                    tipos_evento=_cat.TIPOS_EVENTO,
                    tem_clientes=_tem_clientes(pool, conta_id),
-                   tem_cards=_tem_cards(pool, conta_id),
+                   tem_cards=(_ve_funil(ctx) and _tem_cards(pool, conta_id)),
                    # atalho do campo Local: o endereço da própria empresa, num toque.
                    # `pode_cadastrar` decide quem vê o convite pra preencher quando
                    # ainda não há endereço — só quem mexe nos dados da empresa. Pra
@@ -1028,13 +1028,21 @@ def _resolver_cliente(pool, conta_id: int, cliente_id: str, cliente_nome: str):
         return None, nome
 
 
+def _ve_funil(ctx: dict) -> bool:
+    """O papel enxerga o funil? `vendas` em contas.equipe.CAPS. O financeiro abre a
+    Agenda mas não vê lead, conversa nem cliente — de propósito — e o campo "Card
+    do funil" e a busca dele seriam uma porta de lado pro funil inteiro."""
+    from contas import equipe as _eq
+    return bool(_eq.caps_do_papel(ctx.get("papel") or "dono").get("vendas"))
+
+
 def _card_do_compromisso(pool, ctx: dict, prospeccao_id: str) -> int | None:
     """O card escolhido no formulário, se for MESMO desta conta — e, pra quem é
     vendedor, se for DELE (a mesma posse da busca). O form vem do navegador, e
     navegador não é fonte confiável. Qualquer outra coisa vira "sem card", que é
     como o compromisso nascia antes."""
     pid = _txt(prospeccao_id).strip()
-    if not pid.isdigit():
+    if not pid.isdigit() or not _ve_funil(ctx):
         return None
     try:
         with pool.connection() as c:
@@ -1057,6 +1065,8 @@ def agenda_buscar_card(request: Request, q: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"itens": []}, status_code=401)
+    if not _ve_funil(ctx):
+        return JSONResponse({"itens": []}, status_code=403)
     termo = (q or "").strip()
     if len(termo) < 2:
         return JSONResponse({"itens": []})

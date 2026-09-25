@@ -327,13 +327,18 @@ _SQL_EVENTO = {
           from mensagens m join conversas cv on cv.id = m.conversa_id
          where cv.conta_id=%(conta)s and cv.prospeccao_id is not null and m.direcao='out'
          group by cv.prospeccao_id""",
+    # COMPROMISSO É A VISITA/REUNIÃO, NUNCA A FESTA (24/09/2026): a festa aprovada
+    # passou a nascer ligada ao card, e sem `tipo_evento is null` ela dispararia o
+    # gatilho como se alguém tivesse marcado uma visita.
     "compromisso": """
         select prospeccao_id, min(criado_em) from eventos_agenda
          where conta_id=%(conta)s and prospeccao_id is not null and status='ativo'
+           and tipo_evento is null
          group by prospeccao_id""",
     "compromisso_feito": """
         select prospeccao_id, max(coalesce(fim, inicio)) from eventos_agenda
          where conta_id=%(conta)s and prospeccao_id is not null and desfecho='realizado'
+           and tipo_evento is null
          group by prospeccao_id""",
     # ENVIADO POR QUALQUER CANAL DO ZAQ — e não só pelo caminho que mexe no status.
     #

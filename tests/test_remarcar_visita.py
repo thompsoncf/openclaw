@@ -439,3 +439,42 @@ def test_aviso_que_EXPLODE_tambem_nao_desfaz_o_remarcar(pool, monkeypatch):
     assert r["ok"] is True, "a exceção do aviso derrubou o remarcar"
     assert r["avisado"] is False
     assert _st(pool, eid)[2].astimezone(ag.BRT).hour == 10, "a data voltou atrás"
+
+
+# ───────── 24/09/2026: a festa passou a nascer ligada ao card — e continua festa
+def _festa_no_card(pool, lead, *, dias=40):
+    ini = _daqui(dias, hora=19)
+    with pool.connection() as c:
+        eid = c.execute(
+            """insert into eventos_agenda (conta_id, membro_id, titulo, inicio, fim, local,
+                 prospeccao_id, tipo, tipo_evento)
+               values (%s,%s,'Casamento — Camila',%s,%s,'Salão Prime',%s,'empresa','Casamento')
+               returning id""",
+            (CONTA, VEND, ini, ini + timedelta(hours=5), lead)).fetchone()[0]
+        c.commit()
+    return eid, ini
+
+
+def test_a_festa_ligada_ao_card_nao_se_remarca_pelo_app(pool):
+    """A aprovação passou a ligar a festa ao card. Sem a trava do `tipo_evento`, o
+    app a trataria como visita: o vendedor mudaria o casamento de data pelo
+    celular e a cliente receberia "sua visita mudou de data"."""
+    lead = _lead(pool)
+    eid, ini = _festa_no_card(pool, lead)
+    assert ck.visita_para_remarcar(pool, CONTA, VEND, eid) is None
+    r = ck.remarcar_visita(pool, CONTA, VEND, eid, data=_daqui(41).strftime("%Y-%m-%d"), hora="19:00")
+    assert r["ok"] is False
+    assert ck.excluir_visita(pool, CONTA, VEND, eid)["ok"] is False
+    with pool.connection() as c:
+        inicio, status = c.execute("select inicio, status from eventos_agenda where id=%s",
+                                   (eid,)).fetchone()
+    assert inicio == ini and status == "ativo"
+
+
+def test_na_agenda_do_app_a_festa_ligada_e_reservado_e_nao_visita(pool):
+    lead = _lead(pool)
+    eid, _ini = _festa_no_card(pool, lead, dias=3)
+    vid = _visita(pool, dias=2, lead=lead)
+    itens = {x["id"]: x for x in ck.agenda_da_conta(pool, CONTA, VEND)}
+    assert itens[eid]["tipo_ev"] == "reservado"
+    assert itens[vid]["tipo_ev"] == "visita"

@@ -68,7 +68,14 @@ def marcar_por_assinatura(pool, conta_id: int, orcamento_id: int) -> dict:
                     "select chave, ordem from funil_etapas where conta_id=%s",
                     (conta_id,)).fetchall() or [])
                 piso = alturas.get("ganho", 900)
-                if alturas.get(de) is not None and alturas[de] >= piso:
+                # O PERDIDO NÃO É "DEPOIS DA VENDA" (24/09/2026): mora acima do ganho
+                # na régua (910), mas é o outro fim. Contrato assinado prova que o
+                # cliente não estava perdido — ele voltou, ou alguém marcou errado. Era
+                # limitação conhecida (ver tests/test_funil_ganho.py) e virou defeito
+                # quando a assinatura passou a amarrar o card do cliente que volta
+                # (`proposta_lead.garantir_pelo_orcamento`): o contrato ficaria preso
+                # num card em Perdido. O motivo e a data da perda ficam gravados.
+                if de != "perdido" and alturas.get(de) is not None and alturas[de] >= piso:
                     return {"ok": False, "lead_id": lead_id, "de": de,
                             "motivo": "ja_passou_da_venda"}
                 c.execute(

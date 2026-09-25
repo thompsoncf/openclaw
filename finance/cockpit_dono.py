@@ -268,7 +268,8 @@ def visao(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> di
         # a visita de hoje pela régua de `finance.visita` (24/09/2026): com ou sem
         # card, e a festa do dia não entra
         visitas = c.execute(
-            "select count(*) from eventos_agenda e where e.conta_id=%s and " + _vis.sql_conta("e")
+            "select count(*) from eventos_agenda e where e.conta_id=%s and "
+            + _vis.sql_conta("e", festa=_vis.vende_festa(pool, conta_id))
             + " and e.inicio >= %s and e.inicio < %s",
             (conta_id, agora.replace(hour=0, minute=0, second=0, microsecond=0),
              agora.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))).fetchone()[0]
@@ -962,6 +963,7 @@ def atividade(pool, conta_id: int, limite: int = 25) -> list[dict]:
                 """select e.titulo, e.criado_em, coalesce(nullif(m.nome,''), m.email, '—')
                      from eventos_agenda e left join membros m on m.id=e.membro_id
                     where e.conta_id=%s and e.prospeccao_id is not null and e.status='ativo'
+                      and e.tipo_evento is null
                     order by e.criado_em desc limit 10""", (conta_id,)).fetchall():
             alvo = (titulo or "").replace("Visita — ", "")
             itens.append({"tipo": "visita", "quando": quando, "txt": f"{_primeiro(nome)} marcou visita — {alvo}"})

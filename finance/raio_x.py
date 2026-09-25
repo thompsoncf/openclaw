@@ -527,6 +527,7 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
             select e.id, e.prospeccao_id, e.titulo, e.inicio, coalesce(nullif(p.contato,''), nullif(p.empresa,''), e.titulo)
               from eventos_agenda e join prospeccao p on p.id = e.prospeccao_id
              where e.conta_id = %s and p.vendedor_id = %s and e.status = 'ativo' and e.desfecho is null
+               and e.tipo_evento is null        -- a festa do cliente não é "visita amanhã"
                and (e.inicio at time zone 'America/Sao_Paulo')::date = %s
              order by e.inicio""", (conta_id, membro_id, hoje + timedelta(days=1))).fetchall()
     itens: list[dict] = []

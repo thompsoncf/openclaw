@@ -54,13 +54,17 @@ def test_a_regua_de_ocupar_e_mais_estreita_que_a_de_contar_visita():
     """
     from finance import visita as vis
     from web import painel_relatorios as pr
-    assert pr._E_VISITA == vis.sql_e_visita("e")
+    assert pr._E_VISITA == vis.sql_e_visita("e", festa=True)
     for titulo, tipo_evento in (("Visita — Shirley", None), ("VISITA TÉCNICA - PEDRO", None),
                                 ("Visita — Ana", "Casamento"), ("Aniversário", None),
                                 ("Reunião com a engenheira", None)):
         if ag.eh_visita(titulo=titulo, tipo_evento=tipo_evento):
             assert vis.eh_visita(titulo=titulo, tipo_evento=tipo_evento), titulo
+            assert vis.eh_visita(titulo=titulo, tipo_evento=tipo_evento, festa=True), titulo
+    # quem NÃO vende festa conta o compromisso ligado ao card; quem vende, só pelo
+    # título — e a ocupação da data nunca o libera, em nicho nenhum
     assert vis.eh_visita(titulo="ANIVERSÁRIO", prospeccao_id=7)
+    assert not vis.eh_visita(titulo="ANIVERSÁRIO", prospeccao_id=7, festa=True)
     assert not ag.eh_visita(titulo="ANIVERSÁRIO")
     assert ag.estado_da_data(_ev("ANIVERSÁRIO", prospeccao_id=7)) != ag.LIVRE
 

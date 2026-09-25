@@ -821,6 +821,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                              from eventos_agenda
                             where conta_id=%s and prospeccao_id = any(%s)
                               and status='ativo' and inicio >= now()
+                              and tipo_evento is null      -- a festa não é "Visita"
                             order by prospeccao_id, inicio""",
                         (conta_id, lead_ids)).fetchall():
                         visita_por_lead[pid] = inicio

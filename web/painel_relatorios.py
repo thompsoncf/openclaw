@@ -1045,11 +1045,21 @@ AGENDA_TIPO_ROTULO = {"pessoal": "Pessoal", "empresa": "Empresa", "fornecedor": 
 # setembro onde este relatório dava 4. Título começando com "Visita" continua
 # valendo (é como o Cockpit e o time batizam); ligada a um card também vale;
 # `tipo_evento` preenchido continua sendo a FESTA, nunca a visita.
-_E_VISITA = _vis.sql_e_visita("e")
+#: E ela segue o nicho: quem vende festa conta visita só pelo título (a festa
+#: digitada sem tipo e ligada ao card não vira visita); os outros contam também o
+#: compromisso ligado a um card. `_E_VISITA` é a de quem vende festa — a que este
+#: relatório sempre teve; as consultas pedem a da conta com `_e_visita(festa)`.
+_E_VISITA = _vis.sql_e_visita("e", festa=True)
+
+
+def _e_visita(festa: bool) -> str:
+    return _vis.sql_e_visita("e", festa=festa)
+
 
 #: DE QUEM É A VISITA: do dono do card; sem card, de quem marcou (decisão do dono,
-#: 24/09/2026 — a mesma do Raio-X). Pede o `p` do lead em LEFT JOIN na consulta.
-_VIS_VENDEDOR = "coalesce(p.vendedor_id, e.membro_id)"
+#: 24/09/2026 — a mesma do Raio-X, `finance.visita.sql_vendedor`). Com card, é do
+#: dono do card mesmo que ele esteja vago. Pede o `p` do lead em LEFT JOIN.
+_VIS_VENDEDOR = "(case when e.prospeccao_id is not null then p.vendedor_id else e.membro_id end)"
 
 #: EVENTO é o COMPLEMENTO da visita, e não `tipo_evento is not null`. A régua
 #: óbvia apagaria festa: medido na Prime em 31/08/2026, 12 das 43 festas estavam
@@ -1167,10 +1177,9 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     if periodo != "todos":
         where.append("e.inicio::date >= %s and e.inicio::date <= %s")
         params += [ini, fim]
-    if especie == "visita":
-        where.append(_E_VISITA)
-    elif especie == "evento":
-        where.append("not " + _E_VISITA)
+    if especie in ("visita", "evento"):
+        e_vis = _e_visita(_vis.vende_festa(pool, conta_id))
+        where.append(e_vis if especie == "visita" else "not " + e_vis)
     if vendedor_sel:
         try:
             where.append(_VIS_VENDEDOR + " = %s")
@@ -1719,8 +1728,7 @@ def _fmt_hora(d) -> str:
 #: duas espécies de lead e faria a taxa de conversão despencar por artifício.
 _SQL_VISITAS = """
     select e.id,
-           coalesce(nullif(p.empresa, ''), nullif(p.contato, ''), """ + _vis.sql_nome_sem_card("e") + """,
-                    e.titulo) as lead,
+           coalesce(nullif(p.empresa, ''), nullif(p.contato, '')) as lead,
            (e.prospeccao_id is not null) as ligado,
            coalesce(mb.nome, '—') as vendedor,
            e.inicio, (e.inicio < now()) as passou, e.desfecho,
@@ -1731,12 +1739,12 @@ _SQL_VISITAS = """
              (select min(m.criado_em) from mensagens m
                 join conversas cv on cv.id = m.conversa_id
                where cv.prospeccao_id = p.id and m.direcao='in') end as lead_chegou,
-           e.criado_em
+           e.criado_em, e.titulo
       from eventos_agenda e
       left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
       left join membros mb on mb.id = """ + _VIS_VENDEDOR + """
      where e.conta_id = %s
-       and """ + _vis.sql_conta("e") + """
+       and {visita}
 """
 
 
@@ -1769,7 +1777,9 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
         where += " and e.prospeccao_id is null"
 
     with pool.connection() as c:
-        rows = c.execute(_SQL_VISITAS + where + " order by e.inicio desc limit 300",
+        rows = c.execute(_SQL_VISITAS.replace("{visita}", _vis.sql_conta(
+                             "e", festa=_vis.vende_festa(pool, conta_id)))
+                         + where + " order by e.inicio desc limit 300",
                          params).fetchall()
         # os leads que entraram por conversa — o topo do funil. Fora do filtro de
         # vendedor de propósito: o lead chega antes de ter dono, e recortar por
@@ -1790,6 +1800,9 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
 
     linhas, esperas = [], []
     n_agendadas = n_ligadas = n_passou = n_respondidas = n_apareceu = 0
+    # a visita sem card tira o nome do título pela régua da aba Agenda, que conhece
+    # a equipe — "VISITA TÉCNICA - PEDRO" não vira o cliente Pedro
+    equipe = [n for _i, n in _vendedores_da_conta(pool, conta_id) if n] if rows else []
     for r in rows:
         n_agendadas += 1
         if r[2]:
@@ -1806,7 +1819,7 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
             espera = max(0, int((r[8] - r[7]).total_seconds() // 60))
             esperas.append(espera)
         linhas.append({
-            "lead": r[1] or "—",
+            "lead": r[1] or _ag.nome_no_titulo(r[9], None, equipe) or r[9] or "—",
             "vendedor": r[3],
             "marcada": _fmt_hora(r[4]),
             "esperou": vendas.duracao_curta(espera) if espera is not None else "sem lead",

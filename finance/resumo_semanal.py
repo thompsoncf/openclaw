@@ -218,6 +218,7 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
     out = {"visitas_proximas": 0, "festas_proximas": 0, "festa30_sem_contrato": 0,
            "sem_data": 0, "titulos_vencidos": 0, "titulos_vencidos_valor": 0,
            "sinal_pago": 0, "por_vendedor": []}
+    festa = _vis.vende_festa(pool, conta_id)     # a régua da visita segue o nicho
     with pool.connection() as c:
         def _um(sql, args, chave):
             try:
@@ -231,7 +232,7 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
         # a visita pela régua de `finance.visita` — a mesma do Raio-X e do
         # Relatório: com ou sem card, festa não é visita
         _um("""select count(*) from eventos_agenda e
-                where e.conta_id=%s and """ + _vis.sql_conta("e") + """
+                where e.conta_id=%s and """ + _vis.sql_conta("e", festa=festa) + """
                   and e.inicio >= %s and e.inicio < %s""",
             (conta_id, agora, agora + timedelta(days=7)), "visitas_proximas")
         _um("""select count(*) from eventos_agenda e
@@ -270,7 +271,7 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
                            -- AS VISITAS DELE pela régua do Raio-X (24/09/2026): do
                            -- card dele, ou marcadas por ele sem card
                            (select count(*) from eventos_agenda e
-                             where e.conta_id = m.conta_id and """ + _vis.sql_conta("e") + """
+                             where e.conta_id = m.conta_id and """ + _vis.sql_conta("e", festa=festa) + """
                                and """ + _vis.sql_vendedor("e") + """ = m.id
                                and e.desfecho='realizado'
                                and e.inicio >= %s and e.inicio < %s),

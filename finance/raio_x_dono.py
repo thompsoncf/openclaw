@@ -253,8 +253,16 @@ def _faixa_hora(dt: datetime) -> str:
 
 # ---------------------------------------------------------------- o placar
 
+def _fim_do_dia(fim: datetime) -> datetime:
+    """O fim do último dia do período, em Teresina. O período "mês" do Raio-X
+    termina AGORA, e a visita das 17h de hoje ficava fora dele às 10h — enquanto o
+    Relatório, que conta o dia inteiro, já a listava. Só a visita usa isto."""
+    d = (fim - timedelta(microseconds=1)).astimezone(_TZ).date() + timedelta(days=1)
+    return datetime.combine(d, datetime.min.time(), tzinfo=_TZ)
+
+
 def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora, wc: str = "", wcv: list | None = None,
-            wvis: str = "", wvisv: list | None = None) -> dict:
+            wvis: str = "", wvisv: list | None = None, festa: bool = False) -> dict:
     leads, com_data, sem_tipo = c.execute(f"""
         select count(*), count(*) filter (where p.evento_em is not null),
                count(*) filter (where coalesce(p.evento_tipo, '') = '')
@@ -328,9 +336,9 @@ def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora, wc: str = "", w
                count(*) filter (where e.inicio < now() and e.desfecho is null),
                count(*) filter (where e.inicio >= now())
           from eventos_agenda e
-         where e.conta_id = %s and {_vis.sql_conta("e")}
+         where e.conta_id = %s and {_vis.sql_conta("e", festa=festa)}
            and e.inicio >= %s and e.inicio < %s{wvis}""",
-        [conta_id, ini, fim, *(wvisv or [])]).fetchone()
+        [conta_id, ini, _fim_do_dia(fim), *(wvisv or [])]).fetchone()
     vis_ok, vis_nao, vis_sem, vis_fut = (int(x) for x in vis)
     dias = max(1, (min(fim, agora) - ini).days) if fim > ini else 1
     return {
@@ -519,10 +527,11 @@ def _perdas(c, conta_id, w, wv, ini, fim, motivos=MOTIVOS_TODOS) -> dict:
 
 # ---------------------------------------------------------------- da visita ao contrato
 
-#: A VISITA QUE ACONTECEU: a régua do placar (`finance.visita`) com desfecho
-#: "realizado". Era `tipo = 'empresa'` e só com card — o placar e este bloco
-#: passaram a contar a mesma coisa que o Relatório → Funil em 24/09/2026.
-_VISITA_OK = _vis.sql_conta("e") + " and e.desfecho = 'realizado'"
+def _visita_ok(festa: bool) -> str:
+    """A VISITA QUE ACONTECEU: a régua do placar (`finance.visita`) com desfecho
+    "realizado". Era `tipo = 'empresa'` e só com card — o placar e este bloco
+    passaram a contar a mesma coisa que o Relatório → Funil em 24/09/2026."""
+    return _vis.sql_conta("e", festa=festa) + " and e.desfecho = 'realizado'"
 
 #: O vendedor do orçamento: quem o fez; na falta, o vendedor do lead. É a régua
 #: de SQL_CT_VENDEDOR, só que pra quem ainda não tem contrato.
@@ -550,7 +559,7 @@ def _dia(dt):
     return dt.astimezone(_TZ).date() if dt else None
 
 
-def da_visita(c, conta_id: int, f: dict, ini, fim) -> dict:
+def da_visita(c, conta_id: int, f: dict, ini, fim, festa: bool = False) -> dict:
     """DA VISITA AO CONTRATO (pedido do dono em 24/09/2026, mockup
     docs/mockups/prime_visita_ao_contrato.html): quatro degraus do MESMO período,
     cada um pela sua data — a visita pelo dia em que aconteceu, o orçamento de quem
@@ -568,7 +577,7 @@ def da_visita(c, conta_id: int, f: dict, ini, fim) -> dict:
     marcadas = c.execute(f"""
         select count(distinct coalesce('l' || e.prospeccao_id::text, 'e' || e.id::text))
           from eventos_agenda e
-         where e.conta_id = %s and {_vis.sql_conta("e")}
+         where e.conta_id = %s and {_vis.sql_conta("e", festa=festa)}
            and e.inicio >= %s and e.inicio < least(%s, now()){wvis}""",
         [conta_id, ini, fim, *wvisv]).fetchone()[0]
     vis = c.execute(f"""
@@ -579,7 +588,7 @@ def da_visita(c, conta_id: int, f: dict, ini, fim) -> dict:
           from prospeccao p left join orcamentos o on o.id = p.orcamento_id
          where p.conta_id = %s and exists (
                select 1 from eventos_agenda e where e.prospeccao_id = p.id and e.conta_id = p.conta_id
-                  and {_VISITA_OK} and e.inicio >= %s and e.inicio < %s){w}
+                  and {_visita_ok(festa)} and e.inicio >= %s and e.inicio < %s){w}
          order by p.id""", [conta_id, ini, fim, *wv]).fetchall()
     # A VISITA SEM CARD (24/09/2026) também aconteceu, e conta — mas não tem de onde
     # tirar orçamento nem contrato, então vai pra uma lista própria em vez de cair
@@ -588,15 +597,22 @@ def da_visita(c, conta_id: int, f: dict, ini, fim) -> dict:
     # LEAD (tipo de festa, origem...) ela sai, como em `_where_visita`.
     sem_card = []
     if not _where({**f, "vendedor": None})[0]:
-        q = f"""select e.id, coalesce({_vis.sql_nome_sem_card("e")}, 'Visita'), e.membro_id
+        q = f"""select e.id, e.titulo, e.membro_id
                   from eventos_agenda e
-                 where e.conta_id = %s and e.prospeccao_id is null and {_VISITA_OK}
+                 where e.conta_id = %s and e.prospeccao_id is null and {_visita_ok(festa)}
                    and e.inicio >= %s and e.inicio < %s"""
         args = [conta_id, ini, fim]
         if f.get("vendedor"):
             q += " and e.membro_id = %s"
             args.append(f["vendedor"])
-        sem_card = c.execute(q + " order by e.inicio", args).fetchall()
+        crus = c.execute(q + " order by e.inicio", args).fetchall()
+        # o NOME sai do título pela régua da Agenda, que conhece a equipe: a equipe
+        # batiza "VISITA TÉCNICA - PEDRO", e sem a lista o cliente viraria o vendedor
+        from finance import agenda as _ag
+        equipe = [r[0] for r in c.execute("select nome from membros where conta_id = %s and nome is not null",
+                                          (conta_id,)).fetchall()] if crus else []
+        sem_card = [(eid, _ag.nome_no_titulo(t, None, equipe) or (t or "Visita"), mid)
+                    for eid, t, mid in crus]
     prop = c.execute(f"""
         select o.id, {_ORC_VENDEDOR}, coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0),
                exists (select 1 from contratos c where c.orcamento_id = o.id
@@ -772,13 +788,15 @@ def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: di
     w, wv = _where(f)
     wc, wcv = _where_contrato(f)
     wvis, wvisv = _where_visita(f)
+    # quem vende festa conta visita só pelo título (ver finance/visita.py)
+    festa = bool((perfil.get("vocab") or {}).get("data"))
     blocos = set(perfil.get("blocos") or ())
     out = {"ini": ini, "fim": fim, "rotulo": rot, "filtros": f, "perfil": perfil, "placar": None, "anterior": None,
            "demanda_agenda": None, "dia_festa": None, "tipos": None, "ciclo": None, "perdas": None,
            "mrr": None, "comissao": None, "segmentos": None, "servicos": None, "da_visita": None,
            "vendedores": [], "confianca": None}
-    todos = (("placar", lambda: _placar(c, conta_id, w, wv, ini, fim, a, wc, wcv, wvis, wvisv)),
-             ("anterior", lambda: _placar(c, conta_id, w, wv, ant_ini, ant_fim, a, wc, wcv, wvis, wvisv)),
+    todos = (("placar", lambda: _placar(c, conta_id, w, wv, ini, fim, a, wc, wcv, wvis, wvisv, festa)),
+             ("anterior", lambda: _placar(c, conta_id, w, wv, ant_ini, ant_fim, a, wc, wcv, wvis, wvisv, festa)),
              ("demanda_agenda", lambda: _demanda_agenda(c, conta_id, w, wv, a.date())),
              ("dia_festa", lambda: _dia_festa(c, conta_id, w, wv, ini, fim)),
              ("tipos", lambda: _tipos_ticket(c, conta_id, w, wv, ini, fim)),
@@ -788,7 +806,7 @@ def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: di
              ("servicos", lambda: _servicos(c, conta_id, w, wv, ini, fim)),
              ("ciclo", lambda: _ciclo(c, conta_id, w, wv, ini, fim, wc, wcv)),
              ("perdas", lambda: _perdas(c, conta_id, w, wv, ini, fim, perfil.get("motivos") or MOTIVOS_TODOS)),
-             ("da_visita", lambda: da_visita(c, conta_id, f, ini, fim)))
+             ("da_visita", lambda: da_visita(c, conta_id, f, ini, fim, festa)))
     with pool.connection() as c:
         for k, fn in todos:
             if k not in ("placar", "anterior") and k not in blocos:

@@ -3105,7 +3105,8 @@ def cockpit_agenda_novo_tela(request: Request):
     # DE QUAL CARD É (24/09/2026): a visita marcada aqui nascia sem card e sumia do
     # Raio-X. Uma lista, e não uma busca: no celular é um toque, e o vendedor
     # escolhe entre os DELE (a gestão, entre os da conta). Perdido fica de fora.
-    cards = _cards_pro_compromisso(conta_id, membro_id, gestao=bool(g) and not sess)
+    # gestão pelo PAPEL, como no remarcar: o gestor também entra pelo app (`_sessao`)
+    cards = _cards_pro_compromisso(conta_id, membro_id, gestao=_eh_gestao(request, g))
     opcoes = "".join(f"<option value='{cid}'>{esc(nome)}{(' · ' + esc(etapa)) if etapa else ''}</option>"
                      for cid, nome, etapa in cards)
     campo_card = ("<label class=fic-c><span>De qual cliente (card do funil)</span>"
@@ -3131,6 +3132,11 @@ def cockpit_agenda_novo_tela(request: Request):
              + "<div class=rodape-b><button class=btn type=submit>Marcar</button></div>"
              + "</form>")
     return _page("Novo compromisso", corpo)
+
+
+def _eh_gestao(request: Request, g) -> bool:
+    """Dono e gestor escolhem entre os cards da conta; o vendedor, entre os dele."""
+    return bool(g) or (request.session.get("papel") in ("dono", "gestor"))
 
 
 def _cards_pro_compromisso(conta_id: int, membro_id, gestao: bool) -> list[tuple]:
@@ -3175,7 +3181,7 @@ def cockpit_agenda_novo(request: Request, titulo: str = Form(""), data: str = Fo
             with get_pool().connection() as c:
                 r = c.execute("select vendedor_id from prospeccao where id=%s and conta_id=%s",
                               (int(pid), conta_id)).fetchone()
-            if r and (not sess or r[0] == membro_id):
+            if r and (_eh_gestao(request, g) or r[0] == membro_id):
                 lead_id = int(pid)
         except Exception:  # noqa: BLE001 — o vínculo é acessório; a data não é
             lead_id = None
@@ -6945,7 +6951,8 @@ def _bloco_da_visita(pool, conta_id: int, periodo: str, de, ate) -> str:
             return ""
         ini, fim = cd._range(periodo, de, ate)
         with pool.connection() as c:
-            dv = rxd.da_visita(c, conta_id, {}, ini, fim)
+            dv = rxd.da_visita(c, conta_id, {}, ini, fim,
+                               festa=bool((perfil.get("vocab") or {}).get("data")))
     except Exception as e:  # noqa: BLE001
         _log.warning("cockpit: da visita ao contrato da conta %s: %s: %s", conta_id, type(e).__name__, e)
         return ""

@@ -6,18 +6,21 @@ realizadas / 1 sem resposta" no Raio-X. A que faltava era a "Visita Técnica -
 Renata", digitada na Agenda sem card — o Raio-X só via visita com card. E o
 Relatório dava a visita pra quem marcou; o Raio-X, pro dono do card.
 
-O QUE SE PROVA AQUI, num cenário só:
+O QUE SE PROVA AQUI, num cenário só, nos dois nichos:
  1. a visita SEM CARD conta nas duas telas, pra quem marcou;
  2. a visita do card do Pedro marcada pelo GESTOR conta pro Pedro nas duas;
- 3. festa nunca é visita — nem a com tipo, nem a festa digitada solta;
- 4. "Reunião" solta não é visita (é reunião de dentro); ligada a card é;
- 5. cancelada e fornecedor não contam;
- 6. a que ainda vai acontecer entra no Relatório e no rodapé do Raio-X;
- 7. o bloco "Da visita ao contrato" conta a mesma visita, com a sem card à parte;
- 8. a espécie em Python e em SQL dizem a mesma coisa, compromisso por compromisso.
+ 3. a visita num card SEM DONO fica sem dono — não cai em quem marcou;
+ 4. festa nunca é visita — nem a com tipo, nem a festa digitada solta;
+ 5. quem vende festa conta só pelo título; quem não vende conta também o
+    compromisso ligado a card (a reunião) — e "Reunião" solta nunca;
+ 6. cancelada e fornecedor não contam;
+ 7. a que ainda vai acontecer entra no Relatório e no rodapé do Raio-X;
+ 8. o bloco "Da visita ao contrato" conta a mesma visita, com a sem card à parte
+    e com o nome tirado do título sem virar o nome do vendedor;
+ 9. a espécie em Python e em SQL dizem a mesma coisa, compromisso por compromisso.
 """
 import os
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -30,6 +33,7 @@ from tests.test_raio_x_dono import _SQL, MIG
 from web import painel_relatorios as rel
 
 EVENTOS = rxp.perfil("eventos")
+RECORRENTE = rxp.perfil("consultoria")
 BRT = ZoneInfo("America/Sao_Paulo")
 
 
@@ -78,6 +82,7 @@ def cen(pool):
                              (conta, vend, nome, _dt(1, 9, 9))).fetchone()[0]
 
         renata, agna, clara = lead("Renata Costa", pedro), lead("Agna Luíza", pedro), lead("Clara", jaque)
+        sem_dono = lead("Sem Dono", None)
 
         def ev(titulo, inicio, *, membro, lead_id=None, tipo="empresa", tipo_evento=None,
                status="ativo", desfecho=None):
@@ -93,18 +98,24 @@ def cen(pool):
             # 2. no card do Pedro, marcada pelo gestor
             "agna_pelo_gestor": ev("Visita — Agna Luíza", _dt(12, 9, 10), membro=gestor, lead_id=agna,
                                    desfecho="realizado"),
-            # 3. festas: com tipo e ligada ao card; e a digitada solta, sem tipo
+            # 3. num card sem vendedor, marcada pelo Pedro: a visita fica sem dono
+            "orfa": ev("Visita — Sem Dono", _dt(15, 9, 10), membro=pedro, lead_id=sem_dono,
+                       desfecho="realizado"),
+            # 4. a equipe batiza com o nome do vendedor: conta pro Pedro, e o nome não vira "PEDRO"
+            "pedro_no_titulo": ev("VISITA TÉCNICA - PEDRO", _dt(16, 9, 15), membro=pedro,
+                                  desfecho="realizado"),
+            # 5. festas: com tipo e ligada ao card; e a digitada solta, sem tipo
             "festa_com_tipo": ev("Aniversário — Renata", _dt(20, 9, 18), membro=pedro, lead_id=renata,
                                  tipo_evento="Aniversário"),
             "festa_solta": ev("ANIVERSÁRIO", _dt(20, 9, 12), membro=pedro),
-            # 4. reunião solta (de dentro) × reunião ligada ao card da Clara
+            # 6. reunião solta (de dentro) × reunião ligada ao card da Clara
             "reuniao_solta": ev("Reunião alinhamento marketing", _dt(8, 9, 9), membro=jaque),
             "reuniao_no_card": ev("Reunião com a Clara", _dt(9, 9, 15), membro=jaque, lead_id=clara,
                                   tipo="pessoal"),
-            # 5. cancelada e fornecedor
+            # 7. cancelada e fornecedor
             "cancelada": ev("Visita — Clara", _dt(10, 9, 15), membro=jaque, lead_id=clara, status="cancelado"),
             "fornecedor": ev("Visita fornecedor do buffet", _dt(11, 9, 15), membro=jaque, tipo="fornecedor"),
-            # 6. a que ainda vai acontecer (relativa a agora, pra o teste não vencer)
+            # 8. a que ainda vai acontecer (relativa a agora, pra o teste não vencer)
             "futura": ev("Visita — Clara de novo", datetime.now(BRT) + timedelta(days=2), membro=jaque,
                          lead_id=clara),
         }
@@ -112,14 +123,28 @@ def cen(pool):
     return {"conta": conta, "pedro": pedro, "jaque": jaque, "gestor": gestor, "ids": ids}
 
 
-def _f(vendedor=None):
+@pytest.fixture()
+def festa(monkeypatch):
+    """A conta vende festa (a Prime). O banco daqui não tem a tabela de nichos."""
+    monkeypatch.setattr(vis, "vende_festa", lambda pool, conta_id: True)
+    return EVENTOS
+
+
+@pytest.fixture()
+def servico(monkeypatch):
+    """A mesma agenda numa conta que vende serviço (a ZAQ)."""
+    monkeypatch.setattr(vis, "vende_festa", lambda pool, conta_id: False)
+    return RECORRENTE
+
+
+def _f(perfil, vendedor=None):
     ate = (datetime.now(BRT) + timedelta(days=10)).date()
     return rxd.filtros({"periodo": "datas", "de": "2026-09-01", "ate": ate.isoformat(),
-                        **({"vendedor": str(vendedor)} if vendedor else {})}, EVENTOS)
+                        **({"vendedor": str(vendedor)} if vendedor else {})}, perfil)
 
 
-def _raio_x(pool, cen, vendedor=None):
-    p = rxd.dono(pool, cen["conta"], _f(vendedor), perfil=EVENTOS)["placar"]
+def _raio_x(pool, cen, perfil, vendedor=None):
+    p = rxd.dono(pool, cen["conta"], _f(perfil, vendedor), perfil=perfil)["placar"]
     return p["visitas_ok"], p["visitas_nao"], p["visitas_sem_resposta"], p["visitas_futuras"]
 
 
@@ -128,97 +153,122 @@ def _relatorio(pool, cen, vendedor=None):
     return d["linhas"]
 
 
-def test_o_caso_da_prime_as_duas_telas_dao_4_e_nao_3_e_4(pool, cen):
-    # sem card (Renata) + no card dele marcada pelo gestor (Agna): 2 realizadas
-    assert _raio_x(pool, cen, cen["pedro"]) == (2, 0, 0, 0)
+# ───────────────────────────── quem vende festa (a Prime)
+
+def test_o_caso_da_prime_as_duas_telas_dao_o_mesmo_numero(pool, cen, festa):
+    # sem card (Renata), no card dele pelo gestor (Agna), e a do título com o nome dele
+    assert _raio_x(pool, cen, festa, cen["pedro"]) == (3, 0, 0, 0)
     linhas = _relatorio(pool, cen, cen["pedro"])
-    assert len(linhas) == 2
+    assert len(linhas) == 3
     assert {x["vendedor"] for x in linhas} == {"Pedro Yan"}
 
 
-def test_a_visita_do_card_e_do_dono_do_card_mesmo_marcada_por_outro(pool, cen):
-    assert _raio_x(pool, cen, cen["gestor"]) == (0, 0, 0, 0)
+def test_a_visita_do_card_e_do_dono_do_card_mesmo_marcada_por_outro(pool, cen, festa):
+    assert _raio_x(pool, cen, festa, cen["gestor"]) == (0, 0, 0, 0)
     assert _relatorio(pool, cen, cen["gestor"]) == []
 
 
-def test_reuniao_so_conta_ligada_ao_card_e_a_futura_entra_nas_duas(pool, cen):
-    # Jaque: a reunião no card da Clara (passou, sem desfecho) + a futura
-    assert _raio_x(pool, cen, cen["jaque"]) == (0, 0, 1, 1)
-    assert len(_relatorio(pool, cen, cen["jaque"])) == 2
+def test_na_festa_a_reuniao_no_card_nao_e_visita_e_a_futura_entra_nas_duas(pool, cen, festa):
+    assert _raio_x(pool, cen, festa, cen["jaque"]) == (0, 0, 0, 1)
+    assert len(_relatorio(pool, cen, cen["jaque"])) == 1
 
 
-def test_sem_filtro_a_soma_do_raio_x_e_a_lista_do_relatorio(pool, cen):
-    ok, nao, sem, fut = _raio_x(pool, cen)
-    assert (ok, nao, sem, fut) == (2, 0, 1, 1)
+def test_sem_filtro_a_soma_do_raio_x_e_a_lista_do_relatorio(pool, cen, festa):
+    ok, nao, sem, fut = _raio_x(pool, cen, festa)
+    assert (ok, nao, sem, fut) == (4, 0, 0, 1)
     assert ok + nao + sem + fut == len(_relatorio(pool, cen))
 
 
-def test_o_nome_da_visita_sem_card_sai_do_titulo(pool, cen):
+def test_card_sem_dono_nao_da_a_visita_pra_quem_marcou(pool, cen, festa):
+    orfa = [x for x in _relatorio(pool, cen) if x["lead"] == "Sem Dono"]
+    assert len(orfa) == 1 and orfa[0]["vendedor"] == "—"
+
+
+def test_o_nome_da_visita_sem_card_sai_do_titulo_sem_virar_o_vendedor(pool, cen, festa):
     nomes = {x["lead"] for x in _relatorio(pool, cen, cen["pedro"])}
-    assert "Renata" in nomes
+    assert nomes == {"Renata", "Agna Luíza", "VISITA TÉCNICA - PEDRO"}
 
 
-def test_da_visita_ao_contrato_conta_a_mesma_visita_e_separa_a_sem_card(pool, cen):
+def test_da_visita_ao_contrato_conta_a_mesma_visita_e_separa_a_sem_card(pool, cen, festa):
     ini = datetime(2026, 9, 1, tzinfo=BRT)
     fim = datetime.now(BRT) + timedelta(days=10)
     with pool.connection() as c:
-        dv = rxd.da_visita(c, cen["conta"], {}, ini, fim)
-        dv_pedro = rxd.da_visita(c, cen["conta"], {"vendedor": cen["pedro"]}, ini, fim)
-    assert dv["visitas"] == 2                     # Agna (card) + Renata (sem card)
-    assert dv["sem_card"] == ["Renata"]
-    assert dv["sem_orcamento"] == ["Agna Luíza"]  # a sem card não cai aqui
-    assert dv["por_vendedor"][cen["pedro"]]["visitas"] == 2
-    assert dv_pedro["visitas"] == 2
-    # marcadas: Renata, Agna e a reunião da Clara (que passou) — pessoas, não linhas
-    assert dv["marcadas"] == 3
+        dv = rxd.da_visita(c, cen["conta"], {}, ini, fim, festa=True)
+        dv_pedro = rxd.da_visita(c, cen["conta"], {"vendedor": cen["pedro"]}, ini, fim, festa=True)
+    assert dv["visitas"] == 4                      # Agna e Sem Dono (card) + as duas sem card
+    assert dv["sem_card"] == ["Renata", "VISITA TÉCNICA - PEDRO"]
+    assert dv["sem_orcamento"] == ["Agna Luíza", "Sem Dono"]   # a sem card não cai aqui
+    assert dv["por_vendedor"][cen["pedro"]]["visitas"] == 3
+    assert dv["por_vendedor"][None]["visitas"] == 1            # a do card vago: "Outros"
+    assert dv_pedro["visitas"] == 3
+    assert dv["marcadas"] == 4                     # pessoas, não linhas
 
 
-def test_filtro_de_lead_tira_a_visita_sem_card(pool, cen):
+def test_filtro_de_lead_tira_a_visita_sem_card(pool, cen, festa):
     """Filtro de festa/origem pergunta "tem um lead assim"; a sem card não tem."""
     with pool.connection() as c:
         c.execute("update prospeccao set evento_tipo='Casamento' where conta_id=%s", (cen["conta"],))
         c.commit()
     try:
-        f = _f()
+        f = _f(festa)
         f["tipo"] = "Casamento"
-        p = rxd.dono(pool, cen["conta"], f, perfil=EVENTOS)["placar"]
-        assert (p["visitas_ok"], p["visitas_sem_resposta"], p["visitas_futuras"]) == (1, 1, 1)
+        p = rxd.dono(pool, cen["conta"], f, perfil=festa)["placar"]
+        assert (p["visitas_ok"], p["visitas_sem_resposta"], p["visitas_futuras"]) == (2, 0, 1)
     finally:
         with pool.connection() as c:
             c.execute("update prospeccao set evento_tipo=null where conta_id=%s", (cen["conta"],))
             c.commit()
 
 
-def test_a_especie_em_python_e_em_sql_dizem_o_mesmo(pool, cen):
-    with pool.connection() as c:
-        rows = c.execute(
-            f"select id, titulo, tipo_evento, tipo, prospeccao_id, {vis.sql_e_visita('e')} "
-            "from eventos_agenda e where e.conta_id=%s", (cen["conta"],)).fetchall()
-    assert len(rows) == len(cen["ids"])
-    for _id, titulo, tipo_evento, tipo, lead_id, no_sql in rows:
-        assert vis.eh_visita(titulo=titulo, tipo_evento=tipo_evento, tipo=tipo,
-                             prospeccao_id=lead_id) == no_sql, titulo
-    e_visita = {i for i, *_x, s in rows if s}
-    ids = cen["ids"]
-    assert e_visita == {ids["renata_sem_card"], ids["agna_pelo_gestor"], ids["reuniao_no_card"],
-                        ids["cancelada"], ids["futura"]}   # a cancelada é visita; só não conta
-
-
-def test_retornar_contato_nunca_e_visita():
-    assert not vis.eh_visita(titulo="Retornar contato: Ana", prospeccao_id=10)
-    assert vis.eh_visita(titulo="  VISITA TÉCNICA - PEDRO")
-    assert not vis.eh_visita(titulo="Visita — Ana", tipo_evento="Casamento", prospeccao_id=1)
-    assert not vis.eh_visita(titulo="Reunião com Paulo")
-    assert vis.eh_visita(titulo="Reunião com Paulo", prospeccao_id=3)
-
-
-def test_o_resumo_semanal_conta_pela_mesma_regua(pool, cen):
-    """A linha de cada vendedor no resumo do grupo: a visita sem card e a marcada
-    pelo gestor no card dele são do Pedro, como no Raio-X e no Relatório."""
+def test_o_resumo_semanal_conta_pela_mesma_regua(pool, cen, festa):
+    """A linha de cada vendedor no resumo do grupo: a sem card e a marcada pelo
+    gestor no card dele são do Pedro, como no Raio-X e no Relatório."""
     from finance import resumo_semanal as rs
     ini = datetime(2026, 9, 1, tzinfo=BRT)
     fim = datetime.now(BRT) + timedelta(days=10)
     ex = rs._extras(pool, cen["conta"], ini, fim, datetime.now(BRT))
     visitas = {v["id"]: v["visitas"] for v in ex["por_vendedor"]}
-    assert visitas[cen["pedro"]] == 2
-    assert visitas[cen["jaque"]] == 0            # a reunião no card da Clara não teve desfecho
+    assert visitas[cen["pedro"]] == 3
+    assert visitas[cen["jaque"]] == 0
+
+
+# ───────────────────────────── quem vende serviço (a ZAQ)
+
+def test_no_servico_a_reuniao_ligada_ao_card_conta_nas_duas(pool, cen, servico):
+    assert _raio_x(pool, cen, servico, cen["jaque"]) == (0, 0, 1, 1)
+    assert len(_relatorio(pool, cen, cen["jaque"])) == 2
+
+
+def test_no_servico_a_soma_tambem_bate(pool, cen, servico):
+    ok, nao, sem, fut = _raio_x(pool, cen, servico)
+    assert ok + nao + sem + fut == len(_relatorio(pool, cen))
+
+
+# ───────────────────────────── a espécie
+
+@pytest.mark.parametrize("vende_festa", [True, False])
+def test_a_especie_em_python_e_em_sql_dizem_o_mesmo(pool, cen, vende_festa):
+    with pool.connection() as c:
+        rows = c.execute(
+            f"select id, titulo, tipo_evento, tipo, prospeccao_id, {vis.sql_e_visita('e', festa=vende_festa)} "
+            "from eventos_agenda e where e.conta_id=%s", (cen["conta"],)).fetchall()
+    assert len(rows) == len(cen["ids"])
+    for _id, titulo, tipo_evento, tipo, lead_id, no_sql in rows:
+        assert vis.eh_visita(titulo=titulo, tipo_evento=tipo_evento, tipo=tipo,
+                             prospeccao_id=lead_id, festa=vende_festa) == no_sql, titulo
+    ids = cen["ids"]
+    esperado = {ids["renata_sem_card"], ids["agna_pelo_gestor"], ids["orfa"], ids["pedro_no_titulo"],
+                ids["cancelada"], ids["futura"]}        # a cancelada é visita; só não conta
+    if not vende_festa:
+        esperado |= {ids["reuniao_no_card"]}
+    assert {i for i, *_x, s in rows if s} == esperado
+
+
+def test_retornar_contato_e_festa_nunca_sao_visita():
+    assert not vis.eh_visita(titulo="Retornar contato: Ana", prospeccao_id=10)
+    assert vis.eh_visita(titulo="  VISITA TÉCNICA - PEDRO", festa=True)
+    assert not vis.eh_visita(titulo="Visita — Ana", tipo_evento="Casamento", prospeccao_id=1)
+    assert not vis.eh_visita(titulo="Reunião com Paulo")
+    assert vis.eh_visita(titulo="Reunião com Paulo", prospeccao_id=3)
+    # a festa digitada sem tipo e ligada ao card: na festa, não é visita
+    assert not vis.eh_visita(titulo="Formatura - Beatriz", prospeccao_id=3, festa=True)

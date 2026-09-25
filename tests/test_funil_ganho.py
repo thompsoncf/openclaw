@@ -130,16 +130,16 @@ def test_lead_perdido_VOLTA_pra_ganho_se_o_contrato_foi_assinado(pool):
     fim. Se o contrato foi assinado, o lead não estava perdido — alguém marcou
     errado, ou o cliente voltou. A assinatura é mais forte que o palpite.
 
-    Este teste existe pra fixar a decisão: se um dia alguém "consertar" a regra da
-    ordem sem pensar no perdido, ele cai aqui.
+    Até 24/09/2026 a regra da ordem barrava o perdido junto com o pós-venda, e este
+    teste fixava isso como LIMITAÇÃO CONHECIDA ("mude este teste de propósito").
+    Mudou de propósito: a assinatura passou a amarrar o card do cliente que volta
+    (`proposta_lead.garantir_pelo_orcamento`), e o contrato ficaria preso num card
+    em Perdido. Regra do dono de 17/09: assinou é venda.
     """
     lid = _lead(pool, "perdido")
     r = fg.marcar_por_assinatura(pool, CONTA, 900)
-    # hoje a regra da ordem barra o perdido junto com o pós-venda. Está DOCUMENTADO
-    # como limitação conhecida, e não como acerto: ver o corpo do assert.
-    assert r["ok"] is False and r["motivo"] == "ja_passou_da_venda", (
-        "se a regra do perdido mudar, mude este teste de propósito — não por acidente")
-    assert _status(pool, lid) == "perdido"
+    assert r["ok"] is True and r["de"] == "perdido"
+    assert _status(pool, lid) == "ganho"
 
 
 # ──────────────────────────────────────── a regra 2: nunca derruba a assinatura

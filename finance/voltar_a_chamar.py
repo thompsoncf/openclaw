@@ -720,7 +720,7 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                         contas = [r[0] for r in c.execute(
                             "select conta_id from voltar_a_chamar_config where modo <> 'off'"
                         ).fetchall()]
-                except Exception:  # noqa: BLE001 — migração 344 ainda não rodou
+                except Exception:  # noqa: BLE001 — migração 346 ainda não rodou
                     contas = []
             for conta_id in contas:
                 try:

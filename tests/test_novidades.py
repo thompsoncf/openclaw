@@ -72,7 +72,7 @@ def test_o_publico_eventos_e_exatamente_o_nicho_de_eventos():
 
 
 def test_o_publico_clinica_e_exatamente_o_nicho_clinica():
-    """O aviso da tela Hoje (345) fala de uma tela que só abre pro perfil clínica."""
+    """O aviso da tela Hoje (347) fala de uma tela que só abre pro perfil clínica."""
     assert nv.nichos_alcancados("clinica") == {"clinica"}
     assert nv.alcanca("clinica", None) is False
 
@@ -139,8 +139,8 @@ def pool():
         # 338 amplia pela quarta vez, com `empresa` — o segundo portão de CONTA
         # (quem tem a aba Empresa). Mesmo motivo das anteriores.
         c.execute((BASE / "338_novidade_empresa_reorganizada.sql").read_text(encoding="utf-8"))
-        # 345 amplia pela quinta vez, com `clinica` (a tela Hoje da clínica).
-        c.execute((BASE / "345_novidade_hoje_da_clinica.sql").read_text(encoding="utf-8"))
+        # 347 amplia pela quinta vez, com `clinica` (a tela Hoje da clínica).
+        c.execute((BASE / "347_novidade_hoje_da_clinica.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

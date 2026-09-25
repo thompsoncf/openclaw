@@ -1,4 +1,4 @@
--- 344_voltar_a_chamar.sql
+-- 346_voltar_a_chamar.sql
 -- "Voltar a chamar depois do preço" — o primeiro pedaço do nicho clínica que mexe
 -- em dinheiro medido. Na Espaço Pelle (conta 39), de 24/08 a 23/09/2026, 11
 -- pacientes escreveram, receberam o preço da consulta (R$ 500) e só 1 marcou. Os

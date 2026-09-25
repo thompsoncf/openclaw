@@ -550,7 +550,7 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — follow-up falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
-                # Voltar a chamar depois do preço (migração 344): só perfil clínica e
+                # Voltar a chamar depois do preço (migração 346): só perfil clínica e
                 # só conta que saiu do 'off'. Depois do follow-up, que é quem cuida
                 # do mesmo lead em festa e mensalidade.
                 from finance import voltar_a_chamar as _vac

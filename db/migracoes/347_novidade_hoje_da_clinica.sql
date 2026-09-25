@@ -1,6 +1,6 @@
--- 345_novidade_hoje_da_clinica.sql
+-- 347_novidade_hoje_da_clinica.sql
 -- O aviso da tela Hoje da clínica (/painel/hoje, web/painel_hoje.py) e do
--- "Voltar a chamar depois do preço" (finance/voltar_a_chamar.py, migração 344),
+-- "Voltar a chamar depois do preço" (finance/voltar_a_chamar.py, migração 346),
 -- seguindo a seção 5 do CLAUDE.md.
 --
 -- O PORTÃO É NOVO E É `clinica`, o terceiro de UM nicho só (depois de `seguros` e

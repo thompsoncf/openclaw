@@ -208,17 +208,21 @@ def etapa(request: Request, obra_id: int, etapa_id: int = Form(...),
 
 
 @router.post("/painel/obras/{obra_id}/etapas")
-async def etapas(request: Request, obra_id: int):
+def etapas(request: Request, obra_id: int, chave: list[str] = Form([]),
+           nome: list[str] = Form([]), peso: list[str] = Form([]),
+           tirar: list[str] = Form([])):
     """A lista inteira de etapas, editada: nome e peso de cada uma, a linha vazia do
-    fim pra acrescentar, e a marca de tirar. Chave vazia é etapa nova."""
+    fim pra acrescentar, e a marca de tirar. Chave vazia é etapa nova.
+
+    `def` e não `async def`, com as listas vindo do Form: o salvamento é banco
+    síncrono, e num handler async ele congelaria o worker inteiro
+    (tests/test_event_loop_nao_trava.py)."""
     conta, redir = _acesso(request)
     if redir is not None:
         return redir
-    form = await request.form()
-    chaves, nomes, pesos = (form.getlist(k) for k in ("chave", "nome", "peso"))
-    tirar = set(form.getlist("tirar"))
+    fora = set(tirar)
     linhas = [(ch or None, nm, _num(ps) or 0)
-              for ch, nm, ps in zip(chaves, nomes, pesos) if not (ch and ch in tirar)]
+              for ch, nm, ps in zip(chave, nome, peso) if not (ch and ch in fora)]
     try:
         ob.salvar_etapas(get_pool(), conta[0], obra_id, linhas)
     except ValueError as e:

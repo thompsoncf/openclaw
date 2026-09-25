@@ -131,6 +131,7 @@ from web.painel_apolices import router as apolices_router
 from web.painel_hoje import router as hoje_router
 from web.painel_clinica import router as clinica_router
 from web.painel_obras import router as obras_router
+from web.painel_clinica_agenda import router as clinica_agenda_router
 from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
@@ -315,6 +316,7 @@ app.include_router(apolices_router)
 app.include_router(hoje_router)
 app.include_router(clinica_router)
 app.include_router(obras_router)
+app.include_router(clinica_agenda_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)
@@ -565,6 +567,17 @@ def _iniciar_poller_email() -> None:
                              ciclo, _v["contas"], _v["novos"], _v["enviados"], _v["falhas"])
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — voltar a chamar falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
+                # Confirmação na véspera da agenda da clínica (migração 360): só perfil
+                # clínica e só conta que ligou. Lê o 1/2 da resposta e manda os de amanhã.
+                from finance import clinica_agenda as _cag
+                _ca = _cag.rodar(pool)
+                if _ca["contas"]:
+                    log.info("poller: ciclo #%d — confirmação da véspera: %d conta(s), %d enviada(s), "
+                             "%d resposta(s)", ciclo, _ca["contas"], _ca["enviadas"], _ca["respostas"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — confirmação da véspera falhou: %s: %s",
                          ciclo, type(e).__name__, e)
 
     try:

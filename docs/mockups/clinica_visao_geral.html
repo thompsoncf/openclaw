@@ -1,0 +1,361 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clínica no Zaq: visão geral</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:920px;margin:0 auto}
+h1{font-size:26px;margin:0 0 6px}
+.lead{font-size:14.5px;color:#5A6678;margin:0 0 10px;line-height:1.7}
+.idx{background:#fff;border:1px solid #E3DDD0;border-radius:10px;padding:12px 16px;margin:18px 0 6px;font-size:13px;columns:2;column-gap:26px}
+.idx a{color:#14213D;text-decoration:none;display:block;padding:2px 0;break-inside:avoid}
+.idx a b{color:#C9BFA8;margin-right:7px}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:36px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17.5px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:34px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+.big{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem;margin-bottom:14px}
+.big div{background:#fff;border:1px solid #E3DDD0;border-radius:10px;padding:10px 12px}
+.big b{display:block;font-size:1.45rem;line-height:1.2}
+.big span{font-size:11.5px;color:#8A8475}
+.k{display:inline-block;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;white-space:nowrap}
+.k-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.k-reuso{background:#F2EFE7;color:#8A8475;border:1px solid #E3DDD0}
+.k-amigo{background:#EAF1FB;color:#2B5DA8;border:1px solid #C9DBF5}
+
+/* ---------- o mapa ---------- */
+.mapa{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:16px;color:#DDE4EC;margin-bottom:14px;overflow-x:auto}
+.mapa .faixa{display:grid;grid-template-columns:132px 1fr;gap:10px;align-items:stretch;margin-bottom:9px;min-width:620px}
+.mapa .rot{display:flex;align-items:center;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:#7B8A99;font-weight:700;border-right:1px solid #22303C;padding-right:8px}
+.mapa .caixas{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.mapa .cx{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.5rem .6rem;font-size:.78rem;line-height:1.35}
+.mapa .cx b{display:block;font-size:.83rem;margin-bottom:2px}
+.mapa .cx small{color:#7B8A99;font-size:.7rem;display:block}
+.mapa .cx.novo{border-color:#2C6E52;background:#12281F}
+.mapa .cx.novo b{color:#7EE7B8}
+.mapa .cx.amigo{border-color:#2B4A7A;background:#121C2B}
+.mapa .cx.amigo b{color:#8AB4F8}
+.mapa .seta{text-align:center;color:#3C4A57;font-size:1rem;margin:-3px 0 4px}
+.mapa .agente{background:linear-gradient(90deg,#12281F,#16212C);border:1px solid #2C6E52;border-radius:10px;padding:.55rem .7rem;font-size:.8rem;margin-top:4px}
+.mapa .agente b{color:#7EE7B8}
+.leg{font-size:.7rem;color:#7B8A99;margin-top:8px}
+.leg i{font-style:normal;display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:-1px;margin:0 4px 0 12px}
+
+/* ---------- jornada ---------- */
+.jor{border-left:2px solid #DCD5C6;margin:0 0 14px 8px;padding-left:16px}
+.jor .p{position:relative;margin-bottom:12px}
+.jor .p::before{content:"";position:absolute;left:-23px;top:5px;width:10px;height:10px;border-radius:50%;background:#B8862E}
+.jor .p b{display:block;font-size:13.5px}
+.jor .p span{font-size:12.5px;color:#5A6678;display:block;line-height:1.6}
+.jor .p .quem{display:inline-block;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;border-radius:99px;padding:1px 7px;margin-left:6px;vertical-align:1px}
+.qz{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.qh{background:#F2EFE7;color:#8A8475;border:1px solid #E3DDD0}
+.qa{background:#EAF1FB;color:#2B5DA8;border:1px solid #C9DBF5}
+@media (max-width:680px){.idx{columns:1}.big{grid-template-columns:repeat(2,1fr)}.mapa .caixas{grid-template-columns:repeat(2,1fr)}.mapa .faixa{grid-template-columns:1fr;min-width:0}.mapa .rot{border:0;padding:0 0 4px}}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.mapa,.q,table,.jor{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<div class="alerta" style="margin-bottom:18px"><b>A referência atual é o protótipo navegável:</b> <a href="clinica_prototipo.html" style="color:inherit">clinica_prototipo.html</a>. Este documento é anterior a ele e fica como histórico. Onde os dois forem diferentes, vale o protótipo: lá estão a agenda única com o Amigo, os números reais do WhatsApp e do Amigo, a consulta de R$&nbsp;500, a grade do Dr. Manoel (08:00–12:00 e 13:30–16:30) e a Juliana como fisioterapeuta dermatofuncional.</div>
+<h1>Clínica no Zaq — o sistema inteiro, em uma página</h1>
+<p class="lead">
+Este é o documento que vem <b>antes</b> das três partes. Ele explica o que a gente vai construir, por que, como as
+peças se encaixam, o que muda no dia a dia da clínica, o que é novo e o que já existe, quanto custa em etapas e
+o que ainda depende de resposta. <b>Nada foi implementado.</b> A leitura serve para você decidir se manda tocar,
+e por onde.
+</p>
+<p class="lead">
+Tudo foi levantado na <b>Espaço Pelle Clínica Dermatológica</b> (Pedreiras-MA), que usa o <b>Amigo App</b>. Li o
+Amigo em 22/09/2026, só leitura, sem alterar nada e sem copiar dado de paciente. Pacientes e valores das telas
+de exemplo são fictícios.
+</p>
+
+<div class="idx">
+  <a href="#s1"><b>01</b>O problema, medido</a>
+  <a href="#s2"><b>02</b>A ideia em uma frase</a>
+  <a href="#s3"><b>03</b>O mapa do sistema</a>
+  <a href="#s4"><b>04</b>Um paciente, do começo ao fim</a>
+  <a href="#s5"><b>05</b>As telas, uma a uma</a>
+  <a href="#s6"><b>06</b>O que é novo e o que já existe</a>
+  <a href="#s7"><b>07</b>O que NÃO vamos fazer</a>
+  <a href="#s8"><b>08</b>Os números que o dono ganha</a>
+  <a href="#s9"><b>09</b>Riscos e regras que não se quebram</a>
+  <a href="#s10"><b>10</b>A ordem de construção</a>
+  <a href="#s11"><b>11</b>O que depende de resposta</a>
+  <a href="#s12"><b>12</b>Como isso ganha cliente</a>
+</div>
+
+<h2 id="s1"><span class="n">01</span>O problema, medido</h2>
+<div class="sub">O Amigo sabe tudo. Nada disso vira ação.</div>
+<div class="big">
+  <div><b>18 → 0</b><span>retornos pedidos pelo médico esta semana → contatados</span></div>
+  <div><b>5 → 0</b><span>consultas de hoje e amanhã → confirmadas</span></div>
+  <div><b>0</b><span>leads no funil do Amigo, e nenhum registro de "como conheceu"</span></div>
+  <div><b>1</b><span>orçamento em setembro (R$ 2.000, em aberto)</span></div>
+</div>
+<div class="tw"><table>
+<tr><th>O que existe no Amigo</th><th>O que está acontecendo</th></tr>
+<tr><td>Listas de retorno, faltantes e inativos, com botão de WhatsApp em cada card</td><td>Contato é manual, um por um. A recepção atende balcão e telefone, e a lista cresce parada</td></tr>
+<tr><td>17 unidades, <b>9 delas são cidades</b> onde o médico viaja para atender</td><td>Nenhuma tem horário cadastrado: a agenda só existe na sede. A viagem é combinada fora do sistema</td></tr>
+<tr><td>Crédito de procedimento e relatórios de orçamento</td><td>Não usados. Pacote é controlado criando "unidade" no sistema para não se perder</td></tr>
+<tr><td>Estoque com controle de mínimo e validade</td><td><b>58 itens vencidos</b> e 13 abaixo do mínimo, sem nenhum pedido de compra aberto</td></tr>
+</table></div>
+<div class="nota">
+<b>E o lado do Zaq começa do zero:</b> a conta da clínica existe, com o nicho de clínica já no ar, mas tem
+<b>0 pacientes, 0 leads e nenhum WhatsApp conectado</b>. O passo zero de tudo é conectar o número.
+</div>
+
+<h2 id="s2"><span class="n">02</span>A ideia em uma frase</h2>
+<div class="bom" style="font-size:15px">
+<b>O Amigo continua sendo o prontuário da clínica. O Zaq vira a máquina que enche a agenda e faz o paciente
+voltar gastando mais.</b>
+</div>
+<p>É uma divisão de trabalho, não uma briga. Prontuário, convênio, guia, nota fiscal e laudo são caros de
+construir, regulados, e o Amigo já faz. Já o que faz dinheiro entrar — achar paciente, encher horário vago,
+cobrar decisão de tratamento, trazer de volta quem sumiu — é exatamente o que o Zaq já faz para outros ramos,
+e é o que está vazio na clínica.</p>
+<div class="tw"><table>
+<tr><th>Fica no Amigo <span class="k k-amigo">Amigo</span></th><th>Vem para o Zaq <span class="k k-novo">Zaq</span></th></tr>
+<tr><td>Prontuário, laudo, anamnese, foto clínica</td><td>Funil de pacientes novos, com origem</td></tr>
+<tr><td>Convênio, guias TISS, glosa, reembolso</td><td>Agenda que se move (as cidades) e o motor que enche o dia</td></tr>
+<tr><td>Nota fiscal, contabilidade, folha</td><td>Confirmação, retorno e reativação automáticos</td></tr>
+<tr><td>Estoque detalhado, rastreabilidade, compras</td><td>Plano de tratamento, pacote com saldo, assinatura</td></tr>
+<tr><td>Repasse aos médicos e faturamento de convênio</td><td>Caixa, cobrança por Pix e o Raio-X do dono</td></tr>
+</table></div>
+
+<h2 id="s3"><span class="n">03</span>O mapa do sistema</h2>
+<div class="sub">Seis blocos, e o agente atravessando todos</div>
+<div class="mapa">
+  <div class="faixa"><div class="rot">1 · cadastro<br>(a base)</div>
+    <div class="caixas">
+      <div class="cx novo"><b>Profissionais</b><small>médico tem agenda mesmo sem login</small></div>
+      <div class="cx novo"><b>Tipos de atendimento</b><small>duração, cor, preço, prazo de volta</small></div>
+      <div class="cx novo"><b>Locais</b><small>a sede e as cidades</small></div>
+      <div class="cx novo"><b>Grade de horário</b><small>por profissional e local</small></div>
+    </div></div>
+  <div class="seta">↓</div>
+  <div class="faixa"><div class="rot">2 · o dia</div>
+    <div class="caixas">
+      <div class="cx novo"><b>Agenda</b><small>dia e semana, por profissional</small></div>
+      <div class="cx novo"><b>Status</b><small>agendado → confirmado → presente → finalizado</small></div>
+      <div class="cx"><b>Confirmação</b><small>véspera, pelo WhatsApp</small></div>
+      <div class="cx novo"><b>Horários livres</b><small>a conta que responde "tem vaga?"</small></div>
+    </div></div>
+  <div class="seta">↓</div>
+  <div class="faixa"><div class="rot">3 · encher</div>
+    <div class="caixas">
+      <div class="cx novo"><b>Roteiro por cidade</b><small>onde tem gente esperando</small></div>
+      <div class="cx"><b>Fila de espera</b><small>por cidade e por data</small></div>
+      <div class="cx novo"><b>Motor de buraco</b><small>cancelou → oferece em minutos</small></div>
+      <div class="cx"><b>Sinal por Pix</b><small>segura a vaga, vira crédito</small></div>
+    </div></div>
+  <div class="seta">↓</div>
+  <div class="faixa"><div class="rot">4 · vender</div>
+    <div class="caixas">
+      <div class="cx"><b>Funil</b><small>do "quanto custa?" ao fechado</small></div>
+      <div class="cx"><b>Plano de tratamento</b><small>proposta com sessões e parcelas</small></div>
+      <div class="cx novo"><b>Pacote com saldo</b><small>10 sessões que baixam sozinhas</small></div>
+      <div class="cx"><b>Assinatura</b><small>receita todo mês</small></div>
+    </div></div>
+  <div class="seta">↓</div>
+  <div class="faixa"><div class="rot">5 · voltar</div>
+    <div class="caixas">
+      <div class="cx novo"><b>Retorno programado</b><small>"volta em 60 dias"</small></div>
+      <div class="cx"><b>Reativar quem sumiu</b><small>não vem há N meses</small></div>
+      <div class="cx"><b>Recompra de produto</b><small>protetor acabou</small></div>
+      <div class="cx"><b>Marcar a próxima ali</b><small>antes de o paciente sair</small></div>
+    </div></div>
+  <div class="seta">↓</div>
+  <div class="faixa"><div class="rot">6 · dinheiro</div>
+    <div class="caixas">
+      <div class="cx"><b>Caixa e a receber</b><small>parcelas, Pix, cobrança</small></div>
+      <div class="cx"><b>Venda de produto</b><small>balcão e WhatsApp</small></div>
+      <div class="cx novo"><b>Conta da viagem</b><small>lucro por cidade</small></div>
+      <div class="cx novo"><b>Raio-X do dono</b><small>ocupação, ticket, sessões devidas</small></div>
+    </div></div>
+  <div class="agente"><b>O agente de WhatsApp atravessa tudo:</b> responde preço, oferece horário, confirma na
+  véspera, avisa vaga que abriu, manda a proposta, cobra a decisão, lembra a próxima sessão e o retorno.
+  Nunca indica tratamento nem fala de diagnóstico.</div>
+  <div class="leg"><i style="background:#12281F;border:1px solid #2C6E52"></i>peça nova &nbsp;<i style="background:#16212C;border:1px solid #22303C"></i>já existe no Zaq, adaptada</div>
+</div>
+
+<h2 id="s4"><span class="n">04</span>Um paciente, do começo ao fim</h2>
+<div class="sub">O mesmo caso, atravessando o sistema todo</div>
+<div class="jor">
+  <div class="p"><b>Terça, 8h41 — "quanto é a consulta?" <span class="quem qz">agente</span></b>
+  <span>Chega mensagem no WhatsApp da clínica, vinda do Instagram. O agente responde o preço, oferece três horários livres de verdade (lidos da grade do médico) e pergunta o nome. Registra a origem: Instagram.</span></div>
+  <div class="p"><b>Terça, 8h44 — vaga segurada <span class="quem qz">agente</span></b>
+  <span>Ela escolhe quinta às 9h. O card entra no funil em "Consulta agendada" e o horário fica segurado. A recepção confirma com um clique (enquanto a agenda do Amigo e a nossa ainda forem duas).</span></div>
+  <div class="p"><b>Quarta, 10h — lembrete da véspera <span class="quem qz">agente</span></b>
+  <span>"Confirma amanhã às 9h?" Ela responde 1. O card ganha o selo de confirmado. Se dissesse que não pode, o horário voltaria para o motor de ocupação na mesma hora.</span></div>
+  <div class="p"><b>Quinta, 9h — atendimento <span class="quem qh">recepção e médico</span></b>
+  <span>A recepção marca Presente e depois Finalizado. Nessa hora, uma pergunta de um clique: "o médico propôs tratamento?". Sim, criolipólise, 4 sessões.</span></div>
+  <div class="p"><b>Quinta, 9h40 — a proposta <span class="quem qz">agente</span></b>
+  <span>Sai pelo WhatsApp: 4 sessões, R$ 3.200, Pix à vista com desconto ou 4× no cartão, validade de 7 dias. O card vai para "Plano de tratamento".</span></div>
+  <div class="p"><b>Sexta e segunda — a cobrança educada <span class="quem qz">agente</span></b>
+  <span>D+1 e D+3, sem ninguém lembrar. Ela responde na segunda e escolhe o cartão. Pago, viram 4 parcelas a receber e 4 sessões de saldo.</span></div>
+  <div class="p"><b>Primeira sessão <span class="quem qh">recepção</span></b>
+  <span>Ao finalizar, o sistema baixa uma sessão e já oferece marcar a próxima, ali, com a paciente na frente. É o gesto que derruba o cancelamento de 21% para 4%.</span></div>
+  <div class="p"><b>Um mês depois, 10h04 — alguém cancelou <span class="quem qz">agente</span></b>
+  <span>Abre um buraco hoje às 10h. Em minutos a vaga é oferecida a três pessoas que cabem nela, valendo por 20 minutos, e para quem responder primeiro. Cadeira cheia.</span></div>
+  <div class="p"><b>Dois meses depois — retorno <span class="quem qz">agente</span></b>
+  <span>O tipo "consulta" tem prazo de volta de 30 dias, e o médico pediu retorno. Sete dias antes, a mensagem sai perguntando o melhor dia.</span></div>
+  <div class="p"><b>Quando a demanda junta — a viagem <span class="quem qa">dono</span></b>
+  <span>A tela do roteiro mostra 31 pessoas esperando em Bacabal. O dono abre o dia 15/10, e o agente avisa a fila da cidade: retornos vencidos primeiro, depois quem nunca foi atendido. O dia enche antes da viagem, e no fim aparece a conta: receita, custo e quanto custou cada vaga vazia.</span></div>
+</div>
+
+<h2 id="s5"><span class="n">05</span>As telas, uma a uma</h2>
+<div class="tw"><table>
+<tr><th>Tela</th><th>Para quem</th><th>O que resolve</th><th>Parte</th></tr>
+<tr><td><b>Profissionais</b></td><td>dono</td><td>quem atende, onde, o quê, e se tem login</td><td>1</td></tr>
+<tr><td><b>Tipos de atendimento</b></td><td>dono</td><td>duração, cor, preço e prazo de volta — é o que faz o resto funcionar sozinho</td><td>1</td></tr>
+<tr><td><b>Grade de horário</b></td><td>dono</td><td>a semana do médico, com exceções e bloqueios</td><td>1</td></tr>
+<tr><td><b>Agenda do dia</b></td><td>recepção</td><td>uma coluna por profissional, sete status, marcar em 20 segundos</td><td>1</td></tr>
+<tr><td><b>Funil</b></td><td>recepção e dono</td><td>do "quanto custa?" até fechado, com o card andando junto com a agenda</td><td>1</td></tr>
+<tr><td><b>Roteiro por cidade</b></td><td>dono</td><td>para onde viajar, com quantas pessoas esperando</td><td>2</td></tr>
+<tr><td><b>Dia de viagem</b></td><td>dono e recepção</td><td>abrir a data e ver o dia enchendo, com a fila sendo chamada em ordem</td><td>2</td></tr>
+<tr><td><b>Vaga liberada</b></td><td>automático</td><td>buraco na agenda oferecido em minutos a quem cabe nele</td><td>2</td></tr>
+<tr><td><b>Conta da viagem</b></td><td>dono</td><td>receita, custo e o preço de cada vaga vazia</td><td>2</td></tr>
+<tr><td><b>Plano de tratamento</b></td><td>recepção</td><td>proposta com sessões e parcelamento, que se cobra sozinha</td><td>3</td></tr>
+<tr><td><b>Pacote com saldo</b></td><td>recepção e paciente</td><td>sessões que baixam sozinhas, com validade e próxima sugerida</td><td>3</td></tr>
+<tr><td><b>Assinatura</b></td><td>dono</td><td>receita que entra todo mês</td><td>3</td></tr>
+<tr><td><b>Raio-X do dono</b></td><td>dono</td><td>ocupação, ticket, conversão, sessões devidas, receita recorrente</td><td>3</td></tr>
+</table></div>
+
+<h2 id="s6"><span class="n">06</span>O que é novo e o que já existe</h2>
+<p>Metade do sistema já está construída para outros ramos. É isso que torna o projeto possível em etapas curtas.</p>
+<div class="tw"><table>
+<tr><th>Peça</th><th>Situação</th><th>De onde vem</th></tr>
+<tr><td>Funil com etapas por ramo, follow-up, temperatura, motivos de perda</td><td><span class="k k-reuso">pronto</span></td><td>já em produção, com o perfil de clínica no ar</td></tr>
+<tr><td>Fila de espera com aviso quando a data abre</td><td><span class="k k-reuso">adaptar</span></td><td><code>lista_espera</code> (usado em eventos); a chave passa a ser cidade</td></tr>
+<tr><td>Campanha para uma lista, com teto e passos</td><td><span class="k k-reuso">adaptar</span></td><td><code>campanhas_motor</code></td></tr>
+<tr><td>Segurar vaga esperando pagamento</td><td><span class="k k-reuso">adaptar</span></td><td>pré-reserva da agenda de festas</td></tr>
+<tr><td>Cobrança e link de Pix, assinatura recorrente</td><td><span class="k k-reuso">pronto</span></td><td><code>asaas</code>, <code>assinaturas</code></td></tr>
+<tr><td>Proposta com status e cobrança da decisão</td><td><span class="k k-reuso">adaptar</span></td><td><code>orcamentos</code> + follow-up</td></tr>
+<tr><td>Caixa, a receber, produto, estoque mínimo</td><td><span class="k k-reuso">pronto</span></td><td>PDV, catálogo, títulos</td></tr>
+<tr><td><b>Profissional com grade, tipo com duração, locais</b></td><td><span class="k k-novo">novo</span></td><td>—</td></tr>
+<tr><td><b>Agenda por profissional com os sete status</b></td><td><span class="k k-novo">novo</span></td><td>hoje a agenda é de festa, visão de mês</td></tr>
+<tr><td><b>Roteiro por cidade e dia de viagem</b></td><td><span class="k k-novo">novo</span></td><td>não existe em nenhum concorrente</td></tr>
+<tr><td><b>Motor de buraco na agenda</b></td><td><span class="k k-novo">novo</span></td><td>—</td></tr>
+<tr><td><b>Saldo de sessões e retorno programado</b></td><td><span class="k k-novo">novo</span></td><td>—</td></tr>
+</table></div>
+
+<h2 id="s7"><span class="n">07</span>O que NÃO vamos fazer</h2>
+<div class="perigo">
+<b>Prontuário, laudo e anamnese.</b> É onde mora o dado sensível de verdade, é regulado, e o Amigo já faz.
+<br><b>Convênio e guias TISS.</b> Meses de trabalho para competir com quem já resolveu.
+<br><b>Nota fiscal e contabilidade.</b> Mesmo motivo.
+<br><b>Foto clínica e análise de pele por IA.</b> Vende bem em demonstração, mas é foto de rosto: dado sensível,
+com risco alto e pouco retorno para uma clínica de interior neste momento.
+<br><b>Transcrever a consulta com IA.</b> Virou padrão lá fora e o iClinic já tem no Brasil. Não é onde a gente
+ganha, e exige estar dentro da consulta.
+</div>
+<div class="nota">
+<b>E uma trava de produto:</b> o agente <b>não indica tratamento, não fala de sintoma, não interpreta exame e não
+diz se o convênio cobre</b>. Isso já está escrito na persona do nicho de clínica, em produção, com teste que
+quebra se alguém afrouxar.
+</div>
+
+<h2 id="s8"><span class="n">08</span>Os números que o dono ganha</h2>
+<div class="tw"><table>
+<tr><th>Indicador</th><th>Responde</th><th>Hoje a clínica sabe?</th></tr>
+<tr><td><b>Ocupação por profissional e por hora</b></td><td>quanto do dia do médico foi vendido</td><td>não</td></tr>
+<tr><td><b>Vaga vazia em reais</b></td><td>quanto custou o buraco da agenda</td><td>não</td></tr>
+<tr><td><b>Lucro por cidade</b></td><td>vale voltar a Bacabal?</td><td>não</td></tr>
+<tr><td><b>Consulta → proposta → fechada</b></td><td>onde o dinheiro trava</td><td>não</td></tr>
+<tr><td><b>Sessões vendidas × consumidas</b></td><td>quanto a clínica <b>deve</b> em atendimento</td><td>não</td></tr>
+<tr><td><b>Taxa de retorno e de reagendamento</b></td><td>o paciente volta?</td><td>não</td></tr>
+<tr><td><b>Receita recorrente</b></td><td>quanto entra sem depender do movimento</td><td>não</td></tr>
+<tr><td>Faturamento do mês, a receber, a pagar</td><td>o caixa</td><td>sim, no Amigo</td></tr>
+</table></div>
+
+<h2 id="s9"><span class="n">09</span>Riscos e regras que não se quebram</h2>
+<div class="tw"><table>
+<tr><th>Risco</th><th>Como o desenho trata</th></tr>
+<tr><td><b>Duas agendas marcando o mesmo horário</b></td><td>Enquanto forem duas, o Zaq <b>segura</b> e a recepção confirma. A mensagem diz "reservei", nunca "confirmado". Em paralelo, a clínica pergunta ao Amigo se libera integração</td></tr>
+<tr><td><b>Dado de saúde</b></td><td>O Zaq guarda nome, telefone, tipo de atendimento, horário e origem. Nada de diagnóstico, queixa ou exame. As mensagens nunca dizem o motivo clínico</td></tr>
+<tr><td><b>Mensagem demais</b></td><td>Teto por dia, horário comercial, opt-out respeitado para sempre ("responda SAIR"), e quem a clínica marcou como "não perturbar" nunca entra em lista</td></tr>
+<tr><td><b>Promessa de resultado</b></td><td>Proposta diz procedimento, sessões e preço. Nunca resultado esperado nem foto de terceiro</td></tr>
+<tr><td><b>Viagem avisada e cancelada</b></td><td>O aviso da cidade só sai com data e local confirmados</td></tr>
+<tr><td><b>Desconto virando preço</b></td><td>Teto de desconto por papel; acima disso, o dono aprova</td></tr>
+</table></div>
+
+<h2 id="s10"><span class="n">10</span>A ordem de construção</h2>
+<div class="sub">Cada fase entrega algo que a clínica sente sozinha</div>
+<div class="tw"><table>
+<tr><th>Fase</th><th>O que entra</th><th>O que a clínica sente</th><th>Depende de</th></tr>
+<tr><td><b>0</b></td><td>Conectar o WhatsApp da clínica</td><td>nada ainda, mas sem isso nada funciona</td><td>a clínica</td></tr>
+<tr><td><b>1</b><br><span class="k k-novo">base</span></td><td>Profissionais, tipos de atendimento, locais e grade de horário</td><td>o sistema passa a saber quem atende, quando e quanto custa</td><td>decisões B, C, D</td></tr>
+<tr><td><b>2</b></td><td>Agenda do dia com os sete status e o formulário curto; confirmação na véspera</td><td>a recepção marca no Zaq e as consultas passam a ser confirmadas — hoje são zero</td><td>fase 1</td></tr>
+<tr><td><b>3</b></td><td>Funil ligado à agenda e o agente agendando (preço, horários, segurar vaga)</td><td>o lead do Instagram vira consulta marcada sem ninguém digitar</td><td>fase 2, decisão A</td></tr>
+<tr><td><b>4</b></td><td>Fila por cidade, roteiro, abrir dia de viagem, motor de buraco</td><td>os dias enchem: o que nenhum concorrente faz</td><td>fase 3</td></tr>
+<tr><td><b>5</b></td><td>Plano de tratamento, parcelas e cobrança da decisão</td><td>o orçamento parado vira dinheiro</td><td>decisão E</td></tr>
+<tr><td><b>6</b></td><td>Pacote com saldo, retorno programado e reativação</td><td>o paciente volta sozinho</td><td>fase 5</td></tr>
+<tr><td><b>7</b></td><td>Assinatura, produto com recompra, Raio-X completo e conta da viagem</td><td>receita previsível e o dono enxergando o negócio</td><td>fases anteriores</td></tr>
+</table></div>
+<div class="alerta">
+<b>A fase 1 é a única sem a qual nada anda</b>, e é também a mais chata: é cadastro. Vale começar por ela já com
+os dados reais da Espaço Pelle (4 profissionais, 17 tipos, a sede e as cidades), para a clínica ver a própria
+cara no sistema no primeiro dia.
+</div>
+
+<h2 id="s11"><span class="n">11</span>O que depende de resposta</h2>
+<div class="tw"><table>
+<tr><th>#</th><th>Pergunta</th><th>Para quem</th><th>Recomendação</th></tr>
+<tr><td>A</td><td>O agente marca direto ou segura o horário?</td><td>clínica</td><td class="rec">segura, até a agenda ser uma só</td></tr>
+<tr><td>B</td><td>Brenda e Cristiane: o que fazem e têm agenda? (a Juliana é fisioterapeuta dermatofuncional, ainda sem grade no Amigo)</td><td>clínica</td><td>—</td></tr>
+<tr><td>C</td><td>Em que cidades atende, com que frequência e em que dias?</td><td>clínica</td><td>—</td></tr>
+<tr><td>D</td><td>Tabela de preços particulares</td><td>clínica</td><td>começar pelos 10 mais pedidos</td></tr>
+<tr><td>E</td><td>Quais pacotes vende, com quantas sessões e qual intervalo?</td><td>clínica</td><td>—</td></tr>
+<tr><td>F</td><td>Vamos cobrar sinal? Em quais casos?</td><td>clínica</td><td class="rec">só viagem e procedimento longo</td></tr>
+<tr><td>G</td><td>Pacote vence?</td><td>clínica</td><td class="rec">12 meses, avisando 60 dias antes</td></tr>
+<tr><td>H</td><td>Quanto custa uma viagem (combustível, sala, hospedagem)?</td><td>clínica</td><td>—</td></tr>
+<tr><td>I</td><td>O termo que a clínica assina com o paciente cobre mensagem por WhatsApp?</td><td>clínica/jurídico</td><td>ajustar antes de ligar as réguas</td></tr>
+<tr><td>J</td><td>O Amigo libera integração de agenda?</td><td>suporte do Amigo</td><td>perguntar já: muda o desenho da fase 3</td></tr>
+</table></div>
+
+<h2 id="s12"><span class="n">12</span>Como isso ganha cliente</h2>
+<div class="sub">A promessa muda de "organize sua clínica" para "encho sua agenda"</div>
+<div class="tw"><table>
+<tr><th>O que o concorrente vende</th><th>O que a gente vende</th></tr>
+<tr><td>"Sistema completo para sua clínica" (prontuário, convênio, financeiro)</td><td>"Sua agenda cheia e seu paciente voltando" — e o prontuário dele continua onde está</td></tr>
+<tr><td>"IA que agenda pelo WhatsApp" (já é commodity no Brasil)</td><td>Agenda que <b>viaja com o médico</b> e enche o dia antes da viagem</td></tr>
+<tr><td>Relatórios de faturamento</td><td>Quanto custou a cadeira vazia, e se vale voltar àquela cidade</td></tr>
+</table></div>
+<div class="bom">
+<b>A demonstração de 5 minutos:</b> abre o roteiro e mostra 31 pessoas esperando em Bacabal → abre o dia →
+o dia enche na tela → mostra a conta da viagem: sobrou R$ 3.940, e cada vaga vazia custou até R$ 500 (uma consulta). Termina com
+a pergunta: <b>"quantos dias assim você fez esse ano sem saber quanto deixou na mesa?"</b>
+</div>
+
+<div class="ftr">
+Levantado no Amigo App da Espaço Pelle (Pedreiras-MA) em 22/09/2026, só leitura: agenda e suas configurações,
+tipos de atendimento, executantes e grades, Agende+ (leads, retornos, inativos, categorias de interação),
+formulário de agendamento, Central de Agendamentos, orçamentos, estoque e relatórios. Estado da conta no Zaq
+lido de produção no mesmo dia. Números de mercado: Zenoti 2026 Beauty and Wellness Benchmark, Med Spa
+Benchmarks 2026, estatísticas de sinal e de preenchimento automático de cancelamento de 2026.
+Detalhamento em <code>clinica_funil_agenda_medicos.html</code> (parte 1),
+<code>clinica_agenda_itinerante.html</code> (parte 2) e
+<code>clinica_planos_pacotes_assinatura.html</code> (parte 3).
+</div>
+</div></body></html>

@@ -1,0 +1,381 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clínica: médicos, agenda e funil</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:34px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.k{display:inline-block;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;white-space:nowrap}
+.k-traz{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.k-adapta{background:#FFF6E8;color:#7A4E0C;border:1px solid #F0DDBA}
+.k-fica{background:#F2EFE7;color:#8A8475;border:1px solid #E3DDD0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+
+/* ---------- réplica do painel escuro ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC;overflow-x:auto}
+.pn .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pn .tt{font-size:1.05rem;font-weight:700}
+.pn .mut{color:#7B8A99;font-size:.78rem}
+.pn .lbl{color:#7B8A99;font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin:.55rem 0 .2rem}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.35rem .55rem;font-size:.82rem;color:#DDE4EC;display:inline-block;min-width:140px}
+.pn .chip{display:inline-block;background:#0B1219;border:1.5px solid #2A3947;border-radius:16px;padding:3px 11px;font-size:.74rem;color:#B4B2A9;margin:0 4px 5px 0}
+.pn .chip.on{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .bt{display:inline-block;background:#1E6B4E;color:#fff;border-radius:7px;padding:.3rem .65rem;font-size:.76rem;font-weight:600;margin:.35rem .3rem 0 0}
+.pn .bt.sec{background:#22303C;color:#DDE4EC}
+.pn .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.pn .box{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.65rem .75rem}
+.pn .pro{display:flex;align-items:center;gap:10px;background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.5rem .7rem;margin-bottom:.4rem}
+.pn .av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex:0 0 auto;color:#0F1720}
+.pn .pro .nm{flex:1;min-width:0;font-size:.86rem}
+.pn .pro .nm small{display:block;color:#7B8A99;font-size:.72rem}
+.pn .pill{font-size:.66rem;border:1px solid #2A3947;border-radius:99px;padding:1px 8px;color:#9AA7B4;white-space:nowrap}
+.pn .pill.ok{border-color:#2C6E52;color:#7EE7B8}
+.pn .pill.no{border-color:#6B5320;color:#F4C766}
+/* agenda do dia, uma coluna por profissional */
+.ag{display:grid;grid-template-columns:52px repeat(3,minmax(170px,1fr));min-width:600px;border:1px solid #22303C;border-radius:10px;overflow:hidden}
+.ag .h{background:#16212C;padding:.4rem .5rem;font-size:.74rem;font-weight:700;border-bottom:1px solid #22303C;border-left:1px solid #22303C}
+.ag .h small{display:block;font-weight:400;color:#7B8A99;font-size:.66rem}
+.ag .hr{font-size:.66rem;color:#7B8A99;padding:.2rem .35rem;height:34px;border-bottom:1px solid #18232E}
+.ag .c{border-left:1px solid #22303C;border-bottom:1px solid #18232E;height:34px;position:relative;padding:2px 4px}
+.ag .c.off{background:repeating-linear-gradient(45deg,#121B24,#121B24 5px,#0F1720 5px,#0F1720 10px)}
+.ag .c.livre{background:#0F1A14}
+.ag .ev{border-radius:6px;padding:2px 6px;font-size:.68rem;line-height:1.25;height:100%;overflow:hidden;border-left:3px solid}
+.ag .ev b{display:block;font-size:.72rem}
+.st-ag{background:#1B2733;border-color:#7B8A99}
+.st-cf{background:#12281F;border-color:#7EE7B8}
+.st-pr{background:#1A2238;border-color:#8AB4F8}
+.st-at{background:#2A2210;border-color:#F4C766}
+.st-fi{background:#1E1E1E;border-color:#555;color:#8a8a8a}
+.st-fa{background:#2A1715;border-color:#ff8a80}
+.ag .livretx{color:#4E8F6E;font-size:.66rem}
+/* funil */
+.fu{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:.5rem;min-width:780px}
+.fu .col{background:#121B24;border:1px solid #22303C;border-radius:10px;padding:.45rem}
+.fu h5{margin:0 0 .4rem;font-size:.68rem;letter-spacing:.07em;text-transform:uppercase;color:#9AA7B4;display:flex;justify-content:space-between}
+.fu .it{background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.4rem .5rem;margin-bottom:.35rem;font-size:.76rem}
+.fu .it .ln{color:#7B8A99;font-size:.68rem}
+.fu .tag{display:inline-block;font-size:.62rem;border-radius:99px;padding:1px 7px;margin-top:3px;border:1px solid #2A3947;color:#B4B2A9}
+.fu .tag.g{border-color:#2C6E52;color:#7EE7B8;background:#12281F}
+.fu .tag.r{border-color:#6E2E2A;color:#ff8a80;background:#2A1715}
+.fu .tag.y{border-color:#6B5320;color:#F4C766;background:#261E0E}
+.fu .col.alvo{outline:2px dashed #2C6E52;outline-offset:2px}
+/* seletor de horário */
+.slots{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.3rem}
+.slot{background:#0B1219;border:1.5px solid #2A3947;border-radius:8px;padding:.3rem .55rem;font-size:.76rem}
+.slot.on{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.slot small{display:block;color:#7B8A99;font-size:.64rem}
+/* zap */
+.zap{background:#E9DFD4;border-radius:12px;padding:12px;max-width:430px;margin:0 auto 14px}
+.zap .b{background:#fff;border-radius:8px;padding:7px 10px;margin:0 30px 8px 0;font-size:13px;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.zap .b.eu{background:#D9FDD3;margin:0 0 8px 30px}
+.zap .h{font-size:10.5px;color:#667;text-align:right;margin-top:2px}
+.zap .sis{text-align:center;font-size:11px;color:#5A6678;background:#F5EFE6;border-radius:6px;padding:3px 8px;margin:4px auto 8px;width:max-content;max-width:100%}
+@media (max-width:640px){.pn .grid2{grid-template-columns:1fr}}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.pn,.q,table,.zap{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<div class="alerta" style="margin-bottom:18px"><b>A referência atual é o protótipo navegável:</b> <a href="clinica_prototipo.html" style="color:inherit">clinica_prototipo.html</a>. Este documento é anterior a ele e fica como histórico. Onde os dois forem diferentes, vale o protótipo: lá estão a agenda única com o Amigo, os números reais do WhatsApp e do Amigo, a consulta de R$&nbsp;500, a grade do Dr. Manoel (08:00–12:00 e 13:30–16:30) e a Juliana como fisioterapeuta dermatofuncional.</div>
+<h1>Clínica no Zaq, parte 1: médicos, agenda e funil</h1>
+<p class="lead">
+Mockup para aprovação. Nada no banco e nenhum código mudou. Tudo que está aqui foi tirado do Amigo App da
+Espaço Pelle (conta 39) em 22/09/2026, só lendo, sem salvar nada e sem copiar dado de paciente. Os
+profissionais, tipos de atendimento e unidades são os cadastrados lá. Os pacientes nas telas de exemplo são
+fictícios. As partes seguintes (retorno, estoque, financeiro) ficam para depois.
+</p>
+
+<h2><span class="n">01</span>O que o Amigo tem, e o que fazemos com cada coisa</h2>
+<div class="tw"><table>
+<tr><th>No Amigo</th><th>Como funciona lá</th><th>No Zaq</th></tr>
+<tr><td><b>Executantes</b> (profissionais)</td><td>5 cadastrados: Manoel, Juliana, Brenda, Cristiane e o laboratório CIMLAB. <b>Só o Dr. Manoel tem grade de horário ativa.</b></td><td><span class="k k-traz">traz</span> seção 02</td></tr>
+<tr><td><b>Grade de horário</b></td><td>Por profissional: dia, início e fim, <b>unidade</b>, encaixes, recorrência (semanal, quinzenal, mensal), restrição por tipo de atendimento e convênio, exceções e bloqueio.</td><td><span class="k k-traz">traz</span> seção 03</td></tr>
+<tr><td><b>Unidades</b></td><td>17. <b>Metade são cidades</b> onde o médico atende (Bacabal, Codó, Lago da Pedra, Timbiras…). As outras não são lugar: Vacina, Pacotes, Permuta, Alergoshop, Cimlab, Outras clínicas.</td><td><span class="k k-adapta">adapta</span> vira "local", e só o que é lugar (seção 03)</td></tr>
+<tr><td><b>Tipos de atendimento</b></td><td>17, com duração, <b>prazo de retorno</b>, cor e categoria (Padrão, Volta, Cirurgia).</td><td><span class="k k-traz">traz</span> seção 04</td></tr>
+<tr><td><b>Categorias de interação</b> (Agende+)</td><td>O catálogo de procedimentos com o <b>motivo de voltar</b> de cada um (botox → reaplicação; laser → próxima sessão; biópsia → resultado).</td><td><span class="k k-traz">traz</span> junto com o tipo (seção 04)</td></tr>
+<tr><td><b>Agenda</b></td><td>Dia, semana e mês, filtro por unidade e profissional. Status: <b>Agendado → Confirmado → Presente → Em atendimento → Finalizado</b>, e Cancelou ou Faltou.</td><td><span class="k k-traz">traz</span> seção 05</td></tr>
+<tr><td><b>Novo agendamento</b></td><td>Paciente (busca por nome, CPF ou telefone), profissional, tipo, unidade, data, <b>sala</b>, início e fim, "como conheceu", observações. Mais as abas Procedimento e Financeiro.</td><td><span class="k k-adapta">adapta</span> só a aba Agendamento (seção 05)</td></tr>
+<tr><td><b>Central de Agendamentos</b></td><td>O atendente consulta <b>agenda livre do profissional</b> e <b>preço do procedimento</b> na mesma tela.</td><td><span class="k k-traz">traz</span> é o que o agente de WhatsApp faz (seção 07)</td></tr>
+<tr><td><b>Funil de leads</b> (Agende+)</td><td>Leads · Contactados · Reagendado · Agendados. <b>Vazio: 0 leads.</b></td><td><span class="k k-traz">já temos, melhor</span> ligado à agenda (seção 06)</td></tr>
+<tr><td>Salas, fila de espera, painel chamador</td><td>Consultório, sala e chamada na TV da recepção.</td><td><span class="k k-fica">depois</span> sala entra como campo opcional</td></tr>
+<tr><td>Guias de convênio (TISS), prontuário, laudo, NFS-e</td><td>A maior parte do formulário de agendamento.</td><td><span class="k k-fica">fica no Amigo</span></td></tr>
+</table></div>
+
+<h2><span class="n">02</span>Médicos e profissionais</h2>
+<div class="sub">Quem atende, onde e o quê</div>
+<p>Hoje a nossa "equipe" (<code>membros</code>) é quem <b>usa</b> o sistema: dono, gestor, vendedor. Médico é diferente:
+<b>tem agenda mesmo sem ter login</b>. O Dr. Manoel talvez nunca abra o Zaq, e a agenda dele precisa existir do mesmo jeito.</p>
+
+<div class="pn">
+  <div class="top"><span class="tt">Profissionais</span><span class="bt">+ Profissional</span></div>
+  <div class="pro"><div class="av" style="background:#7EE7B8">M</div><div class="nm">Dr. Manoel Soares<small>Dermatologista · CRM-MA ····· · Espaço Pelle + 9 cidades</small></div><span class="pill ok">grade ativa</span><span class="pill">sem login</span></div>
+  <div class="pro"><div class="av" style="background:#8AB4F8">J</div><div class="nm">Juliana<small>Fisioterapeuta dermatofuncional · Espaço Pelle</small></div><span class="pill no">sem grade</span></div>
+  <div class="pro"><div class="av" style="background:#F4C766">B</div><div class="nm">Brenda<small>função a confirmar</small></div><span class="pill no">sem grade</span></div>
+  <div class="pro"><div class="av" style="background:#F28B82">C</div><div class="nm">Cristiane<small>função a confirmar</small></div><span class="pill no">sem grade</span></div>
+  <div class="mut" style="margin-top:.5rem">CIMLAB não entra aqui: é laboratório, não gente. Vira <b>local</b> ou <b>tipo de atendimento</b> (coleta).</div>
+</div>
+
+<div class="pn">
+  <div class="top"><span class="tt">Dr. Manoel Soares</span><span class="mut">editar profissional</span></div>
+  <div class="grid2">
+    <div class="box">
+      <span class="lbl">Nome na agenda</span><span class="inp">Dr. Manoel</span>
+      <span class="lbl">Especialidade</span><span class="inp">Dermatologia</span>
+      <span class="lbl">Conselho</span><span class="inp">CRM · MA · ·····</span>
+      <span class="lbl">Cor na agenda</span><span class="chip on">● verde</span>
+    </div>
+    <div class="box">
+      <span class="lbl">Acesso ao Zaq</span>
+      <span class="chip on">Só agenda (sem login)</span><span class="chip">Vê a própria agenda</span><span class="chip">Gestor</span>
+      <span class="lbl">Faz estes atendimentos</span>
+      <span class="chip on">Consulta</span><span class="chip on">Procedimento clínico</span><span class="chip on">Procedimento estético</span><span class="chip on">Cirurgia dermatológica</span><span class="chip on">Retorno</span><span class="chip">Vacina</span>
+      <span class="lbl">Recebe aviso da agenda do dia</span><span class="chip on">WhatsApp, 7h</span>
+    </div>
+  </div>
+</div>
+<div class="nota">
+<b>Por que "faz estes atendimentos" importa:</b> é o que deixa o agente oferecer horário certo. Quem pede "botox"
+só recebe horário de quem faz procedimento estético. No Amigo isso é uma restrição escondida dentro de cada
+bloco da grade; aqui fica no cadastro, visível.
+</div>
+
+<h2><span class="n">03</span>Grade de horário e locais</h2>
+<div class="sub">A semana do médico, inclusive quando ele viaja</div>
+<div class="pn">
+  <div class="top"><span class="tt">Grade · Dr. Manoel</span><span class="mut">recorrente · exceções · bloqueios</span></div>
+  <div class="tw" style="margin:0"><table style="background:#16212C;border-color:#22303C;color:#DDE4EC">
+    <tr><th style="background:#121B24;color:#7B8A99;border-color:#22303C">Dia</th><th style="background:#121B24;color:#7B8A99;border-color:#22303C">Horário</th><th style="background:#121B24;color:#7B8A99;border-color:#22303C">Local</th><th style="background:#121B24;color:#7B8A99;border-color:#22303C">Repete</th><th style="background:#121B24;color:#7B8A99;border-color:#22303C">Encaixes</th></tr>
+    <tr><td style="border-color:#22303C">Seg a sex</td><td style="border-color:#22303C">08:00–12:00 e 13:30–16:30</td><td style="border-color:#22303C">Espaço Pelle · Pedreiras</td><td style="border-color:#22303C">toda semana</td><td style="border-color:#22303C">2 por dia</td></tr>
+    <tr><td style="border-color:#22303C">Sábado</td><td style="border-color:#22303C">08:00–12:00</td><td style="border-color:#22303C">Lago da Pedra</td><td style="border-color:#22303C">a cada 15 dias</td><td style="border-color:#22303C">—</td></tr>
+    <tr><td style="border-color:#22303C">3ª quinta</td><td style="border-color:#22303C">08:00–17:00</td><td style="border-color:#22303C">Bacabal</td><td style="border-color:#22303C">1× por mês</td><td style="border-color:#22303C">—</td></tr>
+    <tr><td style="border-color:#22303C;color:#ff8a80">24/10</td><td style="border-color:#22303C;color:#ff8a80">dia todo</td><td style="border-color:#22303C;color:#ff8a80">bloqueado · congresso</td><td style="border-color:#22303C;color:#ff8a80">exceção</td><td style="border-color:#22303C">—</td></tr>
+  </table></div>
+  <div class="mut" style="margin-top:.5rem">Os dias em cidades são <b>ilustrativos</b>: no Amigo só a grade do Espaço Pelle está ativa. As viagens estão cadastradas como unidades, mas sem grade.</div>
+</div>
+<div class="alerta">
+<b>Local não é o mesmo que unidade do Amigo.</b> Lá, "Vacina", "Pacotes antes de 01/12/2025" e "Permuta Manoel"
+são unidades, porque o Amigo usa unidade para separar coisas no financeiro. Aqui <b>local é só onde a pessoa vai
+estar</b>, com endereço para a mensagem de confirmação ("Rua Óscar Galvão, 38"). O resto vira tipo de atendimento
+ou fica no Amigo.
+</div>
+
+<h2><span class="n">04</span>Tipos de atendimento</h2>
+<div class="sub">Os 17 do Amigo, arrumados</div>
+<div class="tw"><table>
+<tr><th>Tipo</th><th class="num">Duração</th><th>Categoria</th><th>Volta em</th><th>Por que volta (do Agende+)</th></tr>
+<tr><td><span class="dot" style="background:#7EE7B8"></span>Consulta</td><td class="num">30 min</td><td>consulta</td><td>30 dias</td><td>faltou ou quer reagendar</td></tr>
+<tr><td><span class="dot" style="background:#7EE7B8"></span>Consulta social</td><td class="num">30 min</td><td>consulta</td><td>—</td><td>nova vaga com valor social</td></tr>
+<tr><td><span class="dot" style="background:#8AB4F8"></span>Avaliação</td><td class="num">30 min</td><td>consulta</td><td>—</td><td>—</td></tr>
+<tr><td><span class="dot" style="background:#B4B2A9"></span>Retorno</td><td class="num">30 min</td><td>retorno</td><td>—</td><td>—</td></tr>
+<tr><td><span class="dot" style="background:#B4B2A9"></span>Cortesia</td><td class="num">30 min</td><td>retorno</td><td>—</td><td>—</td></tr>
+<tr><td><span class="dot" style="background:#F4C766"></span>Procedimento clínico</td><td class="num">60 min</td><td>procedimento</td><td>—</td><td>cauterização: reaplicação · biópsia: resultado</td></tr>
+<tr><td><span class="dot" style="background:#F28B82"></span>Procedimento estético</td><td class="num">60 min</td><td>procedimento</td><td>—</td><td>botox: reaplicação · ácido hialurônico: continuação · criolipólise: nova sessão</td></tr>
+<tr><td><span class="dot" style="background:#F28B82"></span>Procedimento parceria</td><td class="num">60 min</td><td>procedimento</td><td>—</td><td>—</td></tr>
+<tr><td><span class="dot" style="background:#C58AF9"></span>Cirurgia dermatológica</td><td class="num">45 min</td><td>cirurgia</td><td>—</td><td>—</td></tr>
+<tr><td><span class="dot" style="background:#78D9EC"></span>Testes alérgicos</td><td class="num">15 min</td><td>exame</td><td>—</td><td>retirada: fazer o exame</td></tr>
+<tr><td><span class="dot" style="background:#78D9EC"></span>Retirada teste alérgico</td><td class="num">15 min</td><td>retorno</td><td>—</td><td>—</td></tr>
+<tr><td><span class="dot" style="background:#78D9EC"></span>Coleta CIMLAB</td><td class="num">15 min</td><td>exame</td><td>—</td><td>coleta ou entrega de resultado</td></tr>
+<tr><td><span class="dot" style="background:#A7F3D0"></span>Vacina</td><td class="num">30 min</td><td>procedimento</td><td>—</td><td>—</td></tr>
+<tr><td><span class="dot" style="background:#A7F3D0"></span>Sessão de pacote (depilação)</td><td class="num">30 min</td><td>sessão</td><td>—</td><td>agendar próxima sessão</td></tr>
+<tr><td style="color:#8A8475">Alergoshop</td><td class="num" style="color:#8A8475">15 min</td><td colspan="3" style="color:#8A8475">venda de produto, não atendimento: vai para a venda no balcão</td></tr>
+<tr><td style="color:#8A8475">Legado · Retorno Dr. Manoel · Retorno Juliana</td><td colspan="4" style="color:#8A8475">não migram: "Retorno" é um só, e o profissional já está no agendamento</td></tr>
+</table></div>
+<div class="nota">
+<b>O que o tipo carrega:</b> a <b>duração</b> (o fim do horário se calcula sozinho), a <b>cor</b> na agenda, a
+<b>categoria</b> (é ela que move o funil, seção 06), o <b>prazo de volta</b> e o <b>preço particular</b> (que o agente
+responde quando perguntam). O "por que volta" do Agende+ entra como o texto que a recepção lê, <b>nunca na
+mensagem ao paciente</b>.
+</div>
+
+<h2><span class="n">05</span>A agenda</h2>
+<div class="sub">O dia, uma coluna por profissional</div>
+<div class="pn">
+  <div class="top"><span class="tt">Agenda · qua 23/09</span><span class="mut">Dia · Semana · Mês &nbsp;|&nbsp; Local: Espaço Pelle ▾ &nbsp;|&nbsp; <i>pacientes fictícios</i></span></div>
+  <div class="ag">
+    <div class="h"></div>
+    <div class="h">Dr. Manoel<small>Espaço Pelle</small></div>
+    <div class="h">Juliana<small>Espaço Pelle</small></div>
+    <div class="h">Brenda<small>sem grade hoje</small></div>
+
+    <div class="hr">08:00</div><div class="c"><div class="ev st-fi"><b>Carla M. · Consulta</b>Finalizado</div></div><div class="c livre"><span class="livretx">livre</span></div><div class="c off"></div>
+    <div class="hr">08:30</div><div class="c"><div class="ev st-at"><b>Pedro S. · Consulta</b>Em atendimento</div></div><div class="c"><div class="ev st-pr"><b>Rita A. · Proc. estético</b>Presente</div></div><div class="c off"></div>
+    <div class="hr">09:00</div><div class="c"><div class="ev st-cf"><b>Lúcia F. · Retorno</b>Confirmado ✓ pelo WhatsApp</div></div><div class="c"><div class="ev st-pr" style="opacity:.6">↑ continua (60 min)</div></div><div class="c off"></div>
+    <div class="hr">09:30</div><div class="c"><div class="ev st-ag"><b>Marcos T. · Consulta</b>Agendado · <span style="color:#F4C766">lead do Instagram</span></div></div><div class="c livre"><span class="livretx">livre</span></div><div class="c off"></div>
+    <div class="hr">10:00</div><div class="c"><div class="ev st-fa"><b>Joana P. · Consulta</b>Faltou → volta ao funil</div></div><div class="c livre"><span class="livretx">livre</span></div><div class="c off"></div>
+    <div class="hr">10:30</div><div class="c livre"><span class="livretx">livre · + encaixe</span></div><div class="c livre"><span class="livretx">livre</span></div><div class="c off"></div>
+  </div>
+  <div style="margin-top:.6rem;font-size:.72rem;color:#9AA7B4">
+    <span class="dot" style="background:#7B8A99"></span>Agendado &nbsp; <span class="dot" style="background:#7EE7B8"></span>Confirmado &nbsp; <span class="dot" style="background:#8AB4F8"></span>Presente &nbsp; <span class="dot" style="background:#F4C766"></span>Em atendimento &nbsp; <span class="dot" style="background:#555"></span>Finalizado &nbsp; <span class="dot" style="background:#ff8a80"></span>Faltou / Cancelou
+  </div>
+</div>
+
+<div class="pn">
+  <div class="top"><span class="tt">Novo agendamento</span><span class="mut">só o que a recepção preenche; o resto se calcula</span></div>
+  <div class="grid2">
+    <div class="box">
+      <span class="lbl">Paciente</span><span class="inp" style="min-width:230px">🔍 nome ou telefone</span>
+      <div class="mut">Não achou? Cria na hora com nome e telefone. CPF é opcional.</div>
+      <span class="lbl">Tipo de atendimento</span><span class="inp">Consulta · 30 min ▾</span>
+      <span class="lbl">Profissional</span><span class="inp">Dr. Manoel ▾</span>
+      <span class="lbl">Como conheceu</span><span class="chip on">Instagram</span><span class="chip">Indicação</span><span class="chip">Google</span><span class="chip">Já é paciente</span><span class="chip">Outro</span>
+    </div>
+    <div class="box">
+      <span class="lbl">Horários livres · Espaço Pelle</span>
+      <div class="slots">
+        <span class="slot">qua 23<small>10:30</small></span><span class="slot">qua 23<small>11:00</small></span><span class="slot on">qui 24<small>09:00</small></span><span class="slot">qui 24<small>14:30</small></span><span class="slot">sex 25<small>08:00</small></span>
+      </div>
+      <div class="mut" style="margin-top:.4rem">Fim calculado: <b style="color:#DDE4EC">09:30</b> (duração do tipo) · Particular · R$ 500</div>
+      <span class="lbl">Observação para a recepção</span><span class="inp" style="min-width:230px">&nbsp;</span>
+      <div><span class="bt">Agendar</span><span class="bt sec">Agendar e mandar confirmação</span></div>
+    </div>
+  </div>
+</div>
+<div class="nota">
+<b>O que ficou de fora do formulário do Amigo, de propósito:</b> RG, raça, etnia, naturalidade, dados bancários
+para reembolso, tipo sanguíneo, alergias e as guias TISS. São dados de prontuário e de convênio, que ficam no
+Amigo. O Zaq guarda o mínimo para marcar e confirmar: nome, telefone, tipo, horário e origem.
+<br><b>A consulta (R$ 500) é o preço real</b>, do texto que a recepção já usa. Os outros preços são ilustrativos: o Amigo tem a tabela na "Central de Agendamentos", e a clínica precisa passar a dela.
+</div>
+
+<h2><span class="n">06</span>O funil, ligado à agenda</h2>
+<div class="sub">O card anda quando a agenda anda</div>
+<p>As colunas são as do perfil de clínica que já está no ar (#805). O que é novo: <b>a coluna "Consulta agendada" e a
+agenda são a mesma coisa</b>. Arrastar para lá pede o horário, e o que acontece na agenda move o card de volta.</p>
+<div class="pn">
+  <div class="top"><span class="tt">Funil · Espaço Pelle</span><span class="mut"><i>leads fictícios</i></span></div>
+  <div class="fu">
+    <div class="col"><h5>Novo <span>4</span></h5>
+      <div class="it">Marina L.<div class="ln">Instagram · "quanto é o botox?"</div><span class="tag y">respondida pelo agente</span></div>
+      <div class="it">Tiago R.<div class="ln">Indicação</div></div>
+    </div>
+    <div class="col"><h5>Contatado <span>3</span></h5>
+      <div class="it">Sônia P.<div class="ln">Google · depilação a laser</div><span class="tag">2º toque amanhã</span></div>
+    </div>
+    <div class="col"><h5>Follow-up <span>2</span></h5>
+      <div class="it">Joana P.<div class="ln">Consulta</div><span class="tag r">faltou 23/09 · remarcar</span></div>
+    </div>
+    <div class="col alvo"><h5>Consulta agendada <span>5</span></h5>
+      <div class="it">Marcos T.<div class="ln">Consulta · Dr. Manoel</div><span class="tag g">qui 24/09 09:00 · confirmado</span></div>
+      <div class="it">Paula V.<div class="ln">Avaliação estética</div><span class="tag">sex 25/09 14:00 · confirmação sai amanhã</span></div>
+    </div>
+    <div class="col"><h5>Plano de tratamento <span>2</span></h5>
+      <div class="it">Lúcia F.<div class="ln">Criolipólise · 4 sessões · R$ 3.200</div><span class="tag y">proposta há 3 dias</span></div>
+    </div>
+  </div>
+  <div class="mut" style="margin-top:.5rem">Fechado e Perdido saem do quadro, como hoje.</div>
+</div>
+
+<div class="tw"><table>
+<tr><th>Na agenda acontece…</th><th>No funil o card…</th></tr>
+<tr><td>Recepção ou agente <b>marca</b> o horário</td><td>vai para <b>Consulta agendada</b>, com data, hora e profissional no card</td></tr>
+<tr><td>Paciente <b>confirma</b> pelo WhatsApp</td><td>ganha o selo "confirmado"</td></tr>
+<tr><td>Paciente <b>faltou</b> ou <b>cancelou</b></td><td>volta para <b>Follow-up</b> com "faltou, remarcar". Não é perdido: faltar não é desistir</td></tr>
+<tr><td>Consulta <b>finalizada</b> e o médico propôs tratamento</td><td>vai para <b>Plano de tratamento</b>, com o valor. O follow-up cobra a decisão</td></tr>
+<tr><td>Consulta <b>finalizada</b>, sem tratamento</td><td>vai para <b>Fechado</b>. O paciente vira cliente com a primeira compra</td></tr>
+<tr><td>Plano aceito e <b>primeira sessão marcada</b></td><td><b>Fechado</b>. As sessões seguintes são agenda, não funil</td></tr>
+</table></div>
+<div class="alerta">
+<b>Quem diz "finalizado com tratamento proposto"?</b> O Amigo sabe, porque o médico registra no prontuário, mas o
+Zaq não lê prontuário e não deve ler. Proposta: ao marcar <b>Finalizado</b>, a recepção responde uma pergunta de um
+clique, "o médico propôs tratamento? sim/não", e informa o valor se souber. É o único momento em que alguém da
+clínica precisa alimentar o funil à mão.
+</div>
+
+<h2><span class="n">07</span>O agente de WhatsApp como central de agendamento</h2>
+<div class="sub">O que a "Central de Agendamentos" do Amigo faz na mão, o agente faz na conversa</div>
+<div class="zap">
+  <div class="sis">WhatsApp da Espaço Pelle · lead novo, veio do Instagram</div>
+  <div class="b eu">oi, quanto é a consulta com o dermatologista? tem vaga essa semana?<div class="h">08:41</div></div>
+  <div class="b">Oi! 😊 A consulta com o Dr. Manoel é <b>R$ 500</b> (particular). Tenho estes horários no Espaço Pelle, em Pedreiras:<br>
+  • qua 23/09 às 10:30<br>• qui 24/09 às 09:00<br>• sex 25/09 às 08:00<br>Algum fica bom?<div class="h">08:41</div></div>
+  <div class="b eu">quinta 9h<div class="h">08:44</div></div>
+  <div class="b">Marcado: <b>quinta, 24/09, às 9h</b>, com o Dr. Manoel, na Rua Óscar Galvão, 38. Na quarta eu te mando um lembrete. Qual o seu nome completo?<div class="h">08:44</div></div>
+  <div class="sis">→ agenda: Consulta · Dr. Manoel · qui 09:00 · origem Instagram<br>→ funil: card vai para Consulta agendada</div>
+</div>
+<div class="tw"><table>
+<tr><th>O agente…</th><th>Lê de onde</th><th>Trava</th></tr>
+<tr><td>diz o preço</td><td>preço particular do tipo de atendimento</td><td>só particular. Convênio: "a recepção confirma a cobertura"</td></tr>
+<tr><td>oferece horário</td><td>grade do profissional − agendamentos − bloqueios</td><td>no máximo 3 opções; só profissional que faz aquele tipo</td></tr>
+<tr><td>marca</td><td>cria o agendamento e move o card</td><td><b>decisão A</b>: marca direto ou só "segura" para a recepção confirmar</td></tr>
+<tr><td>confirma na véspera</td><td>agendamentos de amanhã</td><td>paciente responde 1 (confirmo) ou 2 (remarcar)</td></tr>
+<tr><td>não faz</td><td>—</td><td>não indica procedimento, não fala de sintoma, não diz se o convênio cobre (persona do nicho)</td></tr>
+</table></div>
+
+<h2><span class="n">08</span>O risco maior: duas agendas</h2>
+<div class="perigo">
+<b>Se o Zaq tiver agenda e o Amigo também, uma hora os dois marcam o mesmo horário.</b> A recepção vai continuar
+usando o Amigo, porque é lá que estão o prontuário, as guias e o caixa. Um paciente marcado pelo agente no Zaq e
+outro pela recepção no Amigo, às 9h com o Dr. Manoel, é o erro que faz a clínica desligar o Zaq no primeiro mês.
+</div>
+<div class="tw"><table>
+<tr><th>Caminho</th><th>Como fica</th><th>Custo</th></tr>
+<tr><td><b>A. Integrar com o Amigo</b></td><td>O Zaq lê os horários livres e cria o agendamento <b>na agenda do Amigo</b>. Só existe uma agenda. O Amigo tem uma página pública de agendamento on-line, e a configuração cita "API", mas a tela de API não aparece para esta conta.</td><td>Depende do Amigo liberar acesso. <b>Precisa perguntar a eles</b>.</td></tr>
+<tr><td><b>B. O Zaq vira a agenda da clínica</b></td><td>Toda marcação passa a ser no Zaq, e o Amigo fica para prontuário, guia e caixa. A recepção muda de hábito.</td><td>Alto para a clínica: trocar a tela que ela usa o dia todo.</td></tr>
+<tr><td><b>C. O Zaq só "segura" o horário</b></td><td>O agente oferece horário da grade no Zaq e segura o escolhido. A recepção lança no Amigo e confirma no Zaq com um clique. Duas agendas, mas o Zaq nunca confirma sozinho.</td><td>Baixo para construir; um passo manual por paciente novo.</td></tr>
+</table></div>
+<div class="bom">
+<b>Recomendo começar pelo C e perguntar ao Amigo pelo A em paralelo.</b> O C funciona semana que vem, não depende
+de ninguém e não deixa marcar em cima. Se o Amigo liberar a integração, a mesma tela passa a gravar lá, e o
+passo manual some.
+</div>
+
+<h2><span class="n">09</span>Decisões que são da clínica</h2>
+<div class="q"><div class="qt">A. O agente marca direto ou só segura o horário?</div>
+<div class="qo"><span class="rec">Recomendo: segura (caminho C)</span>, até a agenda ser uma só.</div></div>
+<div class="q"><div class="qt">B. Brenda e Cristiane: o que fazem e têm agenda? (a Juliana é fisioterapeuta dermatofuncional)</div>
+<div class="qo">No Amigo estão sem grade. Se forem da recepção ou da estética, muda quem aparece como coluna na agenda.</div></div>
+<div class="q"><div class="qt">C. Os atendimentos nas cidades: com que frequência e em que dias?</div>
+<div class="qo">As cidades estão cadastradas como unidades, mas sem grade. Se o agente vai oferecer horário em Bacabal, precisa saber quando o médico está lá.</div></div>
+<div class="q"><div class="qt">D. A tabela de preços particulares</div>
+<div class="qo">Consulta, consulta social e os procedimentos mais pedidos. Sem ela o agente não responde "quanto custa", que é a primeira pergunta de quase todo lead.</div></div>
+<div class="q"><div class="qt">E. O Amigo libera integração de agenda?</div>
+<div class="qo">Pergunta para o suporte do Amigo, feita pela clínica, que é a cliente deles.</div></div>
+
+<h2><span class="n">10</span>O plano desta parte</h2>
+<div class="tw"><table>
+<tr><th class="num">#</th><th>Passo</th><th>O que entrega</th></tr>
+<tr><td class="num">0</td><td>Conectar o WhatsApp da conta 39 (hoje não tem nenhum)</td><td>sem canal o agente não conversa</td></tr>
+<tr><td class="num">1</td><td>Profissionais (com e sem login) + tipos de atendimento com duração, cor, categoria e preço</td><td>o cadastro que tudo usa</td></tr>
+<tr><td class="num">2</td><td>Grade por profissional e local, com exceções e bloqueios, e o cálculo de horário livre</td><td>"tem vaga quinta?" tem resposta</td></tr>
+<tr><td class="num">3</td><td>Agenda do dia e da semana por profissional, com os 7 status, e o formulário curto</td><td>a recepção enxerga e marca</td></tr>
+<tr><td class="num">4</td><td>Ligação agenda ↔ funil (tabela da seção 06) e a pergunta de um clique no Finalizado</td><td>o card anda sozinho</td></tr>
+<tr><td class="num">5</td><td>Agente: preço, 3 horários, segurar ou marcar, confirmação na véspera</td><td>o lead do Instagram sai marcado da conversa</td></tr>
+</table></div>
+<div class="nota">
+<b>Reuso:</b> profissional com grade e tipo com duração servem a salão, estética, petshop (banho e tosa) e oficina.
+A agenda de festas continua como está: o perfil decide qual agenda a conta vê.
+</div>
+
+<div class="ftr">
+Levantado no Amigo App da Espaço Pelle em 22/09/2026, só leitura: Configurações de agenda (tipos de
+atendimento, executantes, grades), Agende+ (categorias de interação), formulário de novo agendamento (aberto
+e fechado sem salvar), Central de Agendamentos, status da agenda e agendamento on-line. Pacientes, leads e
+preços nas telas de exemplo são fictícios. Nosso lado: <code>finance/agenda.py</code> (<code>eventos_agenda</code>),
+<code>web/painel_agenda.py</code>, <code>finance/raio_x_perfil.py</code> (perfil <code>clinica</code>, #805).
+</div>
+</div></body></html>

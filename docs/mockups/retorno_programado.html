@@ -1,0 +1,300 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Retorno programado</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+
+/* ---------- réplica do painel escuro ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC;overflow-x:auto}
+.pn .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pn .tt{font-size:1.05rem;font-weight:700}
+.pn .mut{color:#7B8A99;font-size:.78rem}
+.pn .kpis{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:.5rem;margin-bottom:.8rem}
+.pn .kpi{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.5rem .65rem}
+.pn .kpi b{display:block;font-size:1.25rem}
+.pn .kpi span{color:#7B8A99;font-size:.72rem}
+.pn .kpi.ruim b{color:#ff8a80}.pn .kpi.ok b{color:#7EE7B8}
+.pn .cols{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:.55rem;min-width:720px}
+.pn .col{background:#121B24;border:1px solid #22303C;border-radius:10px;padding:.5rem}
+.pn .col h5{margin:0 0 .45rem;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:#9AA7B4;display:flex;justify-content:space-between}
+.pn .it{background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.45rem .55rem;margin-bottom:.4rem;font-size:.8rem}
+.pn .it .nm{font-weight:600}
+.pn .it .ln{color:#7B8A99;font-size:.72rem}
+.pn .tag{display:inline-block;font-size:.64rem;border-radius:99px;padding:1px 7px;margin-top:3px;border:1px solid #2A3947;color:#B4B2A9}
+.pn .tag.venc{border-color:#6E2E2A;color:#ff8a80;background:#2A1715}
+.pn .tag.hoje{border-color:#6B5320;color:#F4C766;background:#261E0E}
+.pn .tag.env{border-color:#2C6E52;color:#7EE7B8;background:#12281F}
+.pn .bt{display:inline-block;background:#1E6B4E;color:#fff;border-radius:7px;padding:.28rem .6rem;font-size:.74rem;font-weight:600;margin:.3rem .3rem 0 0}
+.pn .bt.sec{background:#22303C;color:#DDE4EC}
+.pn .ficha{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.7rem .8rem}
+.pn .chip{display:inline-block;background:#0B1219;border:1.5px solid #2A3947;border-radius:16px;padding:3px 11px;font-size:.76rem;color:#B4B2A9;margin:0 4px 5px 0}
+.pn .chip.on{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.35rem .55rem;font-size:.82rem;color:#DDE4EC;display:inline-block;min-width:150px}
+.pn .lbl{color:#7B8A99;font-size:.66rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin:.5rem 0 .2rem}
+
+/* ---------- conversa de WhatsApp ---------- */
+.zap{background:#E9DFD4;border-radius:12px;padding:12px;max-width:420px;margin:0 auto 14px}
+.zap .b{background:#fff;border-radius:8px;padding:7px 10px;margin:0 30px 8px 0;font-size:13px;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.zap .b.eu{background:#D9FDD3;margin:0 0 8px 30px}
+.zap .h{font-size:10.5px;color:#667;text-align:right;margin-top:2px}
+.zap .sis{text-align:center;font-size:11px;color:#5A6678;background:#F5EFE6;border-radius:6px;padding:3px 8px;margin:4px auto 8px;width:max-content;max-width:100%}
+
+@media (max-width:640px){.pn .kpis{grid-template-columns:repeat(2,1fr)}}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q,table,.zap{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<h1>Retorno programado: o paciente que o médico mandou voltar, voltando</h1>
+<p class="lead">
+Mockup para aprovação. Nada foi escrito no banco e nenhum código mudou. A dor foi medida no Amigo App
+da Espaço Pelle (conta 39), só leitura, em 22/09/2026. O desenho reaproveita a régua de renovação de
+apólices, que já avisa perto de uma data. Ele vale para a clínica e para qualquer ramo que tem "volta":
+retoque no salão, revisão na oficina, vacina no petshop.
+</p>
+
+<h2><span class="n">01</span>A dor, medida</h2>
+<div class="sub">O Amigo sabe quem precisa voltar. Ninguém liga.</div>
+<table>
+<tr><th>Tela do Amigo</th><th>O que mostra</th><th class="num">Contatados</th></tr>
+<tr><td>Retornos (próximos 7 dias)</td><td>pacientes com retorno pedido pelo médico</td><td class="num"><b>18 → 0</b></td></tr>
+<tr><td>Central de confirmação (hoje e amanhã)</td><td>consultas marcadas</td><td class="num">5 → 0</td></tr>
+<tr><td>Inativos (últimos 3 dias)</td><td>pacientes que pararam de vir</td><td class="num">8 → 0</td></tr>
+</table>
+<div class="nota">
+<b>Por que o Amigo não resolve sozinho:</b> ele monta a lista, mas o contato é manual, um card por
+vez, pelo botão "Whatsapp". Com a recepção atendendo balcão e telefone, a lista cresce e ninguém mexe.
+O que falta não é a informação. É <b>alguém que faça o primeiro contato no dia certo e cobre quem não
+respondeu</b>, que é o que o Zaq já faz com lead.
+</div>
+<div class="alerta">
+<b>O ponto de partida da conta 39 no Zaq é zero:</b> 0 clientes, 0 leads, <b>nenhum WhatsApp
+conectado</b> e 1 usuário. Qualquer desenho aqui começa conectando o número da clínica (passo 0 do plano).
+</div>
+
+<h2><span class="n">02</span>Onde mora</h2>
+<div class="sub">No paciente (cliente), não no funil de leads</div>
+<p>Hoje o sistema tem dois lugares onde uma data futura vira ação. Nenhum serve como está:</p>
+<table>
+<tr><th>Lugar existente</th><th>Por que não serve</th></tr>
+<tr><td><b>Follow-up do funil</b><br><code>follow_up.marcar</code></td>
+    <td>Trabalha com <b>lead</b> (<code>estagio='lead'</code>) e larga o lead quando ele é ganho. O paciente de
+    retorno já foi ganho. Além disso, o motor e a tela só rodam no perfil <code>eventos</code>
+    (<code>PERFIS_COM_TELA</code>).</td></tr>
+<tr><td><b>Renovação de apólice</b><br><code>lembretes._renovacoes</code></td>
+    <td>É o parente certo: data futura, ligada ao <b>cliente</b>, com avisos 60/30/15 dias antes e cada aviso
+    saindo uma vez só (dedup). Mas é presa à tabela <code>apolices</code> e <b>avisa o corretor</b>, não o cliente.</td></tr>
+</table>
+<div class="bom">
+<b>Proposta:</b> uma tabela nova, <code>retornos</code>, ligada a <code>clientes</code>, com a régua copiada da
+renovação de apólice. O que muda é o destino: o primeiro aviso vai <b>ao paciente</b>, e a recepção entra
+quando ele responde, quando não responde ou quando a data passa.
+</div>
+<table>
+<tr><th>Coluna</th><th>O que guarda</th></tr>
+<tr><td><code>cliente_id</code>, <code>conta_id</code></td><td>quem volta, de qual clínica</td></tr>
+<tr><td><code>data_prevista</code></td><td>quando o médico quer ver o paciente de novo</td></tr>
+<tr><td><code>tipo</code></td><td>de uma <b>lista fechada</b> por nicho: retorno de consulta, revisão de procedimento, próxima
+    sessão do pacote, reaplicação. <b>Nunca texto livre</b> (ver seção 07)</td></tr>
+<tr><td><code>profissional</code></td><td>com quem é o retorno (texto curto, ou <code>membro_id</code> se o médico usa o Zaq)</td></tr>
+<tr><td><code>status</code></td><td><code>a_contatar</code> · <code>contatado</code> · <code>agendado</code> · <code>veio</code> · <code>perdido</code></td></tr>
+<tr><td><code>evento_id</code></td><td>o compromisso na agenda, quando agendado (<code>eventos_agenda.cliente_id</code> já existe)</td></tr>
+<tr><td><code>origem</code>, <code>criado_por</code></td><td>ficha · WhatsApp da recepção · planilha importada</td></tr>
+<tr><td><code>perda_motivo</code></td><td>quando vira perdido: não respondeu, fez em outro lugar, desistiu, mudou de cidade</td></tr>
+</table>
+
+<h2><span class="n">03</span>Como o retorno entra</h2>
+<div class="sub">Três portas, da mais rápida para a mais completa</div>
+
+<div class="pn">
+  <div class="top"><span class="tt">Ficha · Ana Paula R.</span><span class="mut">Paciente desde mar/2026 · 4 atendimentos</span></div>
+  <div class="ficha">
+    <span class="lbl">Marcar retorno</span>
+    <span class="chip">15 dias</span><span class="chip">30 dias</span><span class="chip on">60 dias</span><span class="chip">90 dias</span><span class="chip">6 meses</span><span class="chip">1 ano</span>
+    <span class="lbl">Tipo</span>
+    <span class="inp">Revisão de procedimento ▾</span>
+    <span class="lbl">Profissional</span>
+    <span class="inp">Dr. Manoel ▾</span>
+    <div class="mut" style="margin-top:.5rem">Retorno em <b style="color:#DDE4EC">21/11/2026 (sex)</b> · o paciente recebe a mensagem 7 dias antes</div>
+    <span class="bt">Marcar retorno</span>
+  </div>
+</div>
+
+<table>
+<tr><th>Porta</th><th>Como funciona</th><th>Para quem</th></tr>
+<tr><td><b>1. Ficha do paciente</b></td><td>Os botões acima: um clique no prazo, um no tipo. Se o paciente ainda não existe, a
+    busca por telefone cria a ficha na hora (<code>puxar_ou_criar_cliente</code>, que o PDV já usa).</td><td>recepção, no balcão</td></tr>
+<tr><td><b>2. Mensagem para o Zaq</b></td><td>A recepção escreve no WhatsApp do agente: <i>"retorno da Ana Paula, 99 9xxxx-xxxx, em 60 dias,
+    revisão"</i>. O agente confirma antes de gravar, como já faz com lançamento.</td><td>quem está no celular, sem abrir o painel</td></tr>
+<tr><td><b>3. Planilha do Amigo</b></td><td>O relatório de <b>Agendamentos</b> do Amigo tem "Exportar". A tela de Retornos
+    não tem. Importar a planilha com uma prévia do que entra (nome, telefone, data, tipo), sem nenhuma coluna clínica.</td><td>a carga inicial dos 18 da semana e dos meses seguintes</td></tr>
+</table>
+<div class="alerta">
+<b>Dependência da porta 3:</b> ainda não sei se a planilha exportada pelo Amigo traz a <b>data de retorno</b>
+ou só a do atendimento. Precisa baixar uma com a clínica e olhar as colunas. Se não trouxer, as portas 1 e 2
+resolvem daqui para frente, e os 18 de agora entram à mão, uma vez.
+</div>
+
+<h2><span class="n">04</span>A tela de retornos</h2>
+<div class="sub">Quatro colunas, a mesma gramática do funil</div>
+
+<div class="pn">
+  <div class="top"><span class="tt">Retornos</span><span class="mut">próximos 30 dias · todos os profissionais ▾ · <i>números ilustrativos</i></span></div>
+  <div class="kpis">
+    <div class="kpi ruim"><b>3</b><span>vencidos sem agendar</span></div>
+    <div class="kpi"><b>18</b><span>vencem nos próximos 7 dias</span></div>
+    <div class="kpi"><b>41</b><span>no mês</span></div>
+    <div class="kpi ok"><b>62%</b><span>voltaram (90 dias)</span></div>
+  </div>
+  <div class="cols">
+    <div class="col"><h5>A contatar <span>9</span></h5>
+      <div class="it"><div class="nm">Carlos M.</div><div class="ln">Retorno de consulta · Dr. Manoel</div><span class="tag venc">venceu há 4 dias</span><br><span class="bt">WhatsApp</span><span class="bt sec">Agendar</span></div>
+      <div class="it"><div class="nm">Beatriz S.</div><div class="ln">Revisão de procedimento</div><span class="tag hoje">vence hoje</span></div>
+      <div class="it"><div class="nm">Ana Paula R.</div><div class="ln">Próxima sessão (3/6)</div><span class="tag">em 7 dias · mensagem sai amanhã</span></div>
+    </div>
+    <div class="col"><h5>Contatado <span>6</span></h5>
+      <div class="it"><div class="nm">João V.</div><div class="ln">Retorno de consulta</div><span class="tag env">mensagem enviada há 2 dias</span><br><span class="tag">2º toque em 3 dias</span></div>
+      <div class="it"><div class="nm">Márcia L.</div><div class="ln">Reaplicação</div><span class="tag env">respondeu: “quero marcar”</span></div>
+    </div>
+    <div class="col"><h5>Agendado <span>11</span></h5>
+      <div class="it"><div class="nm">Roberto A.</div><div class="ln">Revisão · 28/09 14:00</div><span class="tag">na agenda</span></div>
+    </div>
+    <div class="col"><h5>Veio <span>15</span></h5>
+      <div class="it"><div class="nm">Lúcia F.</div><div class="ln">Retorno · 19/09</div><span class="tag">novo retorno? <b>+60d</b></span></div>
+    </div>
+  </div>
+</div>
+<div class="nota">
+<b>Duas coisas que a tela do Amigo não faz:</b> (1) o card <b>anda sozinho</b>. A mensagem sai e o card vai para
+"Contatado"; o paciente responde que quer marcar e o card sobe com a resposta à mostra. (2) Quando o paciente
+<b>vem</b>, a tela oferece o <b>próximo</b> retorno com um clique. Tratamento de pele é contínuo, e é aí que está a
+receita recorrente da clínica.
+<br><b>"Perdido"</b> não é coluna: sai do quadro com motivo, como no funil.
+</div>
+
+<h2><span class="n">05</span>A régua</h2>
+<div class="sub">Quem recebe o quê, e quando</div>
+<table>
+<tr><th>Quando</th><th>O que acontece</th><th>Para quem</th></tr>
+<tr><td class="num">D−7</td><td>Mensagem ao paciente lembrando o retorno e perguntando o melhor dia. Card → <b>Contatado</b>.</td><td>paciente</td></tr>
+<tr><td class="num">D−7 + 3 dias</td><td>Sem resposta: segundo toque, mais curto.</td><td>paciente</td></tr>
+<tr><td class="num">D0</td><td>Ainda sem agendar: vira <b>tarefa da recepção</b> ("ligar para Carlos M."), no resumo do dia.</td><td>recepção</td></tr>
+<tr><td class="num">D+15</td><td>Último toque ao paciente, e a recepção é avisada.</td><td>paciente + recepção</td></tr>
+<tr><td class="num">D+30</td><td>Sai do quadro como <b>perdido</b>, motivo "não respondeu". Aparece no Raio-X.</td><td>ninguém; é registro</td></tr>
+</table>
+<div class="nota">
+<b>Os prazos são do perfil</b> (<code>_FUNIL_POR_PERFIL["clinica"]</code>), como a temperatura e a escada do follow-up.
+A clínica muda sem deploy. Os números acima são o ponto de partida, sem medição; ver a decisão B na seção 09.
+<br><b>Nunca manda duas vezes a mesma etapa</b>: dedup <code>retorno:&lt;id&gt;:&lt;degrau&gt;</code> em
+<code>lembretes_enviados</code>, a mesma chave da renovação de apólice.
+<br><b>Teto por dia e horário comercial</b>: a janela do perfil (seg a sex, 8h às 19h). Mensagem de clínica às 22h é reclamação.
+</div>
+
+<h2><span class="n">06</span>A mensagem</h2>
+<div class="sub">O que o paciente lê, e o que acontece quando ele responde</div>
+<div class="zap">
+  <div class="sis">Espaço Pelle · WhatsApp da clínica</div>
+  <div class="b">Oi, Ana Paula! Aqui é da Espaço Pelle 😊<br>
+  O Dr. Manoel pediu para te ver de novo por volta de <b>21/11</b> para a revisão.
+  Qual dia fica melhor para você?<br><br>
+  <span style="color:#667;font-size:11.5px">Se não quiser receber lembretes, responda SAIR.</span>
+  <div class="h">09:12</div></div>
+  <div class="b eu">oi! pode ser dia 20 de manhã?<div class="h">09:40</div></div>
+  <div class="b">Perfeito! Vou confirmar o horário com a recepção e já te aviso. 🙏<div class="h">09:40</div></div>
+  <div class="sis">→ card sobe para a recepção: “Ana Paula pediu 20/11 de manhã”</div>
+</div>
+<table>
+<tr><th>O paciente responde…</th><th>O agente faz</th></tr>
+<tr><td>um dia ou horário</td><td>Agradece, <b>não confirma horário sozinho</b> (a agenda do médico está no Amigo) e passa para a recepção com o pedido destacado.</td></tr>
+<tr><td>“já marquei” / “já fui”</td><td>Pergunta a data e move o card para Agendado ou Veio. A recepção confere.</td></tr>
+<tr><td>dúvida sobre o tratamento, sintoma, remédio</td><td><b>Não responde nada clínico</b> (regra da persona do nicho). Diz que o médico responde na consulta e oferece agendar.</td></tr>
+<tr><td>SAIR</td><td>Marca o paciente como <b>sem lembretes</b> e confirma em uma linha. Nenhuma régua fala com ele de novo.</td></tr>
+</table>
+
+<h2><span class="n">07</span>LGPD e dado de saúde</h2>
+<div class="sub">O que nunca entra, e por quê</div>
+<div class="perigo">
+<b>O retorno em si já é dado de saúde:</b> saber que alguém "volta ao dermatologista em 60 dias" diz algo sobre
+a saúde dessa pessoa. Por isso:
+<br>· <b>O tipo é lista fechada</b> (retorno de consulta, revisão de procedimento, próxima sessão). Não há campo de
+texto livre onde caiba "retorno da acne" ou "resultado da biópsia".
+<br>· <b>A mensagem não diz o motivo clínico</b>, só "revisão" ou "retorno". Quem mais vê o celular do paciente não fica sabendo de nada.
+<br>· <b>Nada do prontuário vem do Amigo.</b> A planilha importada tem nome, telefone, data e tipo. Outras colunas são descartadas na prévia, antes de gravar.
+<br>· <b>Opt-out existe desde o primeiro dia</b> (hoje o sistema não tem opt-out de WhatsApp para cliente; nasce aqui) e vale para toda mensagem automática ao paciente, não só retorno.
+<br>· A clínica é a <b>controladora</b>: o contato do paciente para lembrete de retorno precisa estar coberto no termo que ela já colhe. É pergunta para ela, não decisão nossa (decisão D).
+</div>
+
+<h2><span class="n">08</span>O canal</h2>
+<table>
+<tr><th>WhatsApp da clínica por…</th><th>O que dá para mandar</th></tr>
+<tr><td><b>QR code</b> (número próprio, como a maioria das contas)</td><td>Texto livre, como acima. <b>Recomendado para começar.</b></td></tr>
+<tr><td>API oficial (Twilio / Cloud)</td><td>Fora da janela de 24h só com <b>template aprovado</b> pela Meta (dias para aprovar). O D−7 é sempre fora da janela, então sem template a régua não sai. É a mesma trava do aviso ao convidado (<code>convites._dentro_da_janela</code>).</td></tr>
+</table>
+
+<h2><span class="n">09</span>Decisões que são da clínica</h2>
+<div class="q"><div class="qt">A. A primeira mensagem sai sozinha ou a recepção aprova?</div>
+<div class="qo"><span class="rec">Recomendo: sai sozinha</span>, com a opção "aprovar antes" por clínica. Os 18 com zero contato mostram que um passo manual a mais é o que trava hoje.</div></div>
+<div class="q"><div class="qt">B. Quantos dias antes?</div>
+<div class="qo"><span class="rec">Recomendo: 7 dias</span>. Dá tempo de achar horário sem ser tão cedo que o paciente esquece. Para "próxima sessão do pacote", 3 dias.</div></div>
+<div class="q"><div class="qt">C. O agente pode marcar o horário direto?</div>
+<div class="qo"><span class="rec">Recomendo: não, por enquanto.</span> A agenda dos médicos está no Amigo; se o Zaq marcar sem ver a agenda de lá, marca em cima de outro paciente. Integração de agenda é outro projeto.</div></div>
+<div class="q"><div class="qt">D. O termo que a clínica colhe cobre lembrete por WhatsApp?</div>
+<div class="qo">Pergunta para a clínica (ou o jurídico dela). Se não cobrir, entra uma linha no termo antes de ligar a régua.</div></div>
+<div class="q"><div class="qt">E. Quais tipos de retorno?</div>
+<div class="qo">Proposta inicial: retorno de consulta · revisão de procedimento · próxima sessão do pacote · reaplicação · manutenção. A clínica ajusta a lista.</div></div>
+
+<h2><span class="n">10</span>O plano</h2>
+<table>
+<tr><th class="num">#</th><th>Passo</th><th>O que entrega</th></tr>
+<tr><td class="num">0</td><td>Conectar o WhatsApp da conta 39 por QR</td><td>sem canal, nada sai (não é código)</td></tr>
+<tr><td class="num">1</td><td>Tabela <code>retornos</code> + porta 1 (ficha) + tela de 4 colunas</td><td>a recepção já trabalha a lista no Zaq, mesmo sem régua</td></tr>
+<tr><td class="num">2</td><td>Opt-out de WhatsApp para cliente (SAIR) + régua D−7/D0/D+15/D+30 ligada em <code>lembretes</code></td><td>o card anda sozinho</td></tr>
+<tr><td class="num">3</td><td>Agente lê a resposta do paciente (dia pedido, já fui, SAIR, dúvida clínica)</td><td>a recepção só recebe o que precisa dela</td></tr>
+<tr><td class="num">4</td><td>Porta 2 (mensagem ao Zaq) e porta 3 (planilha do Amigo, depois de olhar as colunas)</td><td>carga sem digitar</td></tr>
+<tr><td class="num">5</td><td>Taxa de retorno no Raio-X da clínica + "próximo retorno" ao marcar Veio</td><td>o número que o dono acompanha</td></tr>
+</table>
+<div class="nota">
+<b>Reuso fora da clínica:</b> nada aqui é específico de clínica, a não ser os <b>tipos</b> e os <b>prazos</b>, que vêm do
+perfil. Salão (retoque em 30 dias), oficina (revisão em 6 meses) e petshop (vacina anual) ganham a mesma tela
+trocando a lista de tipos. A renovação de apólice poderia migrar para cá depois, mas não neste trabalho.
+</div>
+
+<div class="ftr">
+Medido no Amigo App da Espaço Pelle (conta 39) em 22/09/2026, só leitura, sem copiar dado de paciente. Os nomes
+nesta página são fictícios. Estado da conta 39 no Zaq lido de produção no mesmo dia. Referências de código:
+<code>finance/lembretes.py</code> (<code>_renovacoes</code>), <code>finance/follow_up.py</code>
+(<code>PERFIS_COM_TELA</code>, <code>marcar</code>), <code>finance/clientes.py</code>
+(<code>puxar_ou_criar_cliente</code>), <code>finance/convites.py</code> (janela de 24h),
+<code>finance/raio_x_perfil.py</code> (perfil <code>clinica</code>).
+</div>
+</div></body></html>

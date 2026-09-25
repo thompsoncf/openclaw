@@ -45,6 +45,8 @@ _AVISOS = {
     "nao_paciente": "Pronto: esse número não recebe mais toque nenhum.",
     "marcou": "Anotado como marcado. O card foi para Consulta agendada.",
     "salvo": "Configuração salva.",
+    "hoje_ja": "Esse paciente já recebeu uma mensagem hoje. O próximo toque fica para amanhã.",
+    "desligado": "Voltar a chamar está desligado: nada sai, nem clicando.",
 }
 
 
@@ -61,10 +63,14 @@ def _acesso(request: Request):
     return conta, papel in ("dono", "gestor"), None
 
 
-def _ir(aviso: str = "", erro: str = "") -> RedirectResponse:
-    from urllib.parse import urlencode
-    q = {k: v for k, v in (("aviso", aviso), ("erro", erro)) if v}
-    return RedirectResponse("/painel/hoje" + ("?" + urlencode(q) if q else ""), status_code=303)
+def _ir(request: Request, aviso: str = "", erro: str = "") -> RedirectResponse:
+    """Volta pra tela. O aviso vai na URL como CÓDIGO (traduzido por `_AVISOS`); o
+    erro de validação, que é texto livre, vai pela sessão — texto da URL impresso na
+    tela é o link que alguém manda pra recepção com um script dentro."""
+    if erro:
+        request.session["hoje_erro"] = erro[:300]
+    return RedirectResponse("/painel/hoje" + (f"?aviso={aviso}" if aviso in _AVISOS else ""),
+                            status_code=303)
 
 
 @router.get("/painel/hoje", response_class=HTMLResponse)
@@ -78,14 +84,18 @@ def painel_hoje(request: Request):
     with pool.connection() as c:
         cfg = vac.config(c, conta_id, "clinica")
         janela = fr.config(c, conta_id)
+        if cfg["modo"] != "off":
+            # a tela não espera o poller: quem respondeu SAIR ou marcou há um minuto
+            # já não aparece com a mensagem pronta
+            vac.atualizar_estados(c, conta_id, agora, cfg)
         dados = vac.hoje(c, conta_id, agora, cfg)
         c.commit()      # fr.config semeia a linha da régua na 1ª vez
     for e in dados["esperando"]:
         e["fora"] = not fr.dentro_da_janela(e["em"], janela)
     q = request.query_params
-    return _render("hoje", request, titulo="Hoje", cfg=cfg, gerencia=gerencia,
+    return _render("hoje.html", request, titulo="Hoje", cfg=cfg, gerencia=gerencia,
                    d=dados, aviso=_AVISOS.get(q.get("aviso") or "", ""),
-                   erro=(q.get("erro") or "")[:300],
+                   erro=request.session.pop("hoje_erro", ""),
                    rotulos=vac._ROTULO_TOQUE)
 
 
@@ -99,18 +109,19 @@ def acao_no_toque(request: Request, toque_id: int, acao: str):
     if acao == "mandar":
         r = vac.mandar_sugerido(pool, conta_id, toque_id, membro)
         if r.get("ok"):
-            return _ir("mandado")
-        return _ir("ja_tratado" if r.get("erro") == "ja_tratado" else "falhou")
+            return _ir(request, "mandado")
+        erro = r.get("erro")
+        return _ir(request, erro if erro in ("ja_tratado", "hoje_ja", "desligado") else "falhou")
     if acao == "dispensar":
         vac.dispensar(pool, conta_id, toque_id)
-        return _ir("dispensado")
+        return _ir(request, "dispensado")
     if acao == "nao-paciente":
         vac.nao_e_paciente(pool, conta_id, toque_id, membro)
-        return _ir("nao_paciente")
+        return _ir(request, "nao_paciente")
     if acao == "ja-marcou":
         vac.ja_marcou(pool, conta_id, toque_id, membro)
-        return _ir("marcou")
-    return _ir()
+        return _ir(request, "marcou")
+    return _ir(request)
 
 
 @router.post("/painel/hoje/config")
@@ -121,7 +132,7 @@ def salvar_config(request: Request, modo: str = Form("off"), teto_dia: str = For
     if redir is not None:
         return redir
     if not gerencia:
-        return _ir(erro="Só o dono ou o gestor muda o modo e os textos.")
+        return _ir(request, erro="Só o dono ou o gestor muda o modo e os textos.")
     try:
         teto = int(teto_dia) if teto_dia.strip() else None
     except ValueError:
@@ -131,9 +142,9 @@ def salvar_config(request: Request, modo: str = Form("off"), teto_dia: str = For
         erro = vac.salvar_config(c, conta[0], modo, textos, teto)
         if erro:
             c.rollback()
-            return _ir(erro=erro)
+            return _ir(request, erro=erro)
         c.commit()
-    return _ir("salvo")
+    return _ir(request, "salvo")
 
 
 _TPL = r"""{% extends "base" %}{% block conteudo %}
@@ -220,7 +231,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="hj-sec"><h3>Voltar a chamar hoje</h3><span class="qt">{{ d.voltar|length }}</span>
     <span class="ex">Receberam o preço da consulta, não marcaram e a conversa parou.{% if cfg.modo == 'ligado' %} O Zaq manda sozinho no horário de atendimento; você pode mandar antes.{% endif %}{% if d.proximos %} Mais {{ d.proximos }} programado(s) para os próximos dias.{% endif %}</span></div>
   <div class="hj-lista">
-  {% for t in d.voltar %}{% set tipo = 'toque' %}{% include "hoje_toque" %}
+  {% for t in d.voltar %}{% set tipo = 'toque' %}{% include "hoje_toque.html" %}
   {% else %}<div class="hj-vazio">Nada para hoje.</div>{% endfor %}
   </div>
 
@@ -228,7 +239,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="hj-sec"><h3>Repescagem</h3><span class="qt">{{ d.repescagem|length }}</span>
     <span class="ex">Receberam o preço antes de o recurso ser ligado e não voltaram. Uma mensagem só, e ela nunca sai sozinha.</span></div>
   <div class="hj-lista">
-  {% for t in d.repescagem %}{% set tipo = 'repescagem' %}{% include "hoje_toque" %}{% endfor %}
+  {% for t in d.repescagem %}{% set tipo = 'repescagem' %}{% include "hoje_toque.html" %}{% endfor %}
   </div>
   {% endif %}
 
@@ -295,5 +306,8 @@ _TPL_TOQUE = r"""<div class="hj-card quente">
   </div>
 </div>"""
 
-_env.loader.mapping["hoje"] = _TPL
-_env.loader.mapping["hoje_toque"] = _TPL_TOQUE
+# ".html" NÃO É ENFEITE: o `_env` liga o autoescape pela extensão
+# (select_autoescape). Sem ela, o nome e a mensagem que chegam pelo WhatsApp —
+# qualquer número, até desconhecido — iam crus pra tela, com a sessão da recepção.
+_env.loader.mapping["hoje.html"] = _TPL
+_env.loader.mapping["hoje_toque.html"] = _TPL_TOQUE

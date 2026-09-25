@@ -84,10 +84,12 @@ _PARADA_H = 3                  # conversa sem mensagem há isso: dá pra chamar 
 _REPESCAGEM_PARADA_H = 24      # e pra repescagem, parada há um dia
 
 RE_MARCOU = r"(prontinho|agendamento foi realizado)"
-RE_SAIR = r"^\s*(sair|parar|pare|n[ãa]o quero)\y"
+# A MENSAGEM INTEIRA tem que ser o pedido de saída: "Não quero esperar muito, tem
+# horário?" e "Sair do trabalho às 18h, tem 19h?" começam igual e querem marcar.
+RE_SAIR = r"^\s*(sair|parar|pare|n[ãa]o quero( mais)?)\s*[.!,]*\s*(obrigad[oa])?\s*[.!]*\s*$"
 
 _RE_MARCOU_PY = re.compile(RE_MARCOU, re.I)
-_RE_SAIR_PY = re.compile(RE_SAIR.replace(r"\y", r"\b"), re.I)
+_RE_SAIR_PY = re.compile(RE_SAIR, re.I)
 
 
 def _py(rx: str) -> str:
@@ -321,9 +323,18 @@ _FORA_DA_EQUIPE = r"""
                   and (right(regexp_replace(coalesce(mb.whatsapp,''), '\D', '', 'g'), 8) = """ + _N8 + r"""
                     or right(regexp_replace(coalesce(mb.whatsapp_id,''), '\D', '', 'g'), 8) = """ + _N8 + """))"""
 
-_NAO_BLOQUEADO = """
+def _nao_bloqueado(so_nao_paciente: bool = False) -> str:
+    """O bloqueio vale pra TOQUE. Pra "Esperando resposta" e pro placar, só o 'não é
+    paciente' (fornecedor, contador) sai: quem pediu pra sair e depois volta a
+    escrever continua sendo paciente esperando atendimento, e continua tendo
+    recebido o preço."""
+    return ("""
    not exists (select 1 from voltar_a_chamar_bloqueios b
-                where b.conta_id = cv.conta_id and b.numero8 = """ + _N8 + ")"
+                where b.conta_id = cv.conta_id and b.numero8 = """ + _N8
+            + (" and b.motivo = 'nao_paciente'" if so_nao_paciente else "") + ")")
+
+
+_NAO_BLOQUEADO = _nao_bloqueado()
 
 # A mensagem do toque não é fato: nem pela id que ele gravou, nem pelo eco do
 # celular (mesmo texto, outra linha). Os textos não falam de preço, e isto é a
@@ -336,7 +347,7 @@ _NAO_E_TOQUE = """
 # paciente tendo escrito antes dela. Base do registro e do placar — a mesma, de
 # propósito: gatilho e métrica que lessem "preço" diferente dariam um placar que
 # ninguém conseguiria conferir.
-_SQL_FATOS = """
+_SQL_FATOS_BASE = """
   select pr.conversa_id, cv.prospeccao_id, pr.mid, m.criado_em
     from (select m.conversa_id, min(m.id) as mid
             from mensagens m join conversas cv on cv.id = m.conversa_id
@@ -352,8 +363,8 @@ _SQL_FATOS = """
     join conversas cv on cv.id = pr.conversa_id
     left join prospeccao p on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
    where length(""" + _N8 + """) = 8
-     and """ + _FORA_DA_EQUIPE + """
-     and """ + _NAO_BLOQUEADO
+     and """ + _FORA_DA_EQUIPE
+_SQL_FATOS = _SQL_FATOS_BASE + " and " + _NAO_BLOQUEADO
 
 # "Marcou" pelo que está na conversa ou no card. As chaves `qualificado` e
 # `proposta` são "Consulta agendada" e "Plano de tratamento" no funil da clínica.
@@ -465,6 +476,11 @@ def atualizar_estados(c, conta_id: int, agora: datetime, cfg: dict) -> None:
                                and m.criado_em > pm.criado_em + interval '""" + str(_RAJADA_MIN) + """ minutes'
                                and m.criado_em > %(agora)s - interval '""" + str(_HUMANO_RECENTE_H) + """ hours'
                                and """ + _NAO_E_TOQUE + ")", p)
+    # o de +3h é do mesmo dia: se o dia virou sem ele sair (conversa viva à tarde,
+    # clínica fechou), ele não aparece de manhã empurrando os outros pra dias seguidos
+    c.execute("""update voltar_a_chamar_toques t set estado = 'pulado'
+                  where t.conta_id = %(conta)s and t.estado = 'pendente' and t.toque = 1
+                    and t.devido_em < %(hoje)s""", dict(p, hoje=_inicio_do_dia(agora)))
     # venceu um toque mais novo antes deste sair: fica só o mais novo
     c.execute("""update voltar_a_chamar_toques t set estado = 'pulado'
                   where t.conta_id = %(conta)s and t.estado = 'pendente' and t.devido_em <= %(agora)s
@@ -476,12 +492,33 @@ def atualizar_estados(c, conta_id: int, agora: datetime, cfg: dict) -> None:
 
 # ------------------------------------------------------------------ envio
 
-# A conversa parou: a última mensagem tem `_PARADA_H` horas, e não é uma pergunta
-# do paciente esperando a gente. Vale pra mostrar o toque na tela e pra mandar.
+# A conversa parou: a última mensagem tem `_PARADA_H` horas, e nada do que o
+# paciente mandou depois da nossa última resposta é pergunta, foto ou áudio — isso
+# é da recepção, e ele está em "Esperando resposta". Vale pra mostrar e pra mandar.
 _PARADA = """(
-   select m.criado_em < %(agora)s - interval '""" + str(_PARADA_H) + """ hours'
-          and not (m.direcao = 'in' and m.texto like '%%?%%')
-     from mensagens m where m.conversa_id = t.conversa_id order by m.id desc limit 1)"""
+   (select max(m.criado_em) from mensagens m where m.conversa_id = t.conversa_id)
+       < %(agora)s - interval '""" + str(_PARADA_H) + """ hours'
+   and not exists (
+       select 1 from mensagens q
+        where q.conversa_id = t.conversa_id and q.direcao = 'in'
+          and q.id > coalesce((select max(o.id) from mensagens o
+                                where o.conversa_id = t.conversa_id and o.direcao = 'out'), 0)
+          and (q.texto like '%%?%%' or q.midia_tipo is not null
+               or q.texto ~ '^(🎤|🎵|📷|🎥|📎)')))"""
+
+# SOZINHO (modo 'ligado'), só com a última mensagem NOSSA. "Tem horário amanhã de
+# manhã", sem ponto de interrogação, passa pelo `_PARADA`; o Zaq respondendo isso
+# com "conseguiu ver as informações?" seria pior que não mandar. Com a última
+# palavra do paciente, o toque fica na tela e a recepção lê antes de mandar.
+_ULTIMA_E_NOSSA = """(
+   (select m.direcao from mensagens m where m.conversa_id = t.conversa_id
+     order by m.id desc limit 1) = 'out')"""
+
+# 1 por paciente por dia — na tela, no clique e no automático, a mesma regra
+_NAO_MANDADO_HOJE = """
+   not exists (select 1 from voltar_a_chamar_toques o
+                where o.conta_id = t.conta_id and o.conversa_id = t.conversa_id
+                  and o.estado = 'enviado' and o.enviado_em >= %(hoje)s)"""
 
 def _inicio_do_dia(agora: datetime) -> datetime:
     return _utc(datetime.combine(_local(agora).date(), time(0, 0)))
@@ -495,16 +532,21 @@ def enviar(c, conta_id: int, toque_id: int, cfg: dict, *, por: str,
     O estado vira 'enviado' e é COMMITADO antes de chamar o WhatsApp: se o processo
     cair no meio, o paciente fica sem o toque, e nunca com dois.
     """
+    agora = agora or datetime.now(timezone.utc)
     r = c.execute(
-        """update voltar_a_chamar_toques
-              set estado = 'enviado', enviado_em = coalesce(%s, now()), enviado_por = %s,
-                  membro_id = %s
-            where id = %s and conta_id = %s and estado = 'pendente'
-        returning conversa_id, toque""",
-        (agora, por, membro_id, toque_id, conta_id)).fetchone()
+        """update voltar_a_chamar_toques t
+              set estado = 'enviado', enviado_em = %(agora)s, enviado_por = %(por)s,
+                  membro_id = %(membro)s
+            where t.id = %(id)s and t.conta_id = %(conta)s and t.estado = 'pendente'
+              and """ + _NAO_MANDADO_HOJE + """
+        returning t.conversa_id, t.toque""",
+        {"agora": agora, "por": por, "membro": membro_id, "id": toque_id, "conta": conta_id,
+         "hoje": _inicio_do_dia(agora)}).fetchone()
     if not r:
+        ainda = c.execute("select estado from voltar_a_chamar_toques where id=%s and conta_id=%s",
+                          (toque_id, conta_id)).fetchone()
         c.rollback()
-        return {"ok": False, "erro": "ja_tratado"}
+        return {"ok": False, "erro": "hoje_ja" if (ainda and ainda[0] == "pendente") else "ja_tratado"}
     conversa_id, toque = r
     info = c.execute(
         "select " + _DESTINO + """,
@@ -534,7 +576,7 @@ def enviar(c, conta_id: int, toque_id: int, cfg: dict, *, por: str,
     mid = c.execute(
         """insert into mensagens (conversa_id, canal, direcao, autor, texto, membro_id, provider_sid,
                                    criado_em)
-           values (%s, 'whatsapp', 'out', %s, %s, %s, %s, coalesce(%s, now())) returning id""",
+           values (%s, 'whatsapp', 'out', %s, %s, %s, %s, %s) returning id""",
         (conversa_id, "bot" if por == "agente" else "humano", texto, membro_id,
          res.get("sid"), agora)).fetchone()[0]
     c.execute("update conversas set ultima_msg_em=now() where id=%s", (conversa_id,))
@@ -571,10 +613,8 @@ def _enviar_um(c, conta_id: int, agora: datetime, cfg: dict, janela: dict) -> di
     r = c.execute(
         """select t.id from voltar_a_chamar_toques t
             where t.conta_id=%(conta)s and t.estado='pendente' and t.toque >= 1
-              and t.devido_em <= %(agora)s and """ + _PARADA + """
-              and not exists (select 1 from voltar_a_chamar_toques o
-                               where o.conta_id = t.conta_id and o.conversa_id = t.conversa_id
-                                 and o.estado = 'enviado' and o.enviado_em >= %(hoje)s)
+              and t.devido_em <= %(agora)s and """ + _PARADA + " and " + _ULTIMA_E_NOSSA + """
+              and """ + _NAO_MANDADO_HOJE + """
             order by t.devido_em, t.id limit 1""",
         {"conta": conta_id, "agora": agora, "hoje": hoje}).fetchone()
     c.commit()
@@ -666,13 +706,32 @@ def _sequencia(c, conta_id: int, toque_id: int):
             where t.id=%s and t.conta_id=%s""", (toque_id, conta_id)).fetchone()
 
 
-def mandar_sugerido(pool, conta_id: int, toque_id: int, membro_id: int | None) -> dict:
-    """O botão Mandar. Sai como mensagem da recepção (autor 'humano', com o membro)."""
+def mandar_sugerido(pool, conta_id: int, toque_id: int, membro_id: int | None,
+                    agora: datetime | None = None) -> dict:
+    """O botão Mandar. Sai como mensagem da recepção (autor 'humano', com o membro).
+
+    A tela pode estar aberta há uma hora: antes de mandar, os estados são
+    recalculados (sair, marcou, bloqueio, recepção que já falou) e o toque tem que
+    continuar na tela — conversa parada e ninguém mandou nada pra ele hoje. Com o
+    modo 'off', nada sai, nem clicando."""
+    agora = agora or datetime.now(timezone.utc)
     with pool.connection() as c:
         cfg = config(c, conta_id)
         if not cfg:
             return {"ok": False, "erro": "perfil"}
-        return enviar(c, conta_id, toque_id, cfg, por="recepcao", membro_id=membro_id)
+        if cfg["modo"] == "off":
+            return {"ok": False, "erro": "desligado"}
+        atualizar_estados(c, conta_id, agora, cfg)
+        c.commit()
+        ainda = c.execute(
+            """select 1 from voltar_a_chamar_toques t
+                where t.id = %(id)s and t.conta_id = %(conta)s and t.estado = 'pendente'
+                  and """ + _PARADA,
+            {"id": toque_id, "conta": conta_id, "agora": agora}).fetchone()
+        c.rollback()
+        if not ainda:
+            return {"ok": False, "erro": "ja_tratado"}
+        return enviar(c, conta_id, toque_id, cfg, por="recepcao", membro_id=membro_id, agora=agora)
 
 
 def dispensar(pool, conta_id: int, toque_id: int) -> bool:
@@ -735,22 +794,23 @@ def placar(c, conta_id: int, desde: datetime, ate: datetime, cfg: dict) -> dict:
     """Receberam o preço, marcaram, e nunca foram chamados de novo — no intervalo.
 
     É a SQL do registro sem os filtros de "lead em aberto": o placar olha pra
-    trás, e o paciente que marcou já saiu do aberto. "Marcou" vale em 7 dias pela
-    conversa, ou pelo "Já marcou" da recepção. "Nunca chamado" é quem não marcou,
+    trás, e o paciente que marcou já saiu do aberto. "Marcou" é o mesmo da tela:
+    "Prontinho" na conversa depois do preço, card em Consulta agendada ou além, ou
+    o "Já marcou" da recepção — sem prazo, senão quem marca depois do toque de +7
+    dias nunca entraria. Quem pediu pra sair continua em "receberam"; só o 'não é
+    paciente' sai da conta. "Nunca chamado" é quem não marcou,
     não recebeu mais nada nosso depois da rajada do preço, e o preço já tem 1 dia
     — antes disso é cedo, e o placar acusaria quem a recepção ainda vai chamar.
     """
     r = c.execute(
-        "with fatos as (" + _SQL_FATOS + """)
+        "with fatos as (" + _SQL_FATOS_BASE + " and " + _nao_bloqueado(True) + """)
          select count(*),
                 count(*) filter (where f.marcou),
                 count(*) filter (where not f.marcou and not f.chamado
                                    and f.criado_em < %(ate)s - interval '1 day')
            from (select fa.*,
-                        (exists (select 1 from mensagens mm where mm.conversa_id = fa.conversa_id
-                                  and mm.direcao = 'out' and mm.id > fa.mid
-                                  and mm.texto ~* %(re_marcou)s
-                                  and mm.criado_em < fa.criado_em + interval '7 days')
+                        (""" + _MARCOU_SQL.format(conv="fa.conversa_id", mid="fa.mid",
+                                                  lead="fa.prospeccao_id") + """
                          or exists (select 1 from voltar_a_chamar_toques t
                                      where t.conversa_id = fa.conversa_id and t.preco_msg_id = fa.mid
                                        and t.estado = 'marcou')) as marcou,
@@ -775,7 +835,7 @@ def _fmt(quando: datetime | None) -> str:
 
 def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
     """Tudo que a tela Hoje mostra, numa conexão."""
-    p = _params(conta_id, cfg, agora=agora)
+    p = _params(conta_id, cfg, agora=agora, hoje=_inicio_do_dia(agora))
     esperando = []
     for r in c.execute(
             """select cv.id, cv.prospeccao_id,
@@ -787,7 +847,7 @@ def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
                                 where m.conversa_id = cv.id order by m.id desc limit 1) ult on true
                 where cv.conta_id = %(conta)s and cv.canal = 'whatsapp'
                   and ult.direcao = 'in' and ult.criado_em > %(agora)s - interval '3 days'
-                  and """ + _FORA_DA_EQUIPE + " and " + _NAO_BLOQUEADO + """
+                  and """ + _FORA_DA_EQUIPE + " and " + _nao_bloqueado(True) + """
                 order by ult.criado_em limit 40""", p).fetchall():
         esperando.append({"conversa_id": r[0], "lead": r[1], "nome": r[2] or "Sem nome",
                           "texto": (r[3] or "")[:160], "quando": _fmt(r[4]), "em": r[4]})
@@ -838,8 +898,9 @@ def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
                             "quando": _fmt(r[5]), "em": r[5]})
     _velho = datetime(1970, 1, 1, tzinfo=timezone.utc)
     responderam.sort(key=lambda x: x["em"] or _velho, reverse=True)
-    voltar = _toques("t.toque >= 1 and t.devido_em <= %(agora)s and " + _PARADA)
-    repescagem = _toques("t.toque = 0 and " + _PARADA)
+    voltar = _toques("t.toque >= 1 and t.devido_em <= %(agora)s and " + _PARADA
+                     + " and " + _NAO_MANDADO_HOJE)
+    repescagem = _toques("t.toque = 0 and " + _PARADA + " and " + _NAO_MANDADO_HOJE)
     # quem já tem a mensagem pronta lá em cima não aparece duas vezes
     na_fila = {t["conversa_id"] for t in voltar + repescagem}
     responderam = [r for r in responderam if r["conversa_id"] not in na_fila]

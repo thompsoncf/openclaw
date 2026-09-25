@@ -35,7 +35,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   ultima_msg_em timestamptz default now(), criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, membro_id bigint, provider_sid text,
-  criado_em timestamptz default now());
+  midia_tipo text, criado_em timestamptz default now());
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text default 'off', cobranca_modo text default 'off',
   janela_dias text, janela_abre time, janela_fecha time, sem_resposta_min int,
@@ -180,11 +180,14 @@ def test_conversa_viva_segura_o_toque(pool, envios):
     assert tela["voltar"] == []
     assert [x["lead"] for x in tela["responderam"]] == [lead]
     assert "marido" in tela["responderam"][0]["frase"]
-    vac.rodar(pool, agora=_br(21, 14, 5))            # parou há 3h: agora sai
-    assert len(envios) == 1
+    # parou há 3h: aparece na tela com a mensagem pronta (e sai da lista de baixo)...
     with pool.connection() as c:
         tela = vac.hoje(c, CLINICA, _br(21, 14, 10), vac.config(c, CLINICA))
-    assert tela["responderam"] == [] or tela["responderam"][0]["lead"] == lead
+    assert [t["toque"] for t in tela["voltar"]] == [1]
+    assert tela["responderam"] == []
+    # ...mas SOZINHO não sai: a última palavra foi do paciente, a recepção lê antes
+    vac.rodar(pool, agora=_br(21, 14, 5))
+    assert envios == []
 
 
 def test_agradeceu_e_parou_recebe_o_toque_do_dia_seguinte(pool, envios):
@@ -471,8 +474,9 @@ def test_mandar_duas_vezes_manda_uma(pool, envios):
         tid = c.execute("select id from voltar_a_chamar_toques where toque=1").fetchone()[0]
         c.execute("insert into membros (id, conta_id, nome) values (7,%s,'Ana da recepção')", (CLINICA,))
         c.commit()
-    assert vac.mandar_sugerido(pool, CLINICA, tid, 7)["ok"]
-    assert vac.mandar_sugerido(pool, CLINICA, tid, 7) == {"ok": False, "erro": "ja_tratado"}
+    assert vac.mandar_sugerido(pool, CLINICA, tid, 7, agora=_br(21, 13, 6))["ok"]
+    assert vac.mandar_sugerido(pool, CLINICA, tid, 7, agora=_br(21, 13, 7)) == {
+        "ok": False, "erro": "ja_tratado"}
     assert len(envios) == 1
     with pool.connection() as c:
         autor, membro = c.execute("select autor, membro_id from mensagens order by id desc limit 1").fetchone()
@@ -529,3 +533,133 @@ def test_placar_3_de_13(pool, sem_envio):
     with pool.connection() as c:
         p = vac.placar(c, CLINICA, _br(1, 0), _br(30, 0), vac.config(c, CLINICA))
     assert p == {"receberam": 13, "marcaram": 3, "nunca_chamados": 8, "taxa": 23}
+
+
+# ------------------------------------------------------------------ achados da revisão do #843
+
+def test_nao_quero_no_comeco_de_um_pedido_nao_bloqueia(pool, sem_envio):
+    """"Não quero esperar muito, tem horário?" quer marcar — não é pedido de saída."""
+    _modo(pool, CLINICA, "sugere")
+    _, conv = _paciente_recebe_preco(pool)
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    _msg(pool, conv, "in", "Não quero esperar muito, tem horário essa semana?", _br(21, 11))
+    vac.rodar(pool, agora=_br(21, 11, 5))
+    with pool.connection() as c:
+        assert c.execute("select count(*) from voltar_a_chamar_bloqueios").fetchone()[0] == 0
+        tela = vac.hoje(c, CLINICA, _br(21, 11, 10), vac.config(c, CLINICA))
+    assert [e["conversa_id"] for e in tela["esperando"]] == [conv]
+
+
+def test_quem_pediu_pra_sair_e_volta_aparece_em_esperando(pool, sem_envio):
+    _modo(pool, CLINICA, "sugere")
+    _, conv = _paciente_recebe_preco(pool)
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    _msg(pool, conv, "in", "Não quero, obrigada", _br(21, 11))
+    vac.rodar(pool, agora=_br(21, 11, 5))
+    assert {x[1] for x in _toques(pool)} == {"saiu"}
+    _msg(pool, conv, "in", "Oi, mudei de ideia, tem horário sábado?", _br(22, 9))
+    with pool.connection() as c:
+        tela = vac.hoje(c, CLINICA, _br(22, 9, 5), vac.config(c, CLINICA))
+    assert [e["conversa_id"] for e in tela["esperando"]] == [conv]
+
+
+def test_o_de_3h_nao_escorrega_pra_manha_seguinte(pool, envios):
+    """Preço às 15h, paciente responde às 16h30 (a conversa só para às 19h30, depois
+    de fechar): o toque de +3h morre na virada, e o de +1 dia sai no dia dele."""
+    _modo(pool, CLINICA, "ligado")
+    _, conv = _paciente_recebe_preco(pool, quando=_br(21, 15))
+    vac.rodar(pool, agora=_br(21, 15, 5))
+    _msg(pool, conv, "in", "Vou ver, obrigada", _br(21, 16, 30))
+    _msg(pool, conv, "out", "Fico no aguardo 😊", _br(21, 16, 35))
+    vac.rodar(pool, agora=_br(22, 8, 5))
+    assert envios == []
+    with pool.connection() as c:
+        est = c.execute("select estado from voltar_a_chamar_toques where toque=1").fetchone()[0]
+    assert est == "pulado"
+    vac.rodar(pool, agora=_br(22, 15, 5))            # +1 dia
+    assert len(envios) == 1 and "dúvida" in envios[0]["texto"]
+
+
+def test_um_por_dia_tambem_na_tela_e_no_clique(pool, envios):
+    """O toque 2 ficou esperando o clique até quinta; o 3 vence no mesmo dia. Depois
+    de mandar o 2, o 3 não aparece nem sai clicando."""
+    _modo(pool, CLINICA, "sugere")
+    _paciente_recebe_preco(pool)                     # segunda 10h
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    with pool.connection() as c:
+        t2, t3 = [r[0] for r in c.execute(
+            "select id from voltar_a_chamar_toques where toque in (2,3) order by toque").fetchall()]
+        # o 3 vence quinta 10h; o 2 continua pendente (ninguém clicou)
+        c.execute("update voltar_a_chamar_toques set estado='pendente' where id=%s", (t2,))
+        c.commit()
+    assert vac.mandar_sugerido(pool, CLINICA, t2, None, agora=_br(24, 9))["ok"]
+    with pool.connection() as c:
+        tela = vac.hoje(c, CLINICA, _br(24, 13, 5), vac.config(c, CLINICA))
+    assert tela["voltar"] == []
+    assert vac.mandar_sugerido(pool, CLINICA, t3, None, agora=_br(24, 13, 5)) == {
+        "ok": False, "erro": "hoje_ja"}
+    # e o enviar direto também recusa no mesmo dia
+    with pool.connection() as c:
+        r = vac.enviar(c, CLINICA, t3, vac.config(c, CLINICA), por="recepcao", agora=_br(24, 13, 6))
+    assert r == {"ok": False, "erro": "hoje_ja"}
+    assert len(envios) == 1
+
+
+def test_mandar_com_modo_desligado_nao_sai(pool, envios):
+    _modo(pool, CLINICA, "sugere")
+    _paciente_recebe_preco(pool)
+    vac.rodar(pool, agora=_br(21, 13, 5))
+    with pool.connection() as c:
+        tid = c.execute("select id from voltar_a_chamar_toques where toque=1").fetchone()[0]
+    _modo(pool, CLINICA, "off")
+    assert vac.mandar_sugerido(pool, CLINICA, tid, None, agora=_br(21, 13, 6)) == {
+        "ok": False, "erro": "desligado"}
+    assert envios == []
+
+
+def test_mandar_reconfere_sair_na_hora_do_clique(pool, envios):
+    """A tela ficou aberta; o paciente respondeu SAIR depois. O clique não manda."""
+    _modo(pool, CLINICA, "sugere")
+    _, conv = _paciente_recebe_preco(pool)
+    vac.rodar(pool, agora=_br(21, 13, 5))
+    with pool.connection() as c:
+        tid = c.execute("select id from voltar_a_chamar_toques where toque=1").fetchone()[0]
+    _msg(pool, conv, "in", "Sair", _br(21, 13, 6))
+    assert vac.mandar_sugerido(pool, CLINICA, tid, None, agora=_br(21, 13, 7))["ok"] is False
+    assert envios == []
+
+
+def test_foto_ou_pergunta_sem_interrogacao_no_bloco_segura_o_toque(pool, envios):
+    _modo(pool, CLINICA, "ligado")
+    _, conv = _paciente_recebe_preco(pool)
+    _msg(pool, conv, "in", "Tem horário sábado?", _br(21, 10, 40))
+    _msg(pool, conv, "in", "ou segunda cedo", _br(21, 10, 41))
+    _, conv2 = _paciente_recebe_preco(pool, fone="5586999990002", nome="Bia")
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, midia_tipo, criado_em)
+                     values (%s,'whatsapp','in','lead','📷 Foto','imagem',%s)""", (conv2, _br(21, 10, 40)))
+        c.commit()
+    for dia, h in ((21, 14), (22, 10), (24, 10)):
+        vac.rodar(pool, agora=_br(dia, h, 5))
+    assert envios == []
+    with pool.connection() as c:
+        tela = vac.hoje(c, CLINICA, _br(24, 10, 10), vac.config(c, CLINICA))
+    assert tela["voltar"] == []
+
+
+def test_placar_conta_quem_marca_depois_de_7_dias_e_mantem_quem_saiu(pool, sem_envio):
+    _modo(pool, CLINICA, "sugere")
+    _, conv1 = _paciente_recebe_preco(pool, fone="5586999990011", quando=_br(2, 10))
+    _msg(pool, conv1, "out", "Prontinho!! Te espero", _br(12, 10))          # 10 dias depois
+    lead2, _ = _paciente_recebe_preco(pool, fone="5586999990012", quando=_br(3, 10))
+    with pool.connection() as c:                                           # card agendado
+        c.execute("update prospeccao set status='qualificado' where id=%s", (lead2,))
+        c.execute("""insert into voltar_a_chamar_bloqueios (conta_id, numero8, motivo)
+                     values (%s,'99990013','saiu'),(%s,'99990014','nao_paciente')""",
+                  (CLINICA, CLINICA))
+        c.commit()
+    _paciente_recebe_preco(pool, fone="5586999990013", quando=_br(4, 10))   # pediu pra sair
+    _paciente_recebe_preco(pool, fone="5586999990014", quando=_br(5, 10))   # não é paciente
+    with pool.connection() as c:
+        p = vac.placar(c, CLINICA, _br(1, 0), _br(30, 0), vac.config(c, CLINICA))
+    assert (p["receberam"], p["marcaram"]) == (3, 2)

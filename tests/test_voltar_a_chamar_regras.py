@@ -102,6 +102,10 @@ def test_marcou_e_sair():
     assert vac.quer_sair("Parar")
     assert not vac.quer_sair("quero sair da lista de espera e marcar")  # não começa com sair
     assert not vac.quer_sair("pareceu caro")
+    # a mensagem inteira tem que ser o pedido de saída (revisão do #843)
+    assert not vac.quer_sair("Não quero esperar muito, tem horário essa semana?")
+    assert not vac.quer_sair("Sair do trabalho às 18h, tem 19h?")
+    assert vac.quer_sair("Não quero mais.")
 
 
 def test_so_a_clinica_tem_o_padrao():

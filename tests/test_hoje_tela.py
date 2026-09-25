@@ -103,7 +103,7 @@ def test_vendedor_nao_ve_nem_salva_o_modo(cli):
     r = cli.get("/painel/hoje")
     assert r.status_code == 200 and 'action="/painel/hoje/config"' not in r.text
     r = cli.post("/painel/hoje/config", data={"modo": "ligado"})
-    assert "erro=" in r.headers["location"]
+    assert r.headers["location"] == "/painel/hoje"
     with cli.pool.connection() as c:
         assert c.execute("select count(*) from voltar_a_chamar_config").fetchone()[0] == 0
 
@@ -125,7 +125,7 @@ def test_dono_liga_e_grava_quando_ligou(cli):
 def test_texto_com_saude_nao_salva(cli):
     r = cli.post("/painel/hoje/config", data={"modo": "sugere",
                                                "t1": "Oi, {nome}! Ainda quer tratar a acne?"})
-    assert "erro=" in r.headers["location"]
+    assert r.headers["location"] == "/painel/hoje"
     with cli.pool.connection() as c:
         assert c.execute("select count(*) from voltar_a_chamar_config").fetchone()[0] == 0
 
@@ -159,3 +159,30 @@ def test_nao_e_paciente_some_da_tela(cli, pool):  # noqa: F811
     html = cli.get("/painel/hoje?aviso=nao_paciente").text
     assert "esse número não recebe mais toque nenhum" in html
     assert f"/painel/hoje/toque/{tid}/mandar" not in html
+
+
+# ------------------------------------------------------------------ achados da revisão do #843
+
+def test_nome_e_mensagem_do_whatsapp_saem_escapados(cli, pool):  # noqa: F811
+    """Qualquer número manda mensagem pra clínica: nada dela pode virar HTML na tela."""
+    _modo(pool, CLINICA, "sugere")
+    lead, conv = _paciente_recebe_preco(pool, nome='<img src=x onerror="alert(1)">')
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em)
+                     values (%s,'whatsapp','in','lead','<script>alert(2)</script>', now())""", (conv,))
+        c.commit()
+    html = cli.get("/painel/hoje").text
+    assert "<script>alert(2)" not in html and "&lt;script&gt;alert(2)" in html
+    assert '<img src=x onerror' not in html
+
+
+def test_erro_da_url_nao_vai_pra_tela(cli):
+    html = cli.get("/painel/hoje?erro=<script>alert(1)</script>").text
+    assert "alert(1)" not in html
+
+
+def test_erro_de_validacao_aparece_uma_vez(cli):
+    r = cli.post("/painel/hoje/config", data={"modo": "sugere", "t1": "Oi, {nome}! E a acne?"})
+    assert r.headers["location"] == "/painel/hoje"
+    assert "não pode falar de saúde" in cli.get("/painel/hoje").text
+    assert "não pode falar de saúde" not in cli.get("/painel/hoje").text

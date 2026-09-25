@@ -635,6 +635,16 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
         txt = f"{r['etapa']} {verbo} em {r['obra']}: a obra está em {r['pct']}%."
         if r["status"] == "pronta":
             txt += " Todas as etapas feitas — marquei a obra como PRONTA."
+        # REFORMA: a etapa concluída libera a parcela ligada a ela (finance/obra_reforma)
+        if r["concluida"] and o["tipo"] == "reforma":
+            try:
+                from . import obra_reforma as orf
+                for p in orf.parcelas_liberadas(pool, conta_id, ob.obter_obra(pool, conta_id, o["id"])):
+                    if p["etapa"] == r["etapa"]:
+                        txt += (f" A parcela \"{p['rotulo']}\" ({ob._brl(p['valor_centavos'])}) "
+                                "já pode ser cobrada do cliente.")
+            except Exception:  # noqa: BLE001 — sem a 355, sem parcela
+                pass
         return txt
 
     def marcar_documento(e: dict) -> str:

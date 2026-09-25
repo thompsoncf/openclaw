@@ -598,7 +598,32 @@ def bloco_persona(pool, conta_id: int) -> str:
             "vez, sem insistir), ofereça distribuir: gastos_sem_obra lista, e cada um vai "
             "com por_na_obra ou dividir_entre_obras.")
     linhas += _bloco_das_casas(pool, conta_id, obras)
+    linhas += _bloco_das_reformas(pool, conta_id, obras)
     return "\n".join(linhas)
+
+
+def _bloco_das_reformas(pool, conta_id: int, obras: list[dict]) -> list[str]:
+    """As parcelas de reforma que a etapa concluída já liberou e ainda estão em
+    aberto (finance/obra_reforma.py). Vazio sem a 355."""
+    reformas = [o for o in obras if o["tipo"] == "reforma"]
+    if not reformas:
+        return []
+    try:
+        from . import obra_reforma as _orf
+        liberadas = []
+        for o in reformas:
+            completa = obter_obra(pool, conta_id, o["id"])
+            for p in _orf.parcelas_liberadas(pool, conta_id, completa):
+                liberadas.append(f"{o['nome']}: \"{p['rotulo']}\" {_brl(p['valor_centavos'])} "
+                                 f"({p['etapa'].lower()} concluída)")
+    except Exception:  # noqa: BLE001
+        return []
+    linhas = ["- REFORMA: o orçamento com aceite do cliente e os aditivos se fazem na ficha da "
+              "obra, no painel. Serviço extra no meio da obra NÃO se cobra sem aditivo aceito."]
+    if liberadas:
+        linhas.append("- PARCELAS PRA COBRAR (a etapa já foi feita): " + " | ".join(liberadas)
+                      + ". Ofereça cobrar, uma vez, sem insistir.")
+    return linhas
 
 
 def _bloco_das_casas(pool, conta_id: int, obras: list[dict]) -> list[str]:

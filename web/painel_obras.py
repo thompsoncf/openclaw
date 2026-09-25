@@ -21,12 +21,16 @@ editar, marcar etapa e pôr um gasto na obra. Nada apaga lançamento.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from jinja2 import Environment
 
 from db.conexao import get_pool
+from finance import obra_reforma as orf
 from finance import obra_venda as ov
 from finance import obras as ob
 from finance import raio_x_perfil as rxp
@@ -180,9 +184,11 @@ def ficha(request: Request, obra_id: int):
     if not o:
         return RedirectResponse("/painel/obras", status_code=303)
     sit = ov.situacao_da_casa(get_pool(), conta[0], o) if o["tipo"] == "casa" else None
+    orc = _orcamento_da_reforma(get_pool(), conta[0], o) if o["tipo"] == "reforma" else None
     return _render("obra", request, titulo=o["nome"], secao_ativa="obras", brl=_brl,
                    o=o, tipos=ob.ROTULO_TIPO, status=ob.ROTULO_STATUS,
-                   rotulo_custo=ob.ROTULO_CUSTO, sit=sit,
+                   rotulo_custo=ob.ROTULO_CUSTO, sit=sit, orc=orc,
+                   tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, modelos=orf.MODELOS,
                    status_doc=ov.STATUS_DOC, modalidades=ov.MODALIDADES,
                    situacoes=[(k, ov.ROTULO_SITUACAO[k]) for k in ov.SITUACOES],
                    erro=(request.query_params.get("erro") or "").strip())
@@ -265,6 +271,108 @@ def editar(request: Request, obra_id: int, nome: str = Form(""), tipo: str = For
     except ValueError as e:
         return _volta(f"/painel/obras/{obra_id}", str(e))
     return RedirectResponse(f"/painel/obras/{obra_id}", status_code=303)
+
+
+# ─────────────────────────────────────────────────────────────── o orçamento da reforma
+_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def _app_url() -> str:
+    """O endereço público, pro link do cliente: a mesma fonte dos e-mails."""
+    return os.environ.get("APP_URL", "https://app.zaq-ia.com").rstrip("/")
+
+
+def _orcamento_da_reforma(pool, conta_id: int, o: dict) -> dict:
+    """As versões (orçamento e aditivos), as parcelas que já podem ser cobradas e o
+    que o editor mostra: a versão em aberto, ou uma nova se não houver nenhuma."""
+    versoes = orf.orcamentos(pool, conta_id, o["id"])
+    liberadas = {(x["versao"], x["titulo_id"]) for x in orf.parcelas_liberadas(pool, conta_id, o)}
+    for v in versoes:
+        pagaveis = [p for p in v["parcelas"] if int(p.get("valor_centavos") or 0) > 0]
+        for p in v["parcelas"]:
+            p["liberada"] = False
+        for p, tid in zip(pagaveis, v["titulos"]):
+            p["liberada"] = (v["versao"], tid) in liberadas
+        if v["aceito_em"]:
+            v["aceito_em"] = v["aceito_em"].astimezone(_TZ)
+    aberta = versoes[-1] if versoes and versoes[-1]["status"] != "aceito" else None
+    editor = None
+    if aberta or not versoes:
+        base = aberta or {"id": None, "versao": 1, "status": "rascunho", "itens": [],
+                          "material_incluso": True, "prazo_dias": None,
+                          "modelo_pagamento": "etapas", "parcelas": [], "escopo": "",
+                          "garantia": orf.GARANTIA_PADRAO}
+        vazia = {"servico": "", "tipo": "mao_de_obra", "unidade": "m2", "quantidade": 0,
+                 "valor_unit_centavos": 0}
+        linhas = list(base["itens"]) + [dict(vazia) for _ in range(max(3, 6 - len(base["itens"])))]
+        parcelas = list(base["parcelas"]) or orf.parcelas_do_modelo(base["modelo_pagamento"],
+                                                                   o["etapas"])
+        editor = dict(base, linhas=linhas,
+                      parcelas_linhas=parcelas + [{"rotulo": "", "pct": 0, "etapa": None}])
+    return {"versoes": versoes, "editor": editor, "base": _app_url(),
+            "pode_aditivo": bool(versoes) and versoes[-1]["status"] == "aceito",
+            "nome_etapa": {e["chave"]: e["nome"] for e in o["etapas"]}}
+
+
+def _pct(txt: str) -> float:
+    try:
+        return float((txt or "0").replace(",", ".").replace("%", "").strip() or 0)
+    except ValueError:
+        return 0.0
+
+
+@router.post("/painel/obras/{obra_id}/orcamento")
+def salvar_orcamento(request: Request, obra_id: int, servico: list[str] = Form([]),
+                     tipo: list[str] = Form([]), unidade: list[str] = Form([]),
+                     quantidade: list[str] = Form([]), valor_unit: list[str] = Form([]),
+                     material_incluso: str = Form("1"), prazo_dias: str = Form(""),
+                     modelo_pagamento: str = Form("etapas"), usar_modelo: str = Form(""),
+                     p_rotulo: list[str] = Form([]), p_pct: list[str] = Form([]),
+                     p_etapa: list[str] = Form([]), escopo: str = Form(""),
+                     garantia: str = Form("")):
+    """`def` e não `async`, com as listas vindo do Form (test_event_loop_nao_trava)."""
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    itens = [{"servico": sv, "tipo": tp, "unidade": un, "quantidade": qt,
+              "valor_unit_centavos": _cent(vl) or 0}
+             for sv, tp, un, qt, vl in zip(servico, tipo, unidade, quantidade, valor_unit)]
+    parcelas = None if usar_modelo else [
+        {"rotulo": r, "pct": _pct(pc), "etapa": et or None}
+        for r, pc, et in zip(p_rotulo, p_pct, p_etapa) if r.strip() and _pct(pc) > 0]
+    prazo = int(prazo_dias) if prazo_dias.strip().isdigit() and int(prazo_dias) > 0 else None
+    try:
+        orf.salvar_rascunho(get_pool(), conta[0], obra_id, itens=itens,
+                            material_incluso=material_incluso == "1", prazo_dias=prazo,
+                            garantia=garantia, escopo=escopo,
+                            modelo_pagamento=modelo_pagamento, parcelas=parcelas or None)
+    except ValueError as e:
+        return _volta(f"/painel/obras/{obra_id}", str(e))
+    return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
+
+
+@router.post("/painel/obras/{obra_id}/orcamento/{orcamento_id}/enviar")
+def enviar_orcamento(request: Request, obra_id: int, orcamento_id: int):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        orf.enviar(get_pool(), conta[0], orcamento_id)
+    except ValueError as e:
+        return _volta(f"/painel/obras/{obra_id}", str(e))
+    return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
+
+
+@router.post("/painel/obras/{obra_id}/aditivo")
+def abrir_aditivo(request: Request, obra_id: int):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        orf.abrir_aditivo(get_pool(), conta[0], obra_id)
+    except ValueError as e:
+        return _volta(f"/painel/obras/{obra_id}", str(e))
+    return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
 
 
 @router.post("/painel/obras/{obra_id}/etapa")
@@ -538,6 +646,75 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
 </form></details>
 {% endif %}
 
+{% if orc is not none %}
+<h3 class="ob-sec" id="orcamento">O orçamento</h3>
+{% for v in orc.versoes %}<div class="ob-box">
+  <div class="ob-acoes" style="justify-content:space-between">
+    <b>{{ 'Orçamento' if v.versao == 1 else 'Aditivo ' ~ (v.versao - 1) }} · {{ brl(v.total_centavos) }}</b>
+    <span class="ob-pill{{ ' pronta' if v.status == 'aceito' }}">{{ v.rotulo_status }}</span>
+  </div>
+  <div class="ob-mut" style="margin:.3rem 0">mão de obra {{ brl(v.totais.mao_de_obra) }} · material {{ brl(v.totais.material) }}
+    · equipamento {{ brl(v.totais.equipamento) }}{% if v.prazo_dias %} · prazo {{ v.prazo_dias }} dias{% endif %} · {{ v.rotulo_modelo }}</div>
+  {% if v.token and v.status in ('enviado', 'aceito', 'recusado') %}
+  <div class="ob-acoes" style="margin:.3rem 0">
+    <input readonly value="{{ orc.base }}/orcamento-obra/{{ v.token }}" onclick="this.select()" style="flex:1 1 260px">
+    <a class="ob-bt" target="_blank" rel="noopener" href="https://wa.me/?text={{ ('Segue o orçamento da reforma: ' ~ orc.base ~ '/orcamento-obra/' ~ v.token)|urlencode }}">Mandar no WhatsApp</a>
+  </div>{% endif %}
+  {% if v.status == 'aceito' %}<div class="ob-mut">Aceito por <b>{{ v.aceito_nome|e }}</b> em {{ v.aceito_em.strftime('%d/%m/%Y %H:%M') }}.
+    As parcelas viraram contas a receber no centro desta obra.</div>{% endif %}
+  {% if v.status == 'enviado' %}<div class="ob-mut">Enviado · vale até {{ v.validade_ate.strftime('%d/%m/%Y') if v.validade_ate }}.
+    Mudar aqui muda o que o cliente vê no mesmo link.</div>{% endif %}
+  <table class="ob-tab" style="margin-top:.4rem"><tr><th>Parcela</th><th>Quando</th><th style="text-align:right">Valor</th></tr>
+  {% for p in v.parcelas %}<tr><td>{{ p.rotulo|e }}{% if p.liberada %} <span class="ob-chip">pode cobrar</span>{% endif %}</td>
+    <td class="ob-mut">{{ ('ao concluir ' ~ (orc.nome_etapa[p.etapa] or p.etapa)|lower) if p.etapa else 'na assinatura' }}</td>
+    <td class="v">{{ brl(p.valor_centavos) }}</td></tr>{% endfor %}
+  </table>
+  {% if v.status in ('rascunho', 'enviado', 'recusado') %}
+  <form method="post" action="/painel/obras/{{ o.id }}/orcamento/{{ v.id }}/enviar" style="margin-top:.5rem">
+    <button class="ob-bt prim">{{ 'Gerar o link pro cliente' if v.status != 'enviado' else 'Renovar a validade do link' }}</button></form>{% endif %}
+</div>{% endfor %}
+
+{% if orc.pode_aditivo %}<form method="post" action="/painel/obras/{{ o.id }}/aditivo" class="ob-box ob-acoes">
+  <span>Serviço extra no meio da obra? Ele entra como <b>aditivo</b>, com link e aceite próprios.</span>
+  <button class="ob-bt">Abrir aditivo</button></form>{% endif %}
+
+{% if orc.editor %}{% set ed = orc.editor %}
+<details class="ob-box"{% if not orc.versoes or ed.status == 'rascunho' %} open{% endif %}>
+<summary>{{ ('Editar o ' ~ ('orçamento' if ed.versao == 1 else 'aditivo ' ~ (ed.versao - 1))) if ed.id else 'Montar o orçamento' }}</summary>
+<form method="post" action="/painel/obras/{{ o.id }}/orcamento">
+  <p class="ob-mut" style="margin:.5rem 0">Mão de obra, material e equipamento separados — é o que o Código de Defesa do
+  Consumidor (art. 40) pede no orçamento. Linha sem serviço é ignorada.</p>
+  <div class="ob-rolo"><table class="ob-tab">
+  <tr><th>Serviço</th><th>Tipo</th><th>Unid.</th><th>Qtd</th><th>Valor unit. (R$)</th></tr>
+  {% for it in ed.linhas %}<tr>
+    <td><input name="servico" value="{{ it.servico|e }}" placeholder="ex.: assentamento de piso"></td>
+    <td><select name="tipo">{% for k, r in tipos_item.items() %}<option value="{{ k }}"{{ ' selected' if k == it.tipo }}>{{ r }}</option>{% endfor %}</select></td>
+    <td><select name="unidade">{% for k, r in unidades.items() %}<option value="{{ k }}"{{ ' selected' if k == it.unidade }}>{{ r }}</option>{% endfor %}</select></td>
+    <td><input name="quantidade" value="{{ '%g'|format(it.quantidade) if it.quantidade else '' }}" inputmode="decimal" style="max-width:5rem"></td>
+    <td><input name="valor_unit" value="{{ '%.2f'|format(it.valor_unit_centavos / 100) if it.valor_unit_centavos else '' }}" inputmode="decimal" style="max-width:8rem"></td>
+  </tr>{% endfor %}
+  </table></div>
+  <div class="ob-grid">
+    <div><label>Material incluso?</label><select name="material_incluso"><option value="1"{{ ' selected' if ed.material_incluso }}>Sim, está no preço</option><option value="0"{{ ' selected' if not ed.material_incluso }}>Não, o cliente compra</option></select></div>
+    <div><label>Prazo (dias)</label><input name="prazo_dias" value="{{ ed.prazo_dias or '' }}" inputmode="numeric" placeholder="{{ 'Reforma Casa Brasil: 55' }}"></div>
+    <div><label>Forma de pagamento</label><select name="modelo_pagamento">{% for k, r in modelos.items() %}<option value="{{ k }}"{{ ' selected' if k == ed.modelo_pagamento }}>{{ r }}</option>{% endfor %}</select></div>
+  </div>
+  <p style="margin:.7rem 0 .3rem"><b>Parcelas</b> <label class="ob-mut" style="display:inline"><input type="checkbox" name="usar_modelo" value="1" style="width:auto"{{ ' checked' if not ed.id }}> usar as parcelas da forma de pagamento escolhida</label></p>
+  <table class="ob-tab"><tr><th>Parcela</th><th>%</th><th>Quando</th></tr>
+  {% for p in ed.parcelas_linhas %}<tr>
+    <td><input name="p_rotulo" value="{{ p.rotulo|e }}"></td>
+    <td><input name="p_pct" value="{{ '%g'|format(p.pct) if p.pct else '' }}" inputmode="decimal" style="max-width:5rem"></td>
+    <td><select name="p_etapa"><option value="">na assinatura</option>{% for e in o.etapas %}<option value="{{ e.chave|e }}"{{ ' selected' if e.chave == p.etapa }}>ao concluir {{ e.nome|e|lower }}</option>{% endfor %}</select></td>
+  </tr>{% endfor %}
+  </table>
+  <div style="margin-top:.6rem"><label>Escopo (o que está e o que não está no serviço)</label><textarea name="escopo" rows="2">{{ ed.escopo|e }}</textarea></div>
+  <div style="margin-top:.6rem"><label>Garantia</label><textarea name="garantia" rows="2">{{ ed.garantia|e }}</textarea></div>
+  <p class="ob-mut" style="margin:.6rem 0">As cláusulas que vão junto (material, prazo, serviço extra, ART/RRT, garantia) são um modelo:
+  leia antes de mandar. O cliente vê tudo no link e aceita por lá, com nome e data registrados.</p>
+  <button class="ob-bt prim">Salvar o orçamento</button>
+</form></details>{% endif %}
+{% endif %}
+
 <h3 class="ob-sec" id="etapas">Etapas · {{ o.pct }}%</h3>
 <div class="ob-bar" style="height:9px;margin-bottom:.6rem"><i style="width:{{ o.pct }}%"></i></div>
 <div class="ob-etapas">{% for e in o.etapas %}
@@ -593,3 +770,116 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
 
 _env.loader.mapping["obras"] = _TPL_LISTA
 _env.loader.mapping["obra"] = _TPL_FICHA
+
+
+# ─────────────────────────────────────────────────────────────── o link do cliente
+#
+# PÚBLICO, sem login: o cliente da reforma abre pelo link que a empresa mandou e
+# aceita por ali, como na proposta de hoje (web/proposta.py). Fora de /painel, o
+# gate de papel não se aplica; quem escopa é o TOKEN. Environment próprio com
+# autoescape: tudo o que aparece aqui foi digitado por alguém.
+_env_pub = Environment(autoescape=True)
+
+
+def _ip(request: Request) -> str:
+    xf = request.headers.get("x-forwarded-for", "")
+    if xf:
+        return xf.split(",")[0].strip()[:60]
+    return (request.client.host if request.client else "")[:60]
+
+
+@router.get("/orcamento-obra/{token}", response_class=HTMLResponse)
+def orcamento_publico(request: Request, token: str):
+    orc = orf.por_token(get_pool(), token)
+    if not orc:
+        return HTMLResponse(_env_pub.from_string(_TPL_PUB_404).render(), status_code=404)
+    q = request.query_params
+    return HTMLResponse(_env_pub.from_string(_TPL_PUB).render(
+        o=orc, brl=_brl, tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES,
+        erro=(q.get("erro") or "").strip(), acabou=(q.get("ok") or "").strip()))
+
+
+@router.post("/orcamento-obra/{token}/aceitar")
+def aceitar_orcamento(request: Request, token: str, nome: str = Form(""),
+                      doc: str = Form(""), concordo: str = Form("")):
+    if not concordo:
+        return RedirectResponse(f"/orcamento-obra/{token}?erro=Marque%20que%20leu%20e%20aceita.",
+                                status_code=303)
+    if not nome.strip():
+        return RedirectResponse(f"/orcamento-obra/{token}?erro=Escreva%20seu%20nome%20completo.",
+                                status_code=303)
+    ok = orf.aceitar(get_pool(), token, nome, doc, _ip(request))
+    return RedirectResponse(f"/orcamento-obra/{token}?ok={'aceito' if ok else 'nao'}",
+                            status_code=303)
+
+
+@router.post("/orcamento-obra/{token}/recusar")
+def recusar_orcamento(request: Request, token: str):
+    orf.recusar(get_pool(), token)
+    return RedirectResponse(f"/orcamento-obra/{token}?ok=recusado", status_code=303)
+
+
+_TPL_PUB_404 = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Orçamento</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:640px;margin:3rem auto;padding:0 1rem;color:#1d2433">
+<h2>Orçamento não encontrado</h2><p>O link pode ter sido digitado errado. Peça um novo a quem mandou.</p></body></html>"""
+
+_TPL_PUB = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orçamento · {{ o.obra_nome }}</title>
+<style>
+body{margin:0;background:#f4f2ee;font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1d2433}
+.pg{max-width:760px;margin:0 auto;padding:1.4rem 1rem 3rem}
+h1{font-size:1.35rem;margin:.2rem 0}.mut{color:#667085;font-size:.88rem}
+.cx{background:#fff;border:1px solid #e4e0d8;border-radius:12px;padding:1rem 1.1rem;margin:.9rem 0}
+table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{padding:.45rem .4rem;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+th{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#667085}td.v{text-align:right;white-space:nowrap}
+.tot{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.5rem}
+.tot div{background:#faf8f4;border-radius:9px;padding:.5rem .7rem}.tot b{display:block;font-size:1.1rem}
+.ok{background:#e8f5ee;border:1px solid #bfe3d0;color:#155c3b}.err{background:#fdecea;border:1px solid #f5c6c0;color:#8c332c}
+label{display:block;font-size:.8rem;color:#667085;margin:.6rem 0 .2rem}input[type=text]{width:100%;box-sizing:border-box;padding:.55rem;border:1px solid #d0d5dd;border-radius:8px;font-size:1rem}
+button{padding:.65rem 1.1rem;border-radius:9px;border:0;font-size:1rem;cursor:pointer}
+.sim{background:#1c7a4f;color:#fff}.nao{background:transparent;color:#667085;text-decoration:underline}
+</style></head><body><div class="pg">
+<div class="mut">{{ o.empresa }}</div>
+<h1>{{ 'Orçamento' if o.versao == 1 else 'Aditivo ' ~ (o.versao - 1) }} · {{ o.obra_nome }}</h1>
+{% if o.obra_endereco %}<div class="mut">{{ o.obra_endereco }}</div>{% endif %}
+
+{% if acabou == 'aceito' or (o.status == 'aceito' and not acabou) %}<div class="cx ok">Aceito por <b>{{ o.aceito_nome }}</b>. Obrigado!</div>
+{% elif acabou == 'recusado' or o.status == 'recusado' %}<div class="cx">Você recusou este orçamento. Se mudar de ideia, fale com a empresa.</div>
+{% elif acabou == 'nao' %}<div class="cx err">Não deu pra registrar o aceite: o orçamento já foi respondido ou a validade venceu.</div>{% endif %}
+{% if erro %}<div class="cx err">{{ erro }}</div>{% endif %}
+
+<div class="cx"><table>
+<tr><th>Serviço</th><th>Tipo</th><th style="text-align:right">Qtd</th><th style="text-align:right">Unit.</th><th style="text-align:right">Total</th></tr>
+{% for it in o.itens %}<tr><td>{{ it.servico }}</td><td class="mut">{{ tipos_item[it.tipo] }}</td>
+<td class="v">{{ '%g'|format(it.quantidade) }} {{ unidades[it.unidade] }}</td><td class="v">{{ brl(it.valor_unit_centavos) }}</td>
+<td class="v">{{ brl(it.subtotal_centavos) }}</td></tr>{% endfor %}
+</table>
+<div class="tot" style="margin-top:.8rem">
+  <div><span class="mut">Mão de obra</span><b>{{ brl(o.totais.mao_de_obra) }}</b></div>
+  <div><span class="mut">Material</span><b>{{ brl(o.totais.material) }}</b></div>
+  <div><span class="mut">Equipamento</span><b>{{ brl(o.totais.equipamento) }}</b></div>
+  <div><span class="mut">Total</span><b>{{ brl(o.total_centavos) }}</b></div>
+</div></div>
+
+<div class="cx"><b>Como paga</b><table style="margin-top:.4rem">
+{% for p in o.parcelas %}<tr><td>{{ p.rotulo }}</td><td class="mut">{{ ('ao concluir ' ~ (p.etapa_nome or p.etapa)|lower) if p.etapa else 'na assinatura' }}</td><td class="v">{{ brl(p.valor_centavos) }}</td></tr>{% endfor %}
+</table></div>
+
+<div class="cx">{% for t, txt in o.clausulas %}<p><b>{{ t }}.</b> {{ txt }}</p>{% endfor %}
+{% if o.validade_ate %}<p class="mut">Este orçamento vale até {{ o.validade_ate.strftime('%d/%m/%Y') }}.</p>{% endif %}</div>
+
+{% if o.status == 'enviado' and not o.vencido and acabou not in ('aceito', 'recusado') %}
+<form class="cx" method="post" action="/orcamento-obra/{{ o.token }}/aceitar">
+  <b>Aceitar o orçamento</b>
+  <label>Seu nome completo</label><input type="text" name="nome" required>
+  <label>CPF (opcional)</label><input type="text" name="doc" inputmode="numeric">
+  <label style="display:flex;gap:.5rem;align-items:center;font-size:.9rem;color:#1d2433"><input type="checkbox" name="concordo" value="1"> Li o orçamento e as condições, e aceito.</label>
+  <div style="margin-top:.8rem;display:flex;gap:.6rem;align-items:center">
+    <button class="sim">Aceitar</button>
+    <button class="nao" formaction="/orcamento-obra/{{ o.token }}/recusar" formnovalidate>Recusar</button>
+  </div>
+  <p class="mut" style="margin:.6rem 0 0">O aceite fica registrado com o seu nome, a data e o endereço de internet de onde foi feito.</p>
+</form>{% elif o.vencido %}<div class="cx err">A validade deste orçamento venceu. Peça um novo à empresa.</div>{% endif %}
+</div></body></html>"""

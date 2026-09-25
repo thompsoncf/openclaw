@@ -1189,7 +1189,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    pergunta_data=(_evl.PERGUNTA_DATA if modo_evento else ""),
                    status=status_tpl, colunas_tpl=colunas_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
-                   ia_resumo=_resumo_ia_ligado(ctx["conta"]),
+                   ia_resumo=_resumo_ia_ligado(ctx.get("conta")),
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
                    total_alvos=len(rows) - len(outros_vend), tem_places=fontes.tem_chave_places(),
                    tem_maps_js=fontes.tem_chave_maps_js(), maps_js_key=fontes.chave_maps_js(),
@@ -8957,7 +8957,7 @@ def prospeccao_resumo(request: Request, alvo_id: int):
         "canais_contato": [{"ic": x["ic"], "label": x["label"], "respondeu": x["respondeu"]}
                             for x in canais_contato],
         # o botão "✨ Resumo IA" da janela (finance/resumo_ia.py)
-        "ia_resumo": _resumo_ia_ligado(ctx["conta"]),
+        "ia_resumo": _resumo_ia_ligado(ctx.get("conta")),
         "atividades": [{"tipo_rot": x["tipo_rot"], "resultado_rot": x["resultado_rot"],
                          "descricao": x["descricao"], "cor": x["cor"],
                          "quando": x["criado_em"].strftime("%d/%m %H:%M") if x["criado_em"] else ""}

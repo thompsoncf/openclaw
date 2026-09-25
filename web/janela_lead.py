@@ -284,7 +284,9 @@ body.lp-aberta .wa-suporte{visibility:hidden}
    a IA escreveu; verde é fato do sistema (quantas mensagens, com quem está a bola).
    Todo botão com margin:0 e width:auto — o button{width:100%} global vaza aqui. */
 .lpia-ic{color:var(--roxo)}
-.lpia-re{margin:0 0 0 auto;width:28px;height:28px;border-radius:50%;border:1px solid var(--borda);background:none;color:var(--txt-mut);cursor:pointer;font-size:.85rem;flex:none}
+/* o button global do painel tem altura mínima de toque; aqui a janela é densa */
+.lpia .lpia-re,.lpia .lpia-bt,.lpia .lpia-voto button,.lpia .lpia-faixa button,.lpia .lpia-erro button{min-height:0;line-height:1.25}
+.lpia-re{margin:0 0 0 auto;width:28px;height:28px;padding:0;border-radius:50%;border:1px solid var(--borda);background:none;color:var(--txt-mut);cursor:pointer;font-size:.85rem;flex:none}
 .lpia-re:hover{color:var(--txt);border-color:var(--roxo)}
 .lpia-fatos{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.5rem}
 .lpia-chip{font-size:.7rem;border-radius:999px;padding:.12rem .55rem;border:1px solid var(--borda);color:var(--txt-mut);white-space:nowrap}

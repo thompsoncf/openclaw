@@ -226,3 +226,125 @@ def test_a_janela_nao_depende_de_nome_que_pode_nao_existir():
                 f"Nas telas que carregam só a janela (Comunicação, ficha) isso é "
                 f"ReferenceError na primeira linha da função — e o botão morre "
                 f"calado, sem alerta nenhum pra quem usa.")
+
+
+# ── a janela INTEIRA à vista (25/09/2026) ─────────────────────────────────────
+# O print do dono: o "Abrir ficha" do Follow-up fica no canto direito do cartão,
+# e com o cartão no meio da tela sobravam ~300px embaixo. A janela abria ali, com
+# essa altura — e o topo dela (nome, Ligar/WhatsApp, os dois grupos de situação)
+# não encolhe: `overflow:hidden` cortava "Encerrar" e o histórico, sem barra pra
+# rolar. E o botão de suporte do WhatsApp (z-index 9999) cobria o canto.
+
+#: um resumo ALTO de propósito: duas atividades e o evento, como o da Liane
+_RESUMO_ALTO = dict(_RESUMO, evento_fmt="🎂 Aniversário · 12/02/2028 · 100 convidados",
+                    evento_tipo="Aniversário", evento_iso="2028-02-12", evento_convidados=100,
+                    valor_fmt="R$ 12.500,00", telefone="86999990000",
+                    atividades=[{"tipo_rot": "WhatsApp", "resultado_rot": "Interessado",
+                                 "descricao": "Mandou a lista de convidados", "cor": "#3ee0a6",
+                                 "quando": "21/09 10:12"},
+                                {"tipo_rot": "Ligação", "resultado_rot": "Retornar",
+                                 "descricao": "Pediu pra ligar depois das 18h", "cor": "#e0b45f",
+                                 "quando": "19/09 16:40"}])
+
+_ABRE_EM = """(a) => {
+  window.fetch = function(){
+    return Promise.resolve({ok: true, status: 200, headers: {get: function(){ return null; }},
+      text: function(){ return Promise.resolve(JSON.stringify(a.resumo)); }});
+  };
+  if (!document.querySelector('.wa-suporte')) {
+    var w = document.createElement('a'); w.className = 'wa-suporte'; document.body.appendChild(w);
+  }
+  var d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:' + a.top + 'px;left:' + a.left + 'px';
+  d.innerHTML = '<button type="button" id="zaq-alvo" style="width:auto;margin:0">Abrir ficha</button>';
+  document.body.appendChild(d);
+  kbAbrirLead(null, 1438, document.getElementById('zaq-alvo'));
+  return true;
+}"""
+
+_MEDE = """() => {
+  var pop = document.querySelector('.leadpop'), r = pop.getBoundingClientRect();
+  var b = document.getElementById('zaq-alvo').getBoundingClientRect();
+  var cobre = !(r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom);
+  var fim = pop.querySelector('.lp-sit-h.fim');
+  var ws = document.querySelector('.wa-suporte');
+  return {top: r.top, bottom: r.bottom, left: r.left, right: r.right,
+          vh: innerHeight, vw: innerWidth,
+          escondido: pop.scrollHeight - pop.clientHeight,
+          rola: getComputedStyle(pop).overflowY,
+          encerrar: !!fim, texto: pop.innerText,
+          suporte: ws ? getComputedStyle(ws).visibility : null, cobre: cobre};
+}"""
+
+
+def _abre_em(navegador, tmp_path, *, top, left, largura=1280, altura=860):
+    alvo = tmp_path / "janela_posicao.html"
+    alvo.write_text(_render("prospeccao"), encoding="utf-8")
+    pag = navegador.new_page(viewport={"width": largura, "height": altura})
+    pag.goto(alvo.as_uri())
+    pag.wait_for_timeout(200)
+    pag.evaluate(_ABRE_EM, {"resumo": _RESUMO_ALTO, "top": top, "left": left})
+    pag.wait_for_timeout(350)
+    m = pag.evaluate(_MEDE)
+    fechou = pag.evaluate("() => { kbFecharLead(); var w = document.querySelector('.wa-suporte');"
+                          " return w ? getComputedStyle(w).visibility : null; }")
+    pag.close()
+    return m, fechou
+
+
+@pytest.mark.parametrize("onde,top,left", [
+    ("o botão do print: canto direito, meio da tela", 505, 1126),
+    ("botão colado no pé da tela", 820, 1126),
+    ("botão no topo", 60, 300),
+    ("botão na esquerda, meio da tela", 430, 40),
+])
+def test_a_janela_abre_inteira_a_vista(navegador, tmp_path, onde, top, left):
+    """Em tela de computador comum a janela cabe inteira — então ela TEM que
+    aparecer inteira, de "Liane" até o histórico, sem nada escondido."""
+    m, _ = _abre_em(navegador, tmp_path, top=top, left=left)
+    assert m["top"] >= 0 and m["bottom"] <= m["vh"] + 0.5, (
+        f"{onde}: a janela saiu da tela ({m['top']:.0f}→{m['bottom']:.0f} de {m['vh']})")
+    assert m["left"] >= 0 and m["right"] <= m["vw"] + 0.5, f"{onde}: saiu pela lateral"
+    assert m["escondido"] <= 1, (
+        f"{onde}: {m['escondido']}px da janela ficaram escondidos — é o corte do print")
+    assert m["encerrar"] and "Pediu pra ligar" in m["texto"], (
+        f"{onde}: 'Encerrar' ou o histórico não chegaram à tela")
+    assert not m["cobre"], (
+        f"{onde}: a janela abriu POR CIMA do botão que a abriu — o ponteiro fica "
+        f"parado em cima de um chip, e um clique duplo muda a situação sem querer")
+
+
+def test_em_tela_baixa_a_janela_rola_em_vez_de_cortar(navegador, tmp_path):
+    """Notebook pequeno com o navegador em janela: nem a tela inteira basta. Aí a
+    janela ocupa a altura toda e ROLA — nada fica inalcançável."""
+    m, _ = _abre_em(navegador, tmp_path, top=300, left=900, largura=1100, altura=420)
+    assert m["top"] >= 0 and m["bottom"] <= m["vh"] + 0.5
+    assert m["rola"] == "auto", "janela maior que a tela sem rolagem é a janela cortada"
+
+
+def test_no_celular_a_janela_cabe_na_largura(navegador, tmp_path):
+    m, _ = _abre_em(navegador, tmp_path, top=500, left=250, largura=375, altura=740)
+    assert m["left"] >= 0 and m["right"] <= m["vw"] + 0.5
+    assert m["top"] >= 0 and m["bottom"] <= m["vh"] + 0.5
+
+
+def test_o_botao_de_suporte_sai_da_frente_e_volta(navegador, tmp_path):
+    m, fechou = _abre_em(navegador, tmp_path, top=505, left=1126)
+    assert m["suporte"] == "hidden", "o botão do WhatsApp de suporte cobre o canto da janela"
+    assert fechou == "visible", "fechou a janela e o botão de suporte não voltou"
+
+
+def test_o_lugar_da_janela_e_decidido_depois_de_medir():
+    """A guarda na FONTE, que roda no CI (lá não há Chromium e os testes acima
+    pulam). A regra velha abria embaixo com a altura que sobrasse
+    (`abaixo>=260`) — foi ela que cortou a janela."""
+    from web import janela_lead as _janela
+    js, css = _janela.JS, _janela.CSS
+    assert "abaixo>=260" not in js, "voltou a regra que abria com a altura que sobrava"
+    corpo = js[js.index("function kbAbrirLead("):js.index("function kbLeadHtml(")]
+    depois = corpo[corpo.index("pop.innerHTML=kbLeadHtml(d,id);"):]
+    assert "_leadPopPosiciona(pop)" in depois, (
+        "a janela tem que se reposicionar DEPOIS que o resumo chega — é quando ela "
+        "ganha a altura de verdade")
+    assert "overflow-y:auto" in css[css.index(".leadpop{"):css.index("}", css.index(".leadpop{"))]
+    assert "body.lp-aberta .wa-suporte{visibility:hidden}" in css

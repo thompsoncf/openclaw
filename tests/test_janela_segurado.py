@@ -23,7 +23,9 @@ def test_usa_a_mesma_moldura_e_o_mesmo_fechamento():
     """Mesma classe, mesma largura, mesmo fechar — só o conteúdo muda."""
     seg = JL[JL.index("function kbAbrirSegurado("):]
     assert "pop.className='leadpop'" in seg
-    assert "LARG=378" in seg
+    # a MESMA conta de onde abrir (25/09/2026): era uma cópia do cálculo, com
+    # `LARG=378`, e as duas cópias cortavam a janela do mesmo jeito
+    assert "_leadPopPosiciona(pop)" in seg and "pop._ancora=el" in seg
     assert "kbFecharLead()" in seg and "_leadPopEsc" in seg and "_leadPopFora" in seg
     assert JL.count("className='leadpop'") == 2          # lead e segurado, e mais nenhuma
 

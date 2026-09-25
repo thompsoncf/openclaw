@@ -255,6 +255,11 @@ def painel_follow_up(request: Request):
                    sobrando=max(0, len(fila) - 200), estado=estado, vend_f=vend_f,
                    etapa_f=etapa_f, vendedores=vendedores, etapas=etapas,
                    status=status_tpl,
+                   # O NOME da etapa, e não a chave (25/09/2026): o cartão mostrava
+                   # "📍 negociacao" e o filtro "agendado_visita" — a chave interna,
+                   # que ninguém da equipe digitou. A MESMA fonte da janela do lead
+                   # (`status_tpl`), pra a conta que renomeou etapa ver um nome só.
+                   rot_etapa={x["c"]: x["r"] for x in status_tpl},
                    gestao=(fu.por_vendedor(linhas) if papel != "vendedor" else []),
                    modo=cfg["follow_up_modo"], zap=bool(cfg.get("fu_zap")),
                    entrega=entrega, sem_aviso=sem_aviso,
@@ -877,7 +882,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
     {% if etapas %}
     <label class="{{ 'on' if etapa_f }}">Etapa
       <select name="etapa" onchange="this.form.submit()"><option value="">todas</option>
-        {% for e in etapas %}<option value="{{ e }}" {% if etapa_f==e %}selected{% endif %}>{{ e }}</option>{% endfor %}
+        {% for e in etapas %}<option value="{{ e }}" {% if etapa_f==e %}selected{% endif %}>{{ (rot_etapa or {}).get(e, e) }}</option>{% endfor %}
       </select></label>
     {% endif %}
     <label class="{{ 'on' if estado=='todos' }}" style="cursor:pointer" onclick="location.href='/painel/follow-up{{ qs('todos') }}'">Ver todos os {{ topo.ativos }}</label>
@@ -903,7 +908,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
           {% endif %}
           <span><i>⏱️</i><b>{{ tempo(x.parado_h) }}</b> sem interação</span>
           <span><i>🔄</i>{{ x.tentativas }} tentativa{{ '' if x.tentativas == 1 else 's' }}</span>
-          <span><i>📍</i>{{ x.status }}</span>
+          <span><i>📍</i>{{ (rot_etapa or {}).get(x.status, x.status) }}</span>
           <span><i>👤</i>{{ x.vendedor }}</span>
           {% if x.adiados and x.adiados < adia_max %}<span><i>🔁</i>adiado <b>{{ x.adiados }}×</b> sem mensagem no meio</span>{% endif %}
         </div>

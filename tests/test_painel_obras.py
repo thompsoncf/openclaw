@@ -27,7 +27,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "182_clientes_papel.sql",
               "195_titulo_aprovacao.sql", "196_titulo_recorrencia.sql",
               "197_titulo_acrescimo.sql", "317_titulo_classificacao.sql",
-              "349_plano_obras.sql", "351_obras.sql", "353_obra_venda_documentos.sql")
+              "349_plano_obras.sql", "351_obras.sql", "353_obra_venda_documentos.sql",
+              "355_reforma_orcamento.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 
 

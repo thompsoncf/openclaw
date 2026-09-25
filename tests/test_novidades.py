@@ -1221,3 +1221,24 @@ def test_o_rotulo_da_semana_fala_portugues_e_nao_ISO():
     assert nv.rotulo_semana("2026-W35", agora=agora) == "24 a 30/08"
     # e não estoura com lixo
     assert nv.rotulo_semana("nao-e-semana", agora=agora) == "antes"
+
+
+def test_o_topo_do_funil_avisa_em_dois_alcances(pool):
+    """340: a parte 2 do funil enxuto é UM aviso pra quem tem funil (`servico`) e
+    OUTRO só pra quem vende data, sobre a régua da festa (§6). O de todos não pode
+    falar de festa — a consultoria recebe e não tem festa nenhuma."""
+    with pool.connection() as c:
+        c.execute((BASE / "340_novidade_funil_topo.sql").read_text(encoding="utf-8"))
+        c.commit()
+        rows = {r[0]: r[1:] for r in c.execute(
+            """select chave, publico, pra_quem, titulo, resumo, corpo, link from novidades
+                where chave in ('funil-topo', 'funil-regua-festa')""").fetchall()}
+    assert set(rows) == {"funil-topo", "funil-regua-festa"}
+    pub, pq, tit, res, corpo, link = rows["funil-topo"]
+    assert pub == "servico" and sorted(pq) == ["dono", "gestor", "vendedor"]
+    assert "festa" not in (tit + res + corpo).lower(), "vocabulário de eventos no aviso de todos"
+    assert link == "/painel/prospeccao" and res
+    assert {"eventos", "consultoria"} <= nv.nichos_alcancados("servico")
+    pub, pq, tit, res, corpo, link = rows["funil-regua-festa"]
+    assert pub == "eventos" and nv.nichos_alcancados(pub) == {"eventos"}
+    assert sorted(pq) == ["dono", "gestor", "vendedor"] and res and link == "/painel/prospeccao"

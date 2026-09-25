@@ -280,8 +280,11 @@ def test_o_trilho_lista_os_meses_com_contagem_e_sem_data_no_fim(monkeypatch, poo
     _lead(pool, "Sem")
     html = _html(monkeypatch, pool)
     trilho = html.split('id="trilho"')[1].split("</div>")[0]
-    assert "Todos <b>4</b>" in trilho
-    assert trilho.index(f"{ROT_PERTO} <b>1</b>") < trilho.index(f"{ROT_LONGE} <b>2</b>") < trilho.index("Sem data <b>1</b>")
+    # desde 25/09/2026 o trilho é uma RÉGUA (uma barra por mês): o número fica
+    # dentro da barra, e o nome inteiro do mês (com o ano) no title
+    assert 'title="Todos · 4"><b>4</b>' in trilho
+    assert (trilho.index(f'title="{ROT_PERTO} · 1"') < trilho.index(f'title="{ROT_LONGE} · 2"')
+            < trilho.index('title="Sem data · 1"'))
     assert f'href="/painel/prospeccao?mes={KEY_LONGE}"' in trilho
     assert 'href="/painel/prospeccao?mes=sem"' in trilho
 
@@ -304,7 +307,7 @@ def test_filtrar_por_mes_vale_pro_quadro_inteiro_e_mostra_o_de_quantos(monkeypat
     assert f"<b>{ROT_LONGE}</b> · só as festas desse mês" in html
     # a pílula do mês escolhido acende; o trilho inteiro continua (é a régua)
     assert f'class="mes on" href="/painel/prospeccao?mes={KEY_LONGE}"' in html
-    assert f"{ROT_PERTO} <b>1</b>" in html
+    assert f'title="{ROT_PERTO} · 1"' in html
 
 
 def test_filtrar_sem_data_e_a_fila_de_quem_ainda_nao_disse_quando(monkeypatch, pool, vende_data):
@@ -508,14 +511,14 @@ def test_o_quadro_abre_no_mes_atual_e_o_resto_fica_a_um_clique(monkeypatch, pool
     velho = _lead(pool, "Do Mês Passado", criado_em=datetime.now(timezone.utc) - timedelta(days=40))
     html = _html(monkeypatch, pool, entrou="")
     assert "Deste Mês" in html and "Do Mês Passado" not in html
-    assert "<b style=\"color:var(--txt)\">1</b> no quadro · entraram em" in html
+    assert '<b>1</b><span class="kbnq"> no quadro</span><span class="kbper"> · <span class="kbnq">entraram em </span>' in html
     assert '<span class="kbcnt">1 <i>de 2</i></span>' in _coluna(html, "contatado")
     # as pílulas: o mês corrente (ligado), o mês do outro lead e Tudo
     foco = html.split('id="foco"')[1].split("</div>")[0]
     assert 'class="pil on" href="/painel/prospeccao?entrou=' in foco
     assert "Tudo <b>2</b>" in foco
     tudo = _html(monkeypatch, pool, entrou="tudo")
-    assert "Deste Mês" in tudo and "Do Mês Passado" in tudo and "no quadro · entraram em" not in tudo
+    assert "Deste Mês" in tudo and "Do Mês Passado" in tudo and 'class="kbper"' not in tudo
 
 
 def test_a_escolha_do_periodo_fica_na_sessao(monkeypatch, pool, vende_data):

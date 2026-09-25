@@ -28,6 +28,9 @@ create table if not exists public.lead_resumo_ia (
   prospeccao_id  bigint not null references public.prospeccao(id) on delete cascade,
   membro_id      bigint,
   ultima_msg_id  bigint not null default 0,
+  -- muda quando o TEXTO de uma mensagem muda sem id novo (a transcrição do áudio
+  -- chega segundos depois, na mesma linha) ou quando mensagem some (retenção)
+  assinatura     text not null default '',
   n_lidas        integer not null default 0,
   n_total        integer not null default 0,
   resumo         jsonb not null,
@@ -45,8 +48,22 @@ create index if not exists idx_lead_resumo_ia_lead
 create index if not exists idx_lead_resumo_ia_dia
   on public.lead_resumo_ia (conta_id, criado_em);
 
+-- O TETO TÉCNICO por conta por dia, contado por TENTATIVA (a chamada que falha
+-- também custa) e num insert-or-update só — dois cliques juntos não passam os
+-- dois. Não é cota: é trava contra laço.
+create table if not exists public.lead_resumo_ia_uso (
+  conta_id    bigint not null references public.contas(id) on delete restrict,
+  dia         date not null,
+  tentativas  integer not null default 0,
+  primary key (conta_id, dia)
+);
+
 comment on table public.lead_resumo_ia is
   'Resumo da conversa e sugestão da IA por lead, guardado até chegar mensagem nova. Ver a migração 343.';
 
+comment on table public.lead_resumo_ia_uso is
+  'Tentativas de resumo por IA por conta e dia (teto contra laço). Ver a migração 343.';
+
 -- rollback:
+--   drop table if exists public.lead_resumo_ia_uso;
 --   drop table if exists public.lead_resumo_ia;

@@ -5535,13 +5535,16 @@ _IA_JS = r"""<script>
   var caixa=document.querySelector("form.composer [name=texto]");
   var d=null, gerando=false, falha="";
   function esc(t){return String(t==null?"":t).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
-  function abrir(){folha.hidden=false;fundo.hidden=false;if(d&&!falha){pinta();return;}carregar();}
+  // SEMPRE relê ao abrir: o GET não chama a IA, e a tela do lead fica aberta
+  // horas — sem isto, a bola e o "mensagem nova" congelavam na primeira abertura.
+  function abrir(){folha.hidden=false;fundo.hidden=false;carregar();}
   function fechar(){folha.hidden=true;fundo.hidden=true;}
   function carregando(){return '<div class=iabl><div class=iarot>✨ Lendo a conversa…</div>'
     +'<div class=iask style="width:92%"></div><div class=iask style="width:74%;margin-top:.4rem"></div>'
     +'<div class=iask style="width:84%;margin-top:.4rem"></div></div>';}
   function carregar(){
-    falha=""; corpo.innerHTML=carregando(); pe.innerHTML="";
+    falha="";
+    if(d)pinta(); else {corpo.innerHTML=carregando(); pe.innerHTML="";}
     zapFetch(BASE+"/lead/"+LEAD+"/resumo-ia",{headers:{"x-cockpit":"1"}}).then(function(j){
       if(!j){falha="Não deu pra abrir.";pinta();return;}
       if(!j.ok){falha=j.msg||"Não consegui abrir.";pinta();return;}
@@ -5569,6 +5572,7 @@ _IA_JS = r"""<script>
     if(R&&d.feito_txt&&!gerando)ch+="<span class=iachip>"+esc(d.feito_txt)+"</span>";
     if(ch)h+="<div class=iafatos>"+ch+"</div>";
     if(d&&d.novas&&R&&!gerando)h+="<div class=iafaixa>"+d.novas+(d.novas===1?" mensagem nova":" mensagens novas")+" depois deste resumo. Toque em ↻ Atualizar.</div>";
+    else if(d&&d.mudou&&R&&!gerando)h+="<div class=iafaixa>A conversa mudou depois deste resumo. Toque em ↻ Atualizar.</div>";
     if(falha)h+="<div class=iaerro>"+esc(falha)+"</div>";
     if(gerando)h+=carregando();
     else if(d&&!d.tem_conversa)h+="<div class=iadica>Este lead ainda não trocou mensagem, então não há conversa pra resumir.</div>";
@@ -5585,10 +5589,11 @@ _IA_JS = r"""<script>
     }
     corpo.innerHTML=h;
     var p="";
-    if(!gerando&&d&&d.tem_conversa&&(R||falha))p+="<button type=button class='btn ghost' id=iaOutra>"+(R?"↻ Outra":"Tentar de novo")+"</button>";
+    var velho=!!(d&&R&&(d.novas||d.mudou));
+    if(!gerando&&d&&d.tem_conversa&&(R||falha))p+="<button type=button class='btn ghost' id=iaOutra>"+(velho?"↻ Atualizar":R?"↻ Outra":"Tentar de novo")+"</button>";
     if(!gerando&&R&&R.mensagem)p+="<button type=button class=btn id=iaUsar"+(caixa?"":" disabled")+">Usar resposta</button>";
     pe.innerHTML=p;
-    var o=document.getElementById("iaOutra"); if(o)o.onclick=function(){gerar(R?{variar:1}:{forcar:1});};
+    var o=document.getElementById("iaOutra"); if(o)o.onclick=function(){gerar(R&&!velho?{variar:1}:{forcar:1});};
     var u=document.getElementById("iaUsar"); if(u)u.onclick=usar;
   }
   function usar(){
@@ -5731,8 +5736,12 @@ _RAPIDAS_JS = r"""
 
   // A BARRA. Digitar "/" no fim do que está escrito abre a lista já filtrada —
   // é o atalho de quem tem as mãos no teclado e não quer procurar botão.
-  caixa.addEventListener("input",function(){
+  caixa.addEventListener("input",function(e){
     acertarSalvar();
+    // SÓ quem DIGITA abre a barra (25/09/2026). O texto posto por código — a
+    // resposta rápida escolhida, a sugestão da IA ("R$ 490 /mês") — dispara um
+    // `input` sintético, e a folha subia sozinha por cima do que ele ia mandar.
+    if(e&&e.isTrusted===false)return;
     var v=caixa.value||"", m=v.match(/(?:^|\s)\/([^\/\s][^\/]*)?$/);
     if(m){ deBarra=true; abrir((m[1]||"").trim()); }
     else if(deBarra && folha.hidden===false){ fechar(); }
@@ -6827,7 +6836,8 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     # página e o JS. Só com a IA ligada — sem ela, o botão prometeria o que não há.
     from finance import resumo_ia as _ria
     ia_html = ""
-    if _ria.ligado():
+    _cid = request.session.get("conta_id")
+    if _ria.ligado() and (not _cid or _ia_perfil(_cid).get("aplica", True)):
         chip += "<button type=button class=iabtn id=iaBtn aria-label='Resumo e sugestão da IA'>✨ IA</button>"
         ia_html = ("<div class=iafundo id=iafundo hidden></div>"
                    "<div class=iafolha id=iafolha hidden role=dialog aria-label='Resumo da conversa'>"

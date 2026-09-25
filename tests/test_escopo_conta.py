@@ -119,6 +119,7 @@ TABELAS: dict[str, tuple[str, ...]] = {
     "lancamentos": ('conta_id',),
     "lead_repasse": ('conta_id',),
     "lead_resumo_ia": ('conta_id',),
+    "lead_resumo_ia_uso": ('conta_id',),
     "leads": ('conta_id',),
     "lembretes_enviados": ('conta_id',),
     "lista_compras": ('conta_id',),

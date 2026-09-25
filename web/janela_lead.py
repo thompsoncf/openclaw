@@ -395,7 +395,13 @@ function _leadPopPosiciona(pop){
   }
   pop.style.top=Math.round(top)+'px';
 }
-function _leadPopFora(e){if(_leadPop&&!_leadPop.contains(e.target))kbFecharLead();}
+// SELECIONAR E SOLTAR FORA NÃO FECHA (25/09/2026). A janela do resumo tem uma
+// caixa de texto pra editar: arrastar de dentro dela pra selecionar e soltar o
+// mouse fora gera um click FORA, e a edição sumia. O click só fecha se o
+// mousedown também começou fora.
+var _leadPopDentro=false;
+document.addEventListener('mousedown',function(e){_leadPopDentro=!!(_leadPop&&_leadPop.contains(e.target));},true);
+function _leadPopFora(e){if(_leadPopDentro){_leadPopDentro=false;return;}if(_leadPop&&!_leadPop.contains(e.target))kbFecharLead();}
 function _leadPopEsc(e){if(e.key==='Escape')kbFecharLead();}
 function _leadPopRolou(e){if(_leadPop&&_leadPop.contains(e.target))return;kbFecharLead();}
 function kbAbrirLead(ev,id,cardEl){
@@ -954,7 +960,7 @@ function _lpiaCarregando(){
     +'<div class="lpia-sk" style="width:84%"></div><div class="lpia-sk" style="width:60%"></div></div>';
 }
 function _lpiaGerar(pop,op){
-  pop._gerando=true; pop._falha=''; _lpiaPinta(pop);
+  pop._gerando=true; pop._falha=''; pop._refaz='resumo'; _lpiaPinta(pop);
   var fd=new FormData(); if(op.forcar)fd.append('forcar','1'); if(op.variar)fd.append('variar','1');
   zapFetch('/painel/prospeccao/'+pop._lead+'/resumo-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){
     if(_leadPop!==pop)return;
@@ -982,7 +988,8 @@ function _lpiaPinta(pop){
   if(ch)h+='<div class="lpia-fatos">'+ch+'</div>';
   h+='</div><div class="lp-body lpia-b">';
   if(d.novas&&R&&!pop._gerando)h+='<div class="lpia-faixa">'+d.novas+(d.novas===1?' mensagem nova':' mensagens novas')+' depois deste resumo<button type="button" onclick="kbResumoIARefazer()">↻ Atualizar</button></div>';
-  if(pop._falha)h+='<div class="lpia-erro">'+cxEscK(pop._falha)+'<button type="button" onclick="kbResumoIARefazer()">Tentar de novo</button></div>';
+  else if(d.mudou&&R&&!pop._gerando)h+='<div class="lpia-faixa">A conversa mudou depois deste resumo<button type="button" onclick="kbResumoIARefazer()">↻ Atualizar</button></div>';
+  if(pop._falha)h+='<div class="lpia-erro">'+cxEscK(pop._falha)+'<button type="button" onclick="'+(pop._refaz==='primeira'?'kbResumoIAPrimeira(null)':'kbResumoIARefazer()')+'">Tentar de novo</button></div>';
   if(pop._gerando)h+=_lpiaCarregando();
   else if(!d.tem_conversa)h+=_lpiaSemConversa(pop);
   else if(R)h+=_lpiaResumoHtml(R,d);
@@ -1017,12 +1024,17 @@ function _lpiaSemConversa(pop){
   if(pop._primeira){
     h+='<div class="lpia-rot">✨ Primeira mensagem · dá pra editar</div>'
       +'<textarea class="lpia-caixa" id="lpia-msg" aria-label="Primeira mensagem">'+cxEscK(pop._primeira.texto||'')+'</textarea>'
-      +'<div class="lpia-bts">'+(pop._primeira.link?'<a class="lpia-bt pri" style="text-decoration:none" href="'+cxEscK(pop._primeira.link)+'" target="_blank" rel="noopener">Abrir no WhatsApp</a>':'')
+      +'<div class="lpia-bts">'+(pop._primeira.link?'<a class="lpia-bt pri" style="text-decoration:none" href="'+cxEscK(pop._primeira.link)+'" target="_blank" rel="noopener" onclick="kbResumoIAZap(this)">Abrir no WhatsApp</a>':'')
       +'<button type="button" class="lpia-bt" onclick="kbResumoIACopiar(this)">Copiar</button></div>';
   }else if((pop._d||{}).ia){
     h+='<div class="lpia-bts"><button type="button" class="lpia-bt" onclick="kbResumoIAPrimeira(this)">✨ Sugerir a primeira mensagem</button></div>';
   }
   return h+'</div>';
+}
+// o wa.me leva o texto que está na caixa AGORA, não o que a IA escreveu
+function kbResumoIAZap(a){
+  var ta=_leadPop&&_leadPop.querySelector('#lpia-msg'); if(!ta||!a)return;
+  a.href=a.href.split('?')[0]+'?text='+encodeURIComponent(ta.value);
 }
 function kbResumoIARefazer(){var pop=_leadPop;if(pop&&pop._lead&&!pop._gerando)_lpiaGerar(pop,{forcar:1});}
 function kbResumoIAOutra(){var pop=_leadPop;if(pop&&pop._lead&&!pop._gerando)_lpiaGerar(pop,{variar:1});}
@@ -1045,7 +1057,7 @@ function kbResumoIAPrimeira(btn){
   var fd=new FormData(); fd.append('canal','whatsapp');
   zapFetch('/painel/prospeccao/'+pop._lead+'/mensagem-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){
     if(_leadPop!==pop)return;
-    if(!r||!r.ok){pop._falha=(r&&r.erro==='sem_ia')?'A IA não está ligada nesta conta.':'Não consegui escrever agora. Tente de novo em instantes.';pop._primeira=null;_lpiaPinta(pop);return;}
+    if(!r||!r.ok){pop._falha=(r&&r.erro==='sem_ia')?'A IA não está ligada nesta conta.':'Não consegui escrever agora. Tente de novo em instantes.';pop._refaz='primeira';pop._primeira=null;_lpiaPinta(pop);return;}
     pop._primeira={texto:r.texto||'',link:r.link||''}; pop._falha=''; _lpiaPinta(pop);
   });
 }
@@ -1065,8 +1077,11 @@ function kbResumoIAUsar(ev){
     return;
   }
   if(conv&&window.kbAbrirChat&&anc&&document.body.contains(anc)){
+    // de reserva, na área de transferência: se a conversa não responde por aqui
+    // (canal sem configuração), o balão não tem campo, e o texto não se perde
+    try{navigator.clipboard.writeText(txt).catch(function(){});}catch(e){}
     window._cpPrefill=txt;
-    window.kbAbrirChat(ev||{stopPropagation:function(){}},conv.id,conv.aba,anc);
+    window.kbAbrirChat(ev||{stopPropagation:function(){}},conv.id,conv.aba,anc,(d.lead||{}).nome);
     return;
   }
   var b=pop.querySelector('.lpia-bt.pri');

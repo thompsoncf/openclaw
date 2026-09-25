@@ -178,6 +178,10 @@ function kbAbrirChat(ev,convId,aba,btn,nome){
   // "fora" e fecharia o balão antes de ele aparecer.
   setTimeout(function(){document.addEventListener('click',_chatPopFora,true);document.addEventListener('keydown',_chatPopEsc,true);
     window.addEventListener('scroll',_chatPopRolou,true);},0);
+  // O TEXTO PRONTO É DESTA CHAMADA (25/09/2026). Era lido do global só quando a
+  // conversa chegava: se ela falhava, ou se outro balão abria antes, o texto de
+  // um cliente ficava guardado e nascia no campo da conversa de OUTRO cliente.
+  var _pre=_cpPrefill; _cpPrefill='';
   zapFetch('/painel/prospeccao/comunicacao/thread/'+convId).then(function(d){if(!d){if(_chatPop===pop)pop.querySelector('#cp-msgs').innerHTML='<div class="cx-empty">Não deu pra carregar.</div>';return;}
     if(_chatPop!==pop)return;   // o popover foi trocado/fechado antes da resposta chegar
     var box=pop.querySelector('#cp-msgs');
@@ -190,11 +194,11 @@ function kbAbrirChat(ev,convId,aba,btn,nome){
         +'<button type="button" onclick="kbResponderChat('+convId+')">Enviar</button></div>';
       // o "perguntar" do card deixa a pergunta pronta na caixa — o vendedor
       // confere o tom e manda (decisão do dono, 04/09: abre, não dispara)
-      if(_cpPrefill){var ta=comp.querySelector('#cp-input');if(ta){ta.value=_cpPrefill;ta.rows=2;if(_cpPrefill.length>60)ta.style.height='5.6rem';ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);}}
+      if(_pre){var ta=comp.querySelector('#cp-input');if(ta){ta.value=_pre;ta.rows=2;if(_pre.length>60)ta.style.height='5.6rem';ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);}}
     }else if(d.ok){
-      comp.innerHTML='<div class="cx-stub">Responder por aqui <span class="lbl2">em breve</span></div>';
+      comp.innerHTML='<div class="cx-stub">Responder por aqui <span class="lbl2">em breve</span></div>'
+        +(_pre?'<div class="cx-stub">O texto pronto foi copiado: cole onde for responder.</div>':'');
     }
-    _cpPrefill='';
   });
 }
 var _cpPrefill='';

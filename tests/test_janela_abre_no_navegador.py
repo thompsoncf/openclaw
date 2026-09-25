@@ -497,3 +497,42 @@ def test_no_celular_o_resumo_cabe_inteiro(navegador, tmp_path):
                      top=420, left=20, largura=390, altura=780)
     assert m["left"] >= 0 and m["right"] <= m["vw"] + .5
     assert m["top"] >= 0 and m["bottom"] <= m["vh"] + .5
+
+
+def test_o_texto_de_um_cliente_nao_nasce_na_conversa_de_outro(navegador, tmp_path):
+    """Achado da revisão: "Usar" no lead A e, antes de a conversa dele chegar, o
+    💬 do lead B. O texto do A nascia no campo do B — um Enter e ia pro cliente
+    errado. O prefill agora é da CHAMADA."""
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, resumo=_RESUMO_IA, resumo_id=9),
+                     depois="""() => new Promise(function(ok){
+                       var orig = window.fetch;
+                       window.fetch = function(url, op){
+                         if (String(url).indexOf('/thread/501') >= 0)
+                           return new Promise(function(r){ setTimeout(function(){ r(orig(url, op)); }, 400); });
+                         return orig(url, op);
+                       };
+                       document.querySelector('.leadpop.lpia .lpia-bt.pri').click();
+                       setTimeout(function(){
+                         var b = document.createElement('button'); b.id = 'card-b'; b.title = 'B';
+                         b.style.cssText = 'position:fixed;top:40px;left:40px';
+                         document.body.appendChild(b);
+                         window.kbAbrirChat({stopPropagation: function(){}}, 777, 'conversas', b, 'Bruno');
+                         setTimeout(function(){
+                           var ta = document.getElementById('cp-input');
+                           ok({campoB: ta ? ta.value : null});
+                         }, 700);
+                       }, 50);
+                     })""")
+    assert not m["erros"], m["erros"]
+    assert m["extra"]["campoB"] == "", m["extra"]
+
+
+def test_o_que_a_ia_escreve_aparece_como_texto_e_nunca_como_html(navegador, tmp_path):
+    """O texto da IA vem de uma conversa que o cliente escreve: HTML ali tem que
+    aparecer literal na janela, não virar código."""
+    mal = "<img src=x onerror=window.__xss=1>"
+    r = dict(_RESUMO_IA, quer=mal, em_que_pe=[mal], proximo_passo=mal, mensagem=mal)
+    m = _abre_resumo(navegador, tmp_path, get=dict(_PACOTE, resumo=r, resumo_id=9,
+                                                   lead=dict(_PACOTE["lead"], nome=mal)),
+                     depois="() => ({xss: window.__xss || 0})")
+    assert m["extra"]["xss"] == 0 and mal in m["texto"] and m["caixa"] == mal

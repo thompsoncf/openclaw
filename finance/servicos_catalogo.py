@@ -116,19 +116,32 @@ def _slugify(nome: str, existentes: set[str]) -> str:
 
 
 def listar(pool, conta_id: int) -> list[dict]:
-    """Serviços ativos da conta, na ordem definida."""
+    """Serviços ativos da conta, na ordem definida.
+
+    `diz_preco` é a chave "a IA pode dizer este preço" (migração 348). Banco sem a
+    coluna devolve falso — que é o default dela, e o lado seguro."""
     with pool.connection() as c:
-        rows = c.execute(
-            """select id, slug, nome, descricao, setup_centavos, mensal_centavos,
-                      custo_centavos, ordem, categoria, foto_url, icone
-                 from servicos_catalogo
-                where conta_id=%s and ativo
-                order by ordem, id""", (conta_id,)).fetchall()
+        try:
+            with c.transaction():
+                rows = c.execute(
+                    """select id, slug, nome, descricao, setup_centavos, mensal_centavos,
+                              custo_centavos, ordem, categoria, foto_url, icone,
+                              agente_diz_preco
+                         from servicos_catalogo
+                        where conta_id=%s and ativo
+                        order by ordem, id""", (conta_id,)).fetchall()
+        except Exception:  # noqa: BLE001 — banco sem a 348
+            rows = [tuple(r) + (False,) for r in c.execute(
+                """select id, slug, nome, descricao, setup_centavos, mensal_centavos,
+                          custo_centavos, ordem, categoria, foto_url, icone
+                     from servicos_catalogo
+                    where conta_id=%s and ativo
+                    order by ordem, id""", (conta_id,)).fetchall()]
     return [{"id": r[0], "slug": r[1], "nome": r[2], "descricao": r[3] or "",
              "setup_centavos": int(r[4] or 0), "mensal_centavos": int(r[5] or 0),
              "custo_centavos": int(r[6] or 0), "ordem": r[7] or 0,
              "categoria": r[8] or "", "foto_url": r[9] or "",
-             "icone": r[10] or ""} for r in rows]
+             "icone": r[10] or "", "diz_preco": bool(r[11])} for r in rows]
 
 
 def slugs_validos(pool, conta_id: int) -> set[str]:
@@ -139,8 +152,12 @@ def slugs_validos(pool, conta_id: int) -> set[str]:
 def salvar(pool, conta_id: int, *, id: int | None = None, nome: str,
            descricao: str = "", setup_centavos: int = 0,
            mensal_centavos: int = 0, custo_centavos: int = 0,
-           categoria: str = "", foto_url: str = "", icone: str = "") -> dict:
-    """Cria (id vazio) ou edita (id preenchido) um serviço do catálogo da conta."""
+           categoria: str = "", foto_url: str = "", icone: str = "",
+           diz_preco: bool | None = None) -> dict:
+    """Cria (id vazio) ou edita (id preenchido) um serviço do catálogo da conta.
+
+    `diz_preco` None = não mexe na chave "a IA pode dizer este preço" (quem chama
+    sem ela, como a importação do modelo, não apaga a escolha do dono)."""
     nome = (nome or "").strip()
     if not nome:
         return {"ok": False, "erro": "Informe o nome do serviço."}
@@ -160,6 +177,8 @@ def salvar(pool, conta_id: int, *, id: int | None = None, nome: str,
                  custo_centavos, (categoria or "").strip() or None,
                  (foto_url or "").strip() or None,
                  (icone or "").strip() or None, id, conta_id)).fetchone()
+            if r and diz_preco is not None:
+                _gravar_diz_preco(c, conta_id, r[0], diz_preco)
             c.commit()
             if not r:
                 return {"ok": False, "erro": "Serviço não encontrado."}
@@ -181,8 +200,21 @@ def salvar(pool, conta_id: int, *, id: int | None = None, nome: str,
              (categoria or "").strip() or None,
              (foto_url or "").strip() or None,
              (icone or "").strip() or None)).fetchone()[0]
+        if diz_preco:
+            _gravar_diz_preco(c, conta_id, nid, True)
         c.commit()
         return {"ok": True, "id": nid, "slug": slug}
+
+
+def _gravar_diz_preco(c, conta_id: int, id: int, diz: bool) -> None:
+    """A chave "a IA pode dizer este preço". Savepoint: banco sem a coluna (348) não
+    pode levar junto o resto da edição do item."""
+    try:
+        with c.transaction():
+            c.execute("update servicos_catalogo set agente_diz_preco=%s "
+                      "where id=%s and conta_id=%s", (bool(diz), id, conta_id))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def excluir(pool, conta_id: int, id: int) -> dict:

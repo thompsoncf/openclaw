@@ -173,6 +173,17 @@ def _empresa(pool, conta_id: int) -> bool:
         return False
 
 
+def _mais_de_um_chip(pool, conta_id: int) -> bool:
+    """A empresa tem dois chips de WhatsApp ou mais (migração 388, a regra por número).
+
+    A tela Regras por número e a chave "a IA pode dizer este preço" do catálogo só
+    aparecem aí: com um chip só, quem recebe o lead é o rodízio de sempre. O portão
+    é o MESMO da tela (`chip_regra.tem_mais_de_um_chip`), pra aviso e tela nunca
+    discordarem. Falha fechada."""
+    from finance import chip_regra as _cr
+    return _cr.tem_mais_de_um_chip(pool, conta_id)
+
+
 # O REGISTRO. Cada chave aponta pro portão que já decide quem vê a funcionalidade.
 # Acrescentar um público aqui EXIGE mexer no check da migração — e um teste
 # compara as duas listas, pra deriva virar falha em vez de surpresa.
@@ -199,6 +210,7 @@ PUBLICOS_NICHO = {
 PUBLICOS_CONTA = {
     "canal_proprio": _canal_proprio,
     "empresa": _empresa,
+    "mais_de_um_chip": _mais_de_um_chip,
 }
 
 # A lista completa — é ela que o check da migração espelha.

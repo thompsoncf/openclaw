@@ -144,6 +144,9 @@ def pool():
         # 350 amplia pela sexta, com `construcao` — o quarto portão de UM nicho
         # só. Depois da 347 de propósito: a lista dela é a base da dele.
         c.execute((BASE / "350_novidade_nicho_construcao.sql").read_text(encoding="utf-8"))
+        # 389 amplia pela sétima, com `mais_de_um_chip` — o terceiro portão de CONTA
+        # (a regra por número só existe em empresa de dois chips)
+        c.execute((BASE / "389_novidade_regras_por_numero.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

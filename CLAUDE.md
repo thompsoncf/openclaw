@@ -110,6 +110,25 @@ Na prática, pra quem for rodar qualquer coisa contra um banco:
 * Ao adicionar um projeto Supabase novo, a referência dele entra em
   `REFS_PRODUCAO` no conftest **antes** de qualquer teste rodar.
 
+### Consulta ao banco de produção: só avisar, sem pedir autorização
+
+Regra do dono, dada em 26/09/2026:
+
+> "quando for pra acessar o banco de dados somente consulta não precisa pedir
+> minha autorização, somente avisar que está acessando"
+
+* **Consulta (`SELECT`) em produção não pede autorização.** Basta dizer, na
+  mensagem, que vai consultar o banco e o que vai olhar ("vou consultar no banco,
+  só leitura, as visitas da Prime"). É o jeito de diagnosticar sem travar o
+  trabalho esperando um "pode".
+* **Só consulta.** `insert`, `update`, `delete`, DDL, migração, função que grava
+  — nada disso entra nesta regra. Escrita em produção continua pedindo
+  autorização explícita do dono, e as seções 0, 1 e 2 continuam valendo inteiras
+  (nada de mexer em `wa_qr_*`, `canais_config`, ou em dado de cliente).
+* O que a consulta devolve é dado de cliente: fica na conversa, não vai pra PR,
+  commit, mockup nem aviso sem ser anonimizado (primeiro nome ou `lead #id`, nunca
+  telefone ou e-mail).
+
 ## 3. Este repositório
 
 `render.yaml` é **documentação**, não Blueprint — os serviços do Render são

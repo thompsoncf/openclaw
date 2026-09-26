@@ -1026,6 +1026,11 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% for mid,nome in pessoas %}<option value="{{ mid }}" {% if mid==membro_sel %}selected{% endif %}>{{ nome }}</option>{% endfor %}
 </select>{% endif %}
 </form></div>
+{% if obras_topo %}<a href="/painel/obras" class="fin-obras" style="display:block;margin:.8rem 0 .2rem;padding:.65rem .8rem;border-radius:11px;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:inherit;text-decoration:none">
+{% if obras_topo.parado %}<b>{{ brl(obras_topo.parado) }} parados em obra</b> <span style="color:var(--txt-mut)">— gasto em casa que a Caixa ainda não pagou.</span>
+{% if obras_topo.travadas %}<div style="font-size:.85rem;margin-top:.2rem">Travadas: {{ obras_topo.travadas|join(' · ')|e }}</div>{% endif %}{% endif %}
+{% if obras_topo.sem_n %}<div style="font-size:.85rem;margin-top:.2rem">{{ obras_topo.sem_n }} gasto{{ 's' if obras_topo.sem_n != 1 }} de obra sem obra ({{ brl(obras_topo.sem_total) }}) — distribua em Obras ›</div>{% endif %}
+</a>{% endif %}
 {% if eh_pj %}
 <div style="margin:.8rem 0 .2rem">
 <div style="color:#888780;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem">Ver lançamentos de</div>
@@ -13389,7 +13394,20 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         if m == 0:
             m = 12; y -= 1
 
-    return _render("dash", request, titulo="Financeiro", conta=conta,
+    # A faixa das obras (perfil `obras`, docs/mockups/nicho_construcao.html,
+    # seção 06): dinheiro parado em casa e gasto de obra sem obra. Tolerante: sem
+    # as 351/353 a faixa some e o Financeiro abre igual.
+    obras_topo = None
+    if eh_pj:
+        try:
+            from finance import raio_x_perfil as _rxp_fin
+            if _rxp_fin.perfil_por_nicho(nicho_da_conta(conta)) == "obras":
+                from finance import obra_venda as _ov
+                obras_topo = _ov.topo_financeiro(pool, conta[0])
+        except Exception:  # noqa: BLE001
+            obras_topo = None
+
+    return _render("dash", request, titulo="Financeiro", conta=conta, obras_topo=obras_topo,
                    resumo=resumo, categorias=categorias, maior_cat=maior_cat,
                    lancamentos=lancamentos, dias=dias, raiox=raiox, pessoas=pessoas,
                    meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo,

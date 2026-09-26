@@ -218,11 +218,6 @@ def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), in
         request.session["agenda_form"] = guardar
         return _ir(request, volta, erro="Escolha um horário.")
     with get_pool().connection() as c:
-        from finance import clinica_pacotes as ckp
-        erro = ckp.bloqueio(c, conta_id, _int(lead_id), fone, _int(tipo))
-        if erro:
-            request.session["agenda_form"] = guardar
-            return _ir(request, volta, erro=erro)
         eid, erro = ca.agendar(c, conta_id, profissional_id=_int(prof) or 0, servico_id=_int(tipo) or 0,
                                inicio=quando, lead_id=_int(lead_id), nome=nome, fone=fone, origem=origem,
                                observacao=observacao, encaixe=encaixe, membro_id=membro)
@@ -281,8 +276,10 @@ def ver_evento(request: Request, evento_id: int):
         except Exception:  # noqa: BLE001
             r = None
         retorno = {"vence": r[0], "estado": r[1]} if r else None
+        pac_cfg = ckp.config(c, conta_id)
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
                    pacote_feito=pacote_feito, pacote_vai=pacote_vai, volta_padrao=volta_padrao, retorno=retorno,
+                   pac_cfg=pac_cfg,
                    ev=ev, prof=prof, proximos=ca.PROXIMOS.get(ev["situacao"], ()), remarcar=remarcar,
                    conversa=conversa, quando=f"{ca.dia_txt(ev['inicio'])} {ev['hora']}–{ev['fim_txt']}",
                    msg_marcado=msg_marcado, msg_vespera=msg_vespera,
@@ -559,15 +556,15 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
           <label><input type="radio" name="tratamento" value="sim" required> Sim — Plano de tratamento</label></div></div>
       <label>Valor proposto (se souber)<input name="valor" inputmode="decimal" placeholder="1.500,00"></label>
       {% endif %}
-      <label>O médico pediu retorno em quantos dias? (vazio: não pediu)<input name="retorno" inputmode="numeric" value="{{ volta_padrao }}"></label>
+      <label>O médico pediu retorno em quantos dias? (vazio: não pediu)<input name="retorno" inputmode="numeric" value="{{ '' if pacote_vai else volta_padrao }}"></label>
       <div class="ag-acoes inteira"><button>Finalizar</button></div>
     </form>
     {% endif %}{% endif %}
     {% if ev.situacao == 'finalizado' %}
     {% if pacote_feito %}<div class="ok" style="margin-top:.7rem">Sessão {{ pacote_feito.usadas }} de {{ pacote_feito.total }} baixada ({{ pacote_feito.nome }}).{% if pacote_feito.saldo %} Faltam {{ pacote_feito.saldo }}; a próxima fica boa a partir de {{ pacote_feito.proxima.strftime('%d/%m') }} (intervalo de {{ pacote_feito.intervalo }} dias).{% else %} Pacote concluído.{% endif %}</div>{% endif %}
-    {% if retorno %}<div class="mut" style="margin-top:.4rem">Retorno pedido até {{ retorno.vence.strftime('%d/%m/%Y') }}{% if retorno.estado == 'marcado' %} · já marcado{% else %} · o Zaq chama o paciente 7 dias antes{% endif %}.</div>{% endif %}
+    {% if retorno %}<div class="mut" style="margin-top:.4rem">Retorno pedido até {{ retorno.vence.strftime('%d/%m/%Y') }}{% if retorno.estado == 'marcado' %} · já marcado{% elif pac_cfg.lembretes == 'ligado' %} · o Zaq chama o paciente {{ pac_cfg.retorno_aviso_dias }} dias antes{% else %} · os lembretes estão desligados: a recepção chama{% endif %}.</div>{% endif %}
     <div class="ag-acoes" style="margin-top:.7rem">
-      {% if pacote_feito and pacote_feito.saldo %}<a class="ag-bt" href="/painel/clinica/agenda/novo?prof={{ ev.profissional_id }}&tipo={{ pacote_feito.servico_id }}&data={{ pacote_feito.proxima.isoformat() }}&lead={{ ev.lead or '' }}">Marcar a {{ pacote_feito.proxima_n }}ª sessão</a>{% endif %}
+      {% if pacote_feito and pacote_feito.saldo %}<a class="ag-bt" href="/painel/clinica/agenda/novo?prof={{ ev.profissional_id }}&tipo={{ ev.servico_id }}&data={{ pacote_feito.proxima.isoformat() }}&lead={{ ev.lead or '' }}">Marcar a {{ pacote_feito.proxima_n }}ª sessão</a>{% endif %}
       <a class="ag-bt sec" href="/painel/clinica/planos/novo?evento={{ ev.id }}">Plano de tratamento</a></div>
     {% endif %}
   </div>

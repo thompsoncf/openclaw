@@ -144,17 +144,21 @@ def consumos(c, conta_id: int, pacote_id: int) -> list[dict]:
 
 
 def _tem_futuro(c, conta_id: int, k: dict, agora: datetime) -> bool:
-    """O paciente já tem a próxima sessão marcada (esse procedimento, ou "Sessão de pacote")."""
+    """O paciente já tem a próxima sessão marcada (esse procedimento, ou "Sessão de pacote").
+
+    Conta o atendimento de HOJE que ainda não foi finalizado, mesmo depois da hora: a
+    paciente que está na cadeira às 15h não pode receber "sua 3ª sessão já pode ser
+    marcada" porque a recepção ainda não clicou Finalizar."""
     return c.execute(
         r"""select 1 from eventos_agenda e
               left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
              where e.conta_id=%s and e.status='ativo' and e.situacao in ('agendado','confirmado','presente','atendimento')
-               and e.inicio > %s and (e.servico_id = %s or s.categoria = 'sessao')
+               and e.inicio >= %s and (e.servico_id = %s or s.categoria = 'sessao')
                and (e.prospeccao_id = %s
                     or (length(%s) >= 8 and right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8) = %s))
              limit 1""",
-        (conta_id, agora, k["servico_id"], k["lead"], ca._digitos(k["fone"]), ca._digitos(k["fone"])[-8:])).fetchone() \
-        is not None
+        (conta_id, ca.utc(ca.hoje_br(agora), time(0)), k["servico_id"], k["lead"], ca._digitos(k["fone"]),
+         ca._digitos(k["fone"])[-8:])).fetchone() is not None
 
 
 def precisam_marcar(c, conta_id: int, agora: datetime) -> list[dict]:
@@ -183,23 +187,47 @@ def para_o_evento(c, conta_id: int, ev: dict) -> dict | None:
     return pacote(c, conta_id, k) if k else None
 
 
-def _achar(c, conta_id: int, ev: dict, trava: bool) -> int | None:
+def _primeiro(nome: str | None) -> str:
+    from finance.clinica_agente import _palavras
+    p = _palavras(nome)
+    return p[0] if p else ""
+
+
+def _achar(c, conta_id: int, ev: dict, trava: bool, todos: bool = False):
+    """O pacote que este atendimento baixa. O MESMO procedimento vem antes da "Sessão
+    de pacote" genérica (a Peeling não baixa do Laser só porque o Laser é mais antigo),
+    e o PACIENTE tem que ser o mesmo: a mãe e o filho no mesmo card/celular não
+    dividem saldo (o primeiro nome do agendamento bate com o do pacote).
+    `todos=True` devolve todos os que casam (a regra da parcela atrasada olha todos)."""
     try:
         with c.transaction():
-            r = c.execute(
-                r"""select k.id from clinica_pacotes k
+            rows = c.execute(
+                r"""select k.id, k.paciente_nome from clinica_pacotes k
                       left join servicos_catalogo s on s.id = %s and s.conta_id = k.conta_id
                      where k.conta_id=%s and k.estado='ativo' and k.sessoes_usadas < k.sessoes_total
                        and (k.validade_ate is null or k.validade_ate >= %s)
                        and (k.servico_id = %s or s.categoria = 'sessao')
                        and (k.prospeccao_id = %s
                             or (length(%s) >= 8 and right(regexp_replace(k.paciente_fone, '\D', '', 'g'), 8) = %s))
-                     order by k.criado_em, k.id limit 1""" + (" for update of k" if trava else ""),
+                     order by (k.servico_id = %s) desc, k.criado_em, k.id limit 20""",
                 (ev.get("servico_id"), conta_id, ca.local(ev["inicio"]).date(), ev.get("servico_id"), ev.get("lead"),
-                 ca._digitos(ev.get("fone")), ca._digitos(ev.get("fone"))[-8:])).fetchone()
-    except Exception:  # noqa: BLE001 — sem a 381
+                 ca._digitos(ev.get("fone")), ca._digitos(ev.get("fone"))[-8:], ev.get("servico_id"))).fetchall()
+    except Exception as e:  # noqa: BLE001
+        if "clinica_pacotes" in str(e) and "does not exist" in str(e):
+            return [] if todos else None    # a 381 ainda não rodou
+        _log.warning("pacotes: não consegui achar o pacote (evento %s)", ev.get("id"), exc_info=True)
+        return [] if todos else None
+    quem = _primeiro(ev.get("paciente"))
+    ids = [r[0] for r in rows if not quem or not _primeiro(r[1]) or _primeiro(r[1]) == quem]
+    if todos:
+        return ids
+    if not ids:
         return None
-    return r[0] if r else None
+    if trava:
+        ok = c.execute("""select id from clinica_pacotes where id=%s and conta_id=%s and estado='ativo'
+                           and sessoes_usadas < sessoes_total for update""", (ids[0], conta_id)).fetchone()
+        return ok[0] if ok else None
+    return ids[0]
 
 
 # ------------------------------------------------------------------ nascer
@@ -288,16 +316,18 @@ def atrasado(c, conta_id: int, k: dict, hoje: date | None = None) -> bool:
         return False
 
 
-def bloqueio(c, conta_id: int, lead: int | None, fone: str, servico_id: int | None) -> str | None:
+def bloqueio(c, conta_id: int, lead: int | None, fone: str, servico_id: int | None,
+            paciente: str = "") -> str | None:
     """A regra da clínica (decisão C, nasce desligada): sessão de pacote com parcela
     atrasada não se marca. Devolve o texto do erro, ou None."""
     if not config(c, conta_id)["bloqueia_atrasado"] or not servico_id:
         return None
-    ev = {"servico_id": servico_id, "lead": lead, "fone": fone, "inicio": datetime.now(timezone.utc)}
-    kid = _achar(c, conta_id, ev, trava=False)
-    k = pacote(c, conta_id, kid) if kid else None
-    if k and atrasado(c, conta_id, k):
-        return "Parcela do plano em atraso: pela regra da clínica, a sessão só é marcada com a parcela em dia."
+    ev = {"servico_id": servico_id, "lead": lead, "fone": fone, "inicio": datetime.now(timezone.utc),
+          "paciente": paciente}
+    for kid in _achar(c, conta_id, ev, trava=False, todos=True):
+        k = pacote(c, conta_id, kid)
+        if k and atrasado(c, conta_id, k):
+            return "Parcela do plano em atraso: pela regra da clínica, a sessão só é marcada com a parcela em dia."
     return None
 
 
@@ -319,7 +349,7 @@ def retornos(c, conta_id: int, agora: datetime, dias: int = 14) -> list[dict]:
         with c.transaction():
             rows = c.execute(
                 """select r.id, r.prospeccao_id, r.paciente_nome, r.paciente_fone, r.vence_em, r.profissional_id,
-                          coalesce(p.nome, ''), r.estado
+                          coalesce(p.nome, ''), r.estado, r.criado_em
                      from clinica_retornos r
                      left join clinica_profissionais p on p.id = r.profissional_id and p.conta_id = r.conta_id
                     where r.conta_id=%s and r.estado='aguardando' and r.vence_em <= %s
@@ -327,7 +357,7 @@ def retornos(c, conta_id: int, agora: datetime, dias: int = 14) -> list[dict]:
     except Exception:  # noqa: BLE001
         return []
     return [{"id": r[0], "lead": r[1], "paciente": r[2], "fone": r[3], "vence_em": r[4], "profissional_id": r[5],
-             "prof": r[6], "vencido": r[4] < hoje} for r in rows]
+             "prof": r[6], "vencido": r[4] < hoje, "criado_em": r[8]} for r in rows]
 
 
 def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
@@ -342,21 +372,33 @@ def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
                                                  where e.conta_id = r.conta_id and e.id <> r.evento_id
                                                    and e.profissional_id = r.profissional_id
                                                    and e.situacao not in ('cancelou','faltou') and e.status='ativo'
-                                                   and e.criado_em > r.criado_em
+                                                   and e.inicio > (select o.inicio from eventos_agenda o
+                                                                    where o.id = r.evento_id and o.conta_id = r.conta_id)
                                                    and (e.prospeccao_id = r.prospeccao_id
-                                                        or right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8)
-                                                           = right(regexp_replace(r.paciente_fone, '\D', '', 'g'), 8))
+                                                        or (length(regexp_replace(r.paciente_fone, '\D', '', 'g')) >= 8
+                                                            and right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8)
+                                                                = right(regexp_replace(r.paciente_fone, '\D', '', 'g'), 8)))
                                                  order by e.inicio limit 1)
                      where r.conta_id=%s and r.estado='aguardando'
                        and exists (select 1 from eventos_agenda e
                                     where e.conta_id = r.conta_id and e.id <> r.evento_id
                                       and e.profissional_id = r.profissional_id
                                       and e.situacao not in ('cancelou','faltou') and e.status='ativo'
-                                      and e.criado_em > r.criado_em
+                                      and e.inicio > (select o.inicio from eventos_agenda o
+                                                       where o.id = r.evento_id and o.conta_id = r.conta_id)
                                       and (e.prospeccao_id = r.prospeccao_id
-                                           or right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8)
-                                              = right(regexp_replace(r.paciente_fone, '\D', '', 'g'), 8)))
+                                           or (length(regexp_replace(r.paciente_fone, '\D', '', 'g')) >= 8
+                                               and right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8)
+                                                   = right(regexp_replace(r.paciente_fone, '\D', '', 'g'), 8))))
                     returning r.id""", (conta_id,)).fetchall())
+            # o horário que fechou o retorno foi cancelado (ou faltou): volta pra fila
+            n += len(c.execute(
+                """update clinica_retornos r set estado='aguardando', marcado_evento_id=null, atualizado_em=now()
+                    where r.conta_id=%s and r.estado='marcado'
+                      and exists (select 1 from eventos_agenda e where e.id = r.marcado_evento_id
+                                     and e.conta_id = r.conta_id
+                                     and (e.status = 'cancelado' or e.situacao in ('cancelou','faltou')))
+                   returning r.id""", (conta_id,)).fetchall())
             n += len(c.execute("""update clinica_retornos set estado='vencido', atualizado_em=now()
                                    where conta_id=%s and estado='aguardando' and vence_em < %s returning id""",
                                (conta_id, ca.hoje_br(agora) - timedelta(days=RETORNO_PERDE_DIAS))).fetchall())
@@ -396,6 +438,7 @@ def texto_lembrete(tipo: str, nome: str, **kw) -> str:
 
 def _ja_lembrou(c, conta_id: int, tipo: str, ref_id: int, desde: datetime | None = None) -> bool:
     return c.execute("select 1 from clinica_lembretes where conta_id=%s and tipo=%s and ref_id=%s"
+                     " and estado <> 'falhou'"
                      + (" and enviado_em >= %s" if desde else "") + " limit 1",
                      (conta_id, tipo, ref_id) + ((desde,) if desde else ())).fetchone() is not None
 
@@ -410,6 +453,9 @@ def _mandar_lembrete(c, conta_id: int, conv: int, destino: str, tipo: str, ref_i
     if res.get("ok"):
         c.execute("update clinica_lembretes set mensagem_id=%s where id=%s and conta_id=%s",
                   (res.get("mensagem_id"), lid, conta_id))
+    else:
+        # não saiu (chip caído): não queima o lembrete nem o "1 por dia" do paciente
+        c.execute("update clinica_lembretes set estado='falhou' where id=%s and conta_id=%s", (lid, conta_id))
     c.commit()
     return bool(res.get("ok"))
 
@@ -451,6 +497,8 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
     for r in retornos(c, conta_id, agora, dias=cfg["retorno_aviso_dias"]):
         if r["vencido"] or _ja_lembrou(c, conta_id, "retorno", r["id"]):
             continue
+        if r["criado_em"] > agora - timedelta(days=2):
+            continue                        # pedido agora ("volta em 7 dias"): o paciente acabou de sair
         conv, destino = pode(r["lead"], r["fone"])
         if conv and _mandar_lembrete(c, conta_id, conv, destino, "retorno", r["id"],
                                      texto_lembrete("retorno", r["paciente"], prof=profs.get(r["profissional_id"], ""),
@@ -468,6 +516,8 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
     for k in listar(c, conta_id, hoje):
         if k["estado"] != "ativo" or not k["vence_logo"] or _ja_lembrou(c, conta_id, "validade", k["id"]):
             continue
+        if k["criado_em"] > agora - timedelta(days=2) or _tem_futuro(c, conta_id, k, agora):
+            continue                        # acabou de comprar, ou já marcou as próximas
         conv, destino = pode(k["lead"], k["fone"])
         if conv and _mandar_lembrete(c, conta_id, conv, destino, "validade", k["id"],
                                      texto_lembrete("validade", k["paciente"], saldo=k["saldo"],

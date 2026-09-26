@@ -70,7 +70,8 @@ create table if not exists public.clinica_lembretes (
   tipo text not null check (tipo in ('sessao','retorno','validade')),
   ref_id bigint not null,                  -- o pacote ou o retorno
   enviado_em timestamptz not null default now(),
-  mensagem_id bigint);
+  mensagem_id bigint,
+  estado text not null default 'enviado' check (estado in ('enviado','falhou')));
 create index if not exists idx_clinica_lembretes_conversa on public.clinica_lembretes (conta_id, conversa_id, enviado_em);
 
 alter table public.clinica_agenda_config

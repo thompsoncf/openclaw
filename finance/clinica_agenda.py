@@ -368,6 +368,12 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
     lid, nome_pac, fone_pac, erro = _lead_do_paciente(c, conta_id, lead_id, nome, fone)
     if erro:
         return None, erro
+    # a regra da parcela atrasada (fase 6, nasce desligada) vale pra QUEM marcar: a
+    # recepção, o agente no WhatsApp e a vaga liberada
+    from finance import clinica_pacotes as ckp
+    erro = ckp.bloqueio(c, conta_id, lid, fone_pac or fone, servico_id, (paciente or "").strip() or nome_pac)
+    if erro:
+        return None, erro
     if (paciente or "").strip():
         nome_pac = paciente.strip()
     if not fone_pac and len(_digitos(fone)) >= 10:
@@ -505,8 +511,8 @@ def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: s
         try:
             with c.transaction():
                 ckp.ao_finalizar(c, conta_id, evento_id, retorno_dias)
-        except Exception:  # noqa: BLE001 — sem a 381: finalizar não pode cair por isso
-            _log.info("agenda da clínica: pacote/retorno não gravado (evento %s)", evento_id, exc_info=True)
+        except Exception:  # noqa: BLE001 — finalizar não pode cair por isso; mas deixa rastro
+            _log.warning("agenda da clínica: pacote/retorno não gravado (evento %s)", evento_id, exc_info=True)
     return None
 
 

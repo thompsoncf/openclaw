@@ -234,11 +234,11 @@ def test_pacote_perto_de_vencer_avisa_e_depois_vence(pool, zap):
     _plano_aceito(pool, lead)
     with pool.connection() as c:
         c.execute("update clinica_pacotes set validade_ate=%s", (date(2026, 12, 18),))
-        _sessao(c, lead, date(2026, 10, 26), h=9)            # a próxima já marcada: só o aviso de validade
+        _finalizar(c, _sessao(c, lead, date(2026, 10, 14), h=9))   # a próxima só libera em 04/11
         c.execute("update clinica_agenda_config set pacote_lembretes='ligado'")
         c.commit()
         assert ckp.lembrar(c, CLINICA, _br(date(2026, 10, 19)))["validade"] == 1       # 60 dias antes
-        assert "4 sessões do seu pacote, válidas até 18/12/2026" in zap.saiu[-1][1]
+        assert "3 sessões do seu pacote, válidas até 18/12/2026" in zap.saiu[-1][1]
         assert ckp.lembrar(c, CLINICA, _br(date(2026, 12, 21)))["vencidos"] == 1
         assert ckp.listar(c, CLINICA)[0]["estado"] == "vencido"
 
@@ -334,3 +334,110 @@ def test_telas_do_pacote_e_marcar_a_proxima(cli, pool, zap):
     assert "Pacotes e retornos" in lista and "Lúcia Ferreira" in lista and "<b>Ferreira</b>" not in lista
     novo = cli.get(f"/painel/clinica/agenda/novo?lead={lead}").text
     assert "Lúcia &lt;b&gt;Ferreira&lt;/b&gt;" in novo
+
+
+# ------------------------------------------------------------------ revisão do PR
+
+def test_quem_esta_na_cadeira_nao_recebe_sua_sessao_ja_pode(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        _finalizar(c, _sessao(c, lead, SEG))
+        dia = SEG + timedelta(days=21)                       # a 2ª libera e está marcada pra hoje 08:00
+        eid = _sessao(c, lead, dia)
+        ca.mudar_situacao(c, CLINICA, eid, "confirmado")
+        ca.mudar_situacao(c, CLINICA, eid, "presente")
+        c.commit()
+        assert ckp.lembrar(c, CLINICA, ca.utc(dia, time(15)))["sessao"] == 0
+        assert ckp.precisam_marcar(c, CLINICA, ca.utc(dia, time(15))) == []
+
+
+def test_o_mesmo_procedimento_baixa_antes_do_pacote_mais_antigo(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        est, cons = _tipo(c, "Procedimento estético")["id"], _tipo(c, "Consulta")["id"]
+        for sid, dias in ((cons, 3), (est, 1)):                # o de Consulta é o mais antigo
+            c.execute("""insert into clinica_pacotes (conta_id, prospeccao_id, paciente_nome, paciente_fone, servico_id,
+                                                      nome, sessoes_total, criado_em)
+                         values (39,%s,'Lúcia Ferreira',%s,%s,'x',4,now() - %s * interval '1 day')""",
+                      (lead, FONE, sid, dias))
+        c.commit()
+        eid = _sessao(c, lead, SEG)
+        _finalizar(c, eid)
+        assert ckp.do_evento(c, CLINICA, eid)["servico_id"] == est
+
+
+def test_mae_e_filho_no_mesmo_card_nao_dividem_saldo(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)                                  # o pacote é da Lúcia
+    with pool.connection() as c:
+        eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c), servico_id=_tipo(c, "Procedimento estético")["id"],
+                               inicio=ca.utc(SEG, time(8)), lead_id=lead, paciente="Pedro Ferreira", agora=AGORA)
+        assert erro is None
+        assert ckp.para_o_evento(c, CLINICA, ca.evento(c, CLINICA, eid)) is None
+        _finalizar(c, eid, tratamento="nao")
+        assert ckp.listar(c, CLINICA)[0]["usadas"] == 0
+
+
+def test_retorno_marcado_antes_do_pedido_fecha_e_fone_vazio_nao_casa(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        consulta = _sessao(c, lead, SEG, tipo="Consulta")
+        volta = _sessao(c, lead, date(2026, 10, 26), tipo="Retorno")       # marcada ANTES de finalizar
+        c.commit()
+        _finalizar(c, consulta, tratamento="nao", retorno_dias=30)
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 1)))
+        c.commit()
+        assert c.execute("select estado, marcado_evento_id from clinica_retornos").fetchone() == ("marcado", volta)
+        ca.mudar_situacao(c, CLINICA, volta, "cancelou")                     # desmarcou: volta pra fila
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 1)))
+        c.commit()
+        assert c.execute("select estado from clinica_retornos").fetchone()[0] == "aguardando"
+        # retorno de paciente sem celular não é fechado pela consulta de outro sem celular
+        c.execute("update clinica_retornos set paciente_fone='', prospeccao_id=null")
+        outro = c.execute("""insert into eventos_agenda (conta_id, titulo, inicio, tipo, profissional_id, situacao,
+                                                         status, paciente_fone, criado_em)
+                             values (39,'x',%s,'empresa',%s,'agendado','ativo','',now()) returning id""",
+                          (_br(date(2026, 10, 27)), _manoel(c))).fetchone()[0]
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 1)))
+        c.commit()
+        assert c.execute("select estado from clinica_retornos").fetchone()[0] == "aguardando"
+        assert outro
+
+
+def test_retorno_pedido_agora_espera_e_sessao_de_pacote_nao_sugere_retorno(cli, pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        eid = _sessao(c, lead, SEG, tipo="Consulta")
+        _finalizar(c, eid, tratamento="nao", retorno_dias=7)
+        c.execute("update clinica_retornos set criado_em = %s", (_br(date(2026, 9, 28)),))
+        c.commit()
+        assert ckp.lembrar(c, CLINICA, _br(date(2026, 9, 29)))["retorno"] == 0          # dia seguinte: espera
+        assert ckp.lembrar(c, CLINICA, _br(date(2026, 9, 30)))["retorno"] == 1
+
+
+def test_lembrete_que_falhou_nao_conta(pool, zap, monkeypatch):
+    with pool.connection() as c:
+        lead, conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        monkeypatch.setattr(agente, "_mandar", lambda *a, **k: {"ok": False})
+        assert ckp.lembrar(c, CLINICA, _br(date(2026, 10, 21)))["retorno"] == 0
+        from finance import clinica_vagas as cvg
+        assert not cvg._recebeu_hoje(c, CLINICA, conv, ca.utc(date(2026, 10, 21), time(0)))
+        monkeypatch.setattr(agente, "_mandar", lambda *a, **k: {"ok": True, "sid": "x"})
+        assert ckp.lembrar(c, CLINICA, _br(date(2026, 10, 22)))["retorno"] == 1
+
+
+def test_parcela_atrasada_vale_pro_agente_e_pra_vaga(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        c.execute("update titulos set vencimento = current_date - 10 where id = (select min(id) from titulos)")
+        ckp.salvar_config(c, CLINICA, validade="12", lembretes="ligado", aviso="7", bloqueia=True)
+        c.commit()
+        eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c), servico_id=_tipo(c, "Procedimento estético")["id"],
+                               inicio=ca.utc(SEG, time(8)), lead_id=lead, marcado_por="ia", agora=AGORA)
+        assert eid is None and "parcela" in erro

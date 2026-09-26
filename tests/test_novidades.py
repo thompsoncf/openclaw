@@ -154,6 +154,8 @@ def pool():
         c.execute((BASE / "391_novidade_ia_marca_visita.sql").read_text(encoding="utf-8"))
         c.execute("delete from novidades where chave in "
                   "('ia-do-numero-marca-visita','visita-meia-hora')")
+        # 393: o aviso do orçamento pela IA (mesmo portão da 391)
+        c.execute((BASE / "393_novidade_ia_orcamento.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1335,3 +1337,10 @@ def test_os_avisos_da_391(pool):
     assert rows["ia-do-numero-marca-visita"][:2] == ("visita_da_ia", ["dono", "gestor"])
     assert rows["visita-meia-hora"][:2] == ("eventos", ["dono", "gestor", "vendedor"])
     assert all(r[2] and r[3] for r in rows.values())
+
+
+def test_o_aviso_do_orcamento_da_ia_mira_quem_ve_a_chave(pool):
+    with pool.connection() as c:
+        r = c.execute("""select publico, pra_quem, resumo, link from novidades
+                          where chave='ia-do-numero-monta-orcamento'""").fetchone()
+    assert r[0] == "visita_da_ia" and r[1] == ["dono", "gestor"] and r[2] and r[3]

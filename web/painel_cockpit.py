@@ -4329,6 +4329,97 @@ def cockpit_visita_marcar(request: Request, lead_id: int):
     return _page(f"Visita — {d['empresa']}", corpo)
 
 
+# ------------------------------------------------------------------ orçamento da IA
+# A conferência (migração 392, finance/ia_orcamento.py): a IA da regra por número montou
+# o orçamento, e quem confere decide em um toque — "Conferir e mandar" (o link sai pelo
+# chip da conversa), "Editar" (a tela de orçamento de sempre) ou "Descartar".
+
+def _sessao_e_papel(request: Request):
+    g = _gerencia(request)
+    if g:
+        return g[0], g[1], "gestor"
+    sess = _sessao(request)
+    if sess:
+        return sess[0], sess[1], request.session.get("papel", "vendedor")
+    return None
+
+
+@router.get("/cockpit/ia-orcamento/{orc_id}", response_class=HTMLResponse)
+def cockpit_ia_orcamento(request: Request, orc_id: int):
+    s = _sessao_e_papel(request)
+    if not s:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id, papel = s
+    from finance import ia_orcamento as iao
+    pool = get_pool()
+    d = iao.pendente(pool, conta_id, orc_id)
+    if not d or not iao.pode_conferir(pool, conta_id, membro_id, papel, orc_id):
+        return RedirectResponse(_BASE, status_code=303)
+    ev = d["evento"] or {}
+    linhas = "".join(
+        f"<div class=ficha-l><span>{esc(str(it.get('nome','')))}"
+        + (f" ({int(it.get('qtd') or 1)}×)" if int(it.get("qtd") or 1) > 1 else "")
+        + f"</span><b>{_brl(int(round(float(it.get('setup') or 0) * 100)))}</b></div>"
+        for it in (d["itens"] or []))
+    festa = " · ".join(x for x in [
+        esc(str(ev.get("tipo") or "")), esc(str(ev.get("data") or "")),
+        (f"{esc(str(ev.get('inicio')))}" + (f"–{esc(str(ev.get('fim')))}" if ev.get("fim") else "")
+         if ev.get("inicio") else ""),
+        (f"{int(ev['convidados'])} convidados" if ev.get("convidados") else "")] if x)
+    feito = d["estado"] != "conferir"
+    botoes = ("<div class=fonte>Este orçamento já foi "
+              + ("mandado." if d["estado"] == "enviado" else "descartado.") + "</div>"
+              if feito else
+              "<button class=btn id=iaoMandar type=button>✅ Conferir e mandar</button>"
+              f"<a class='btn ghost' href='{_BASE}/orcamentos/{orc_id}'>Editar</a>"
+              "<button class='btn ghost' id=iaoDescartar type=button>Descartar</button>")
+    corpo = (_hdr("Orçamento da IA", d["quem"], voltar=_BASE)
+             + "<div class=toast id=toast></div><div class=scroll>"
+             + f"<div class=secao><div class=rot>Cliente</div><div class=local>"
+               f"<div class=nome>{esc(d['quem'])}</div><div class=end>{festa or 'sem dados da festa'}</div></div></div>"
+             + f"<div class=secao><div class=rot>O que a IA montou · nº {esc(str(d['numero'] or ''))}</div>"
+               f"<div class=ficha>{linhas}"
+               f"<div class=ficha-l><span><b>Total</b></span><b>{_brl(d['total_centavos'])}</b></div>"
+               + (f"<div class=ficha-l><span>Sinal</span><b>{_brl(d['sinal_centavos'])}</b></div>"
+                  if d["sinal_centavos"] else "")
+               + "</div></div>"
+             + f"<div class=secao><a href='/proposta/{esc(d['token'])}' target=_blank rel=noopener>"
+               "Ver a proposta como o cliente vai ver</a></div>"
+             + "<div class=fonte>Conferir e mandar: o link vai pro cliente pelo mesmo número "
+               "da conversa. Depois que ele aprovar, a data fica segurada por 72h esperando o sinal.</div>"
+             + "</div>"
+             + f"<div class=rodape-b>{botoes}</div>"
+             + "<script>(function(){function t(m){var x=document.getElementById('toast');"
+               "if(!x)return;x.textContent=m;x.classList.add('show');"
+               "setTimeout(function(){x.classList.remove('show');},2400);}"
+               "function vai(acao,b){b.disabled=true;"
+               f"zapFetch('{_BASE}/ia-orcamento/{orc_id}/'+acao,{{method:'POST'}}).then(function(j){{"
+               "if(!j||!j.ok){t((j&&j.erro)||'Não deu certo');b.disabled=false;return;}"
+               "t(acao==='mandar'?'Mandado ✓':'Descartado');setTimeout(function(){location.reload();},900);});}"
+               "var m=document.getElementById('iaoMandar'),d=document.getElementById('iaoDescartar');"
+               "if(m)m.onclick=function(){vai('mandar',m);};"
+               "if(d)d.onclick=function(){if(confirm('Descartar este orçamento? O cliente não recebe nada.'))vai('descartar',d);};"
+               "})();</script>")
+    return _page(f"Orçamento da IA — {d['quem']}", corpo)
+
+
+@router.post("/cockpit/ia-orcamento/{orc_id}/{acao}")
+def cockpit_ia_orcamento_acao(request: Request, orc_id: int, acao: str):
+    s = _sessao_e_papel(request)
+    if not s:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if acao not in ("mandar", "descartar"):
+        return JSONResponse({"ok": False, "erro": "ação desconhecida"}, status_code=400)
+    conta_id, membro_id, papel = s
+    from finance import ia_orcamento as iao
+    pool = get_pool()
+    if not iao.pode_conferir(pool, conta_id, membro_id, papel, orc_id):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    if acao == "descartar":
+        return JSONResponse(iao.descartar(pool, conta_id, membro_id, orc_id))
+    return JSONResponse(iao.mandar(pool, conta_id, membro_id, orc_id))
+
+
 @router.post("/cockpit/lead/{lead_id}/visita-proposta/{proposta_id}/{acao}")
 def cockpit_visita_proposta(request: Request, lead_id: int, proposta_id: int, acao: str):
     """O vendedor decide sobre a visita que a IA combinou (migração 259).

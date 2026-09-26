@@ -317,9 +317,11 @@ def listar(c, conta_id: int, chips: list[dict]) -> list[dict]:
                 regras[d["chip_id"]] = d
     except Exception:  # noqa: BLE001
         regras = {}
+    from finance import ia_orcamento as _iao
     from finance import ia_visita as _iv
     for d in regras.values():
         d["visita"] = _iv.config_tela(c, d["id"])
+        d["orcamento"] = _iao.config_tela(c, d["id"])
     saida = []
     for ch in chips:
         cid = int(ch.get("id") or conta_id)

@@ -620,19 +620,24 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
     txt = "".join(getattr(b, "text", "") for b in resp.content
                   if getattr(b, "type", None) == "text").strip()
     d = ag._extrair_json(txt)
+    if not isinstance(d, dict):
+        d = {}
     acao = d.get("acao") if d.get("acao") in ACOES else "responder"
-    resposta = (d.get("resposta") or "").strip()
+    resposta = str(d.get("resposta") or "").strip()
 
     if cfg.get("pode_qualificar") and lead and d.get("temperatura") in ("frio", "morno", "quente"):
         c.execute("update prospeccao set temperatura=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (d["temperatura"], lead, conta_id))
 
+    # a IA às vezes devolve o objeto como texto ("consulta": "3-7-..."): o formato
+    # errado não pode derrubar a volta, senão o paciente fica sem resposta nenhuma
+    rep = d.get("repasse") if isinstance(d.get("repasse"), dict) else {"motivo": d.get("repasse")}
+    cons = d.get("consulta") if isinstance(d.get("consulta"), dict) else {"codigo": d.get("consulta")}
     if acao == "repassar":
-        motivo = str((d.get("repasse") or {}).get("motivo") or "pessoa")
+        motivo = str(rep.get("motivo") or "pessoa")
         repassar(pool, c, conta_id, conversa_id, lead, motivo, nome, enviar)
         return
     if acao == "consulta":
-        cons = d.get("consulta") or {}
         marcar(pool, c, conta_id, conversa_id, lead, fone, str(cons.get("codigo") or ""),
                str(cons.get("nome") or ""), menu, agora, enviar)
         return

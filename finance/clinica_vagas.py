@@ -428,33 +428,62 @@ def _bloqueados(c, conta_id: int) -> dict[str, str]:
     return out
 
 
+def _mesmo_numero(c, conta_id: int, conversa_id: int) -> list[int]:
+    """As conversas da conta com o MESMO número desta (8 últimos dígitos): o mesmo
+    telefone pode ter duas conversas, uma por chip. O número é o do voltar a chamar
+    (o WhatsApp do card, o telefone, o contato da conversa); as outras conversas são
+    achadas pelo contato delas (idx_conversas_num8) ou pelo card."""
+    r = c.execute(
+        r"""select right(regexp_replace(coalesce(nullif(p.whatsapp,''), nullif(p.telefone,''), cv.contato_ref, ''),
+                                        '\D', '', 'g'), 8)
+              from conversas cv left join prospeccao p on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
+             where cv.id=%s and cv.conta_id=%s""", (conversa_id, conta_id)).fetchone()
+    n8 = r[0] if r else ""
+    if len(n8) < 8:
+        return [conversa_id]
+    ids = {x[0] for x in c.execute(
+        r"""select cv.id from conversas cv
+             where cv.conta_id=%s and cv.canal='whatsapp'
+               and right(regexp_replace(cv.contato_ref, '\D', '', 'g'), 8) = %s
+            union
+            select cv.id from conversas cv
+              join prospeccao p on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
+             where cv.conta_id=%s and (right(regexp_replace(coalesce(p.whatsapp, ''), '\D', '', 'g'), 8) = %s
+                                       or right(regexp_replace(coalesce(p.telefone, ''), '\D', '', 'g'), 8) = %s)""",
+        (conta_id, n8, conta_id, n8, n8)).fetchall()}
+    return sorted(ids | {conversa_id})
+
+
 def _recebeu_hoje(c, conta_id: int, conversa_id: int, inicio_dia: datetime) -> bool:
-    """1 mensagem automática por pessoa por dia, somando vaga e voltar a chamar."""
-    if c.execute("""select 1 from clinica_vaga_ofertas where conta_id=%s and conversa_id=%s
+    """1 mensagem automática por pessoa por dia, somando vaga, plano, lembretes e voltar
+    a chamar — por NÚMERO, não por conversa (dois chips, duas conversas, uma pessoa),
+    a mesma regra do voltar a chamar (`_nao_mandado_hoje`)."""
+    convs = _mesmo_numero(c, conta_id, conversa_id)
+    if c.execute("""select 1 from clinica_vaga_ofertas where conta_id=%s and conversa_id = any(%s)
                      and enviada_em >= %s and estado <> 'falhou' limit 1""",
-                 (conta_id, conversa_id, inicio_dia)).fetchone():
+                 (conta_id, convs, inicio_dia)).fetchone():
         return True
     try:
         with c.transaction():
-            if c.execute("""select 1 from clinica_planos where conta_id=%s and conversa_id=%s
+            if c.execute("""select 1 from clinica_planos where conta_id=%s and conversa_id = any(%s)
                              and (toque1_em >= %s or toque3_em >= %s) limit 1""",
-                         (conta_id, conversa_id, inicio_dia, inicio_dia)).fetchone():
+                         (conta_id, convs, inicio_dia, inicio_dia)).fetchone():
                 return True                 # lembrete do plano de tratamento hoje
     except Exception:  # noqa: BLE001 — sem a 379
         pass
     try:
         with c.transaction():
-            if c.execute("""select 1 from clinica_lembretes where conta_id=%s and conversa_id=%s
+            if c.execute("""select 1 from clinica_lembretes where conta_id=%s and conversa_id = any(%s)
                              and enviado_em >= %s and estado <> 'falhou' limit 1""",
-                         (conta_id, conversa_id, inicio_dia)).fetchone():
-                return True                 # lembrete de sessão, retorno ou validade hoje
+                         (conta_id, convs, inicio_dia)).fetchone():
+                return True                 # lembrete de sessão, retorno, validade ou reposição hoje
     except Exception:  # noqa: BLE001 — sem a 381
         pass
     try:
         with c.transaction():
-            return c.execute("""select 1 from voltar_a_chamar_toques where conta_id=%s and conversa_id=%s
+            return c.execute("""select 1 from voltar_a_chamar_toques where conta_id=%s and conversa_id = any(%s)
                                  and estado='enviado' and enviado_em >= %s limit 1""",
-                             (conta_id, conversa_id, inicio_dia)).fetchone() is not None
+                             (conta_id, convs, inicio_dia)).fetchone() is not None
     except Exception:  # noqa: BLE001
         return False
 

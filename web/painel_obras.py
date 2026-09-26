@@ -195,6 +195,7 @@ def ficha(request: Request, obra_id: int):
                    fotos=_fotos_da_ficha(conta[0], o),
                    empreita=_empreita_da_ficha(conta[0], o),
                    sinapi=_sinapi_da_ficha(conta[0], o),
+                   lead=_lead_da_ficha(conta[0], o),
                    tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, modelos=orf.MODELOS,
                    status_doc=ov.STATUS_DOC, modalidades=ov.MODALIDADES,
                    situacoes=[(k, ov.ROTULO_SITUACAO[k]) for k in ov.SITUACOES],
@@ -409,6 +410,8 @@ def parcela_recebida(request: Request, obra_id: int, titulo_id: int):
     r = emp.dar_baixa_titulo(pool, conta[0], titulo_id)
     if not (r or {}).get("ok"):
         return _volta(f"/painel/obras/{obra_id}", (r or {}).get("erro") or "Não deu pra dar baixa.")
+    from finance import obra_lead as _ol
+    _ol.parcela_recebida(pool, conta[0], obra_id)
     return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
 
 
@@ -419,6 +422,11 @@ def _sinapi_da_ficha(conta_id: int, o: dict) -> dict | None:
     if not ref or not o.get("area_m2"):
         return None
     return {"ref": ref, "cmp": _sin.comparar(o, ref)}
+
+
+def _lead_da_ficha(conta_id: int, o: dict) -> dict | None:
+    from finance import obra_lead as _ol
+    return _ol.lead_da_obra(get_pool(), conta_id, o["id"])
 
 
 def _empreita_da_ficha(conta_id: int, o: dict) -> dict:
@@ -723,7 +731,8 @@ _TPL_FICHA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="ob-topo" style="margin-top:.4rem"><div>
   <h2>{{ '🏠' if o.tipo == 'casa' else '🔨' }} {{ o.nome|e }}</h2>
   <div class="ob-sub">{{ o.rotulo_tipo }}{% if o.endereco %} · {{ o.endereco|e }}{% endif %}{% if o.area_m2 %} · {{ '%g'|format(o.area_m2) }} m²{% endif %}
-    · <span class="ob-pill {{ o.status }}">{{ o.rotulo_status }}</span></div></div></div>
+    · <span class="ob-pill {{ o.status }}">{{ o.rotulo_status }}</span>{% if lead %}
+    · lead: <a href="/painel/prospeccao/{{ lead.id }}">{{ lead.nome|e }}</a>{% endif %}</div></div></div>
 {% if erro %}<div class="ob-erro">{{ erro|e }}</div>{% endif %}
 
 <div class="ob-faixas">
@@ -840,7 +849,7 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
     <td class="ob-mut">{{ ('ao concluir ' ~ (orc.nome_etapa[p.etapa] or p.etapa)|lower) if p.etapa else 'na assinatura' }}</td>
     <td class="v">{{ brl(p.valor_centavos) }}</td></tr>
   {% if p.cobranca %}<tr><td colspan="3"><div class="ob-acoes">
-    <a class="ob-bt prim" target="_blank" rel="noopener" href="https://wa.me/?text={{ p.cobranca.mensagem|urlencode }}">Cobrar no WhatsApp</a>
+    <a class="ob-bt prim" target="_blank" rel="noopener" href="{{ p.cobranca.wa_url }}">Cobrar no WhatsApp</a>
     <form method="post" action="/painel/obras/{{ o.id }}/parcela/{{ p.titulo_id }}/recebi" style="margin:0"><button class="ob-bt">Recebi</button></form>
     <span class="ob-mut">{{ 'com o Pix da empresa' if p.cobranca.pix else 'sem Pix: cadastre a chave abaixo' }}</span></div></td></tr>{% endif %}{% endfor %}
   </table>

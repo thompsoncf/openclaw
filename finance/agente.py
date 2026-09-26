@@ -459,6 +459,29 @@ def _atender(pool, conta_id, conversa_id):
         msgs = c.execute(
             """select direcao, autor, texto from mensagens
                 where conversa_id=%s order by criado_em desc limit 12""", (conversa_id,)).fetchall()
+        # A IA DA REGRA MARCA A VISITA (migração 390, finance/ia_visita.py) — só quem
+        # vende festa, e só com a chave "a IA marca a visita" ligada na regra.
+        vcfg, remarcar = None, False
+        if regra and _perfil == "eventos" and conv[1]:
+            from finance import ia_visita as _iv
+            vcfg = _iv.config(c, regra)
+        if vcfg:
+            _ult = next((t for (_d, a, t) in msgs if a == "lead"), "")
+            _canal0 = conv[9] or "whatsapp"
+            _dest0 = conv[2] if _canal0 in ("messenger", "instagram") else (conv[4] or conv[5] or conv[2])
+            # "1" / "2" à pergunta da véspera: código, não IA — é o que a pergunta prometeu
+            o_que, txt_conf = _iv.responder_confirmacao(c, conta_id, conv[1], _ult)
+            if o_que == "confirmou":
+                _enviar(c, conta_id, conversa_id, _canal0, _dest0, txt_conf)
+                return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
+            remarcar = o_que == "remarcar"
+            # "B" sozinho: o horário B da última oferta, sem depender da IA ler certo
+            _ini = _iv.horario_da_letra(c, conta_id, conversa_id, _ult)
+            if _ini:
+                _enviar(c, conta_id, conversa_id, _canal0, _dest0,
+                        _regra_visita(pool, c, conta_id, conversa_id, conv, regra, vcfg, _ini,
+                                      conv[3] or conv[2] or "O cliente", ""))
+                return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
         catalogo = scat.listar(pool, conta_id)
         instr, faqs = _conhecimento(c, conta_id)
         lead_empresa = conv[3] or conv[2] or "cliente"
@@ -495,7 +518,10 @@ def _atender(pool, conta_id, conversa_id):
         if regra:
             # etapa 1 da regra: a IA ainda não marca — pega a preferência do cliente
             # e chama quem cuida da agenda (a etapa 2 é a IA marcando sozinha)
-            visita_txt = _regra_prompt(regra, msgs, _perfil)
+            visita_txt = _regra_prompt(regra, msgs, _perfil,
+                                       visita=_regra_visita_prompt(pool, c, conta_id, conversa_id,
+                                                                   conv, vcfg, remarcar)
+                                       if vcfg else None)
         elif _av.pode_agora(cfg, _agora):
             visita_livres = _av.sugestoes(pool, conta_id, _agora, quantas=2)
             if visita_livres:
@@ -571,7 +597,8 @@ def _atender(pool, conta_id, conversa_id):
         pedir = (
             f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{visita_txt}{seguros_txt}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
-            + ('{"acao":"responder","resposta":"texto pra mandar ao cliente",' if regra else
+            + ('{"acao":"responder|visita","resposta":"texto pra mandar ao cliente",' if vcfg else
+               '{"acao":"responder","resposta":"texto pra mandar ao cliente",' if regra else
                '{"acao":"responder|orcamento|visita","resposta":"texto pra mandar ao cliente",')
             + '"visita":{"data":"AAAA-MM-DD","hora":"HH:MM"},'
             '"servicos":[{"slug":"...","qtd":1}],"temperatura":"frio|morno|quente",'
@@ -599,10 +626,18 @@ def _atender(pool, conta_id, conversa_id):
         acao = d.get("acao") if d.get("acao") in ("responder", "orcamento", "visita") else "responder"
         resposta = (d.get("resposta") or "").strip()
         if regra:
-            # etapa 1: nem orçamento formal nem visita marcada pela IA — o que ela
-            # precisa de gente vai pelo aviso, e a conversa segue com ela
-            acao = "responder"
+            # nem orçamento formal (etapa 3) nem visita, a menos que a regra marque — o
+            # que ela precisa de gente vai pelo aviso, e a conversa segue com ela
             _regra_avisar(pool, c, conta_id, conversa_id, conv, regra, d, lead_empresa)
+            if vcfg and acao == "visita":
+                quando = _av.ag.parse_datahora(
+                    f"{(d.get('visita') or {}).get('data','')} {(d.get('visita') or {}).get('hora','')}".strip())
+                if quando:
+                    _enviar(c, conta_id, conversa_id, canal, destino,
+                            _regra_visita(pool, c, conta_id, conversa_id, conv, regra, vcfg,
+                                          quando, lead_empresa, resposta))
+                    return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
+            acao = "responder"
 
         # qualificação: atualiza a temperatura do lead (se ligado e veio no JSON)
         if cfg["pode_qualificar"] and conv[1] and d.get("temperatura") in ("frio", "morno", "quente"):
@@ -732,7 +767,7 @@ def _regra_antes(c, conta_id: int, conversa_id: int, regra: dict, enviar) -> boo
     return True
 
 
-def _regra_prompt(regra: dict, msgs, perfil: str = "eventos") -> str:
+def _regra_prompt(regra: dict, msgs, perfil: str = "eventos", *, visita: str | None = None) -> str:
     """O que a IA da regra sabe a mais: como se apresenta, que o preço dela é de
     referência, qual é o próximo passo, e como chamar gente.
 
@@ -759,9 +794,10 @@ def _regra_prompt(regra: dict, msgs, perfil: str = "eventos") -> str:
          "que combinam com o que o cliente precisa."),
         "- NÃO monte orçamento formal nem mande link de proposta: diga que o orçamento "
         "sai conferido pela equipe.",
-        f"- O melhor caminho é {passo}. Se ele "
-        "topar, pergunte o dia e o horário de preferência e diga que a equipe confirma "
-        "— nunca confirme horário sozinha (motivo " + ("visita" if eventos else "agenda") + ").",
+        visita or (
+            f"- O melhor caminho é {passo}. Se ele "
+            "topar, pergunte o dia e o horário de preferência e diga que a equipe confirma "
+            "— nunca confirme horário sozinha (motivo " + ("visita" if eventos else "agenda") + ")."),
         "- CHAMAR GENTE: preencha avisar_equipe.motivo com UM destes quando precisar: "
         + ", ".join(f"{k} ({v[1].lower()})" for k, v in _cr.MOTIVOS.items()
                     if eventos or k != "visita")
@@ -772,6 +808,81 @@ def _regra_prompt(regra: dict, msgs, perfil: str = "eventos") -> str:
         "retorna e use o motivo desconto ou sinal.",
     ]
     return "\n".join(linhas)
+
+
+def _regra_visita_prompt(pool, c, conta_id, conversa_id, conv, vcfg, remarcar: bool) -> str:
+    """O bloco da visita quando a IA MARCA: os horários livres com letra (guardados
+    pra letra do cliente virar horário) e o que fazer com o que ele escolher."""
+    from finance import ia_visita as _iv
+    viva = _iv.visita_viva(c, conta_id, conv[1])
+    agora = datetime.now(timezone.utc)
+    livres = _iv.ofertas(pool, conta_id, vcfg, agora, conversa_id=conversa_id,
+                         ignorar_evento=viva["evento_id"] if viva else None)
+    if livres:
+        _iv.guardar_ofertas(c, conta_id, conversa_id, livres)
+    linhas = []
+    if viva:
+        linhas.append(f"- O cliente JÁ TEM visita marcada: {_iv.fmt(viva['inicio'])}."
+                      + (" Ele pediu pra REMARCAR: ofereça os horários abaixo." if remarcar else
+                         " Se ele quiser mudar, é remarcação: ofereça os horários abaixo."))
+    if livres:
+        linhas.append("- VISITA AO ESPAÇO: você MARCA. Convide o cliente a conhecer o espaço "
+                      "(quem visita fecha muito mais) e ofereça ESTES horários, com a letra:\n"
+                      + _iv.texto_ofertas(livres))
+    else:
+        linhas.append("- VISITA AO ESPAÇO: convide o cliente, e pergunte o dia e o horário "
+                      "que ficam bons pra ele.")
+    linhas.append(
+        "- Quando o cliente escolher um horário (a letra, um dos horários, ou outro dia e "
+        "hora que ele propuser — aceita meia hora, ex.: 9h30), devolva acao=visita com "
+        "visita.data e visita.hora. O sistema confere a agenda e manda a confirmação com "
+        "data e endereço: em resposta escreva SÓ o que vem depois (ex.: os adicionais que "
+        "combinam com a festa), ou deixe vazio. Nunca diga que marcou sem acao=visita.")
+    return "\n".join(linhas)
+
+
+def _regra_visita(pool, c, conta_id, conversa_id, conv, regra, vcfg, quando, quem: str,
+                  complemento: str) -> str:
+    """Tenta marcar (ou remarcar) a visita no horário que o cliente escolheu e devolve
+    o texto pra ele. Não coube: oferece outros, ou chama a anfitriã."""
+    from finance import chip_regra as _cr
+    from finance import ia_visita as _iv
+    agora = datetime.now(timezone.utc)
+    # a marcação usa as próprias conexões (e a trava da conta) e mexe no lead que esta
+    # transação pode ter tocado (temperatura): sem o commit, ela esperaria por nós
+    c.commit()
+    from finance import clinica_agente as _cla
+    _cla.tentar_travar(c, conversa_id)      # a conversa volta a ser só desta volta
+    res = _iv.marcar(pool, conta_id, regra, vcfg, conv[1], conversa_id, quando, agora, quem=quem)
+    if res.get("ok"):
+        return res["texto"] + (f"\n\n{complemento}" if complemento else "")
+    motivo = res.get("motivo") or "falhou"
+
+    def _chama(m: str, resumo: str) -> None:
+        _cr.avisar(pool, conta_id, regra, m, prospeccao_id=conv[1], conversa_id=conversa_id,
+                   resumo=resumo, lead=quem)
+    if motivo == "combinado":
+        _chama("agenda", f"Quer {_iv.fmt(quando)}, mas esse horário aparece combinado em "
+                         "outra conversa e não está na agenda. Confira e responda.")
+        return "Vou confirmar esse horário com a equipe e já te retorno 😊"
+    if motivo in ("remarcacoes", "falhou"):
+        _chama("visita", f"Quer visita {_iv.fmt(quando)}"
+                         + (" (já remarcou 2 vezes)." if motivo == "remarcacoes" else "."))
+        return "Vou ver esse horário com a equipe e já te retorno 😊"
+    domingo = quando.astimezone(_av.ag.BRT).weekday() == 6
+    if domingo:
+        _chama("visita", f"Pediu visita no domingo, {_iv.fmt(quando)}.")
+    viva = _iv.visita_viva(c, conta_id, conv[1])
+    livres = _iv.ofertas(pool, conta_id, vcfg, agora, conversa_id=conversa_id,
+                         ignorar_evento=viva["evento_id"] if viva else None)
+    if not livres:
+        if not domingo:
+            _chama("visita", f"Quer visita {_iv.fmt(quando)}, e a grade não tem horário livre.")
+        return "Vou ver com a equipe um horário pra você e já te retorno 😊"
+    _iv.guardar_ofertas(c, conta_id, conversa_id, livres)
+    abre = ("Domingo eu confirmo com a equipe e te retorno 😊 Se preferir, tenho estes:"
+            if domingo else "Esse horário não está livre 😕 Tenho estes:")
+    return f"{abre}\n{_iv.texto_ofertas(livres)}\nQual fica melhor? É só responder a letra."
 
 
 def _regra_avisar(pool, c, conta_id, conversa_id, conv, regra, d, lead_empresa) -> None:

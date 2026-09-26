@@ -622,6 +622,16 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — confirmação da véspera falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # A visita que a IA da regra por número marcou (migração 390): véspera
+                # às 18h, 2h antes, "ninguém confirmou" pra anfitriã e a falta.
+                from finance import ia_visita as _ivs
+                _iv = _ivs.rodar(pool)
+                if any(_iv.values()):
+                    log.info("poller: ciclo #%d — visitas da IA: %s", ciclo, _iv)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — visitas da IA falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # Vaga liberada da clínica (migração 369): consulta cancelada vira
                 # convite pra quem cabe no horário; lê o 1/2/PARAR e manda a 2ª rodada.
                 from finance import clinica_vagas as _cvg

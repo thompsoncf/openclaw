@@ -99,12 +99,15 @@ def painel_hoje(request: Request):
         vagas_esperando = cvg.esperando(c, conta_id)
         from finance import clinica_planos as cpl
         planos = cpl.em_aberto(c, conta_id, agora)
+        from finance import clinica_pacotes as ckp
+        pac_marcar = ckp.precisam_marcar(c, conta_id, agora)
+        pac_retornos = ckp.retornos(c, conta_id, agora, dias=7)
         c.commit()      # fr.config semeia a linha da régua na 1ª vez
     for e in dados["esperando"]:
         e["fora"] = not fr.dentro_da_janela(e["em"], janela)
     q = request.query_params
     return _render("hoje.html", request, titulo="Hoje", cfg=cfg, gerencia=gerencia,
-                   d=dados, repasses=repasses, vagas_esperando=vagas_esperando, planos=planos, aviso=_AVISOS.get(q.get("aviso") or "", ""),
+                   d=dados, repasses=repasses, vagas_esperando=vagas_esperando, planos=planos, pac_marcar=pac_marcar, pac_retornos=pac_retornos, aviso=_AVISOS.get(q.get("aviso") or "", ""),
                    erro=request.session.pop("hoje_erro", ""),
                    rotulos=vac._ROTULO_TOQUE)
 
@@ -240,6 +243,15 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     {% for p in planos.responderam %}<div class="hj-card quente"><div class="cab"><a class="quem" href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a><span class="chip">respondeu depois do plano</span></div>
       <div class="hj-acoes"><a class="abre" href="/painel/clinica/planos/{{ p.id }}">Abrir plano</a></div></div>{% endfor %}
     {% for p in planos.vencendo if p not in planos.responderam %}<div class="hj-card fora"><div class="cab"><a class="quem" href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a><span class="chip fora">vence {{ p.validade_ate.strftime('%d/%m') }}</span></div></div>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if pac_marcar or pac_retornos %}
+  <div class="hj-sec"><h3>Pacotes e retornos</h3><span class="qt">{{ pac_marcar|length + pac_retornos|length }}</span>
+    <span class="ex">Sessão liberada sem marcar e retorno chegando. O Zaq lembra o paciente; aqui é pra quem quiser ligar antes. <a href="/painel/clinica/pacotes">Abrir pacotes</a></span></div>
+  <div class="hj-lista">
+    {% for k in pac_marcar %}<div class="hj-card quente"><div class="cab"><a class="quem" href="/painel/clinica/pacotes/{{ k.id }}">{{ k.paciente }}</a><span class="chip">{{ k.proxima_n }}ª sessão liberada</span></div></div>{% endfor %}
+    {% for r in pac_retornos %}<div class="hj-card {% if r.vencido %}fora{% else %}quente{% endif %}"><div class="cab"><span class="quem">{{ r.paciente }}</span><span class="chip {% if r.vencido %}fora{% endif %}">retorno até {{ r.vence_em.strftime('%d/%m') }}</span></div></div>{% endfor %}
   </div>
   {% endif %}
 

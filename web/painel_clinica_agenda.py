@@ -150,6 +150,12 @@ def novo(request: Request):
     # sessão — nome, celular e busca nunca vão na URL
     form = request.session.pop("agenda_form", None) or {}
     with get_pool().connection() as c:
+        if not form and _int(q.get("lead")):
+            r = c.execute("""select id, coalesce(nullif(contato,''), empresa, ''),
+                                    coalesce(nullif(whatsapp,''), telefone, '')
+                               from prospeccao where id=%s and conta_id=%s""", (_int(q.get("lead")), conta_id)).fetchone()
+            if r:
+                form = {"lead_id": str(r[0]), "nome": r[1], "fone": r[2], "busca": r[1]}
         profs = [p for p in cc.listar_profissionais(c, conta_id)
                  if p["funcao"] != "Recepção, não atende" and p["tipos"]]
         tipos = cc.listar_tipos(c, conta_id)
@@ -212,6 +218,11 @@ def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), in
         request.session["agenda_form"] = guardar
         return _ir(request, volta, erro="Escolha um horário.")
     with get_pool().connection() as c:
+        from finance import clinica_pacotes as ckp
+        erro = ckp.bloqueio(c, conta_id, _int(lead_id), fone, _int(tipo))
+        if erro:
+            request.session["agenda_form"] = guardar
+            return _ir(request, volta, erro=erro)
         eid, erro = ca.agendar(c, conta_id, profissional_id=_int(prof) or 0, servico_id=_int(tipo) or 0,
                                inicio=quando, lead_id=_int(lead_id), nome=nome, fone=fone, origem=origem,
                                observacao=observacao, encaixe=encaixe, membro_id=membro)
@@ -257,7 +268,21 @@ def ver_evento(request: Request, evento_id: int):
         promete = ca.config(c, conta_id)["confirmacao_modo"] == "ligado"
         msg_marcado = ca.texto_marcado(c, conta_id, ev, promete)
         msg_vespera = ca.texto_vespera(c, conta_id, ev, agora)
+        from finance import clinica_pacotes as ckp
+        hoje = ca.hoje_br(agora)
+        pacote_feito = ckp.do_evento(c, conta_id, evento_id, hoje) if ev["situacao"] == "finalizado" else None
+        pacote_vai = ckp.para_o_evento(c, conta_id, ev) if ev["situacao"] != "finalizado" else None
+        tipo_ev = next((t for t in cc.listar_tipos(c, conta_id, so_ativos=False) if t["id"] == ev["servico_id"]), None)
+        volta_padrao = (tipo_ev or {}).get("volta_dias") or ""
+        try:
+            with c.transaction():
+                r = c.execute("select vence_em, estado from clinica_retornos where conta_id=%s and evento_id=%s",
+                              (conta_id, evento_id)).fetchone()
+        except Exception:  # noqa: BLE001
+            r = None
+        retorno = {"vence": r[0], "estado": r[1]} if r else None
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
+                   pacote_feito=pacote_feito, pacote_vai=pacote_vai, volta_padrao=volta_padrao, retorno=retorno,
                    ev=ev, prof=prof, proximos=ca.PROXIMOS.get(ev["situacao"], ()), remarcar=remarcar,
                    conversa=conversa, quando=f"{ca.dia_txt(ev['inicio'])} {ev['hora']}–{ev['fim_txt']}",
                    msg_marcado=msg_marcado, msg_vespera=msg_vespera,
@@ -266,7 +291,7 @@ def ver_evento(request: Request, evento_id: int):
 
 @router.post("/painel/clinica/agenda/evento/{evento_id}/situacao")
 def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
-                    tratamento: str = Form(""), valor: str = Form("")):
+                    tratamento: str = Form(""), valor: str = Form(""), retorno: str = Form("")):
     conta, _g, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -277,7 +302,8 @@ def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
                    erro="Valor inválido. Use o formato 1.500,00.")
     with get_pool().connection() as c:
         erro = ca.mudar_situacao(c, conta[0], evento_id, nova, tratamento=(tratamento or None),
-                                 valor_centavos=valor_c, membro_id=request.session.get("membro_id"))
+                                 valor_centavos=valor_c, membro_id=request.session.get("membro_id"),
+                                 retorno_dias=_int(retorno))
         (c.rollback if erro else c.commit)()
     if not erro and nova == "finalizado" and tratamento == "sim":
         # o médico propôs tratamento: a recepção monta o plano agora, com o paciente na frente
@@ -400,6 +426,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="sub">{% if vista == 'dia' %}Uma coluna por profissional. Clique num horário livre para agendar e num agendamento para mudar o status.{% else %}A semana de um profissional, dia a dia.{% endif %}</div></div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap">
       <a class="ag-bt sec" href="/painel/clinica/vagas">⚡ Vagas liberadas{% if vagas_esperando %} ({{ vagas_esperando }}){% endif %}</a>
+      <a class="ag-bt sec" href="/painel/clinica/pacotes">Pacotes e retornos</a>
       <a class="ag-bt" href="/painel/clinica/agenda/novo?data={{ data_iso }}">+ Agendar</a></div></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
@@ -523,15 +550,26 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     {% if 'finalizado' in proximos %}
     <form class="ag-form" method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao" style="margin-top:.7rem">
       <input type="hidden" name="nova" value="finalizado">
+      {% if pacote_vai %}
+      <div class="inteira"><span class="mut">Sessão do pacote: finalizar baixa 1 do saldo ({{ pacote_vai.nome }}, sessão {{ pacote_vai.usadas + 1 }} de {{ pacote_vai.total }}).</span></div>
+      {% else %}
       <div class="inteira"><span class="mut">O médico propôs tratamento? (o card do paciente anda no funil com a resposta)</span>
         <div class="ag-ops" style="margin-top:.3rem">
           <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'Fechado' }}</label>
           <label><input type="radio" name="tratamento" value="sim" required> Sim — Plano de tratamento</label></div></div>
       <label>Valor proposto (se souber)<input name="valor" inputmode="decimal" placeholder="1.500,00"></label>
+      {% endif %}
+      <label>O médico pediu retorno em quantos dias? (vazio: não pediu)<input name="retorno" inputmode="numeric" value="{{ volta_padrao }}"></label>
       <div class="ag-acoes inteira"><button>Finalizar</button></div>
     </form>
     {% endif %}{% endif %}
-    {% if ev.situacao == 'finalizado' %}<div class="ag-acoes" style="margin-top:.7rem"><a class="ag-bt sec" href="/painel/clinica/planos/novo?evento={{ ev.id }}">Plano de tratamento</a></div>{% endif %}
+    {% if ev.situacao == 'finalizado' %}
+    {% if pacote_feito %}<div class="ok" style="margin-top:.7rem">Sessão {{ pacote_feito.usadas }} de {{ pacote_feito.total }} baixada ({{ pacote_feito.nome }}).{% if pacote_feito.saldo %} Faltam {{ pacote_feito.saldo }}; a próxima fica boa a partir de {{ pacote_feito.proxima.strftime('%d/%m') }} (intervalo de {{ pacote_feito.intervalo }} dias).{% else %} Pacote concluído.{% endif %}</div>{% endif %}
+    {% if retorno %}<div class="mut" style="margin-top:.4rem">Retorno pedido até {{ retorno.vence.strftime('%d/%m/%Y') }}{% if retorno.estado == 'marcado' %} · já marcado{% else %} · o Zaq chama o paciente 7 dias antes{% endif %}.</div>{% endif %}
+    <div class="ag-acoes" style="margin-top:.7rem">
+      {% if pacote_feito and pacote_feito.saldo %}<a class="ag-bt" href="/painel/clinica/agenda/novo?prof={{ ev.profissional_id }}&tipo={{ pacote_feito.servico_id }}&data={{ pacote_feito.proxima.isoformat() }}&lead={{ ev.lead or '' }}">Marcar a {{ pacote_feito.proxima_n }}ª sessão</a>{% endif %}
+      <a class="ag-bt sec" href="/painel/clinica/planos/novo?evento={{ ev.id }}">Plano de tratamento</a></div>
+    {% endif %}
   </div>
 
   {% if remarcar %}

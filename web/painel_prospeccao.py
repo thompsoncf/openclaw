@@ -9162,6 +9162,30 @@ def _perda_da_ficha(c, conta_id: int, lead_id: int):
         return [], None
 
 
+def _dia_ou_none(txt: str):
+    from datetime import date as _d
+    try:
+        return _d.fromisoformat((txt or "").strip()) if (txt or "").strip() else None
+    except ValueError:
+        return None
+
+
+def _volta_da_ficha(c, conta_id: int, lead_id: int) -> dict:
+    """O dia em que o lead perdido volta pro funil (migração 373) e se a conta
+    oferece o campo. Por enquanto só o perfil `obras` (desenho de 25/09/2026, seção
+    08: o comprador com nome sujo que diz "limpo até dezembro"). Best-effort, como
+    os vizinhos: a ficha é a tela mais usada do produto."""
+    try:
+        with c.transaction():
+            liberada = _fr.perfil_da_conta(c, conta_id) == "obras"
+        from finance import funil_perda as _fpv
+        dia = _fpv.volta_em(c, conta_id, lead_id) if liberada else None
+        return {"liberada": liberada, "iso": dia.isoformat() if dia else "",
+                "br": dia.strftime("%d/%m/%Y") if dia else ""}
+    except Exception:  # noqa: BLE001
+        return {"liberada": False, "iso": "", "br": ""}
+
+
 def _teto_da_ficha(c, conta_id: int, lead_id: int, status: str):
     """O estado do teto deste lead, pronto pra tela — ou (None, []) quando a etapa
     não tem teto, que é como toda conta nasce.
@@ -9270,9 +9294,10 @@ def prospeccao_ficha(request: Request, alvo_id: int):
         # `c.transaction()` (foi o que test_lead_resumo pegou). A semente da lista,
         # se foi a 1ª vez, fica gravada do mesmo jeito.
         motivos_conta, perda = _perda_da_ficha(c, ctx["conta_id"], alvo_id)
+        volta = _volta_da_ficha(c, ctx["conta_id"], alvo_id)
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
                    **avisos, teto=teto, teto_hist=teto_hist,
-                   motivos_conta=motivos_conta, perda=perda,
+                   motivos_conta=motivos_conta, perda=perda, volta=volta,
                    canais_contato=canais_contato, origem_ch=origem_ch,
                    a=alvo, timeline=timeline, status=status_ficha, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -9298,7 +9323,7 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                       evento_tipo: str = Form(""), evento_em: str = Form(""),
                       evento_convidados: str = Form(""),
                       origem_cliente: str = Form(""), perda_motivo: str = Form(""),
-                      perda_descricao: str = Form("")):
+                      perda_descricao: str = Form(""), perda_volta_em: str | None = Form(None)):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -9346,6 +9371,11 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                  alvo_id, ctx["conta_id"]))
             # migração 209, à parte e em savepoint: a ficha não depende da coluna
             _gravar_origem_e_motivo(c, ctx["conta_id"], alvo_id, origem_cliente, perda_motivo)
+            # o dia em que o perdido volta (373): só quando o campo veio na tela (a
+            # conta de obra); em branco limpa, como os outros campos da ficha
+            if isinstance(perda_volta_em, str):
+                from finance import funil_perda as _fpv
+                _fpv.marcar_volta(c, ctx["conta_id"], alvo_id, _dia_ou_none(perda_volta_em))
             # o texto do motivo que exige descrição (migração 235). Savepoint pelo
             # mesmo motivo do vizinho: a coluna é nova e editar a ficha não pode
             # depender dela.
@@ -13375,6 +13405,8 @@ function perdaDesc(sel){
                por lá, e pro histórico de quem foi perdido antes. #}
             <div><label class="lbl">Por que perdeu</label><select class="fld" name="perda_motivo" onchange="perdaDesc(this)">
               <option value="">—</option>{% for m in (motivos_conta or motivos_perda_compat) %}<option value="{{ m.chave }}" data-desc="{{ 1 if m.exige_descricao else 0 }}" {% if a.perda_motivo==m.chave %}selected{% endif %}>{{ m.rotulo }}</option>{% endfor %}</select></div>
+            {% if volta and volta.liberada %}<div><label class="lbl">Voltar a procurar em</label><input class="fld" type="date" name="perda_volta_em" value="{{ volta.iso }}"
+                 title="O dia que ele deu (ex.: pra limpar o nome). Nesse dia o lead volta sozinho pro Follow-up."></div>{% endif %}
             <div class="full" id="perda-desc-campo" style="display:{{ 'block' if a.perda_descricao else 'none' }}">
               <label class="lbl">Conte o que aconteceu</label>
               <input class="fld" name="perda_descricao" value="{{ a.perda_descricao or '' }}"

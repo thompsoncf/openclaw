@@ -189,54 +189,79 @@ tbody tr:last-child td{border-bottom:0}
   .campos{grid-template-columns:1fr}
   .er{grid-template-columns:120px 1fr 32px}
 }
+
+/* v3: orçamento prévio, linha do tempo, dados */
+.prev{align-self:flex-end;max-width:74%;border:1px solid var(--ia-borda);background:var(--bg);border-radius:12px;overflow:hidden;font-size:.76rem}
+.prev .ph{background:var(--ia-fundo);padding:.45rem .65rem;display:flex;justify-content:space-between;gap:.5rem;color:var(--ia-2);font-family:var(--mono);font-size:.64rem;letter-spacing:.06em;text-transform:uppercase}
+.prev .pb{padding:.55rem .65rem;display:flex;flex-direction:column;gap:.25rem}
+.prev .pb b{font-size:.84rem}
+.prev .lin{display:flex;justify-content:space-between;gap:.8rem;color:var(--dim)}
+.prev .lin span:last-child{color:var(--text);font-variant-numeric:tabular-nums}
+.prev .inc{color:var(--faint);font-size:.7rem}
+.prev .pf{border-top:1px solid var(--line);padding:.45rem .65rem;display:flex;gap:.4rem}
+.ops{display:flex;flex-direction:column;gap:.25rem;margin-top:.35rem}
+.ops span{border:1px solid var(--ia-borda);border-radius:8px;padding:.2rem .5rem;font-family:var(--mono);font-size:.72rem;color:var(--ia-2)}
+.linha{display:flex;flex-direction:column;gap:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.et{display:grid;grid-template-columns:118px 1fr auto;gap:.3rem 1rem;padding:.7rem 1rem;border-bottom:1px solid var(--line);align-items:start;font-size:.84rem}
+.et:last-child{border-bottom:0}
+.et .q{font-family:var(--mono);font-size:.72rem;color:var(--faint);padding-top:.1rem}
+.et p{margin:0;color:var(--dim)}
+.et p b{color:var(--text)}
+.quem{font-size:.68rem;border-radius:999px;padding:.12rem .55rem;border:1px solid var(--line-2);white-space:nowrap;justify-self:end}
+.quem.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.quem.cli{color:var(--text)}
+.quem.av{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+.quem.cl{border-color:var(--neon);background:var(--neon);color:#062312;font-weight:600}
+.dados{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.dd{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:flex;flex-direction:column;gap:.4rem;font-size:.84rem}
+.dd .big{font-family:var(--display);font-size:1.6rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--neon-2)}
+.dd p{margin:0;color:var(--dim)}
+.dd p b{color:var(--text)}
+.mini{width:100%;border-collapse:collapse;min-width:0;font-size:.78rem}
+.mini td,.mini th{padding:.25rem .4rem;border-bottom:1px solid var(--line);text-align:right}
+.mini td:first-child,.mini th:first-child{text-align:left}
+.mini .ruim{color:var(--coral-2)}
+.grade{display:grid;grid-template-columns:auto repeat(7,1fr);gap:3px;font-size:.66rem;font-family:var(--mono)}
+.grade span{padding:.18rem .1rem;text-align:center;border-radius:4px;color:var(--faint)}
+.grade .h{color:var(--dim)}
+.grade .v{background:var(--neon-fundo);color:var(--neon-2);border:1px solid var(--neon-borda)}
+.grade .f{background:var(--coral-fundo);color:var(--coral-2);border:1px solid var(--coral-borda)}
+@media (max-width:640px){.et{grid-template-columns:1fr}.quem{justify-self:start}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
 <div class="wrap">
 
 <header class="head">
-  <span class="k">Mockup · versão 2, com as decisões do dono · Prime Eventos · 26/09/2026</span>
+  <span class="k">Mockup · versão 3: a IA fecha o ciclo sem depender de gente · Prime Eventos · 26/09/2026</span>
   <h1>O zaq teste vira vendedor com IA, atendendo o chip CP Thiago</h1>
-  <p>Todo contato <b>novo</b> que chegar no número do <b>CP Thiago</b> vai para o <b>zaq teste</b>, e a IA atende do primeiro "oi" até a visita marcada. Quando precisar de gente, ela chama a retaguarda humana. O chip principal (CP Zarb) segue com o rodízio de sempre, sem IA.</p>
+  <p>Todo contato <b>novo</b> que chegar no número do <b>CP Thiago</b> vai para o <b>zaq teste</b>, e a IA atende do primeiro "oi" até o sinal: manda o orçamento prévio, marca a visita e segura a data. A equipe só recebe aviso. O chip principal (CP Zarb) segue com o rodízio de sempre, sem IA.</p>
   <div class="quem">
     <span class="pill">Prime Eventos · conta 34</span>
     <span class="pill ok">chip CP Thiago · conectado</span>
     <span class="pill ia">zaq teste · vendedor IA</span>
-    <span class="pill">retaguarda: Jacqueline</span>
+    <span class="pill">anfitriã da visita: Jacqueline</span>
   </div>
 </header>
 
 <section class="sec">
   <header>
     <span class="k">A resposta</span>
-    <h2>Dá pra fazer, pelo número, não pelo anúncio. E a IA ainda não está pronta</h2>
+    <h2>A IA fecha o ciclo sozinha: orçamento prévio, visita marcada e data segurada</h2>
+    <p>O único clique de gente é <b>confirmar que o sinal caiu</b>, até a Prime ter cobrança própria. Todo o resto a IA faz, e a equipe só recebe aviso.</p>
   </header>
   <div class="ver">
     <div class="vc sim">
-      <h3><span class="st ok">dá</span> Separar pelo número do chip</h3>
-      <p>O número por onde a mensagem entrou é gravado pelo servidor em toda mensagem, e o cliente não consegue mudar. Se o anúncio novo apontar só para o CP Thiago, tudo que entrar ali é da campanha.</p>
-      <ul>
-        <li>Hoje o CP Thiago está quase parado: <b>4 conversas novas em 30 dias</b>.</li>
-        <li>Nada muda na conexão do chip. A regra mexe só em quem recebe o lead e em quem responde.</li>
-      </ul>
+      <h3><span class="st ok">muda</span> O orçamento prévio vai antes da visita</h3>
+      <p>Assim que o cliente diz data, horário e convidados, e a data está livre, a IA manda o link da proposta com o pacote certo daquele dia. A visita vira convite para conhecer o espaço.</p>
     </div>
-    <div class="vc nao">
-      <h3><span class="st no">não dá</span> Separar pela campanha</h3>
-      <p>A mensagem que chega pelo QR não traz de qual anúncio ela veio. O código na mensagem pronta (<code>[#XYZ]</code>) existe no sistema, mas o cliente pode apagar, e nenhum lead da base tem código até hoje.</p>
-      <ul>
-        <li>O código entra no anúncio <b>só para medir</b> por criativo, não para rotear.</li>
-      </ul>
+    <div class="vc sim">
+      <h3><span class="st ok">muda</span> A IA marca a visita direto</h3>
+      <p>Numa grade de horários que você define, na agenda da Jacqueline, sem cair na montagem de festa. Confirma na véspera, remarca e trata a falta sozinha.</p>
     </div>
-    <div class="vc nao">
-      <h3><span class="st no">ainda não</span> A IA pronta para vender</h3>
-      <p>Ela nunca atendeu cliente de verdade na Prime. Nos 32 recados dos testes:</p>
-      <ul>
-        <li>disse <b>"amanhã às 10h está confirmado"</b> sem marcar nada;</li>
-        <li>respondeu <b>4 vezes em 17 segundos</b> quando o cliente mandou mensagens seguidas;</li>
-        <li>prometeu <b>"vou passar pra equipe"</b> sem avisar ninguém;</li>
-        <li>esqueceu a conversa (lê só as 12 últimas mensagens).</li>
-      </ul>
-      <p>As seis peças da seção "O que construir" resolvem isso antes de ligar.</p>
+    <div class="vc sim">
+      <h3><span class="st ok">muda</span> A aprovação segura a data por 72h</h3>
+      <p>O cliente aprova o orçamento no link, a data fica pré-reservada, a IA manda o Pix e lembra. Sem sinal em 72h, a data volta a ficar livre, sem apagar nada.</p>
     </div>
   </div>
 </section>
@@ -245,7 +270,7 @@ tbody tr:last-child td{border-bottom:0}
   <header>
     <span class="k">Tela 1 · Comunicação › Distribuição</span>
     <h2>Regras por número</h2>
-    <p>Cada chip ganha a sua regra. O principal continua no rodízio; o CP Thiago passa a ter um dono só, com a IA ligada <b>só nele</b>. A chave geral da IA da empresa continua desligada.</p>
+    <p>Cada chip ganha a sua regra. O principal continua no rodízio; o CP Thiago passa a ter um dono só, com a IA ligada <b>só nele</b>, e a grade de visita que a IA usa para marcar. A chave geral da IA da empresa continua desligada.</p>
   </header>
   <div class="palco"><div class="tela">
     <div class="painel">
@@ -277,9 +302,23 @@ tbody tr:last-child td{border-bottom:0}
           <div class="cp"><label>IA atende</label><div class="sw"><span class="tg on"></span> ligada neste número</div></div>
           <div class="cp"><label>Horário da IA</label><div class="seg"><span class="on">24 horas</span><span>Horário próprio</span></div></div>
           <div class="cp"><label>Vale para</label><div class="sel">Contatos novos a partir de 29/09</div></div>
-          <div class="cp"><label>Retaguarda (quem a IA chama)</label><div class="sel">Jacqueline · WhatsApp e app</div></div>
-          <div class="cp"><label>Proposta formal pela IA</label><div class="sw"><span class="tg"></span> desligada no começo · liga depois dos primeiros testes</div></div>
-          <div class="cp full"><label>Horário próprio (quando não for 24 horas)</label><div class="seg"><span class="on">seg</span><span class="on">ter</span><span class="on">qua</span><span class="on">qui</span><span class="on">sex</span><span class="on">sáb</span><span>dom</span><span>das 8h às 22h</span><span>fora dele: responde "retorno às 8h"</span></div></div>
+          <div class="cp"><label>Orçamento prévio pela IA</label><div class="sw"><span class="tg on"></span> ligado · vale 7 dias · sinal 30%</div></div>
+          <div class="cp"><label>Reserva da data após aprovar</label><div class="sel">72 horas esperando o sinal</div></div>
+          <div class="cp"><label>Anfitriã da visita</label><div class="sel">Jacqueline · 1 visita por horário</div></div>
+          <div class="cp"><label>Quem a IA avisa</label><div class="sel">Jacqueline · WhatsApp e app</div></div>
+          <div class="cp full"><label>Grade de visita · a IA só oferece estes horários</label>
+            <div class="grade">
+              <span></span><span class="h">seg</span><span class="h">ter</span><span class="h">qua</span><span class="h">qui</span><span class="h">sex</span><span class="h">sáb</span><span class="h">dom</span>
+              <span class="h">8h</span><span></span><span></span><span></span><span></span><span></span><span class="v">✓</span><span></span>
+              <span class="h">9h</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span></span>
+              <span class="h">10h</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span></span>
+              <span class="h">11h</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span></span>
+              <span class="h">17h</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="f">festa</span><span></span>
+              <span class="h">18h</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="v">✓</span><span class="f">festa</span><span></span>
+            </div>
+          </div>
+          <div class="cp"><label>Montagem antes da festa</label><div class="sel">4 horas sem visita</div></div>
+          <div class="cp"><label>Antecedência da visita</label><div class="sel">de 3 horas a 14 dias</div></div>
           <div class="alerta">Nos últimos 30 dias, <b>54% das mensagens enviadas por este número saíram do celular</b>. Com a regra ligada, quem responder pelo celular <b>pausa a IA naquela conversa</b>, para os dois não falarem com o cliente ao mesmo tempo.</div>
           <div class="rodape full"><span class="bt">Pausar a regra</span><span class="bt pri">Salvar regra</span></div>
         </div>
@@ -292,89 +331,148 @@ tbody tr:last-child td{border-bottom:0}
 
 <section class="sec">
   <header>
+    <span class="k">Por que assim · dados da Prime, últimos 60 dias</span>
+    <h2>Três números que mudaram o desenho</h2>
+  </header>
+  <div class="dados">
+    <div class="dd">
+      <span class="big">2 de 12</span>
+      <p>Dos <b>12 contratos</b>, só 2 têm visita ligada ao card. Das 19 visitas realizadas com card, 6 viraram orçamento e 2 fecharam. A visita ajuda, mas <b>não é a porta da venda</b>: o orçamento é.</p>
+    </div>
+    <div class="dd">
+      <span class="big">42%</span>
+      <p>É o comparecimento das visitas marcadas <b>entre 12h e 16h</b>. De manhã e no fim da tarde passa de 90%.</p>
+      <table class="mini"><thead><tr><th>Horário</th><th>Visitas</th><th>Faltas</th><th>Vieram</th></tr></thead>
+        <tbody><tr><td>8h–11h</td><td>14</td><td>1</td><td>92%</td></tr>
+        <tr><td>12h–16h</td><td>12</td><td>7</td><td class="ruim">42%</td></tr>
+        <tr><td>17h–19h</td><td>11</td><td>1</td><td>90%</td></tr></tbody></table>
+    </div>
+    <div class="dd">
+      <span class="big">26h</span>
+      <p>Foi o <b>maior tempo</b> entre aprovar o orçamento e pagar o sinal, entre quem pagou depois de aprovar. Quem paga, paga rápido: <b>72h</b> de reserva cobrem todos os casos com folga.</p>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <header>
     <span class="k">Tela 2 · A conversa</span>
-    <h2>A IA atende, qualifica, propõe a visita e chama gente para confirmar</h2>
-    <p>Exemplo de uma conversa de campanha. A IA fala o vocabulário de quem vende festa: <b>tipo, data, convidados, visita</b>. O preço sai <b>só do catálogo</b>, e a data e a visita <b>nunca</b> são confirmadas pela IA.</p>
+    <h2>Do "oi" à visita marcada, sem ninguém entrar</h2>
+    <p>Exemplo de uma conversa de campanha. A IA fala o vocabulário de quem vende festa: <b>tipo, data, convidados, visita</b>. O preço sai <b>só do catálogo</b>, pelo pacote do dia da semana e do ano da festa.</p>
   </header>
   <div class="palco"><div class="tela">
     <div class="conv">
       <div class="chatbox">
-        <div class="ch"><div><div class="n">Larissa M.</div><div class="s">exemplo · CP Thiago · entrou 21:42 · lead do zaq teste</div></div><span class="selo">IA atendendo</span></div>
+        <div class="ch"><div><div class="n">Larissa M.</div><div class="s">exemplo · CP Thiago · entrou sáb 21:42 · lead do zaq teste</div></div><span class="selo">IA atendendo</span></div>
         <div class="msgs">
           <div class="b">Oi! Vi o anúncio, queria saber o valor do espaço pra um aniversário de 15 anos<span class="h">21:42</span></div>
-          <div class="b out">Oi, Larissa! Que bom falar com você 😊 Sou a assistente Zaq, da Prime Eventos. Pra eu te passar certinho: qual a data que vocês pensam e mais ou menos quantos convidados?<span class="h">21:42</span></div>
-          <div class="b">Março do ano que vem, dia 13. Uns 120<span class="h">21:44</span></div>
-          <div class="b">é sábado</div>
-          <div class="sis">2 mensagens seguidas → uma resposta só</div>
-          <div class="b out">Anotei: 15 anos, sábado 13/03/2027, cerca de 120 convidados. Pela agenda, <b>essa data consta livre</b> hoje. A confirmação é feita pela equipe na visita.<br><br>Pra festa no sábado, o pacote do espaço fica a partir de <b>R$ 7.800 à vista</b> (valores de 2027, do nosso catálogo). O ideal é você conhecer o espaço: tenho <b>quinta 17h</b> ou <b>sábado 10h</b>. Qual fica melhor?<span class="h">21:44</span></div>
-          <div class="b">Sábado 10h!<span class="h">21:46</span></div>
-          <div class="b out">Perfeito! Vou pedir pra equipe confirmar o sábado 10h com você amanhã cedo 🙌<span class="h">21:46</span></div>
-          <div class="chama">
-            <span class="t">Chamando a retaguarda · visita aceita</span>
-            <p>Larissa aceitou <b>sábado 03/10, 10h</b>. A IA pausou nesta conversa até alguém responder. A <b>Jacqueline</b> foi avisada no WhatsApp e no app. O lead continua do zaq teste.</p>
-            <div class="bts"><span class="bt pri">Confirmar visita</span><span class="bt">Assumir a conversa</span><span class="bt ia">Devolver à IA</span></div>
+          <div class="b out">Oi, Larissa! Sou a assistente Zaq, da Prime Eventos 😊 Pra eu montar seu orçamento: qual a data, o horário de início e mais ou menos quantos convidados?<span class="h">21:42</span></div>
+          <div class="b">Sábado, 13 de março do ano que vem, 20h. Uns 120<span class="h">21:44</span></div>
+          <div class="b out">Anotei: 15 anos, sábado 13/03/2027, 20h, ~120 convidados. <b>Essa data está livre</b> 🙌 Montei seu orçamento prévio:<span class="h">21:44</span></div>
+          <div class="prev">
+            <div class="ph"><span>Orçamento prévio nº 43</span><span>vale 7 dias</span></div>
+            <div class="pb">
+              <b>Locação do espaço · sexta a domingo · 2027</b>
+              <div class="lin"><span>Pacote</span><span>R$ 7.800</span></div>
+              <div class="lin"><span>Sinal para reservar a data (30%)</span><span>R$ 2.340</span></div>
+              <span class="inc">Inclusos: freezer, cozinha, climatizadores, louças, LEDs e suíte.</span>
+            </div>
+            <div class="pf"><span class="bt pri">Aprovar e reservar a data</span><span class="bt">Ver detalhes</span></div>
           </div>
+          <div class="b out">Pra conhecer o espaço pessoalmente, tenho estes horários. É só responder com a letra:
+            <div class="ops"><span>A · ter 29/09 às 10h</span><span>B · qui 01/10 às 17h</span><span>C · sáb 03/10 às 9h</span></div><span class="h">21:44</span></div>
+          <div class="b">B<span class="h">22:15</span></div>
+          <div class="b out">Marcado! <b>Quinta 01/10 às 17h</b>, com a Jacqueline, no espaço da Prime. Te mandei o convite pra agenda do celular. Na véspera eu te lembro 😉<span class="h">22:15</span></div>
+          <div class="sis">visita gravada na agenda da Jacqueline · aviso enviado a ela · card em "Agendado Visita"</div>
+          <div class="sis">— quarta 30/09, 18h —</div>
+          <div class="b out">Oi, Larissa! Amanhã, quinta, às 17h, é a sua visita na Prime. Responde <b>1</b> pra confirmar ou <b>2</b> pra remarcar.<span class="h">18:00</span></div>
+          <div class="b">1<span class="h">18:07</span></div>
+          <div class="b out">Confirmadíssimo! Até amanhã 🎉<span class="h">18:07</span></div>
         </div>
       </div>
       <div class="lado">
         <div class="ficha">
-          <h3>O que a IA gravou no lead</h3>
+          <h3>O que a IA gravou</h3>
           <div class="kv">
             <span>Tipo</span><b class="ia">15 anos</b>
-            <span>Data</span><b class="ia">sáb 13/03/2027 · consta livre</b>
+            <span>Data</span><b class="ia">sáb 13/03/2027, 20h · livre</b>
             <span>Convidados</span><b class="ia">~120</b>
-            <span>Etapa</span><b>Agendado Visita (a confirmar)</b>
+            <span>Orçamento</span><b class="ia">nº 43 · prévio · enviado</b>
+            <span>Visita</span><b class="ia">qui 01/10, 17h · confirmada</b>
             <span>Dono</span><b>zaq teste · IA</b>
           </div>
-          <div class="chips"><span class="chip ok">1ª resposta: 20 s</span><span class="chip ia">3 respostas da IA</span><span class="chip warn">esperando confirmação</span></div>
+          <div class="chips"><span class="chip ok">1ª resposta: 20 s</span><span class="chip ia">orçamento em 2 min</span><span class="chip ok">visita confirmada</span></div>
         </div>
         <div class="fone"><div class="in">
-          <div class="not"><span class="ap">Zaq · agora</span><b>Visita aceita · Larissa M.</b><p>15 anos, 13/03/2027, ~120 pessoas. Quer sábado 03/10 às 10h. Toque para confirmar.</p></div>
-          <div class="not"><span class="ap">Zaq · 21:30</span><b>A IA pediu ajuda · Rafael S.</b><p>Pediu desconto. Conversa pausada esperando você.</p></div>
+          <div class="not"><span class="ap">Zaq · qui 18:07</span><b>Visita confirmada · Larissa M.</b><p>Amanhã, 17h. 15 anos, 13/03/2027, ~120 pessoas. Orçamento prévio nº 43 enviado.</p></div>
+          <div class="not"><span class="ap">Zaq · sáb 22:15</span><b>A IA marcou uma visita pra você</b><p>Larissa M., quinta 01/10 às 17h. Nada a fazer: é só receber.</p></div>
         </div></div>
       </div>
     </div>
   </div></div>
+  <p class="nota"><i>1</i><span>As letras <b>A, B, C</b> valem por 24h. Se a Larissa responder "B" horas depois, a IA ainda sabe qual horário era, e <b>reconfere a agenda na hora de gravar</b>. Se alguém ocupou o horário nesse meio tempo, ela oferece outros.</span></p>
+  <p class="nota"><i>2</i><span>A mensagem sai sempre <b>pelo mesmo número</b> da conversa (o CP Thiago), incluindo o convite da agenda e a confirmação da véspera.</span></p>
+</section>
+
+<section class="sec">
+  <header>
+    <span class="k">O ciclo inteiro</span>
+    <h2>Quem faz cada passo</h2>
+    <p>Da primeira mensagem ao sinal. O verde-cheio é o único clique de gente.</p>
+  </header>
+  <div class="linha">
+    <div class="et"><span class="q">em segundos</span><p><b>Responde e qualifica.</b> Tipo de festa, data, horário de início e convidados, gravados no lead.</p><span class="quem ia">IA</span></div>
+    <div class="et"><span class="q">na hora</span><p><b>Confere a data.</b> Livre: segue. Ocupada: oferece as 3 datas livres mais próximas no mesmo dia da semana.</p><span class="quem ia">IA</span></div>
+    <div class="et"><span class="q">na hora</span><p><b>Manda o orçamento prévio.</b> Link com o pacote do dia da semana e do ano, inclusos escritos, sinal de 30% e validade de 7 dias. Mandar não segura a data.</p><span class="quem ia">IA</span></div>
+    <div class="et"><span class="q">na hora</span><p><b>Oferece e marca a visita.</b> 3 horários da grade, em dias diferentes. O cliente escolhe, a IA grava na agenda da Jacqueline e manda o convite.</p><span class="quem ia">IA</span></div>
+    <div class="et"><span class="q">na hora</span><p><b>A Jacqueline fica sabendo</b> da visita marcada, com o resumo do lead. Não precisa confirmar nada.</p><span class="quem av">aviso</span></div>
+    <div class="et"><span class="q">véspera 18h · 2h antes</span><p><b>Confirma a visita.</b> "1 confirma, 2 remarca". Sem resposta até as 9h, pergunta de novo. Silêncio não cancela: só avisa a Jacqueline.</p><span class="quem ia">IA</span></div>
+    <div class="et"><span class="q">se precisar</span><p><b>Remarca ou trata a falta.</b> Move a mesma visita (até 2 vezes). Na falta, uma mensagem no mesmo dia oferecendo novo horário, e para por aí.</p><span class="quem ia">IA</span></div>
+    <div class="et"><span class="q">quando o cliente quiser</span><p><b>Aprova o orçamento no link.</b> A data fica pré-reservada por 72h, e a IA manda o Pix do sinal.</p><span class="quem cli">cliente</span></div>
+    <div class="et"><span class="q">24h e 48h</span><p><b>Lembra do sinal.</b> Sem pagamento em 72h, a data volta a ficar livre (cancelada, nada é apagado) e cliente e dono são avisados.</p><span class="quem ia">IA</span></div>
+    <div class="et"><span class="q">comprovante chegou</span><p><b>Confirmar o sinal.</b> O dono recebe "comprovante chegou" e confirma com um toque: a data fica firme e o contrato segue.</p><span class="quem cl">1 clique</span></div>
+  </div>
+  <p class="nota"><i>!</i><span>Esse último clique some quando a Prime tiver <b>cobrança própria</b> (Pix com confirmação automática). É a etapa 8 da construção.</span></p>
 </section>
 
 <section class="sec">
   <header>
     <span class="k">As regras da IA</span>
-    <h2>O que ela faz sozinha, quando chama gente e o que nunca faz</h2>
+    <h2>O que ela faz sozinha, quando avisa gente e o que nunca faz</h2>
   </header>
   <div class="tres">
     <div class="col3 a">
       <h3>Faz sozinha</h3>
       <ul>
-        <li>Responde o primeiro contato em segundos, <b>24 horas</b>.</li>
-        <li>Pergunta e grava <b>tipo de festa, data e convidados</b> no lead.</li>
-        <li>Diz o preço <b>só do catálogo</b> (40 itens), como faixa "a partir de".</li>
-        <li>Olha a agenda e diz <b>"consta livre"</b> ou "consta ocupada".</li>
-        <li>Oferece <b>dois horários</b> de visita, sempre de segunda a sábado, das 8h às 18h.</li>
-        <li>Junta as mensagens seguidas do cliente e responde uma vez só.</li>
-        <li>Espera o áudio ser transcrito e responde o que foi dito.</li>
+        <li>Responde em segundos, <b>24 horas</b>, e junta mensagens seguidas numa resposta só.</li>
+        <li>Confere a data <b>pelo dia</b>: festa ativa ou pré-reservada ocupa o dia.</li>
+        <li>Manda o <b>orçamento prévio</b> com o pacote certo e os inclusos escritos.</li>
+        <li><b>Marca a visita</b> na grade, na agenda da Jacqueline, e manda o convite.</li>
+        <li>Confirma na véspera, <b>remarca</b> (até 2 vezes) e trata a <b>falta</b>.</li>
+        <li>Manda o <b>Pix do sinal</b> na aprovação e lembra com 24h e 48h.</li>
       </ul>
     </div>
     <div class="col3 c">
-      <h3>Para e chama a retaguarda</h3>
+      <h3>Avisa gente, sem esperar</h3>
       <ul>
-        <li>O cliente <b>aceita um horário</b> de visita.</li>
-        <li>O cliente pede <b>desconto</b> ou negocia valor.</li>
-        <li>A data <b>consta ocupada</b> ou pré-reservada.</li>
-        <li>O cliente pede <b>orçamento formal</b>, contrato ou sinal.</li>
-        <li>O cliente pede para falar com uma pessoa, ou reclama.</li>
-        <li>A pergunta não está na base, ou a IA não tem certeza.</li>
-        <li>Quatro trocas sem avançar.</li>
+        <li>Visita marcada, confirmada, não confirmada, remarcada ou com falta.</li>
+        <li>Cliente pediu horário <b>fora da grade</b> ou 3ª remarcação.</li>
+        <li>Cliente pede <b>desconto</b> ou negocia valor: a IA diz que a equipe responde e avisa.</li>
+        <li>Data de 2029 em diante, ou festa sem pacote no catálogo.</li>
+        <li>Cliente pede uma pessoa, reclama, ou a pergunta está fora da base.</li>
+        <li><b>Comprovante chegou</b>: o único aviso que pede um clique.</li>
       </ul>
     </div>
     <div class="col3 n">
       <h3>Nunca faz</h3>
       <ul>
-        <li>Confirmar data de festa ou visita.</li>
-        <li>Dar preço que não está no catálogo, ou somar pacotes que são alternativas.</li>
-        <li>Mandar contrato ou cobrança de sinal. <b>Proposta formal</b> fica desligada no começo e liga pela chave da regra, depois da análise dos primeiros testes.</li>
-        <li>Prometer "vou passar pra equipe" sem que o aviso tenha saído.</li>
-        <li>Responder enquanto um humano está na conversa.</li>
+        <li>Dar desconto ou usar preço fora do catálogo.</li>
+        <li>Orçar sem conferir a data, ou firmar a data sem sinal.</li>
+        <li>Dar o sinal como pago, ou cancelar uma data firme.</li>
+        <li>Marcar visita fora da grade ou em cima da montagem de festa.</li>
+        <li>Mexer em compromisso que ela não criou.</li>
+        <li>Mandar mensagem por outro número que não o da conversa.</li>
+        <li>Agir quando não consegue ler a agenda: nesse caso ela avisa gente.</li>
       </ul>
     </div>
   </div>
@@ -408,15 +506,15 @@ tbody tr:last-child td{border-bottom:0}
   </div>
   <div class="tres">
     <div class="col3">
-      <h3>Por que a IA chamou gente</h3>
+      <h3>Por que a IA avisou gente</h3>
       <div class="esc">
-        <div class="er"><span>Visita aceita</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
+        <div class="er"><span>Comprovante chegou</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
         <div class="er"><span>Pediu desconto</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
         <div class="er"><span>Data ocupada</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
         <div class="er"><span>Fora da base</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
         <div class="er"><span>Pediu uma pessoa</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
       </div>
-      <p style="margin:0;color:var(--dim);font-size:.8rem">Ao lado de cada motivo: quanto tempo a retaguarda levou para assumir.</p>
+      <p style="margin:0;color:var(--dim);font-size:.8rem">Ao lado de cada motivo: quanto tempo a equipe levou para agir.</p>
     </div>
     <div class="col3">
       <h3>Onde a IA tende a ganhar</h3>
@@ -432,18 +530,20 @@ tbody tr:last-child td{border-bottom:0}
 <section class="sec">
   <header>
     <span class="k">O que construir, nesta ordem</span>
-    <h2>Seis peças antes de ligar, e o painel</h2>
+    <h2>Da regra do chip ao sinal automático</h2>
+    <p>Quase tudo já existe em partes: a proposta com link e aprovação online, a pré-reserva que expira sozinha, o modo "a IA marca" da visita, e da clínica a grade, a trava e a confirmação na véspera.</p>
   </header>
   <div class="passos">
-    <div class="ps"><b>Regra por número</b><p>Tabela nova com chip, dono, IA ligada, horário e retaguarda. Lida quando o lead nasce e quando a conversa vira lead. A conexão do chip e o cadastro de canais não são tocados.</p></div>
-    <div class="ps"><b>Chamar gente de verdade</b><p>A IA passa a poder dizer "preciso de humano" com o motivo: a conversa pausa e a retaguarda recebe WhatsApp e aviso no app.</p></div>
-    <div class="ps"><b>Uma resposta por rajada</b><p>A conversa fica travada enquanto a IA responde, e mensagens seguidas viram uma resposta só (a clínica já faz isso).</p></div>
-    <div class="ps"><b>Celular pausa a IA</b><p>Mensagem enviada pelo celular do CP Thiago pausa a IA naquela conversa.</p></div>
-    <div class="ps"><b>Agenda de verdade</b><p>A IA consulta a data da festa e propõe horários de visita reais; a confirmação é sempre humana.</p></div>
-    <div class="ps"><b>Áudio e memória</b><p>Responder depois da transcrição do áudio (hoje 7% das mensagens de cliente são áudio), e dar à IA o resumo da conversa longa, não só as 12 últimas mensagens.</p></div>
-    <div class="ps"><b>Painel do desafio e custo</b><p>A tela 3, com o custo da IA gravado por conversa.</p></div>
+    <div class="ps"><b>Regra por número e a IA de pé</b><p>Chip → zaq teste, IA só nele, horário configurável, retaguarda, pausa quando alguém responde pelo celular, uma resposta por rajada, áudio e memória da conversa. A IA cria o card quando a conversa não tem um.</p></div>
+    <div class="ps"><b>Orçamento prévio</b><p>Confere a data pelo dia, escolhe o pacote pelo dia da semana e ano, escreve os inclusos, põe a parcela de sinal e a validade de 7 dias, com o rótulo "prévio".</p></div>
+    <div class="ps"><b>Reserva que não vende a data duas vezes</b><p>A aprovação trava o dia antes de reservar e aproveita a data que já estava segurada para o mesmo cliente. Reserva vinda da IA vale 72h.</p></div>
+    <div class="ps"><b>Grade de visita</b><p>Dias, horários, anfitriã, visitas por horário, horas de montagem, antecedência. A IA oferece 3 horários com letra, trava e reconfere ao gravar.</p></div>
+    <div class="ps"><b>Confirmação, remarcação e falta</b><p>Véspera às 18h e 2h antes, pelo número da conversa. Remarca movendo a mesma visita.</p></div>
+    <div class="ps"><b>Sinal</b><p>Pix na aprovação, lembretes de 24h e 48h, aviso "comprovante chegou" com o botão de confirmar.</p></div>
+    <div class="ps"><b>Painel do desafio</b><p>A tela 3, mês a mês, com o custo da IA por conversa.</p></div>
+    <div class="ps"><b>Cobrança própria (depois)</b><p>Pix com confirmação automática para a Prime. É o que tira o último clique.</p></div>
   </div>
-  <p class="nota"><i>!</i><span>Antes de ligar, sem código: a base de conhecimento da Prime <b>se contradiz</b>. As instruções dizem "nunca feche valor exato", mas a IA está autorizada a mandar orçamento formal; e uma resposta pronta oferece horário de visita que a IA não pode marcar. A decisão 4 abaixo resolve isso: no começo a IA dá a faixa "a partir de" e convida para a visita.</span></p>
+  <p class="nota"><i>!</i><span><b>Antes de ligar, no catálogo:</b> o pacote de <b>segunda a quinta de 2027 está R$ 8.000</b>, mais caro que o de sexta a domingo (R$ 7.800). Nos 2 orçamentos de 2027, os vendedores cobraram R$ 7.800. A IA usaria o valor do catálogo, então esse preço precisa ser conferido.</span></p>
 </section>
 
 <section class="sec">
@@ -456,11 +556,24 @@ tbody tr:last-child td{border-bottom:0}
     <div class="q2"><span class="qn">01</span><h3>O anúncio novo aponta só para o CP Thiago</h3><p>No começo. Se alguém responder pelo celular do chip, a IA pausa naquela conversa.</p><span class="rec ok2">regra por número, só no CP Thiago.</span></div>
     <div class="q2"><span class="qn">02</span><h3>A IA atende só contatos novos</h3><p>A partir da data em que a regra for ligada. Os 14 leads que já estão no chip continuam com os donos de hoje.</p><span class="rec ok2">campo "Vale para" na regra.</span></div>
     <div class="q2"><span class="qn">03</span><h3>24 horas no começo, com horário configurável</h3><p>A regra ganha "Horário próprio": dias da semana, faixa de horas e o que a IA diz fora dele. A visita é sempre oferecida de segunda a sábado, das 8h às 18h.</p><span class="rec ok2">começa em 24 horas.</span></div>
-    <div class="q2"><span class="qn">04</span><h3>Proposta formal: sim, depois dos primeiros testes</h3><p>No começo a IA dá a faixa "a partir de" do catálogo e convida para a visita. A proposta formal fica numa chave da regra, desligada, para ligar depois da análise.</p><span class="rec ok2">chave "Proposta formal pela IA", desligada.</span></div>
-    <div class="q2"><span class="qn">05</span><h3>A retaguarda é a Jacqueline</h3><p>Ela toma conta do espaço: recebe os chamados da IA (visita aceita, desconto, data ocupada, pedido de pessoa) e confirma as visitas. Ela já tem WhatsApp e aviso no app cadastrados.</p><span class="rec ok2">retaguarda: Jacqueline, em todo horário.</span></div>
+    <div class="q2"><span class="qn">04</span><h3>Orçamento: prévio já pela IA</h3><p>Mudou em 26/09: para não depender de gente, a IA manda o <b>orçamento prévio</b> com o valor de tabela e o link de aprovação. Desconto e negociação continuam com a equipe.</p><span class="rec ok2">chave "Orçamento prévio pela IA", ligada.</span></div>
+    <div class="q2"><span class="qn">05</span><h3>A retaguarda é a Jacqueline</h3><p>Ela toma conta do espaço: é a <b>anfitriã</b> das visitas que a IA marca e recebe os avisos. Não precisa confirmar nada. Já tem WhatsApp e aviso no app cadastrados.</p><span class="rec ok2">anfitriã e aviso: Jacqueline.</span></div>
     <div class="q2"><span class="qn">06</span><h3>"Sou a assistente Zaq, da Prime Eventos"</h3><p>É como a IA se apresenta na primeira mensagem, para soar como alguém da equipe de vendas.</p><span class="rec ok2">vai no texto de abertura da IA.</span></div>
-    <div class="q2"><span class="qn">07</span><h3>Tudo conta para o zaq teste</h3><p>O lead continua dele mesmo depois que a Jacqueline confirma a visita ou fecha o contrato, para medir o resultado da IA. A divisão com a equipe fica para depois.</p><span class="rec ok2">o chamado não troca o dono do lead.</span></div>
+    <div class="q2"><span class="qn">07</span><h3>Tudo conta para o zaq teste</h3><p>O lead continua dele mesmo depois da visita com a Jacqueline e do contrato, para medir o resultado da IA. A divisão com a equipe fica para depois.</p><span class="rec ok2">o chamado não troca o dono do lead.</span></div>
     <div class="q2"><span class="qn">08</span><h3>O desafio fecha a cada mês</h3><p>O painel mostra o mês corrente e os anteriores, com a IA ao lado da equipe, sem data para acabar.</p><span class="rec ok2">painel por mês, no horário de Brasília.</span></div>
+  </div>
+  <header style="margin-top:1.2rem">
+    <span class="k">Para aprovar · novas</span>
+    <h2>Seis decisões do novo fluxo</h2>
+    <p>Cada uma com a minha recomendação. Se aprovar "assim", sigo todas.</p>
+  </header>
+  <div class="dec">
+    <div class="q2"><span class="qn">09</span><h3>A grade de visita</h3><p>No começo da tarde o cliente falta em mais da metade das visitas.</p><span class="rec">seg–sex 9h, 10h, 11h, 17h e 18h; sáb 8h a 11h; sem domingo e sem 12h–16h. Se o cliente pedir outro horário, a IA marca e avisa a Jacqueline.</span></div>
+    <div class="q2"><span class="qn">10</span><h3>Preço do orçamento prévio</h3><p>O que vai no link.</p><span class="rec">o valor do pacote de tabela, com freezer, cozinha, climatizadores, louças, LEDs e suíte escritos como inclusos (aparecem em 31 a 36 dos 38 orçamentos).</span></div>
+    <div class="q2"><span class="qn">11</span><h3>Reserva de 72h só para orçamento da IA</h3><p>Os feitos por vendedor continuam segurando a data até 60 dias antes da festa, como você decidiu em 19/09.</p><span class="rec">sim: 72h para a IA; vendedor continua como está.</span></div>
+    <div class="q2"><span class="qn">12</span><h3>Montagem e capacidade</h3><p>Quantas horas antes da festa o espaço fica sem visita, e quantas pessoas cabem.</p><span class="rec ab">4 horas de montagem. A capacidade eu não achei em lugar nenhum: quantos convidados cabem no salão?</span></div>
+    <div class="q2"><span class="qn">13</span><h3>O pacote de segunda a quinta de 2027</h3><p>No catálogo está R$ 8.000, mais caro que o de sexta a domingo (R$ 7.800).</p><span class="rec ab">conferir e corrigir no catálogo antes de ligar. Qual é o valor certo?</span></div>
+    <div class="q2"><span class="qn">14</span><h3>Cobrança própria</h3><p>É o que tira o último clique, o de confirmar o sinal.</p><span class="rec">construir depois do primeiro mês do desafio; até lá, o dono confirma o sinal com um toque quando o comprovante chega.</span></div>
   </div>
 </section>
 

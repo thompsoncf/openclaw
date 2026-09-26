@@ -317,12 +317,17 @@ def cardapio(c, conta_id: int, lead: int | None, agora: datetime) -> dict:
     locais = {x["id"]: x for x in cc.listar_locais(c, conta_id, so_ativos=False)}
     desde = agora + ANTECEDENCIA
     hoje = ca.hoje_br(agora)
+    # horário com convite de vaga na rua não é oferecido a outra pessoa (clinica_vagas)
+    from finance import clinica_vagas as cvg
+    na_rua = cvg.em_oferta(c, conta_id)
     slots = []
     for t in tipos:
         for p in profs:
             if t["id"] not in p["tipos"]:
                 continue
-            for x in _escolher(ca.livres(c, conta_id, p["id"], t["id"], hoje, DIAS, desde)):
+            livres_ = [x for x in ca.livres(c, conta_id, p["id"], t["id"], hoje, DIAS, desde)
+                       if not cvg.encosta(na_rua, p["id"], x["inicio"], x["fim"])]
+            for x in _escolher(livres_):
                 loc = locais.get(x["local_id"])
                 onde = ""
                 if loc:
@@ -821,12 +826,25 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
     if m:
         repassar(pool, c, conta_id, conversa_id, lead, m, nome, enviar)
         return
-    # 3) o "1"/"2" do lembrete: resposta pronta pelo que foi gravado, sem IA
+    # 3) o "1"/"2"/PARAR de um convite de vaga (clinica_vagas): marca ou agradece, sem IA
+    from finance import clinica_vagas as cvg
+    try:
+        if cvg.processar(c, conta_id, agora, conversa_id=conversa_id,
+                         responder=lambda _oferta, texto: enviar(texto)):
+            return
+        if cvg.ja_respondida(c, conta_id, conversa_id):
+            return                          # o poller respondeu este "1" um instante antes
+    except Exception:  # noqa: BLE001 — sem a 369, ou vaga com problema: segue a conversa
+        c.rollback()
+        _log.info("agente da clínica: resposta de vaga não tratada (conversa %s)", conversa_id, exc_info=True)
+        if not tentar_travar(c, conversa_id):
+            return                          # o rollback soltou a trava e outra volta pegou
+    # 4) o "1"/"2" do lembrete: resposta pronta pelo que foi gravado, sem IA
     ack = resposta_da_vespera(c, conta_id, conversa_id, lead, fone, ultima, agora)
     if ack:
         enviar(ack)
         return
-    # 4) convênio e desconto pedidos pelo paciente: é da recepção, sem perguntar à IA
+    # 5) convênio e desconto pedidos pelo paciente: é da recepção, sem perguntar à IA
     #    (o "Isso mesmo!" dela não teria palavra nenhuma pra rede pegar)
     p = next((pp for pp in (pediu(t) for t, _tp in pend) if pp), None)
     if p:

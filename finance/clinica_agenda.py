@@ -390,7 +390,7 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
         (conta_id, f"{nome_pac} · {palavra}"[:200], inicio, fim, loc["nome"] if loc else None,
          lid, profissional_id, servico_id, loc_id,
          origem if origem in ORIGENS else None, nome_pac[:120], fone_pac, bool(encaixe and not livre),
-         marcado_por if marcado_por in ("recepcao", "ia") else "recepcao",
+         marcado_por if marcado_por in ("recepcao", "ia", "vaga") else "recepcao",
          (observacao or "").strip()[:500] or None)).fetchone()[0]
     return eid, None
 

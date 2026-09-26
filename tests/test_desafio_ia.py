@@ -96,7 +96,10 @@ DIA_22 = datetime(2026, 9, 16, 22, tzinfo=BRT)
 
 
 def _lead(pool, membro, *, chega=DIA_10, resposta_min=None, autor="humano", data=False,
-          convidados=False, visita=False, orc=None, contrato=False):
+          convidados=False, visita=False, orc=None, contrato=False, ia=None, status=None):
+    """`ia`: o lead entrou pela regra (chip_regra_leads) — é da IA. Por padrão, é da IA
+    quando o autor da resposta é a IA."""
+    ia = (autor == "bot") if ia is None else ia
     with pool.connection() as c:
         oid = None
         if orc:
@@ -110,14 +113,17 @@ def _lead(pool, membro, *, chega=DIA_10, resposta_min=None, autor="humano", data
                             values (%s,%s,%s,%s,%s,%s) returning id""",
                          (EMPRESA, membro, "2027-03-13" if data else None, 90 if convidados else None,
                           oid, chega)).fetchone()[0]
+        if ia:
+            c.execute("insert into chip_regra_leads (prospeccao_id, conta_id, chip_id, membro_id) "
+                      "values (%s,%s,%s,%s)", (lead, EMPRESA, CHIP2, membro))
         conv = c.execute("insert into conversas (conta_id, prospeccao_id) values (%s,%s) returning id",
                          (EMPRESA, lead)).fetchone()[0]
         c.execute("insert into mensagens (conversa_id, direcao, autor, texto, criado_em) "
                   "values (%s,'in','lead','oi',%s)", (conv, chega))
         if resposta_min is not None:
-            c.execute("insert into mensagens (conversa_id, direcao, autor, texto, criado_em) "
-                      "values (%s,'out',%s,'olá',%s)",
-                      (conv, autor, chega + timedelta(minutes=resposta_min)))
+            c.execute("insert into mensagens (conversa_id, direcao, autor, texto, status, criado_em) "
+                      "values (%s,'out',%s,'olá',%s,%s)",
+                      (conv, autor, status, chega + timedelta(minutes=resposta_min)))
         if visita:
             c.execute("""insert into eventos_agenda (conta_id, titulo, inicio, prospeccao_id)
                          values (%s,'Visita — Ana',%s,%s)""", (EMPRESA, chega + timedelta(days=2), lead))
@@ -165,9 +171,9 @@ def test_o_custo_da_ia_por_lead_e_por_contrato(pool, prime):
     # Sonnet 4.6: 10k × 3 + 1k × 15 = US$ 0,045 × 5,40 = R$ 0,243
     assert ia_uso.custo_centavos("claude-sonnet-4-6", uso) == 24
     assert ia_uso.custo_centavos("modelo-novo", uso) == 24          # sem preço: o mais caro
-    for _ in range(4):
-        ia_uso.registrar(pool, EMPRESA, conv, lead, "claude-sonnet-4-6", SimpleNamespace(usage=uso))
     with pool.connection() as c:
+        for _ in range(4):
+            ia_uso.registrar(c, EMPRESA, conv, lead, "claude-sonnet-4-6", SimpleNamespace(usage=uso))
         c.execute("update ia_uso set criado_em=%s", (DIA_10,))
         c.commit()
     d = dia.dados(pool, EMPRESA, MES)
@@ -203,8 +209,57 @@ def test_sem_ia_ligada_o_painel_diz_e_nao_quebra(pool, prime):
     with pool.connection() as c:
         c.execute("update chip_regra set ia_ligada=false")
         c.commit()
+    _lead(pool, prime["Jacqueline"], resposta_min=3)
     d = dia.dados(pool, EMPRESA, MES)
     assert not d["tem_ia"] and d["custo_centavos"] is None and d["avisos"] == []
+    assert d["ia"] is None and [c["nome"] for c in d["colunas"]] == ["Jacqueline"]
+
+
+# ══════════════════════════════════════════════ o que a revisão de 26/09 achou
+
+def test_lead_do_rodizio_do_dono_da_regra_e_da_equipe(pool, prime):
+    """O dono da regra pode ser uma pessoa que também recebe lead do rodízio: esses
+    são dela, do lado da equipe — só o que a regra DEU é da IA."""
+    z = prime["zaq teste"]
+    _lead(pool, z, resposta_min=0.2, autor="bot")                 # pela regra
+    _lead(pool, z, resposta_min=10, autor="humano", ia=False)      # do rodízio
+    d = dia.dados(pool, EMPRESA, MES)
+    ia_col = [c for c in d["colunas"] if c["ia"]]
+    eq_col = [c for c in d["colunas"] if not c["ia"]]
+    assert [c["leads"] for c in ia_col] == [1] and [c["leads"] for c in eq_col] == [1]
+    assert eq_col[0]["resp_mediana_min"] == 10.0
+
+
+def test_o_recado_de_fora_do_horario_nao_e_resposta(pool, prime):
+    z = prime["zaq teste"]
+    lead, conv = _lead(pool, z, chega=DIA_22, resposta_min=0.1, autor="bot", status="ia_fora")
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (conversa_id, direcao, autor, texto, criado_em)
+                     values (%s,'out','bot','bom dia!',%s)""", (conv, DIA_22 + timedelta(hours=10)))
+        c.commit()
+    assert dia.dados(pool, EMPRESA, MES)["ia"]["resp_mediana_min"] == 600.0
+
+
+def test_robo_nao_conta_como_resposta_da_equipe(pool, prime):
+    _lead(pool, prime["Jacqueline"], resposta_min=0.1, autor="bot", ia=False)
+    assert _col(dia.dados(pool, EMPRESA, MES), "Jacqueline")["resp_mediana_min"] is None
+
+
+def test_quem_saiu_continua_no_mes_em_que_atendeu(pool, prime):
+    _lead(pool, prime["Pedro"], resposta_min=5)
+    with pool.connection() as c:
+        c.execute("update membros set ativo=false where id=%s", (prime["Pedro"],))
+        c.commit()
+    assert _col(dia.dados(pool, EMPRESA, MES), "Pedro")["leads"] == 1
+
+
+def test_desligar_a_ia_hoje_nao_apaga_o_mes_dela(pool, prime):
+    _lead(pool, prime["zaq teste"], resposta_min=0.2, autor="bot")
+    with pool.connection() as c:
+        c.execute("update chip_regra set ia_ligada=false, ativa=false")
+        c.commit()
+    d = dia.dados(pool, EMPRESA, MES)
+    assert d["tem_ia"] and d["ia"]["leads"] == 1
 
 
 def test_mes_invalido_vira_o_atual():

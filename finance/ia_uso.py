@@ -36,14 +36,17 @@ def custo_centavos(modelo: str | None, uso) -> int:
     return int(round(usd * CAMBIO * 100))
 
 
-def registrar(pool, conta_id: int, conversa_id: int | None, prospeccao_id: int | None,
+def registrar(c, conta_id: int, conversa_id: int | None, prospeccao_id: int | None,
               modelo: str | None, resp) -> None:
-    """Uma linha em `ia_uso` pela resposta do modelo. Conexão própria e curta."""
+    """Uma linha em `ia_uso` pela resposta do modelo, na conexão do PRÓPRIO atendimento
+    (savepoint): pedir outra ao pool, com o atendimento segurando esta, poderia fazer a
+    resposta ao cliente esperar o pool. O modelo é o que respondeu (`resp.model`)."""
     uso = getattr(resp, "usage", None)
     if uso is None:
         return
+    modelo = getattr(resp, "model", None) or modelo
     try:
-        with pool.connection() as c:
+        with c.transaction():
             c.execute(
                 """insert into ia_uso (conta_id, conversa_id, prospeccao_id, modelo, input_tokens,
                                        cache_read_tokens, cache_write_tokens, output_tokens,
@@ -55,6 +58,5 @@ def registrar(pool, conta_id: int, conversa_id: int | None, prospeccao_id: int |
                  int(getattr(uso, "cache_creation_input_tokens", 0) or 0),
                  int(getattr(uso, "output_tokens", 0) or 0),
                  custo_centavos(modelo, uso)))
-            c.commit()
     except Exception:  # noqa: BLE001 — banco sem a 394, ou qualquer outra coisa
         _log.info("ia_uso: não registrou (conta=%s conversa=%s)", conta_id, conversa_id)

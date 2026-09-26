@@ -14513,7 +14513,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div style="font-size:1.6rem">📱</div>
       <div style="flex:1"><b style="font-size:1rem">Regras por número<span class="tag-new">novo</span></b>
         <div class="mut" style="font-size:.8rem">Cada chip pode ter um dono só para os contatos novos, com a IA atendendo só nele. Sem regra, o chip segue no rodízio.</div></div>
-      {% if regra_eventos and regras_chip | selectattr('regra') | map(attribute='regra') | selectattr('ia_ligada') | list %}<a class="pbtn ghost" href="/painel/prospeccao/desafio-ia">🏁 Desafio IA × equipe</a>{% endif %}
+      {% if regra_eventos and regras_chip | selectattr('regra') | map(attribute='regra') | selectattr('ativa') | selectattr('ia_ligada') | list %}<a class="pbtn ghost" href="/painel/prospeccao/desafio-ia">🏁 Desafio IA × equipe</a>{% endif %}
     </div>
     {% if regra_cat and regra_cat.total %}
     <div class="{{ 'distalerta' if not regra_cat.liberados else 'distnote' }}" style="margin-top:.7rem">
@@ -18049,13 +18049,12 @@ _DESAFIO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {% if not d.tem_ia %}
   <div class="distnote" style="margin-top:1rem">Nenhum número está com a IA ligada. Ligue em <b>Comunicação › Agente › Regras por número</b> e o desafio começa a contar.</div>
   {% endif %}
-  {% set ia = d.colunas | selectattr('ia') | list %}
-  {% if ia %}{% set a = ia[0] %}
+  {% if d.ia %}{% set a = d.ia %}
   <div class="ds-kpis">
-    <div class="ds-k"><div class="v">{{ a.leads }}</div><div class="l">Leads da IA no mês</div><div class="m">{{ a.nome }}</div></div>
+    <div class="ds-k"><div class="v">{{ a.leads }}</div><div class="l">Leads da IA no mês</div><div class="m">que entraram pela regra do número</div></div>
     <div class="ds-k"><div class="v">{{ ('%.1f' % a.resp_mediana_min).replace('.', ',') ~ ' min' if a.resp_mediana_min is not none else '—' }}</div><div class="l">1ª resposta da IA (mediana)</div><div class="m">meta: menos de {{ d.meta_min }} min</div></div>
     <div class="ds-k"><div class="v">{{ a.visitas }}{% if a.visitas_pct is not none %} <span style="font-size:.9rem">· {{ a.visitas_pct }}%</span>{% endif %}</div><div class="l">Visitas marcadas</div><div class="m">meta do time: {{ d.meta_visita_pct }}% dos leads</div></div>
-    <div class="ds-k"><div class="v">{{ brl(d.custo_centavos) if d.custo_centavos is not none else '—' }}</div><div class="l">Custo da IA no mês</div><div class="m">{{ ('por lead ' ~ brl(d.custo_por_lead)) if d.custo_por_lead is not none else 'por lead —' }} · {{ ('por contrato ' ~ brl(d.custo_por_contrato)) if d.custo_por_contrato is not none else 'por contrato —' }}</div></div>
+    <div class="ds-k"><div class="v">{{ brl(d.custo_centavos) if d.custo_centavos is not none else '—' }}</div><div class="l">Gasto da IA no mês</div><div class="m">leads do mês: {{ ('por lead ' ~ brl(d.custo_por_lead)) if d.custo_por_lead is not none else 'por lead —' }} · {{ ('por contrato ' ~ brl(d.custo_por_contrato)) if d.custo_por_contrato is not none else 'por contrato —' }}</div></div>
   </div>
   {% endif %}
   <div class="ds-wrap" style="margin-top:1rem"><table class="ds-tab">

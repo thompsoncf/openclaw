@@ -644,7 +644,7 @@ def _atender(pool, conta_id, conversa_id):
             # o custo da IA vendedora, por conversa e por lead (migração 394): é o
             # "custo por lead e por contrato" do painel do desafio
             from finance import ia_uso as _iu
-            _iu.registrar(pool, conta_id, conversa_id, conv[1],
+            _iu.registrar(c, conta_id, conversa_id, conv[1],
                           getattr(_brain, "model", None), resp)
         txt = "".join(getattr(b, "text", "") for b in resp.content
                       if getattr(b, "type", None) == "text").strip()

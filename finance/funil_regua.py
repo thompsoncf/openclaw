@@ -311,20 +311,27 @@ _SQL_ORCAMENTO_ENVIADO = """
          where p.conta_id=%(conta)s
            and (o.status in ('enviado','aprovada','fechado') or e.primeiro is not null)"""
 
-# a primeira resposta do cliente DEPOIS da primeira mensagem nossa com preço. Compara
-# ids, não datas — mesmo motivo da bola na trava: duas mensagens quase simultâneas
-# chegam fora de ordem.
+# a primeira resposta do cliente DEPOIS da primeira mensagem nossa com preço.
+# "Depois" pela DATA, com o id desempatando o que chegou quase junto:
+#   * perto do preço (2 minutos), vale o id — duas mensagens quase simultâneas chegam
+#     fora de ordem no relógio (mesmo motivo da bola na trava);
+#   * longe dele, vale a data — o histórico importado depois (conversa antiga do
+#     WhatsApp) ganha ids NOVOS com datas velhas, e o "oi" de um mês antes do preço
+#     não é resposta ao preço (o voltar a chamar já compara assim, #843).
+# A primeira mensagem com preço também é a mais antiga pela data, não pelo id.
 # Tabela derivada, e não CTE: este SQL entra como ramo de um UNION dentro de
 # subconsulta em `negociacao_valores`, e `WITH` não pode aparecer ali.
 _SQL_RESPONDEU_PRECO = """
-        select pr.lead, min(m.criado_em) as quando
-          from (select cv.prospeccao_id as lead, min(m.id) as mid
+        select pr.lead, greatest(min(m.criado_em), max(pr.em)) as quando
+          from (select distinct on (cv.prospeccao_id) cv.prospeccao_id as lead, m.id as mid, m.criado_em as em
                   from mensagens m join conversas cv on cv.id = m.conversa_id
                  where cv.conta_id=%(conta)s and cv.prospeccao_id is not null
                    and m.direcao='out' and m.texto ~* '""" + RE_PRECO + """'
-                 group by cv.prospeccao_id) pr
+                 order by cv.prospeccao_id, m.criado_em, m.id) pr
           join conversas cv on cv.prospeccao_id = pr.lead and cv.conta_id=%(conta)s
-          join mensagens m on m.conversa_id = cv.id and m.direcao='in' and m.id > pr.mid
+          join mensagens m on m.conversa_id = cv.id and m.direcao='in'
+                          and m.criado_em > pr.em - interval '2 minutes'
+                          and (m.id > pr.mid or m.criado_em > pr.em + interval '2 minutes')
          group by pr.lead"""
 
 # O PREÇO NO VÁCUO também é um fato — só não é Negociação na Prime (ver acima). Na

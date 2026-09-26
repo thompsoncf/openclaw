@@ -574,6 +574,31 @@ _NAO_MANDADO_HOJE = """
                   and (o.conversa_id = t.conversa_id
                        or """ + _n8_da_conversa("o.conversa_id", "o.conta_id") + " = " + _n8_da_conversa("t.conversa_id", "t.conta_id") + "))"
 
+# As OUTRAS automáticas da clínica contam no mesmo "1 por paciente por dia": a vaga
+# liberada (369), a cobrança do plano de tratamento (379) e os lembretes de sessão,
+# retorno, validade e reposição (381/386). O lado de lá já conta o voltar a chamar
+# (clinica_vagas._recebeu_hoje); sem isto, o paciente recebia a vaga de manhã e o
+# toque à tarde. Tabela que ainda não existe (migração não rodou) fica de fora.
+_OUTRAS_HOJE = {
+    "clinica_vaga_ofertas": "x.enviada_em >= %(hoje)s and x.estado <> 'falhou'",
+    "clinica_planos": "(x.toque1_em >= %(hoje)s or x.toque3_em >= %(hoje)s)",
+    "clinica_lembretes": "x.enviado_em >= %(hoje)s and x.estado <> 'falhou'",
+}
+
+
+def _nao_mandado_hoje(c) -> str:
+    tem = c.execute("select " + ", ".join(f"to_regclass('public.{t}') is not null" for t in _OUTRAS_HOJE)).fetchone()
+    sql = _NAO_MANDADO_HOJE
+    for (tabela, quando), existe in zip(_OUTRAS_HOJE.items(), tem):
+        if existe:
+            sql += (f"""
+   and not exists (select 1 from {tabela} x
+                    where x.conta_id = t.conta_id and x.conversa_id is not null and {quando}
+                      and (x.conversa_id = t.conversa_id
+                           or """ + _n8_da_conversa("x.conversa_id", "x.conta_id") + " = "
+                    + _n8_da_conversa("t.conversa_id", "t.conta_id") + "))")
+    return sql
+
 def _inicio_do_dia(agora: datetime) -> datetime:
     return _utc(datetime.combine(_local(agora).date(), time(0, 0)))
 
@@ -592,7 +617,7 @@ def enviar(c, conta_id: int, toque_id: int, cfg: dict, *, por: str,
               set estado = 'enviado', enviado_em = %(agora)s, enviado_por = %(por)s,
                   membro_id = %(membro)s
             where t.id = %(id)s and t.conta_id = %(conta)s and t.estado = 'pendente'
-              and """ + _NAO_MANDADO_HOJE + """
+              and """ + _nao_mandado_hoje(c) + """
         returning t.conversa_id, t.toque""",
         {"agora": agora, "por": por, "membro": membro_id, "id": toque_id, "conta": conta_id,
          "hoje": _inicio_do_dia(agora)}).fetchone()
@@ -669,7 +694,7 @@ def _enviar_um(c, conta_id: int, agora: datetime, cfg: dict, janela: dict) -> di
         """select t.id from voltar_a_chamar_toques t
             where t.conta_id=%(conta)s and t.estado='pendente' and t.toque >= 1
               and t.devido_em <= %(agora)s and """ + _PARADA + " and " + _ULTIMA_E_NOSSA + """
-              and """ + _NAO_MANDADO_HOJE + """
+              and """ + _nao_mandado_hoje(c) + """
             order by t.devido_em, t.id limit 1""",
         {"conta": conta_id, "agora": agora, "hoje": hoje}).fetchone()
     c.commit()
@@ -958,9 +983,9 @@ def hoje(c, conta_id: int, agora: datetime, cfg: dict) -> dict:
                             "quando": _fmt(r[5]), "em": r[5]})
     _velho = datetime(1970, 1, 1, tzinfo=timezone.utc)
     responderam.sort(key=lambda x: x["em"] or _velho, reverse=True)
-    voltar = _toques("t.toque >= 1 and t.devido_em <= %(agora)s and " + _PARADA
-                     + " and " + _NAO_MANDADO_HOJE)
-    repescagem = _toques("t.toque = 0 and " + _PARADA + " and " + _NAO_MANDADO_HOJE)
+    hoje_sql = _nao_mandado_hoje(c)
+    voltar = _toques("t.toque >= 1 and t.devido_em <= %(agora)s and " + _PARADA + " and " + hoje_sql)
+    repescagem = _toques("t.toque = 0 and " + _PARADA + " and " + hoje_sql)
     # quem já tem a mensagem pronta lá em cima não aparece duas vezes
     na_fila = {t["conversa_id"] for t in voltar + repescagem}
     responderam = [r for r in responderam if r["conversa_id"] not in na_fila]

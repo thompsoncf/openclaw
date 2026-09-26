@@ -1,0 +1,248 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prontuário, documentos e nota fiscal</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:34px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+.big{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem;margin-bottom:14px}
+.big div{background:#fff;border:1px solid #E3DDD0;border-radius:10px;padding:10px 12px}
+.big b{display:block;font-size:1.45rem;line-height:1.2}
+.big span{font-size:11.5px;color:#8A8475}
+/* painel escuro */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC;overflow-x:auto}
+.pn .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pn .tt{font-size:1.05rem;font-weight:700}
+.pn .mut{color:#7B8A99;font-size:.78rem}
+.pn .lbl{color:#7B8A99;font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin:.55rem 0 .2rem}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.35rem .55rem;font-size:.82rem;color:#DDE4EC;display:inline-block;min-width:130px}
+.pn .chip{display:inline-block;background:#0B1219;border:1.5px solid #2A3947;border-radius:16px;padding:3px 11px;font-size:.74rem;color:#B4B2A9;margin:0 4px 5px 0}
+.pn .chip.on{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .bt{display:inline-block;background:#1E6B4E;color:#fff;border-radius:7px;padding:.3rem .65rem;font-size:.76rem;font-weight:600;margin:.35rem .3rem 0 0}
+.pn .bt.sec{background:#22303C;color:#DDE4EC}
+.pn .box{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.65rem .75rem;margin-bottom:.5rem}
+.pn .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.pn table{background:#16212C;border-color:#22303C;color:#DDE4EC}
+.pn th{background:#121B24;color:#7B8A99;border-color:#22303C}
+.pn td{border-color:#22303C}
+.ses{display:flex;gap:5px;flex-wrap:wrap;margin-top:.35rem}
+.ses i{width:26px;height:26px;border-radius:7px;border:1.5px solid #2A3947;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-style:normal;color:#7B8A99}
+.ses i.ok{background:#12281F;border-color:#2C6E52;color:#7EE7B8}
+.ses i.next{border-color:#F4C766;color:#F4C766}
+.lin{display:flex;align-items:center;gap:8px;background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.4rem .55rem;margin-bottom:.35rem;font-size:.78rem}
+.lin .nm{flex:1;min-width:0}
+.lin .nm small{display:block;color:#7B8A99;font-size:.7rem}
+.lin .vl{font-weight:700;white-space:nowrap}
+.tag{display:inline-block;font-size:.64rem;border-radius:99px;padding:1px 8px;border:1px solid #2A3947;color:#B4B2A9}
+.tag.g{border-color:#2C6E52;color:#7EE7B8;background:#12281F}
+.tag.y{border-color:#6B5320;color:#F4C766;background:#261E0E}
+.tag.r{border-color:#6E2E2A;color:#ff8a80;background:#2A1715}
+/* zap */
+.zap{background:#E9DFD4;border-radius:12px;padding:12px;max-width:430px;margin:0 auto 14px}
+.zap .b{background:#fff;border-radius:8px;padding:7px 10px;margin:0 30px 8px 0;font-size:13px;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.zap .b.eu{background:#D9FDD3;margin:0 0 8px 30px}
+.zap .h{font-size:10.5px;color:#667;text-align:right;margin-top:2px}
+.zap .sis{text-align:center;font-size:11px;color:#5A6678;background:#F5EFE6;border-radius:6px;padding:3px 8px;margin:4px auto 8px;width:max-content;max-width:100%}
+.zap .card{border:1px solid #E3DDD0;border-radius:8px;padding:8px 10px;margin-top:6px;background:#FBFAF7;font-size:12.5px}
+@media (max-width:640px){.pn .grid2{grid-template-columns:1fr}.big{grid-template-columns:repeat(2,1fr)}}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.pn,.q,table,.zap{break-inside:avoid}}
+</style></head><body><div class="wrap">
+<div class="alerta" style="margin-bottom:18px"><b>Mockup para aprovação.</b> Nada no banco e nenhum código mudou. Pacientes, fotos e textos clínicos das telas são <b>fictícios</b>. Os nomes dos profissionais e da cidade são os da Espaço Pelle.</div>
+
+<h1>Clínica no Zaq, parte 4: prontuário, documentos e nota fiscal</h1>
+<p class="lead">Em 26/09/2026 o dono decidiu que a Espaço Pelle deixa o Amigo por inteiro. O desenho anterior deixava no Amigo o prontuário, o laudo, o convênio e a nota fiscal ("é onde mora o dado sensível, é regulado, e o Amigo já faz"). Agora isso vem para o Zaq. A clínica atende <b>só particular</b>, então o convênio (guias TISS) fica fora. Entram quatro partes: o <b>prontuário</b>, os <b>documentos assinados</b> (receita, atestado, pedido de exame, laudo), a <b>nota fiscal</b> pela prefeitura de Pedreiras e o <b>histórico que está no Amigo</b>.</p>
+
+<div class="big">
+  <div><b>P1</b><span>prontuário: ficha, evolução, fotos, anexos</span></div>
+  <div><b>P2</b><span>documentos com certificado digital</span></div>
+  <div><b>P3</b><span>nota fiscal de serviço (prefeitura)</span></div>
+  <div><b>P5</b><span>histórico do Amigo, guardado 20 anos</span></div>
+</div>
+
+<h2><span class="n">01</span>A regra que muda</h2>
+<p class="sub">Até aqui o Zaq nunca lia prontuário. Agora ele guarda, mas quem lê continua sendo só quem cuida do paciente</p>
+<p>O acesso ao conteúdo clínico não vem do papel no sistema (dono, gestor, recepção). Vem de <b>ser profissional de saúde da clínica</b>, com login e registro no conselho. O dono que não é profissional de saúde não lê o prontuário: vê quem abriu, quando e o quê.</p>
+<div class="tw"><table>
+<tr><th>Quem</th><th>Ficha do paciente</th><th>Evolução, fotos, anexos, documentos</th><th>Registro de acesso</th></tr>
+<tr><td><b>Profissional de saúde</b> (Dr. Manoel, Juliana…)</td><td>lê e edita</td><td>lê de todos os pacientes da clínica; escreve e assina os próprios</td><td>vê o dos próprios pacientes</td></tr>
+<tr><td><b>Recepção</b></td><td>nome, contato, nascimento e um aviso de alergia (sem o texto clínico)</td><td><b>não vê</b>. Vê só que o atendimento foi registrado e quais documentos saíram, para entregar</td><td>não</td></tr>
+<tr><td><b>Dono ou gestor sem registro de saúde</b></td><td>como a recepção</td><td><b>não vê</b></td><td>vê tudo: quem abriu qual prontuário e quando</td></tr>
+<tr><td><b>Agente do WhatsApp (IA)</b></td><td colspan="3"><b>Nunca.</b> O módulo do agente não tem acesso às tabelas do prontuário, e um teste trava o repositório se algum dia tiver (como a trava de escopo por conta).</td></tr>
+<tr><td><b>Equipe do Zaq (suporte)</b></td><td colspan="3">Não lê por padrão. Acesso de suporte só com pedido da clínica, com prazo, e fica no registro de acesso como qualquer outro.</td></tr>
+</table></div>
+<div class="nota"><b>Prontuário da clínica, não do profissional.</b> O Conselho considera o prontuário do paciente, guardado pela instituição. Por isso todos os profissionais da clínica leem a história inteira do paciente (a Juliana vê o que o Dr. Manoel prescreveu, e o contrário). Cada um só assina o que escreveu.</div>
+
+<h2><span class="n">02</span>O prontuário do paciente</h2>
+<p class="sub">Uma tela por paciente: o que não pode ser esquecido no alto, a história em ordem de data embaixo</p>
+<div class="pn">
+  <div class="top"><div><span class="tt">Marina Costa, 34 anos</span> <span class="mut">· paciente desde mar/2025 · 7 atendimentos</span></div><div><span class="tag r">ALERGIA: dipirona</span> <span class="tag y">gestante: não</span></div></div>
+  <div class="grid2">
+    <div class="box"><span class="lbl">Medicamentos em uso</span>Isotretinoína 20 mg/dia (desde 12/08)<br>Anticoncepcional oral</div>
+    <div class="box"><span class="lbl">Problemas e antecedentes</span>Acne inflamatória grau III · Melasma · Mãe com melanoma</div>
+  </div>
+  <span class="lbl">Atendimentos</span>
+  <div class="lin"><div class="nm">24/09/2026 · Consulta · <b>Dr. Manoel</b><small>Retorno isotretinoína, 6ª semana. Ressecamento labial leve; sem queixas visuais. Mantida a dose. Pedido de TGO/TGP e lipidograma.</small></div><span class="tag g">assinado · certificado</span></div>
+  <div class="lin"><div class="nm">10/09/2026 · Sessão · <b>Juliana</b><small>Limpeza de pele profunda, extração cuidadosa (paciente em uso de isotretinoína). Sem intercorrências.</small></div><span class="tag g">assinado</span></div>
+  <div class="lin"><div class="nm">12/08/2026 · Consulta · <b>Dr. Manoel</b> · 4 fotos · 2 documentos<small>Início de isotretinoína 20 mg. Termo de consentimento assinado. Orientada sobre contracepção.</small></div><span class="tag g">assinado · certificado</span></div>
+  <div class="lin"><div class="nm">15/08/2026 · <b>Adendo</b> de Dr. Manoel ao atendimento de 12/08<small>Resultado do beta-HCG negativo, anexado.</small></div><span class="tag">adendo</span></div>
+  <span class="bt">Nova evolução</span> <span class="bt sec">Fotos (12)</span> <span class="bt sec">Anexos (5)</span> <span class="bt sec">Documentos (6)</span> <span class="bt sec">Imprimir prontuário</span>
+</div>
+<div class="nota"><b>A evolução nasce do atendimento.</b> Quando o paciente passa para "Em atendimento" na agenda, o botão <b>Abrir prontuário</b> aparece para o profissional daquele horário. Finalizar o atendimento pede a assinatura da evolução, se ela ainda estiver em rascunho.</div>
+
+<h2><span class="n">03</span>A evolução</h2>
+<p class="sub">Modelo por tipo de profissional, texto livre sempre possível</p>
+<div class="pn">
+  <div class="top"><span class="tt">Evolução · Consulta de 24/09/2026 · Dr. Manoel</span><span class="mut">rascunho salvo há 20 s</span></div>
+  <span class="chip on">Dermatologia</span><span class="chip">Fisioterapia dermatofuncional</span><span class="chip">Procedimento</span><span class="chip">Texto livre</span>
+  <span class="lbl">Queixa e história</span><span class="inp" style="width:100%">Retorno, 6ª semana de isotretinoína. Refere ressecamento labial…</span>
+  <span class="lbl">Exame dermatológico</span><span class="inp" style="width:100%">Lesões inflamatórias em regressão em face; sem novas pústulas…</span>
+  <div class="grid2"><div><span class="lbl">Hipótese / diagnóstico (CID-10, opcional)</span><span class="inp">L70.0 Acne vulgar</span></div><div><span class="lbl">Retorno</span><span class="inp">em 30 dias</span></div></div>
+  <span class="lbl">Conduta</span><span class="inp" style="width:100%">Mantida isotretinoína 20 mg. Hidratante labial. Exames de controle.</span>
+  <span class="bt sec">+ Foto</span><span class="bt sec">+ Anexo</span><span class="bt sec">+ Receita</span><span class="bt sec">+ Pedido de exame</span><span class="bt sec">+ Atestado</span>
+  <br><span class="bt">Assinar e finalizar</span>
+</div>
+<div class="tw"><table>
+<tr><th>Modelo</th><th>Campos</th><th>Quem usa</th></tr>
+<tr><td>Dermatologia</td><td>queixa e história · exame dermatológico · hipótese (CID opcional) · conduta · retorno</td><td>Dr. Manoel</td></tr>
+<tr><td>Fisioterapia dermatofuncional</td><td>avaliação · procedimento realizado · parâmetros (aparelho, intensidade, tempo) · resposta · orientação</td><td>Juliana</td></tr>
+<tr><td>Procedimento</td><td>procedimento · região · produto e lote · quantidade · intercorrências · orientação pós</td><td>quem aplica (toxina, preenchedor, peeling)</td></tr>
+<tr><td>Texto livre</td><td>um campo</td><td>qualquer profissional</td></tr>
+</table></div>
+<div class="nota"><b>Produto e lote no procedimento.</b> O campo puxa do estoque da clínica (fase 7c): aplicou toxina do lote X, o lote fica no prontuário e o estoque baixa. Se um lote tiver recall, a clínica sabe quem recebeu.</div>
+<div class="nota"><b>Retorno da evolução vira o retorno da agenda.</b> "Retorno em 30 dias" é o mesmo campo que hoje a recepção preenche ao finalizar (fase 6): o Zaq chama o paciente antes do prazo, sem dizer o motivo.</div>
+
+<h2><span class="n">04</span>Assinado não se apaga</h2>
+<p class="sub">O registro assinado fica como foi escrito; correção é um adendo, também assinado</p>
+<div class="tw"><table>
+<tr><th>Momento</th><th>O que o Zaq guarda</th></tr>
+<tr><td>Rascunho</td><td>salvo a cada poucos segundos; só o autor vê e edita</td></tr>
+<tr><td><b>Assinar</b></td><td>o texto vira imutável: data e hora do servidor, profissional, conselho e número, e uma impressão digital do conteúdo (hash). Qualquer mudança posterior no banco é detectada</td></tr>
+<tr><td>Corrigir</td><td>só por <b>adendo</b>, ligado ao registro original, com a própria assinatura. O original continua visível</td></tr>
+<tr><td>Apagar</td><td><b>não existe</b>. Nem o dono, nem o suporte. O paciente que pede para apagar os dados (LGPD) não apaga o prontuário: a lei manda guardar por 20 anos</td></tr>
+</table></div>
+<p><b>As duas assinaturas, prontas para uma ou outra</b> (o profissional escolhe no cadastro dele):</p>
+<div class="tw"><table>
+<tr><th>Tipo</th><th>Como funciona</th><th>Quando assina</th></tr>
+<tr><td><b>Certificado em arquivo (A1)</b></td><td>o arquivo do certificado (e-CPF) fica guardado cifrado no Zaq; a senha dele nunca fica gravada: o profissional digita uma vez por dia e o Zaq assina durante o expediente</td><td>a cada evolução, sem interromper</td></tr>
+<tr><td><b>Certificado em nuvem ou cartão (A3, CRM Digital)</b></td><td>o Zaq manda o documento para o provedor do certificado, e o profissional autoriza no celular (aplicativo do provedor) ou com o cartão</td><td>no fim do atendimento, ou <b>em lote</b>: "assinar as 14 evoluções de hoje" com uma autorização</td></tr>
+<tr><td>Sem certificado (provisório)</td><td>login, senha e a impressão digital do conteúdo. Vale como registro, mas os documentos saem para imprimir e assinar à mão</td><td>ao finalizar</td></tr>
+</table></div>
+<div class="nota"><b>Qual certificado cada profissional tem.</b> O dono disse que há os dois tipos na clínica. Para ligar, precisamos saber de cada profissional: é arquivo (A1) ou nuvem/cartão (A3), e de qual provedor (o CRM Digital do CFM, ou outros como BirdID, VIDaaS, SafeID). O desenho atende os dois; a integração com o provedor em nuvem é por provedor.</div>
+
+<h2><span class="n">05</span>Fotos clínicas e anexos</h2>
+<p class="sub">A foto é o dado mais sensível da clínica: fica fora do alcance de tudo que não é o prontuário</p>
+<div class="pn">
+  <div class="top"><span class="tt">Fotos · Marina Costa</span><span class="mut">região: face · comparar</span></div>
+  <div class="grid2"><div class="box" style="text-align:center;padding:28px 0">[foto 12/08/2026]<br><span class="mut">antes · face frontal</span></div><div class="box" style="text-align:center;padding:28px 0">[foto 24/09/2026]<br><span class="mut">6ª semana · face frontal</span></div></div>
+  <span class="mut">Termo de uso de imagem: assinado em 12/08/2026 (uso clínico, sem divulgação)</span>
+</div>
+<div class="tw"><table>
+<tr><th>Regra</th><th>Por quê</th></tr>
+<tr><td>Guardadas em área privada, cifradas; o link para ver vale poucos minutos e só para quem pode ver</td><td>foto de paciente em link aberto é o pior vazamento possível</td></tr>
+<tr><td>Tiradas pelo celular do profissional direto no prontuário (sem passar pela galeria do aparelho)</td><td>foto de paciente na galeria pessoal sai do controle da clínica</td></tr>
+<tr><td>Termo de uso de imagem por paciente, com dois níveis: só uso clínico, ou também divulgação</td><td>o antes e depois nas redes precisa de autorização específica</td></tr>
+<tr><td>Anexos (exame em PDF ou foto do papel) no mesmo lugar, ligados ao atendimento</td><td>o resultado do exame fica junto da conduta</td></tr>
+</table></div>
+
+<h2><span class="n">06</span>Documentos assinados (P2)</h2>
+<p class="sub">Receita, atestado, pedido de exame e laudo em PDF, com a assinatura digital do profissional</p>
+<div class="tw"><table>
+<tr><th>Documento</th><th>Como sai</th></tr>
+<tr><td>Receita simples</td><td>PDF assinado, com o código para a farmácia conferir a assinatura no validador do governo</td></tr>
+<tr><td>Receita de controle especial (receituário branco, 2 vias)</td><td>PDF assinado nas duas vias</td></tr>
+<tr><td>Notificação de receita (amarela ou azul)</td><td><b>continua em papel</b>, no talão numerado da vigilância. O Zaq registra no prontuário que foi emitida e o número</td></tr>
+<tr><td>Atestado, declaração de comparecimento, pedido de exame, laudo, orientações pós-procedimento</td><td>PDF assinado, com modelos da clínica</td></tr>
+</table></div>
+<div class="zap">
+  <div class="sis">enviado pela recepção, a pedido do profissional</div>
+  <div class="b eu">Oi, Marina! Aqui estão a sua receita e o pedido de exames da consulta de hoje 😊<div class="card">📄 Documentos da consulta · 24/09<br><small>abre com a sua data de nascimento · vale 30 dias</small></div><div class="h">15:42</div></div>
+</div>
+<div class="alerta"><b>Documento clínico nunca sai sozinho.</b> O agente do WhatsApp não envia receita, laudo nem resultado. O envio é um clique de quem atendeu (ou da recepção, a pedido dele), e vai por um link que pede a data de nascimento do paciente, não o arquivo solto na conversa.</div>
+
+<h2><span class="n">07</span>Nota fiscal de serviço (P3)</h2>
+<p class="sub">Hoje a nota sai direto na prefeitura de Pedreiras; o Zaq passa a emitir quando o pagamento entra</p>
+<div class="tw"><table>
+<tr><th>Quando</th><th>O que acontece</th></tr>
+<tr><td>Pagamento recebido (consulta, parcela do plano, mensalidade da assinatura, produto)</td><td>a nota é emitida com o CPF do paciente, o serviço e o valor, e fica ligada ao recebimento no Financeiro</td></tr>
+<tr><td>Modo inicial</td><td><b>a recepção confere e clica "emitir"</b>; depois de umas semanas sem erro, a clínica liga o automático</td></tr>
+<tr><td>Envio ao paciente</td><td>o PDF da nota vai por e-mail; pelo WhatsApp só se o paciente pedir</td></tr>
+</table></div>
+<div class="nota"><b>Como o Zaq fala com a prefeitura.</b> Depende de Pedreiras: se a prefeitura já usa o padrão nacional da NFS-e, o Zaq emite direto no sistema nacional; se usa sistema próprio, emite por um intermediário que atende a cidade. Os dois pedem o certificado digital da empresa (e-CNPJ) e os dados fiscais (inscrição municipal, código do serviço, alíquota do ISS, regime). Isso se confirma com o contador da clínica.</div>
+
+<h2><span class="n">08</span>O histórico que está no Amigo (P5)</h2>
+<p class="sub">O prontuário antigo não pode sumir quando a clínica deixar o Amigo</p>
+<div class="perigo"><b>Antes de cancelar o Amigo, o histórico tem que estar salvo.</b> A lei manda guardar o prontuário por 20 anos a partir do último registro. Se a assinatura do Amigo acabar antes de exportar, a clínica perde a história clínica dos pacientes e fica irregular.</div>
+<p>Como o Amigo exporta os prontuários está sendo lido no próprio Amigo (só leitura). O plano: trazer o histórico de cada paciente para dentro do prontuário no Zaq como <b>"histórico do Amigo"</b>, somente leitura, com a data original de cada registro, ao lado dos atendimentos novos.</p>
+
+<h2><span class="n">09</span>Segurança e LGPD</h2>
+<div class="tw"><table>
+<tr><th>Regra</th><th>Como</th></tr>
+<tr><td>Registro de acesso</td><td>toda abertura de prontuário, foto e documento fica registrada (quem, quando, o quê). O dono vê o registro; o paciente pode pedir o dele</td></tr>
+<tr><td>Login do profissional mais forte</td><td>código no celular além da senha (dois fatores) para quem lê prontuário; sessão encerra sozinha depois de um tempo parado</td></tr>
+<tr><td>Separado do resto</td><td>tabelas próprias, que o agente e as automações não alcançam; nada clínico em mensagem automática, em aviso ou no Raio-X</td></tr>
+<tr><td>Direito do paciente</td><td>cópia do prontuário em PDF, a pedido, pelo profissional</td></tr>
+<tr><td>Guarda</td><td>20 anos; nada se apaga. Cópia de segurança diária</td></tr>
+<tr><td>Consentimento</td><td>termo de uso de imagem e termos de procedimento (modelos da clínica), assinados pelo paciente e anexados</td></tr>
+</table></div>
+
+<h2><span class="n">10</span>O que é regulado e precisa de confirmação</h2>
+<div class="alerta"><b>O Zaq segue as regras, mas não substitui o jurídico.</b> Antes de a clínica depender só do Zaq, o advogado ou o CRM do Maranhão precisa confirmar os pontos abaixo.</div>
+<div class="tw"><table>
+<tr><th>Norma</th><th>O que pede</th><th>Como o desenho atende</th></tr>
+<tr><td>CFM 1.638/2002</td><td>o que o prontuário tem que ter: identificação, anamnese, exame, hipóteses, conduta, evolução com data, hora, assinatura e conselho</td><td>modelos da seção 03; assinatura com conselho (seção 04)</td></tr>
+<tr><td>Lei 13.787/2018</td><td>prontuário digital com assinatura ICP-Brasil; guarda por 20 anos</td><td>certificado A1 ou A3 (seção 04); nada se apaga</td></tr>
+<tr><td>CFM 1.821/2007</td><td>requisitos de segurança do sistema; <b>para dispensar o papel</b>, o CFM pede sistema certificado (SBIS/CFM)</td><td>registro de acesso, integridade e assinatura digital. <b>O Zaq não tem essa certificação</b>: é o ponto a confirmar com o jurídico</td></tr>
+<tr><td>CFM 2.299/2021</td><td>documentos médicos eletrônicos (receita, atestado, laudo) com assinatura ICP-Brasil</td><td>seção 06</td></tr>
+<tr><td>LGPD, art. 11</td><td>dado de saúde é sensível: finalidade, acesso restrito, segurança</td><td>seções 01, 05 e 09</td></tr>
+</table></div>
+
+<h2><span class="n">11</span>A ordem de construção</h2>
+<div class="tw"><table>
+<tr><th>#</th><th>Parte</th><th>Entrega</th></tr>
+<tr><td class="num">1</td><td>Quem vê o quê</td><td>login dos profissionais ligado ao cadastro, conselho e número; as regras da seção 01; o registro de acesso; a trava que impede o agente de ler</td></tr>
+<tr><td class="num">2</td><td>Ficha e evolução</td><td>alergias, medicamentos, problemas; evolução com os modelos; assinatura simples; adendo; "abrir prontuário" pela agenda</td></tr>
+<tr><td class="num">3</td><td>Fotos e anexos</td><td>área privada cifrada, câmera direto no prontuário, comparação, termo de imagem</td></tr>
+<tr><td class="num">4</td><td>Certificado digital</td><td>A1 e nuvem/A3; assinatura das evoluções, uma a uma ou em lote</td></tr>
+<tr><td class="num">5</td><td>Documentos (P2)</td><td>receita, atestado, pedido de exame, laudo em PDF assinado; envio por link</td></tr>
+<tr><td class="num">6</td><td>Histórico do Amigo (P5)</td><td>importar e mostrar como histórico, antes de a clínica cancelar o Amigo</td></tr>
+<tr><td class="num">7</td><td>Nota fiscal (P3)</td><td>emissão pela prefeitura de Pedreiras, conferida e depois automática</td></tr>
+</table></div>
+<div class="nota"><b>Por que o histórico do Amigo não é o último.</b> Ele define quando a clínica pode cancelar o Amigo. Se a virada da agenda for antes, o Amigo fica pago só para consulta até a importação terminar.</div>
+
+<h2><span class="n">12</span>O que depende de resposta</h2>
+<div class="q"><div class="qt">A. Quais profissionais escrevem no prontuário, e qual o conselho de cada um?</div><div class="qo">Dr. Manoel (CRM), Juliana (CREFITO), Brenda e Cristiane (função a confirmar). Todos precisam de login próprio para assinar.</div></div>
+<div class="q"><div class="qt">B. Qual certificado cada um tem?</div><div class="qo">Arquivo (A1) ou nuvem/cartão (A3), e de qual provedor. O desenho atende os dois; a integração com nuvem é por provedor. <span class="rec">Sugestão: começar pelo do Dr. Manoel.</span></div></div>
+<div class="q"><div class="qt">C. O dono da clínica é profissional de saúde?</div><div class="qo">Se não for, ele não lê o conteúdo clínico, só o registro de acesso (seção 01).</div></div>
+<div class="q"><div class="qt">D. A clínica tem modelos próprios?</div><div class="qo">De evolução, de receita, de termo de consentimento, de orientação pós-procedimento. Se tiver no Amigo, eles vêm junto.</div></div>
+<div class="q"><div class="qt">E. Dados fiscais para a nota</div><div class="qo">CNPJ, inscrição municipal, regime tributário, código do serviço, alíquota do ISS e o certificado da empresa (e-CNPJ). Com o contador.</div></div>
+<div class="q"><div class="qt">F. Confirmação jurídica</div><div class="qo">A seção 10, com o advogado ou o CRM-MA, antes de a clínica largar o papel ou o Amigo.</div></div>
+
+<div class="ftr">Desenho da parte 4 da clínica no Zaq (prontuário, documentos, nota fiscal e histórico do Amigo), 26/09/2026. Decisão do dono: construir no Zaq; clínica só particular (sem convênio/TISS); profissionais com certificado A1 e A3; nota fiscal hoje pela prefeitura; vários profissionais escrevem no prontuário. Pacientes e textos clínicos das telas são fictícios.</div>
+</div></body></html>

@@ -20,7 +20,7 @@ from finance import obras as ob
 from web import painel_obras as po
 
 # a ficha da casa lê a venda e os papéis (353), e a assinatura cria título a receber
-_MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
+_MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql", "058_dados_empresa.sql",
               "057_natureza_lancamento.sql", "064_clientes_lojista.sql",
               "066_pessoas_identidade.sql", "067_titulos_cliente.sql",
               "131_pessoa_cnpj.sql", "132_plano_contas_centros_custo.sql",
@@ -28,7 +28,7 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "195_titulo_aprovacao.sql", "196_titulo_recorrencia.sql",
               "197_titulo_acrescimo.sql", "317_titulo_classificacao.sql",
               "349_plano_obras.sql", "351_obras.sql", "353_obra_venda_documentos.sql",
-              "355_reforma_orcamento.sql")
+              "355_reforma_orcamento.sql", "377_sinapi_referencia.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 
 
@@ -309,3 +309,17 @@ def test_cadastrar_a_venda_e_assinar_pela_ficha(pool, conta, monkeypatch):
     assert v["situacao"] == "assinatura" and v["titulo_entrada_id"] and v["titulo_repasse_id"]
     html = c.get(f"/painel/obras/{o['id']}").text
     assert "Contrato assinado" in html and "R$ 145.000,00" in html
+
+
+def test_a_ficha_mostra_a_referencia_sinapi_do_estado(pool, conta, monkeypatch):
+    with pool.connection() as c:
+        c.execute("update contas set uf='MA' where id=%s", (conta,))
+        c.commit()
+    o = ob.criar_obra(pool, conta, "Casa 12", "casa", area_m2=45, custo_previsto_centavos=8_100_000)
+    sem_area = ob.criar_obra(pool, conta, "Casa 13", "casa")
+    c = _cliente(pool, conta, monkeypatch)
+    _entrar(c)
+    html = c.get(f"/painel/obras/{o['id']}").text
+    assert "SINAPI-MA ago/2026" in html and "R$ 1.969,07/m²" in html
+    assert "o previsto: R$ 1.800,00/m² (-9%)" in html
+    assert "SINAPI-MA" not in c.get(f"/painel/obras/{sem_area['id']}").text

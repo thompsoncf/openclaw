@@ -725,6 +725,16 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
+    # A CLÍNICA TEM A AGENDA DELA (uma coluna por profissional, web/painel_clinica_agenda).
+    # Aba aberta antes do deploy ou favorito no endereço velho deixavam a recepção na
+    # agenda de sempre achando que a nova não existia (25/09/2026). Quem não vende
+    # (financeiro) não entra na da clínica e continua aqui.
+    from finance import raio_x_perfil as _rxp
+    from web import portal as _portal
+    from contas import equipe as _eq
+    if (_rxp.perfil_por_nicho(_portal.nicho_da_conta(ctx.get("conta"))) == "clinica"
+            and _eq.caps_do_papel(ctx.get("papel"))["vendas"]):
+        return RedirectResponse("/painel/clinica/agenda", status_code=303)
     pool = get_pool()
     conta_id = ctx["conta_id"]
     ano, mes = _mes_ref(m)

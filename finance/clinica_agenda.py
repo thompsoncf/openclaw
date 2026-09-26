@@ -400,6 +400,20 @@ def _nota(c, lead_id: int, membro_id: int | None, texto: str) -> None:
         _log.info("agenda da clínica: nota não gravada (lead %s)", lead_id, exc_info=True)
 
 
+def _outra_marcada(c, conta_id: int, lead: int, evento_id: int) -> bool:
+    """O mesmo card tem outra consulta marcada, desta pra frente? (a mãe marca pra
+    ela e pro filho do mesmo celular; ou a recepção marcou a nova antes de cancelar
+    a velha). "Desta pra frente" e não "depois de agora": a consulta esquecida como
+    agendada no mês passado não segura o card, e o teste não depende do relógio."""
+    return c.execute(
+        """select 1 from eventos_agenda o
+             join eventos_agenda e on e.id=%s and e.conta_id=o.conta_id
+            where o.conta_id=%s and o.prospeccao_id=%s and o.id<>e.id and o.status='ativo'
+              and o.situacao in ('agendado', 'confirmado', 'presente', 'atendimento')
+              and o.inicio >= e.inicio
+            limit 1""", (evento_id, conta_id, lead)).fetchone() is not None
+
+
 def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento: str | None = None,
                      valor_centavos: int | None = None, membro_id: int | None = None) -> str | None:
     """O CARD ANDA QUANDO A AGENDA ANDA (seção 06 da parte 1 aprovada). Devolve a
@@ -427,7 +441,7 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
     chaves = _chaves_do_funil(c, conta_id)
     antes = ("novo", "contatado", "follow_up", "qualificado")
     destino, nota, valor = None, None, None
-    if nova in ("faltou", "cancelou") and atual == "qualificado" and "follow_up" in chaves:
+    if nova in ("faltou", "cancelou") and atual == "qualificado" and "follow_up" in chaves             and not _outra_marcada(c, conta_id, lead, evento_id):
         destino = "follow_up"
         nota = f"{'Faltou à' if nova == 'faltou' else 'Cancelou a'} consulta de {quando}: remarcar."
     elif nova == "agendado" and atual == "follow_up" and "qualificado" in chaves:
@@ -488,7 +502,8 @@ def _gravar_situacao(c, conta_id: int, evento_id: int, ev, nova: str) -> str | N
     return None
 
 
-def remarcar(c, conta_id: int, evento_id: int, novo_inicio: datetime, agora: datetime | None = None) -> str | None:
+def remarcar(c, conta_id: int, evento_id: int, novo_inicio: datetime, agora: datetime | None = None,
+             membro_id: int | None = None) -> str | None:
     agora = agora or datetime.now(timezone.utc)
     ev = c.execute("""select profissional_id, servico_id, situacao from eventos_agenda
                        where id=%s and conta_id=%s and situacao is not null for update""",
@@ -515,6 +530,8 @@ def remarcar(c, conta_id: int, evento_id: int, novo_inicio: datetime, agora: dat
             where id=%s and conta_id=%s""",
         (novo_inicio, novo_inicio + timedelta(minutes=(dur[0] if dur else 30)),
          faixa["local_id"] if faixa else None, evento_id, conta_id))
+    if ev[2] == "faltou":   # é o caminho que a nota "faltou, remarcar" manda seguir
+        card_pela_agenda(c, conta_id, evento_id, "agendado", membro_id=membro_id)
     return None
 
 

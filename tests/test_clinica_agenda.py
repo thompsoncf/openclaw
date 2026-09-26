@@ -371,6 +371,7 @@ def test_cancelar_pela_agenda_de_sempre_libera_e_nao_manda_vespera(pool, envios)
     assert ag.cancelar_evento(pool, CLINICA, eid)
     with pool.connection() as c:
         assert ca.evento(c, CLINICA, eid)["situacao"] == "cancelou"
+        assert _status(c, eid)[0] == "follow_up"      # o card anda igual, venha de onde vier
         assert ca.utc(SEG, time(8)) in [x["inicio"] for x in
                                         ca.livres(c, CLINICA, _manoel(c)["id"], _tipo(c, "Consulta")["id"], SEG, 1, AGORA)]
         ca.salvar_config(c, CLINICA, "ligado", 10)
@@ -483,6 +484,33 @@ def test_cancelou_tambem_volta_pro_follow_up(pool):
         assert _status(c, eid)[0] == "follow_up"
 
 
+def test_remarcar_a_falta_devolve_pra_consulta_agendada(pool):
+    """A nota diz "faltou, remarcar": remarcar é o caminho, não só o Reabrir."""
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        ca.mudar_situacao(c, CLINICA, eid, "faltou")
+        assert _status(c, eid)[0] == "follow_up"
+        assert ca.remarcar(c, CLINICA, eid, ca.utc(SEG, time(14)), AGORA, membro_id=51) is None
+        assert _status(c, eid)[0] == "qualificado"
+        # faltou de novo: volta pro Follow-up, com nota nova
+        ca.mudar_situacao(c, CLINICA, eid, "faltou")
+        assert _status(c, eid)[0] == "follow_up"
+        assert c.execute("select count(*) from prospeccao_atividades where descricao like 'Faltou%'"
+                         ).fetchone()[0] == 2
+
+
+def test_falta_de_um_nao_tira_o_card_de_quem_tem_outra_marcada(pool):
+    """A mãe marca pra ela e pro filho do mesmo celular: o filho falta, mas o card
+    continua em Consulta agendada, porque a dela ainda está marcada."""
+    with pool.connection() as c:
+        filho, _ = _marcar(c, h=8, nome="Pedro")
+        mae, _ = _marcar(c, h=9, nome="Maria Clara")
+        ca.mudar_situacao(c, CLINICA, filho, "faltou")
+        assert _status(c, filho)[0] == "qualificado"
+        ca.mudar_situacao(c, CLINICA, mae, "faltou")          # agora não sobra consulta nenhuma
+        assert _status(c, mae)[0] == "follow_up"
+
+
 def _ate_atendimento(c, eid):
     for s in ("confirmado", "presente", "atendimento"):
         assert ca.mudar_situacao(c, CLINICA, eid, s) is None
@@ -527,9 +555,51 @@ def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
         c.commit()
     html = cli.get(f"/painel/clinica/agenda/evento/{eid}").text
     assert "O médico propôs tratamento?" in html
+    # valor ilegível não finaliza calado sem o valor: volta pedindo o formato
+    cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
+             data={"nova": "finalizado", "tratamento": "sim", "valor": "mil e quinhentos"})
+    assert "Valor inválido" in cli.get(f"/painel/clinica/agenda/evento/{eid}").text
+    with pool.connection() as c:
+        assert ca.evento(c, CLINICA, eid)["situacao"] == "atendimento"
     r = cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
                  data={"nova": "finalizado", "tratamento": "sim", "valor": "1.500,00"})
     assert "aviso=situacao" in r.headers["location"]
     with pool.connection() as c:
         assert _status(c, eid) == ("proposta", 150000)
 
+
+
+def test_agenda_antiga_manda_a_clinica_pra_agenda_nova(monkeypatch):
+    """Aba aberta antes do deploy ou favorito velho: a recepção cai na agenda nova."""
+    from web import painel_agenda as pag
+    from web import portal
+    estado = {"nicho": "clinica"}
+    monkeypatch.setattr(pag, "conta_logada", lambda request: (CLINICA,))
+    monkeypatch.setattr(portal, "nicho_da_conta", lambda conta: estado["nicho"])
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="teste")
+    app.include_router(pag.router)
+
+    @app.get("/_papel/{papel}")
+    def _papel(request: Request, papel: str):
+        request.session["papel"] = papel
+        return {}
+
+    cli = TestClient(app, follow_redirects=False)
+    cli.get("/_papel/vendedor")
+    assert cli.get("/painel/agenda").headers["location"] == "/painel/clinica/agenda"
+    # quem não vende (financeiro) fica na agenda da conta: a rota segue e vai ao banco
+    class Chegou(Exception):
+        pass
+
+    def _pool():
+        raise Chegou
+    monkeypatch.setattr(pag, "get_pool", _pool)
+    cli.get("/_papel/financeiro")
+    with pytest.raises(Chegou):
+        cli.get("/painel/agenda")
+    # e conta que não é clínica nunca é desviada
+    estado["nicho"] = "eventos"
+    cli.get("/_papel/vendedor")
+    with pytest.raises(Chegou):
+        cli.get("/painel/agenda")

@@ -268,10 +268,13 @@ def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
     if redir is not None:
         return redir
     from finance.clinica_config import centavos
+    valor_c = centavos(valor) if valor.strip() else None
+    if valor.strip() and valor_c is None:
+        return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}",
+                   erro="Valor inválido. Use o formato 1.500,00.")
     with get_pool().connection() as c:
         erro = ca.mudar_situacao(c, conta[0], evento_id, nova, tratamento=(tratamento or None),
-                                 valor_centavos=centavos(valor) if valor else None,
-                                 membro_id=request.session.get("membro_id"))
+                                 valor_centavos=valor_c, membro_id=request.session.get("membro_id"))
         (c.rollback if erro else c.commit)()
     return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", "" if erro else "situacao", erro or "")
 
@@ -283,7 +286,7 @@ def evento_remarcar(request: Request, evento_id: int, inicio: str = Form("")):
         return redir
     quando = _instante(inicio)
     with get_pool().connection() as c:
-        erro = ca.remarcar(c, conta[0], evento_id, quando) if quando else "Escolha o novo horário."
+        erro = ca.remarcar(c, conta[0], evento_id, quando, membro_id=request.session.get("membro_id"))             if quando else "Escolha o novo horário."
         (c.rollback if erro else c.commit)()
     return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", "" if erro else "remarcado", erro or "")
 

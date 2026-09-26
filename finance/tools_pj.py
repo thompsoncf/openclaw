@@ -576,6 +576,19 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                 txt += " " + emp
         except Exception:  # noqa: BLE001 — sem a 371
             pass
+        try:
+            from . import sinapi as _sin
+            ref = _sin.referencia(pool, _sin.uf_da_conta(pool, conta_id))
+            cmp = _sin.comparar(o, ref)
+            if ref and cmp:
+                txt += (f" Referência SINAPI-{ref['uf']} {ref['rotulo_mes']}: "
+                        f"{ob._brl(ref['total_centavos'])}/m² (pra comparar, não pra cobrar)")
+                if cmp["base"]:
+                    txt += (f"; {'a obra saiu' if cmp['base'] == 'gasto' else 'o previsto dá'} "
+                            f"{ob._brl(cmp['valor'])}/m² ({cmp['pct']:+d}%)")
+                txt += "."
+        except Exception:  # noqa: BLE001 — sem a 377
+            pass
         return txt
 
     def consultar_obra(e: dict) -> str:

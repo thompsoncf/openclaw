@@ -181,6 +181,10 @@ def por_token(pool, token: str) -> dict | None:
     o["vencido"] = bool(o["validade_ate"] and o["validade_ate"] < date.today()
                         and o["status"] == "enviado")
     o["clausulas"] = clausulas(o)
+    try:
+        o["pagar"] = pagar_pelo_link(pool, o)
+    except Exception:  # noqa: BLE001 — sem a 367, a página abre sem o Pix
+        o["pagar"] = []
     return o
 
 
@@ -404,4 +408,75 @@ def parcelas_liberadas(pool, conta_id: int, obra: dict) -> list[dict]:
                 out.append({"rotulo": p["rotulo"], "etapa": feitas[p["etapa"]],
                             "valor_centavos": int(p["valor_centavos"]), "titulo_id": tid,
                             "versao": o["versao"]})
+    return out
+
+
+# ── cobrar a parcela liberada (Pix da própria empresa, finance/pix.py) ─────
+def _app_url() -> str:
+    import os
+    return (os.environ.get("APP_URL") or "https://app.zaq-ia.com").rstrip("/")
+
+
+def mensagem_de_cobranca(parcela: dict, cliente: str, empresa: str,
+                         pix_copia_cola: str | None, link: str) -> str:
+    """O texto que a empresa manda do WhatsApp DELA (decisão do dono em 26/09: o
+    cliente recebe de um número que conhece). A etapa pronta vem primeiro: é o
+    motivo da cobrança, e é o que o CC art. 614 chama de obra medida."""
+    primeiro = (cliente or "").split()[0].title() if (cliente or "").strip() else ""
+    linhas = [f"Olá{', ' + primeiro if primeiro else ''}! A etapa *{parcela['etapa'].lower()}* "
+              "da sua reforma ficou pronta ✅",
+              f"Parcela: {parcela['rotulo']} — *{_ob._brl(parcela['valor_centavos'])}*"]
+    if pix_copia_cola:
+        linhas += ["", "Pix copia e cola:", pix_copia_cola, "",
+                   f"Ou pelo QR code, no seu orçamento: {link}"]
+    else:
+        linhas += ["", f"Seu orçamento e as parcelas: {link}"]
+    linhas += ["", f"Qualquer dúvida, é só me chamar. {empresa}".strip()]
+    return "\n".join(linhas)
+
+
+def cobrancas(pool, conta_id: int, obra: dict) -> list[dict]:
+    """Cada parcela liberada e em aberto, com o Pix e a mensagem prontos. O Pix só
+    vai se a empresa cadastrou a chave (sem ela, a mensagem vai sem Pix)."""
+    from . import pix as _pix
+    livres = parcelas_liberadas(pool, conta_id, obra)
+    if not livres:
+        return []
+    versoes = {o["versao"]: o for o in orcamentos(pool, conta_id, obra["id"])}
+    chave = _pix.da_conta(pool, conta_id)
+    with pool.connection() as c:
+        r = c.execute("select coalesce(nullif(nome_fantasia,''), nullif(razao_social,''), nome) "
+                      "from contas where id=%s", (conta_id,)).fetchone()
+    empresa = r[0] if r else ""
+    out = []
+    for p in livres:
+        v = versoes.get(p["versao"]) or {}
+        link = f"{_app_url()}/orcamento-obra/{v.get('token')}" if v.get("token") else _app_url()
+        codigo = None
+        if chave:
+            try:
+                codigo = _pix.copia_e_cola(chave["chave"], p["valor_centavos"], chave["recebedor"],
+                                           chave["cidade"], txid=f"OBRA{obra['id']}T{p['titulo_id']}")
+            except ValueError:
+                codigo = None
+        msg = mensagem_de_cobranca(p, v.get("aceito_nome") or "", empresa, codigo, link)
+        out.append(dict(p, cliente=v.get("aceito_nome") or "", token=v.get("token"),
+                        pix=codigo, link=link, mensagem=msg))
+    return out
+
+
+def pagar_pelo_link(pool, orc: dict) -> list[dict]:
+    """O que a página pública do orçamento mostra pra pagar: as parcelas DESTA
+    versão que a etapa liberou e continuam abertas, com o Pix e o QR."""
+    from . import pix as _pix
+    if orc.get("status") != "aceito":
+        return []
+    obra = _ob.obter_obra(pool, orc["conta_id"], orc["obra_id"])
+    if not obra:
+        return []
+    out = []
+    for cb in cobrancas(pool, orc["conta_id"], obra):
+        if cb["versao"] != orc["versao"] or not cb["pix"]:
+            continue
+        out.append(dict(cb, qr=_pix.qr_svg(cb["pix"])))
     return out

@@ -126,11 +126,18 @@ def _itens_do_form(form) -> list[dict]:
 
 @router.post(URL + "/salvar")
 async def salvar(request: Request):
+    # o async é só pra ler o formulário (os campos são dinâmicos: tipo_0, sessoes_0...);
+    # o banco roda no threadpool, pra não travar o event loop de todo mundo
+    from starlette.concurrency import run_in_threadpool
+    form = dict(await request.form())
+    return await run_in_threadpool(_salvar, request, form)
+
+
+def _salvar(request: Request, form: dict):
     conta, gerencia, redir = _acesso(request)
     if redir is not None:
         return redir
     conta_id = conta[0]
-    form = await request.form()
     plano_id = _int(form.get("plano_id"))
     volta = f"{URL}/{plano_id}" if plano_id else (
         f"{URL}/novo?evento={form.get('evento_id')}" if _int(form.get("evento_id")) else

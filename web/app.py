@@ -459,6 +459,16 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — voltar_os_vencidos falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # O SINAPI (custo médio do m² por estado, IBGE) das contas de
+                # construção: perto da virada da hora, e cada UF no máximo uma vez
+                # por dia — com o IBGE fora do ar, tenta de novo na hora seguinte.
+                from datetime import datetime as _dt
+                if _dt.now().minute < 2:
+                    from finance import sinapi as _sin
+                    _sin.atualizar(pool)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — sinapi falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 from finance import aprovacao_aviso as _ap
                 # A fila de liberação do dono só existe pra quem abre a tela de
                 # Empresa — e quem abre a tela todo dia é quem LANÇA, não quem

@@ -194,6 +194,7 @@ def ficha(request: Request, obra_id: int):
                    sou_dono=request.session.get("papel", "dono") == "dono",
                    fotos=_fotos_da_ficha(conta[0], o),
                    empreita=_empreita_da_ficha(conta[0], o),
+                   sinapi=_sinapi_da_ficha(conta[0], o),
                    tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, modelos=orf.MODELOS,
                    status_doc=ov.STATUS_DOC, modalidades=ov.MODALIDADES,
                    situacoes=[(k, ov.ROTULO_SITUACAO[k]) for k in ov.SITUACOES],
@@ -409,6 +410,15 @@ def parcela_recebida(request: Request, obra_id: int, titulo_id: int):
     if not (r or {}).get("ok"):
         return _volta(f"/painel/obras/{obra_id}", (r or {}).get("erro") or "Não deu pra dar baixa.")
     return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
+
+
+def _sinapi_da_ficha(conta_id: int, o: dict) -> dict | None:
+    """A referência SINAPI do estado da empresa e a comparação com esta obra."""
+    from finance import sinapi as _sin
+    ref = _sin.referencia(get_pool(), _sin.uf_da_conta(get_pool(), conta_id))
+    if not ref or not o.get("area_m2"):
+        return None
+    return {"ref": ref, "cmp": _sin.comparar(o, ref)}
 
 
 def _empreita_da_ficha(conta_id: int, o: dict) -> dict:
@@ -726,6 +736,9 @@ _TPL_FICHA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="ob-cx"><span class="r">{{ 'Venda prevista' if o.tipo == 'casa' else 'Contrato' }}</span>
     <span class="v">{{ brl(o.valor_centavos) if o.valor_centavos else '—' }}</span>
     <span class="n">recebido nesta obra: {{ brl(o.custos.recebido) }}</span></div>
+  {% if sinapi %}<div class="ob-cx" title="Custo médio do m² de construção no estado (SINAPI, IBGE). É pra comparar, não pra cobrar: casa popular pode e deve sair abaixo."><span class="r">SINAPI-{{ sinapi.ref.uf }} {{ sinapi.ref.rotulo_mes }}</span>
+    <span class="v">{{ brl(sinapi.ref.total_centavos) }}/m²</span>
+    <span class="n">{% if sinapi.cmp and sinapi.cmp.base %}{{ 'a obra' if sinapi.cmp.base == 'gasto' else 'o previsto' }}: {{ brl(sinapi.cmp.valor) }}/m² ({{ '+' if sinapi.cmp.pct > 0 }}{{ sinapi.cmp.pct }}%){% else %}pra comparar, não pra cobrar{% endif %}</span></div>{% endif %}
   {% if margem %}<div class="ob-cx"><span class="r">{{ 'Margem prevista' if margem.base == 'previsto' else 'Margem' }}</span>
     <span class="v"{% if margem.valor < 0 %} style="color:var(--coral)"{% endif %}>{{ brl(margem.valor) }}</span>
     <span class="n">{{ margem.pct }}% de {{ brl(margem.preco) }} · {{ 'com o custo previsto' if margem.base == 'previsto' else 'com o gasto até agora' }}</span></div>{% endif %}

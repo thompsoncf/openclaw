@@ -75,7 +75,7 @@ def _precos_escondidos(c, conta_id: int, *, todos: bool = False) -> set[str] | N
     das outras contas nasceram com a coluna em false e continuam como sempre foram.
     Tolerante: banco sem as colunas (348) não esconde nada.
 
-    `todos` é o modo da REGRA POR NÚMERO (migração 386): ali a chave vale pra TODO
+    `todos` é o modo da REGRA POR NÚMERO (migração 388): ali a chave vale pra TODO
     item, não só pro da clínica — decisão do dono em 26/09, "a IA respeita o que eu
     liberar no catálogo". E o lado seguro se inverte: sem a coluna, nada foi
     liberado, então a volta é None ("esconda todos")."""
@@ -418,7 +418,7 @@ def _atender(pool, conta_id, conversa_id):
                                 where ct.id=%s""", (conta_id,)).fetchone()
         _perfil = _rxp.perfil_por_nicho(_slug_n[0] if _slug_n else "")
         _visto = 0
-        # A REGRA POR NÚMERO (migração 386, finance/chip_regra.py): a conversa é de um
+        # A REGRA POR NÚMERO (migração 388, finance/chip_regra.py): a conversa é de um
         # lead que caiu no dono da regra e a IA da regra está ligada. Muda o jeito de
         # atender (ver `_regra_antes`), não o motor. A clínica tem o agente dela.
         regra = None
@@ -683,7 +683,7 @@ def _atender(pool, conta_id, conversa_id):
 
 # ---------------------------------------------------------------- a regra por número
 #
-# A IA de um chip com regra (migração 386, finance/chip_regra.py). O motor é o mesmo;
+# A IA de um chip com regra (migração 388, finance/chip_regra.py). O motor é o mesmo;
 # o que muda é o que vem ANTES dele (rajada, pausa, horário) e o que ele pode fazer
 # (etapa 1: responder e chamar gente — nada de orçamento formal nem visita marcada).
 

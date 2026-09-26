@@ -465,7 +465,7 @@ def painel_servicos_catalogo(request: Request):
         # a tela desenha — já resolvido pelo nome/categoria quando não fixaram.
         "icone": s["icone"],
         # "a IA pode dizer este preço" — o agente com regra por número (migração
-        # 386) só cita valor de item com esta chave ligada
+        # 388) só cita valor de item com esta chave ligada
         "diz_preco": s["diz_preco"],
         "icone_svg": ics.svg(ics.escolher(s["nome"], s["categoria"], s["icone"],
                                           modo=modo), px=20),
@@ -5652,7 +5652,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
             <button id="svc-cancelar" class="oc-pill" type="button">Cancelar</button>
           </div>
         </div>
-        {# só onde existe a IA da regra por número (migração 386): a chave não muda
+        {# só onde existe a IA da regra por número (migração 388): a chave não muda
            nada no agente geral, e mostrar um controle que não faz nada é mentir #}
         {% if ia_preco %}<label style="display:flex; gap:.45rem; align-items:flex-start; font-size:.8rem; margin-top:.55rem; cursor:pointer"><input id="svc-diz" type="checkbox" style="margin-top:.15rem"> <span>A IA pode dizer este preço no WhatsApp <span class="mut">(desmarcado, ela não cita o valor: {{ 'convida para a visita' if servico_avulso else 'convida para uma reunião' }} e o orçamento sai conferido por alguém da equipe)</span></span></label>{% endif %}
         <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>

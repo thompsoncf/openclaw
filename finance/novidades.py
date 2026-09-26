@@ -174,7 +174,7 @@ def _empresa(pool, conta_id: int) -> bool:
 
 
 def _mais_de_um_chip(pool, conta_id: int) -> bool:
-    """A empresa tem dois chips de WhatsApp ou mais (migração 386, a regra por número).
+    """A empresa tem dois chips de WhatsApp ou mais (migração 388, a regra por número).
 
     A tela Regras por número e a chave "a IA pode dizer este preço" do catálogo só
     aparecem aí: com um chip só, quem recebe o lead é o rodízio de sempre. O portão

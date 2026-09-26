@@ -1,4 +1,4 @@
-"""A regra por número (migração 386, finance/chip_regra.py) e a IA que atende nela.
+"""A regra por número (migração 388, finance/chip_regra.py) e a IA que atende nela.
 
 O CASO QUE ESTE ARQUIVO FIXA (26/09/2026). A Prime (conta 34) tem dois chips e um
 rodízio só. O dono pôs um tráfego pago no chip "CP Thiago" (conta 36) e quer que todo
@@ -15,7 +15,7 @@ contra a equipe. O que a regra promete, e cada teste abaixo segura um pedaço:
 * o preço que a IA diz é só o liberado, e sempre de referência;
 * a IA de um nicho não fala o vocabulário de outro (CLAUDE.md §6).
 
-Schema mínimo dos caminhos exercitados; a 386 entra inteira, lida do arquivo.
+Schema mínimo dos caminhos exercitados; a 388 entra inteira, lida do arquivo.
 """
 import os
 from datetime import datetime, timedelta, timezone
@@ -77,7 +77,7 @@ def pool():
     p = ConnectionPool(url, min_size=1, max_size=4, open=True, kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_SQL)
-        c.execute((BASE / "386_regra_por_chip.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "388_regra_por_chip.sql").read_text(encoding="utf-8"))
         c.execute("insert into contas (id, nome, chip_de) values (%s,'Prime',null),"
                   "(%s,'CP Thiago',%s),(%s,'Outra',null)", (EMPRESA, CHIP2, EMPRESA, OUTRA))
         c.commit()
@@ -145,7 +145,7 @@ def test_antes_de_ligar_nao_vale(pool, equipe):
         assert cr.dono_do_contato_novo(c, EMPRESA, CHIP2, contato_novo=True) is None
 
 
-def test_banco_sem_a_386_nao_derruba_a_entrada(pool):
+def test_banco_sem_a_388_nao_derruba_a_entrada(pool):
     """Tudo tolerante: sem a tabela, 'sem regra' — e a transação do webhook, que
     carrega a mensagem do cliente, segue viva."""
     with pool.connection() as c:

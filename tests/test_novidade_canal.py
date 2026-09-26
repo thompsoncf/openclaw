@@ -162,7 +162,7 @@ def test_os_cinco_portoes_de_nicho_continuam_iguais(pool, canal):
     Em 24/09/2026 alguém viu: `empresa` (migração 338) é o segundo portão de
     conta — quem tem o módulo PJ, a mesma regra da rota /painel/empresa.
 
-    Em 26/09/2026, o terceiro: `mais_de_um_chip` (migração 387) — a empresa com
+    Em 26/09/2026, o terceiro: `mais_de_um_chip` (migração 389) — a empresa com
     dois números, que é onde a regra por número existe."""
     assert {"todos", "produto", "servico", "eventos",
             "recorrente"} <= set(nv.PUBLICOS_NICHO)

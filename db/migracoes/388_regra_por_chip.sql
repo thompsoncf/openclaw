@@ -1,4 +1,4 @@
--- 386_regra_por_chip.sql
+-- 388_regra_por_chip.sql
 -- A REGRA POR NÚMERO (26/09/2026, mockup docs/mockups/vendedor_ia_chip.html).
 --
 -- Numa empresa de dois chips, todo lead novo caía no mesmo rodízio, venha por qual

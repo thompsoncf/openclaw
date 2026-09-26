@@ -2809,7 +2809,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
             # pra escolher por qual número o aviso sai. Reusa a mesma listagem dos
             # cartões de QR — inclusive o estado, que é o que faz a escolha informada.
             dist_chips = chips_da_conta(c, ctx["conta_id"])
-            # REGRAS POR NÚMERO (migração 386): só com dois chips ou mais — com um só,
+            # REGRAS POR NÚMERO (migração 388): só com dois chips ou mais — com um só,
             # "quem recebe o lead deste número" é o próprio rodízio
             if len(dist_chips) > 1 and ctx["gerencia"]:
                 from finance import chip_regra as _cr
@@ -5190,7 +5190,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # WhatsApp leva 200 como se tivesse dado tudo certo. Falhar o rodízio custa um lead
     # sem dono; perder a mensagem custa o cliente.
     _mid = None
-    # A REGRA POR NÚMERO (migração 386): o contato NOVO que entra por um chip com
+    # A REGRA POR NÚMERO (migração 388): o contato NOVO que entra por um chip com
     # regra vai pro dono dela em vez do rodízio — e, com a IA ligada, é ela quem
     # atende. Ninguém da equipe é avisado de "lead novo pra você" nesse caso: o lead
     # é da IA, e ela chama gente pelo `chip_regra.avisar` quando precisar.
@@ -14413,7 +14413,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </script>
 
   {% if regras_chip %}
-  {# REGRAS POR NÚMERO (migração 386, mockup docs/mockups/vendedor_ia_chip.html).
+  {# REGRAS POR NÚMERO (migração 388, mockup docs/mockups/vendedor_ia_chip.html).
      Uma regra por chip: quem recebe o contato NOVO dele e se a IA atende. Sem regra,
      o chip segue no rodízio do cartão de cima. #}
   <style>

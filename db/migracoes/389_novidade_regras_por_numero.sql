@@ -1,5 +1,5 @@
--- 387_novidade_regras_por_numero.sql
--- O aviso das Regras por número (migração 386, finance/chip_regra.py), seguindo a
+-- 389_novidade_regras_por_numero.sql
+-- O aviso das Regras por número (migração 388, finance/chip_regra.py), seguindo a
 -- seção 5 do CLAUDE.md.
 --
 -- PÚBLICO `mais_de_um_chip`, portão NOVO: nenhum dos outros descreve o alcance. A

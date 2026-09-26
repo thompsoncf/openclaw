@@ -1,4 +1,4 @@
-"""A regra por número (migração 386): quem recebe o lead NOVO que entra por um chip,
+"""A regra por número (migração 388): quem recebe o lead NOVO que entra por um chip,
 se a IA atende esse dono, em que horário, e quem ela avisa quando precisa de gente.
 
 POR QUE EXISTE (26/09/2026). A Prime (conta 34) tem dois chips e um rodízio só. O dono
@@ -16,7 +16,7 @@ O QUE A REGRA NUNCA FAZ
     segue no rodízio — foi a decisão do dono ("só contatos novos").
   * Não liga a IA na conversa de um lead que não é do dono da regra.
 
-Tudo aqui é tolerante: banco sem a 386 devolve "sem regra", e o webhook segue como
+Tudo aqui é tolerante: banco sem a 388 devolve "sem regra", e o webhook segue como
 sempre foi. Nada daqui pode derrubar a entrada de uma mensagem.
 """
 from __future__ import annotations
@@ -69,7 +69,7 @@ def _dict(r) -> dict:
 def regra(c, conta_id: int, chip_id) -> dict | None:
     """A regra ATIVA do chip, ou None. `chip_id` nulo = o chip principal (a empresa).
 
-    Savepoint próprio: sem a tabela (banco sem a 386), a consulta falha e a
+    Savepoint próprio: sem a tabela (banco sem a 388), a consulta falha e a
     transação do webhook não pode ir junto — ela carrega a mensagem do cliente."""
     chip = int(chip_id) if chip_id else int(conta_id)
     try:
@@ -266,7 +266,7 @@ def pendentes_da_abertura(c, conta_id: int, limite: int = 5) -> list[int]:
     """Conversas que receberam o recado de fora do horário e ainda esperam a IA,
     agora que ela pode falar. Chamado pelo webhook a cada mensagem que entra na
     empresa: não há relógio que acorde a IA na abertura, então a primeira mensagem
-    do dia (de qualquer cliente) acorda as que ficaram. Tolerante: sem a 386, []."""
+    do dia (de qualquer cliente) acorda as que ficaram. Tolerante: sem a 388, []."""
     try:
         with c.transaction():
             regras = [_dict(x) for x in c.execute(

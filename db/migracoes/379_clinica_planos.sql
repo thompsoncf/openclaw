@@ -1,4 +1,4 @@
--- 377_clinica_planos.sql
+-- 379_clinica_planos.sql
 -- Fase 5 da clínica: o PLANO DE TRATAMENTO (docs/mockups/clinica_planos_pacotes_assinatura.html,
 -- seções 03 e 11, passos 1 e 2). Depois da consulta, a recepção monta a proposta do
 -- que o médico indicou — procedimentos, sessões, desconto e formas de pagamento —,

@@ -45,7 +45,7 @@ def pool():
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
-                  "377_clinica_planos.sql"):
+                  "379_clinica_planos.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("update servicos_catalogo set setup_centavos=80000 where conta_id=39 and nome='Procedimento estético'")

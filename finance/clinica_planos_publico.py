@@ -1,7 +1,7 @@
 """As duas perguntas do plano de tratamento que NÃO têm conta pra filtrar.
 
 1. De quem é este token? A página /plano/{token} é aberta pelo paciente, sem login:
-   o token (secrets.token_urlsafe, único na 377) É a chave. Resolvido o dono, todo o
+   o token (secrets.token_urlsafe, único na 379) É a chave. Resolvido o dono, todo o
    resto (finance/clinica_planos.py) roda com `conta_id` como sempre.
 2. Que contas têm plano na rua? O poller passa por elas uma a uma.
 

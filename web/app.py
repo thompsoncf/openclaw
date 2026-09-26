@@ -614,7 +614,7 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — vagas falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
-                # Plano de tratamento da clínica (migração 377): o "1/2/3" do paciente,
+                # Plano de tratamento da clínica (migração 379): o "1/2/3" do paciente,
                 # a cobrança da decisão (D+1, D+3), o aviso da véspera e o vencimento.
                 from finance import clinica_planos as _cpl
                 _pl = _cpl.rodar(pool)

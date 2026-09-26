@@ -6613,11 +6613,20 @@ async def webhook_wa_qr_audio(request: Request):
                   from conversas cv
                  where cv.id = m.conversa_id and cv.conta_id=%s
                    and m.provider_sid=%s and m.canal='whatsapp'
-                   and m.texto ~ '^(🎤|🎵) Áudio \(\d+:\d{2}\)$'""",
+                   and m.texto ~ '^(🎤|🎵) Áudio \(\d+:\d{2}\)$'
+             returning m.conversa_id, m.autor""",
             ("\n" + texto, conta_id, sid))
+        linhas = r.fetchall()
         c.commit()
     log.info("webhook_wa_qr_audio: conta_id=%s transcrito (%s linhas, %s chars)",
-             conta_id, r.rowcount, len(texto))
+             conta_id, len(linhas), len(texto))
+    # CLÍNICA: o agente respondeu "recebi o seu áudio" antes de saber o que foi dito.
+    # Se o que foi FALADO é urgência, agora sim sai a orientação de pronto-socorro/192
+    # e o item vermelho na tela Hoje (finance/clinica_agente.py; só na clínica).
+    for conv_id, autor in linhas:
+        if autor == "lead":
+            from finance import clinica_agente as _cla
+            await run_in_threadpool(_cla.urgencia_transcrita, get_pool(), conta_id, conv_id, texto)
     return Response("ok", media_type="text/plain")
 
 

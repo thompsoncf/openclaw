@@ -19,6 +19,9 @@ create table if not exists public.clinica_repasses (
   prospeccao_id bigint references public.prospeccao(id) on delete set null,
   motivo text not null check (motivo in
     ('sintoma','foto','audio','arquivo','desconto','convenio','urgencia','remarcar','marcar','pessoa')),
+  -- todo motivo já avisado ao paciente neste item: o mesmo recado não sai duas
+  -- vezes (foto, áudio, foto). `motivo` é o mais importante deles, o que a tela mostra.
+  motivos text[] not null default '{}',
   criado_em timestamptz not null default now(),
   resolvido_em timestamptz,
   -- só registro (quem apertou Resolvido): sem chave estrangeira de propósito, pra

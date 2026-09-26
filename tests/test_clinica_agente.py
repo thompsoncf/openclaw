@@ -286,10 +286,39 @@ def test_retorno_e_pela_pessoa_nao_pelo_card(pool, ia, zap):
     _rodar(pool, conv, lead)
     with pool.connection() as c:
         assert len(_eventos(c)) == 1 and _repasses(c) == ["marcar"]
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool, tipo="Retorno"), "nome": "Maria Eduarda"}}
+    _rodar(pool, conv, lead)                              # mesmo primeiro nome, outra pessoa
+    with pool.connection() as c:
+        assert len(_eventos(c)) == 1
     ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool, tipo="Retorno"), "nome": "Maria Clara"}}
     _rodar(pool, conv, lead)
     with pool.connection() as c:
         assert [e[0] for e in _eventos(c)][-1] == "Maria Clara"
+
+
+def test_mesmo_horario_com_nome_dito_nao_troca_a_pessoa(pool, ia, zap):
+    """"Marca o Pedro no mesmo horário que o meu": a consulta da mãe não vira do Pedro."""
+    with pool.connection() as c:
+        lead, conv = _conversa(c)
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": "Ana Beatriz"}}
+    _rodar(pool, conv, lead)
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": "Pedro Souza"}}
+    _rodar(pool, conv, lead)
+    with pool.connection() as c:
+        assert [e[0] for e in _eventos(c)] == ["Ana Beatriz"]
+    assert "já está marcada" in zap.saiu[-1]
+
+
+def test_marquei_de_pedido_novo_nao_confirma_a_consulta_antiga(pool, ia, zap):
+    with pool.connection() as c:
+        lead, conv = _conversa(c)
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": "Maria Clara"}}
+    _rodar(pool, conv, lead)
+    with pool.connection() as c:
+        _diz(c, conv, "e pro meu filho Pedro, tem quinta?")
+    ia.json = {"acao": "responder", "resposta": "Prontinho, agendei o Pedro pra quinta 10h!"}
+    _rodar(pool, conv, lead)
+    assert zap.saiu[-1].startswith("Ainda não marquei 😊")
 
 
 def test_nome_provisorio_nao_e_nome(pool, ia, zap):
@@ -377,8 +406,8 @@ def test_ia_diz_que_marcou_sem_marcar_nao_sai(pool, ia, zap):
         lead, conv = _conversa(c)
     ia.json = {"acao": "responder", "resposta": "Prontinho, marquei pra segunda às 8h!"}
     _rodar(pool, conv, lead)
-    assert "marquei" not in zap.saiu[0].lower()
-    assert zap.saiu[0].startswith("Pra eu marcar, escolha um destes horários:")
+    assert "prontinho" not in zap.saiu[0].lower()
+    assert zap.saiu[0].startswith("Ainda não marquei 😊 Escolha um destes horários:")
 
 
 # ------------------------------------------------------------------ passar pra recepção
@@ -450,7 +479,51 @@ def test_foto_e_audio_passam_sem_chamar_a_ia(pool, ia, zap):
     assert ia.chamadas == [] and zap.saiu[-1] == cla.MOTIVOS["audio"][1]
     assert len(zap.avisos) == 1                            # a recepção foi chamada uma vez só
     with pool.connection() as c:
-        assert _repasses(c) == ["audio"]
+        _diz(c, conv, "📷 Foto")                          # foto de novo: esse recado já foi
+    _rodar(pool, conv, lead)
+    assert len(zap.saiu) == 2
+    with pool.connection() as c:
+        assert _repasses(c) == ["foto"]
+
+
+def test_urgencia_no_meio_da_rajada(pool, ia, zap):
+    """"estou sangrando" e logo depois uma foto: a regra olha tudo desde a nossa
+    última mensagem, não só a mais nova."""
+    with pool.connection() as c:
+        lead, conv = _conversa(c, "estou sangrando muito depois do procedimento")
+        _diz(c, conv, "📷 Foto")
+    _rodar(pool, conv, lead)
+    assert zap.saiu == [cla.MOTIVOS["urgencia"][1]] and ia.chamadas == []
+
+
+def test_convenio_pedido_pelo_paciente_nem_vai_pra_ia(pool, ia, zap):
+    with pool.connection() as c:
+        lead, conv = _conversa(c, "vcs atendem unimed?")
+    ia.json = {"acao": "responder", "resposta": "Isso mesmo!"}
+    _rodar(pool, conv, lead)
+    assert ia.chamadas == [] and zap.saiu == [cla.MOTIVOS["convenio"][1]]
+
+
+def test_trava_por_conversa(pool):
+    with pool.connection() as a, pool.connection() as b:
+        assert cla.tentar_travar(a, 777)
+        assert not cla.tentar_travar(b, 777)             # a outra volta sai na hora
+        assert cla.tentar_travar(b, 778)
+        a.commit()
+        assert cla.tentar_travar(b, 777)                 # soltou no commit
+        b.rollback()
+
+
+def test_urgencia_falada_no_audio_transcrito(pool, ia, zap):
+    with pool.connection() as c:
+        lead, conv = _conversa(c, "🎤 Áudio (0:12)")
+    _rodar(pool, conv, lead)
+    assert zap.saiu == [cla.MOTIVOS["audio"][1]]
+    assert not cla.urgencia_transcrita(pool, CLINICA, conv, "queria saber o preço da consulta")
+    assert cla.urgencia_transcrita(pool, CLINICA, conv, "nao to conseguindo respirar direito")
+    assert zap.saiu[-1] == cla.MOTIVOS["urgencia"][1]
+    with pool.connection() as c:
+        assert _repasses(c) == ["urgencia"]
 
 
 def test_audio_transcrito_e_texto_e_foto_com_legenda_e_foto(pool, ia, zap):
@@ -555,6 +628,22 @@ def test_urgencia_curta_depois_do_lembrete_e_urgencia(pool, ia, zap):
     with pool.connection() as c:
         ev = c.execute("select situacao, pede_remarcar_em from eventos_agenda where id=%s", (eid,)).fetchone()
     assert ev == ("agendado", None)
+
+
+def test_poller_nao_le_urgencia_nem_sim_de_outra_pergunta(pool, ia, zap):
+    """`ler_respostas` roda sozinho no poller: as mesmas duas regras do agente."""
+    lead, conv, eid = _com_lembrete(pool)
+    with pool.connection() as c:
+        _diz(c, conv, "Não consigo respirar")
+        ca.ler_respostas(c, CLINICA, AGORA)
+        assert c.execute("select pede_remarcar_em from eventos_agenda where id=%s", (eid,)).fetchone()[0] is None
+        _diz(c, conv, "Quer que eu mande a localização?", autor="bot")
+        _diz(c, conv, "sim")
+        ca.ler_respostas(c, CLINICA, AGORA)
+        assert ca.evento(c, CLINICA, eid)["situacao"] == "agendado"
+        _diz(c, conv, "1")                                # o número puro ainda é resposta
+        ca.ler_respostas(c, CLINICA, AGORA)
+        assert ca.evento(c, CLINICA, eid)["situacao"] == "confirmado"
 
 
 def test_dois_com_a_consulta_ja_confirmada_fica_com_a_ia(pool, ia, zap):

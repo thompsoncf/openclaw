@@ -327,7 +327,11 @@ def _extrair_json(txt: str) -> dict:
 def atender(pool, conta_id: int, conversa_id: int) -> None:
     """Decide e age numa conversa recém-recebida. Nunca estoura (best-effort)."""
     try:
-        _atender(pool, conta_id, conversa_id)
+        # a clínica roda de novo quando chegou mensagem do paciente durante a volta
+        # (a outra volta achou a conversa travada e saiu: ver clinica_agente.tentar_travar)
+        for _ in range(3):
+            if not _atender(pool, conta_id, conversa_id):
+                break
     except Exception as e:  # noqa: BLE001
         _log.info("agente.atender falhou conta=%s conversa=%s: %s: %s",
                   conta_id, conversa_id, type(e).__name__, e)
@@ -349,16 +353,24 @@ def _atender(pool, conta_id, conversa_id):
                                  left join nichos n on n.id = ct.nicho_id
                                 where ct.id=%s""", (conta_id,)).fetchone()
         _perfil = _rxp.perfil_por_nicho(_slug_n[0] if _slug_n else "")
+        _visto = 0
+        if _perfil == "clinica":
+            # UMA VOLTA POR CONVERSA, travada ANTES de ler o histórico: a volta que
+            # espera não pode mandar pra IA uma conversa sem a resposta da anterior
+            from finance import clinica_agente as _cla
+            if not _cla.tentar_travar(c, conversa_id):
+                return False
+            _visto = _cla.ultimo_do_paciente(c, conta_id, conversa_id)
         if not _pode_falar_agora(cfg):
             if _perfil == "clinica":
                 # fora do horário o agente da clínica fica quieto, MENOS na urgência
                 # (pronto-socorro/192 e o item vermelho na tela Hoje não esperam)
-                from finance import clinica_agente as _cla
                 _canal = conv[9] or "whatsapp"
                 _dest = conv[2] if _canal in ("messenger", "instagram") else (conv[4] or conv[5] or conv[2])
                 _cla.so_urgencia(pool, c, conta_id, conversa_id, conv[1],
                                  lambda texto: _enviar(c, conta_id, conversa_id, _canal, _dest, texto))
                 c.commit()
+                return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
             return
         # histórico das últimas mensagens (contexto pro Brain)
         msgs = c.execute(
@@ -383,13 +395,12 @@ def _atender(pool, conta_id, conversa_id):
         # de tudo que é de festa (visita ao espaço, orçamento, evento no lead); o
         # caminho das outras contas segue daqui pra baixo sem mudar nada.
         if _perfil == "clinica":
-            from finance import clinica_agente as _cla
             _cla.atender(pool, c, conta_id, conversa_id, cfg, conv, msgs, historico=historico,
                          gemeo_nota=_nota_gemeo(c, conta_id, conv), instr=instr, faqs=faqs,
                          cat_txt=cat_txt, canal=canal, destino=destino,
                          enviar=lambda texto: _enviar(c, conta_id, conversa_id, canal, destino, texto))
             c.commit()      # o silêncio (recado já com a recepção) também grava a temperatura
-            return
+            return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
         # A VISITA (migração 259). O bloco só entra quando a conta ligou a chave E
         # estamos na janela comercial — fora dela quem resolve é gente, e instruir a
         # IA sobre visita que ela não pode marcar é convidá-la a prometer horário.

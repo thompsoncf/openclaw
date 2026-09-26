@@ -51,6 +51,8 @@ _SEMANA = {1: "seg", 2: "ter", 3: "qua", 4: "qui", 5: "sex", 6: "sáb", 7: "dom"
 # "10 horas" e "1 dúvida" não são "1". Pergunta ("posso ir às 15h?") não é resposta.
 _RE_SIM = re.compile(r"^\s*(1\s*[.!)✅👍]*\s*$|(sim|confirm\w*|confirmad[oa])\b)", re.I)
 _RE_REMARCAR = re.compile(r"^\s*(2\s*[.!)]*\s*$|2\s*[,.-]|(remarc\w*|n[ãa]o\s+(vou|posso|consigo))\b)", re.I)
+#: o "1"/"2" sozinho: resposta ao lembrete mesmo com outra mensagem nossa no meio
+_SO_NUMERO = re.compile(r"^\s*[12]\s*[.!)✅👍]*\s*$")
 _PALAVRA = {"consulta": "consulta", "retorno": "retorno", "sessao": "sessão"}
 
 
@@ -683,11 +685,25 @@ def ler_respostas(c, conta_id: int, agora: datetime) -> int:
         conv = _conversa(c, conta_id, {"lead": lead, "fone": fone})
         if not conv:
             continue
-        for (texto,) in c.execute(
-                """select m.texto from mensagens m join conversas cv on cv.id = m.conversa_id
+        from finance.clinica_agente import urgente
+        for texto, depois_de_outra in c.execute(
+                """select m.texto,
+                          exists (select 1 from mensagens o
+                                   where o.conversa_id = m.conversa_id and o.direcao = 'out'
+                                     and o.criado_em > %s + interval '2 minutes' and o.criado_em < m.criado_em)
+                     from mensagens m join conversas cv on cv.id = m.conversa_id
                     where m.conversa_id=%s and cv.conta_id=%s and m.direcao='in' and m.criado_em > %s
-                    order by m.criado_em, m.id limit 20""", (conv, conta_id, enviada)).fetchall():
+                    order by m.criado_em, m.id limit 20""", (enviada, conv, conta_id, enviada)).fetchall():
             t = texto or ""
+            if depois_de_outra and not _SO_NUMERO.match(t):
+                # a clínica já falou de outra coisa depois do lembrete: o "sim" daqui
+                # pra frente pode responder a ela, não à consulta. O "1"/"2" puro
+                # continua sendo resposta ao lembrete (o agente respondeu o "bom dia")
+                continue
+            if urgente(t):
+                # "não consigo respirar" começa igual a "não consigo ir": não é remarcar
+                # (o agente já passou a urgência pra recepção)
+                continue
             if _RE_SIM.search(t):
                 c.execute("""update eventos_agenda set situacao='confirmado', situacao_em=now(), confirmado_em=now()
                               where id=%s and conta_id=%s and situacao='agendado'""", (eid, conta_id))

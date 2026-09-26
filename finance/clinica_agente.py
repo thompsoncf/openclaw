@@ -88,39 +88,68 @@ _MIDIA = (("📷", "foto"), ("🎬", "foto"), ("🎥", "foto"), ("🖼", "foto")
 _MIDIA_TIPO = {"imagem": "foto", "video": "foto", "documento": "arquivo", "audio": "audio"}
 
 #: rede de segurança da urgência, sem depender da IA, no português do WhatsApp (sem
-#: acento, "n consigo", "ta saindo sangue"). "preciso de um horário urgente" não é
-#: emergência (a IA oferece o primeiro horário), e "exame de sangue" também não.
+#: acento, "n consigo", "ta saindo sangue", "mal consigo respirar"). Três cuidados
+#: contra o alarme falso, que acorda a recepção e manda o paciente pro 192 à toa:
+#:   - "exame(s) de sangue", "coleta de sangue", "sem ar condicionado" não contam;
+#:   - pergunta de estética sobre inchaço ("o rosto fica inchado depois do peeling?",
+#:     "botox deixa inchado?") não conta: inchaço só com o verbo acontecendo
+#:     ("inchou", "está inchando") e sem "fica/deixa/costuma" antes;
+#:   - negação e passado logo antes ("não é emergência", "não tá sangrando", "tive
+#:     reação alérgica ano passado") não contam.
 _PARTE = r"(rosto|boca|labio\w*|lingua|olho\w*|garganta|cara|pescoco)"
+_INCHA = r"(inchou|incharam|inchando|inchad[oa]s?)"
 _RE_URGENTE = re.compile(
-    r"\b(emergencia|sangr\w*|(?<!exame de )sangue|hemorrag\w*|falta de ar|sem ar|"
-    r"(nao|n|nem) (to |tou |estou |esta |ta )?(consig\w*|conseguindo) respirar|"
-    r"dificuldade (pra|para|de) respirar|desmai\w*|anafila\w*|convuls\w*|samu|"
-    r"garganta (\w+ )?fechand\w*|reacao alergica|"
-    rf"inch\w* .{{0,25}}{_PARTE}|{_PARTE} .{{0,25}}inch\w*)\b")
+    r"\b(emergencia|sangrando|sangrou|sangra muito|hemorrag\w*|"
+    r"(saindo|muito|escorrendo|jorrando) (muito )?sangue|sangue (nao para|sem parar|escorrendo|jorrando)|"
+    r"falta (de )?ar|sem ar(?! condicionad)|"
+    r"(nao|n|nem|mal) (to |tou |estou |esta |ta )?(consig\w*|conseguindo) (nem )?respira\w*|"
+    r"dificuldade (pra|para|de) respira\w*|desmai\w*|anafila\w*|convuls\w*|samu|infart\w*|"
+    r"dor (forte )?no peito|passando (muito )?mal|"
+    r"(indo|to|tou|estou|fui agora) (pro|no|para o|pra o|pra) (pronto.?socorro|hospital|upa)|"
+    r"garganta .{0,15}fechand\w*|fechand\w* .{0,15}garganta|reacao alergica|"
+    rf"{_INCHA} .{{0,25}}{_PARTE}|{_PARTE} .{{0,25}}{_INCHA})\b")
+_RE_NAO_E_AGORA = re.compile(
+    r"(nao (e|eh|ta|esta|to|estou|tou|foi|teve|tive)|nunca|fica|ficar|deixa|deixar|costuma|"
+    r"exames? (de|do)|coleta (de|do)|doacao (de|do))\s*(\w+\s*){0,2}$")
+_RE_PASSADO = re.compile(r"\b(ano passado|semana passada|mes passado|anos atras|meses atras|ha \d+ (anos|meses))\b")
 
 #: conselho de saúde na resposta da IA, apesar da instrução: não sai; vira repasse.
 #: Estreita de propósito: "recomendo chegar 10 minutos antes", "você pode usar o
-#: estacionamento" e "a aplicação custa R$ 1.500" são recepção, não conselho — só
-#: pega remédio, creme e cuidado (no infinitivo ou no imperativo), tratamento
-#: indicado e a IA opinando sobre gravidade, causa ou o que é normal sentir.
+#: estacionamento", "a aplicação do ácido custa R$ 1.500" e "é normal ter espera na
+#: sexta" são recepção, não conselho — só pega remédio, creme e cuidado (infinitivo
+#: ou imperativo), tratamento indicado e a IA opinando sobre gravidade, causa ou o
+#: que é normal sentir.
 _PRODUTO = (r"(creme|pomada|remedio|medicamento|protetor|hidratante|sabonete|acido|vitamina|"
-            r"antibiotic\w*|antialergic\w*|corticoide|anti.?inflamat\w*|compressa|gelo)")
+            r"antibiotic\w*|antialergic\w*|corticoide|anti.?inflamat\w*|compressa|gelo|"
+            r"dipirona|paracetamol|ibuprofeno|loratadina|allegra|dexametasona|nimesulida)")
 _CAUSA = r"(alergia|infeccao|micose|fungo|cancer|melanoma|dermatite|herpes|acne|reacao|inflamacao)"
+_SINTOMA = r"(arder|cocar|cocando|inchar|descascar|doer|avermelhar|ficar vermelh\w*|ficar inchad\w*)"
 _RE_CONSELHO = re.compile(
-    rf"\b((us[ae]r?|pass[ae]r?|tom[ae]r?|evit[ae]r?|lav[ae]r?|coloc[ae]r?|ponh[ae])"
-    rf"( (um|uma|o|a|esse|essa|este|esta|bastante))? {_PRODUTO}"
+    rf"\b((us[ae]r?|pass[ae]r?|tom[ae]r?|evit[ae]r?|lav[ae]r?|coloc[ae]r?|ponh[ae]|apliqu[ae]|fa[cz]a|"
+    rf"hidrat[ae]r?|mantenha)\b.{{0,15}}\b{_PRODUTO}"
     rf"|(recomendo|aconselho|indico|sugiro)( (o|a|um|uma))? (tratamento|procedimento|{_PRODUTO})"
-    r"|antibiotic\w*|antialergic\w*|corticoide|nao (e|parece) (nada )?grave|parece (ser )?grave"
+    r"|antibiotic\w*|antialergic\w*|corticoide|dipirona|nao (e|parece) (nada )?grave|parece (ser )?grave"
+    r"|evit[ae]r? (o )?sol|hidrat[ae]r? (bem )?a pele|nao (coce|cocar|mexa|esprema|cutuque)"
     rf"|pode ser (um |uma )?{_CAUSA}|parece (ser )?(um |uma )?{_CAUSA}"
-    r"|(e|eh) (normal|comum) (ficar|ter|arder|cocar|inchar|descascar|doer|sair|sentir|avermelhar))\b")
+    rf"|(deve|provavelmente) (ser|e|seja) (um |uma )?{_CAUSA}|costuma (passar|melhorar|sumir)"
+    rf"|(e|eh) (normal|comum) {_SINTOMA}|isso (e|eh) normal|nao se preocupe)\b")
 
-#: o que a clínica não deixa a IA prometer (seção 07): cobertura de convênio,
-#: desconto, gratuidade, resultado. A IA pode ter lido "a moça disse que a Unimed
-#: cobre" do próprio paciente — pedido de confirmação é justamente o ataque.
-_RE_CONVENIO = re.compile(r"\b(convenio|plano de saude|unimed|hapvida|bradesco saude|sulamerica|amil|"
-                          r"cassi|geap|ipasgo|cobertura|cobre)\b")
-_RE_DESCONTO = re.compile(r"\b(desconto|\d+ ?% ?(off|de desconto)?|gratis|gratuit\w*|de graca|"
-                          r"sem custo|cortesia|resultado garantido|garant\w* (o )?resultado)\b")
+#: o que a clínica não deixa a IA AFIRMAR (seção 07): cobertura de convênio,
+#: desconto, gratuidade, condição de pagamento, resultado. A negação é recepção e
+#: passa ("atendemos só particular, não aceitamos convênio").
+_CONV = (r"(convenio|plano(?! de tratamento)|unimed|hapvida|bradesco|sul ?america|amil|porto seguro|"
+         r"notre ?dame|intermedica|prevent|golden cross|cassi|geap|ipasgo|reembolso|cobertura)")
+_RE_CONVENIO = re.compile(rf"\b{_CONV}\b")
+_RE_CONVENIO_NAO = re.compile(
+    rf"\b(nao (aceitamos|atendemos|trabalhamos|temos|fazemos)|so particular|somente particular|apenas particular"
+    rf"|nao tenho|sem)\b.{{0,25}}{_CONV}\b")
+_ATENDIMENTO = r"(consulta|retorno|avaliacao|sessao|procedimento|atendimento)"
+_RE_DESCONTO = re.compile(
+    r"\b(desconto|\d+ ?%|de graca|cortesia|sem juros|parcel\w* em|\d+ ?x (no|sem)|promocao|"
+    r"resultado garantido|garant\w* .{0,10}resultado|"
+    rf"{_ATENDIMENTO} .{{0,20}}(gratis|gratuit\w*|sem custo|nao (e )?cobrad\w*)|"
+    rf"(gratis|gratuit\w*|sem custo) .{{0,20}}{_ATENDIMENTO})\b")
+_RE_PEDIU_DESCONTO = re.compile(r"\b(desconto|mais barato|abaixa|faz por|promocao|parcel\w*|sem juros)\b")
 
 #: a IA dizendo que marcou sem ter devolvido acao=consulta: quem marca é o código.
 _RE_MARQUEI = re.compile(r"\b(marquei|agendei|reservei|deixei marcad\w*|ja marquei)\b")
@@ -134,9 +163,10 @@ def _sem_acento(txt: str | None) -> str:
 def midia(texto: str | None, tipo: str | None = None) -> str | None:
     """O motivo do repasse quando a mensagem é mídia (foto, vídeo, documento, áudio).
 
-    ÁUDIO TRANSCRITO NÃO É MÍDIA: o wa-qr grava "🎤 Áudio (0:23)" e a transcrição
-    na linha de baixo, e aí o agente lê como texto. Só o áudio sem transcrição passa
-    pra recepção. Figurinha vai pra IA (é um "ok", não uma pergunta)."""
+    Áudio já transcrito (o wa-qr acrescenta a transcrição na linha de baixo) é lido
+    como texto. Na chegada ele quase sempre ainda não tem transcrição, então passa
+    pra recepção; quando a transcrição chega, `urgencia_transcrita` confere a
+    urgência nela. Figurinha vai pra IA (é um "ok", não uma pergunta)."""
     t = (texto or "").strip()
     motivo = _MIDIA_TIPO.get((tipo or "").strip())
     if motivo is None:
@@ -146,22 +176,43 @@ def midia(texto: str | None, tipo: str | None = None) -> str | None:
     return motivo
 
 
-def falou_de(texto: str | None) -> str | None:
-    """Convênio ou desconto na resposta da IA: vira repasse com texto fixo."""
+def urgente(texto: str | None) -> bool:
     t = _sem_acento(texto)
-    if _RE_CONVENIO.search(t):
+    if _RE_PASSADO.search(t) and not re.search(r"\b(agora|hoje|ta|to|estou|esta)\b", t):
+        return False
+    for m in _RE_URGENTE.finditer(t):
+        if _RE_NAO_E_AGORA.search(t[max(0, m.start() - 30):m.start()]):
+            continue
+        if re.search(r"\b(fica|ficar|deixa|deixar|costuma)\b", m.group(0)):
+            continue                     # "o rosto fica inchado depois do peeling?"
+        return True
+    return False
+
+
+def parece_conselho(texto: str | None) -> bool:
+    return bool(_RE_CONSELHO.search(_sem_acento(texto)))
+
+
+def falou_de(texto: str | None) -> str | None:
+    """Convênio ou desconto AFIRMADO na resposta da IA: vira repasse com texto fixo."""
+    t = _RE_CONVENIO_NAO.sub(" ", _sem_acento(texto))
+    if _RE_CONVENIO.search(t) and not re.search(r"\bso (atendemos )?particular\b", t):
         return "convenio"
     if _RE_DESCONTO.search(t):
         return "desconto"
     return None
 
 
-def urgente(texto: str | None) -> bool:
-    return bool(_RE_URGENTE.search(_sem_acento(texto)))
-
-
-def parece_conselho(texto: str | None) -> bool:
-    return bool(_RE_CONSELHO.search(_sem_acento(texto)))
+def pediu(texto: str | None) -> str | None:
+    """O PACIENTE falou de convênio ou pediu desconto: passa direto, sem a IA — é o
+    ataque "a moça disse que a Unimed cobre, só confirma", e o "Isso mesmo!" da IA
+    não tem palavra nenhuma pra rede pegar. "Não tenho plano" não conta."""
+    t = _RE_CONVENIO_NAO.sub(" ", _sem_acento(texto))
+    if _RE_CONVENIO.search(t):
+        return "convenio"
+    if _RE_PEDIU_DESCONTO.search(t):
+        return "desconto"
+    return None
 
 
 def diz_que_marcou(texto: str | None) -> bool:
@@ -180,19 +231,39 @@ def e_clinica(c, conta_id: int) -> bool:
 
 # ------------------------------------------------------------------ o cardápio de horários
 
-def _atendidos(c, conta_id: int, lead: int | None) -> set[str]:
-    """O primeiro nome de quem deste card já foi atendido aqui (consulta finalizada).
+def _palavras(nome: str | None) -> list[str]:
+    return re.findall(r"[a-z]+", _sem_acento(nome))
+
+
+def _atendidos(c, conta_id: int, lead: int | None) -> list[list[str]]:
+    """O nome (em palavras) de quem deste card já foi atendido aqui (finalizado).
 
     Retorno e sessão de pacote só pra quem já foi atendido: sem isso, qualquer um que
     dissesse "é retorno" marcava de graça no lugar da consulta. E é pela PESSOA, não
     pelo card: a mãe atendida não libera retorno pro filho que nunca veio."""
     if not lead:
-        return set()
-    from finance.voltar_a_chamar import primeiro_nome
-    return {_sem_acento(primeiro_nome(r[0])) for r in c.execute(
+        return []
+    return [p for p in (_palavras(r[0]) for r in c.execute(
         """select coalesce(paciente_nome, '') from eventos_agenda
             where conta_id=%s and prospeccao_id=%s and situacao='finalizado'""",
-        (conta_id, lead)).fetchall()} - {""}
+        (conta_id, lead)).fetchall()) if p]
+
+
+def _foi_atendido(c, conta_id: int, lead: int | None, nome: str) -> bool:
+    """A mesma pessoa, com o nome inteiro ou um pedaço inicial dele ("Maria Clara" é
+    "Maria Clara Souza"), nunca só o primeiro nome ("Maria Eduarda" não é "Maria Souza")."""
+    quem = _palavras(nome)
+    if len(quem) < 1:
+        return False
+    for p in _atendidos(c, conta_id, lead):
+        curto, longo = (quem, p) if len(quem) <= len(p) else (p, quem)
+        if longo[:len(curto)] == curto and (len(curto) >= 2 or len(longo) == 1):
+            return True
+    return False
+
+
+def _ja_e_paciente(c, conta_id: int, lead: int | None) -> bool:
+    return bool(_atendidos(c, conta_id, lead))
 
 
 def _ja_e_paciente(c, conta_id: int, lead: int | None) -> bool:
@@ -420,11 +491,11 @@ def resposta_da_vespera(c, conta_id: int, conversa_id: int, lead: int | None, fo
         r"""select id from eventos_agenda
              where conta_id=%s and situacao='agendado' and status='ativo' and pede_remarcar_em is null
                and confirmacao_enviada_em is not null and inicio > %s
-               and confirmacao_enviada_em >= coalesce(%s, confirmacao_enviada_em) - interval '2 minutes'
+               and (%s or confirmacao_enviada_em >= coalesce(%s, confirmacao_enviada_em) - interval '2 minutes')
                and (prospeccao_id = %s
                     or (length(%s) >= 8 and right(regexp_replace(coalesce(paciente_fone,''), '\D', '', 'g'), 8) = %s))
              order by inicio limit 1""",
-        (conta_id, agora, ultima_nossa, lead, dig, dig[-8:])).fetchone()
+        (conta_id, agora, bool(ca._SO_NUMERO.match(t)), ultima_nossa, lead, dig, dig[-8:])).fetchone()
     if not r:
         return None
     ca.ler_respostas(c, conta_id, agora)
@@ -463,13 +534,18 @@ def _aviso(pool, conta_id: int, membros: list[int], titulo: str, corpo: str, url
         _log.info("agente da clínica: aviso não saiu (conta %s)", conta_id, exc_info=True)
 
 
+#: o que a tela Hoje mostra quando o mesmo item junta vários assuntos
+_PESO = {"urgencia": 9, "sintoma": 5, "remarcar": 3, "marcar": 3, "convenio": 3, "desconto": 3,
+         "pessoa": 2, "foto": 1, "audio": 1, "arquivo": 1}
+
+
 def _aberto(c, conta_id: int, conversa_id: int) -> tuple | None:
     """O repasse desta conversa que ainda espera a recepção: criado nas últimas 24h,
     sem Resolvido e sem nenhuma mensagem de gente depois dele."""
     try:
         with c.transaction():
             return c.execute(
-                """select r.id, r.motivo, r.criado_em from clinica_repasses r
+                """select r.id, r.motivo, r.criado_em, r.motivos from clinica_repasses r
                     where r.conta_id=%s and r.conversa_id=%s and r.resolvido_em is null
                       and r.criado_em > now() - interval '24 hours'
                       and not exists (select 1 from mensagens m
@@ -485,25 +561,27 @@ def repassar(pool, c, conta_id: int, conversa_id: int, lead: int | None, motivo:
     """Passa pra recepção: grava o item da tela Hoje, manda o texto fixo e avisa.
     Devolve o texto enviado (ou None, quando o mesmo recado já está esperando).
 
-    O MESMO ASSUNTO NÃO SE REPETE: com um repasse aberto do mesmo motivo (a segunda
-    foto do álbum, o segundo áudio), o agente fica quieto — a recepção já foi chamada
-    e o paciente já leu o recado. Assunto NOVO fala (a foto e depois "é grave?"), no
-    mesmo item da tela Hoje, sem outro aviso. A urgência sempre fala da primeira vez
-    e sobe o item pra urgência, com aviso."""
+    O MESMO RECADO NÃO SE REPETE: se este motivo já foi avisado no item aberto (a
+    segunda foto do álbum, foto-áudio-foto), o agente fica quieto — a recepção já foi
+    chamada e o paciente já leu o recado. Assunto NOVO fala (a foto e depois "é
+    grave?"), no mesmo item da tela Hoje, sem outro aviso; o item mostra o assunto
+    mais importante (urgência > saúde > o resto > mídia). A urgência sempre fala da
+    primeira vez e avisa de novo, com o 🚨."""
     motivo = motivo if motivo in MOTIVOS else "pessoa"
     aberto = _aberto(c, conta_id, conversa_id)
-    if aberto and aberto[1] == motivo:
+    ja_avisados = set((aberto[3] or []) if aberto else []) | ({aberto[1]} if aberto else set())
+    if motivo in ja_avisados:
         return None
-    novo = aberto is None or (motivo == "urgencia" and aberto[1] != "urgencia")
+    novo = aberto is None or motivo == "urgencia"
     try:
         with c.transaction():
             if aberto is None:
-                c.execute("""insert into clinica_repasses (conta_id, conversa_id, prospeccao_id, motivo)
-                             values (%s,%s,%s,%s)""", (conta_id, conversa_id, lead, motivo))
-            elif aberto[1] != "urgencia":
-                # o item mostra o assunto mais recente; urgência não desce
-                c.execute("update clinica_repasses set motivo=%s where id=%s and conta_id=%s",
-                          (motivo, aberto[0], conta_id))
+                c.execute("""insert into clinica_repasses (conta_id, conversa_id, prospeccao_id, motivo, motivos)
+                             values (%s,%s,%s,%s,%s)""", (conta_id, conversa_id, lead, motivo, [motivo]))
+            else:
+                mostra = motivo if _PESO.get(motivo, 1) > _PESO.get(aberto[1], 1) else aberto[1]
+                c.execute("""update clinica_repasses set motivo=%s, motivos=array_append(motivos, %s)
+                              where id=%s and conta_id=%s""", (mostra, motivo, aberto[0], conta_id))
     except Exception:  # noqa: BLE001 — sem a 363 o paciente ainda recebe a resposta
         _log.warning("agente da clínica: repasse não gravado (conversa %s)", conversa_id, exc_info=True)
     texto = MOTIVOS[motivo][1]
@@ -600,8 +678,6 @@ def marcar(pool, c, conta_id: int, conversa_id: int, lead: int | None, fone: str
     que o agente marca pra este contato, o profissional tem que fazer esse
     atendimento, e `clinica_agenda.agendar` reconfere o horário livre com a trava da
     agenda — quem marcou no balcão um segundo antes ganha."""
-    from finance.voltar_a_chamar import primeiro_nome
-
     def sem_horario():
         return repassar(pool, c, conta_id, conversa_id, lead, "marcar",
                         _nome_do_contato(c, conta_id, conversa_id, lead), enviar)
@@ -616,7 +692,17 @@ def marcar(pool, c, conta_id: int, conversa_id: int, lead: int | None, fone: str
     if alvo:
         mesma = next((ev for ev in ja if ev["profissional_id"] == alvo[0] and ev["inicio"] == alvo[2]), None)
         if mesma:
-            if (nome_dito and _sem_acento(nome_dito) != _sem_acento(mesma["paciente"])
+            # renomeia só a consulta que ficou com o nome do CARD (ninguém disse pra
+            # quem era) e só pra um nome que não é o mesmo encurtado ("Maria" pra
+            # "Maria Clara Souza" não é outra pessoa). Consulta com nome dito é de
+            # alguém: "marca o Pedro no mesmo horário que o meu" não tira a mãe.
+            atual = _palavras(mesma["paciente"])
+            dito = _palavras(nome_dito)
+            do_card = atual == _palavras(_nome_do_contato(c, conta_id, conversa_id, lead))
+            mesmo_nome = bool(dito) and (atual[:len(dito)] == dito or dito[:len(atual)] == atual)
+            retorno_ok = mesma.get("categoria") not in ("retorno", "sessao") or \
+                _foi_atendido(c, conta_id, lead, nome_dito)
+            if (dito and do_card and not mesmo_nome and retorno_ok
                     and _corrigir_nome(c, conta_id, mesma, nome_dito)):
                 mesma = ca.evento(c, conta_id, mesma["id"])
                 c.commit()
@@ -640,7 +726,7 @@ def marcar(pool, c, conta_id: int, conversa_id: int, lead: int | None, fone: str
         return {"ok": False, "texto": texto}
     # retorno e sessão: só pra PESSOA já atendida (a mãe atendida não libera o filho)
     if tipos_ok[tipo_id]["categoria"] in ("retorno", "sessao") and \
-            _sem_acento(primeiro_nome(nome)) not in _atendidos(c, conta_id, lead):
+            not _foi_atendido(c, conta_id, lead, nome):
         return {"ok": False, "texto": sem_horario()}
     # a mesma pessoa e o mesmo atendimento já marcados em outro horário
     for ev in ja:
@@ -717,22 +803,21 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
     lead = conv[1]
     fone = conv[4] or conv[5] or (destino if canal == "whatsapp" else "") or ""
     nome = _nome_do_contato(c, conta_id, conversa_id, lead) or conv[3] or conv[2] or "Paciente"
-    # UMA VOLTA POR CONVERSA DE CADA VEZ: três fotos do álbum são três webhooks ao
-    # mesmo tempo, e sem isto as três mandavam o mesmo recado (e o "segunda 8h" e o
-    # "meu nome é Ana" logo depois disputavam a mesma marcação). Solta no commit do
-    # primeiro envio; a volta seguinte já enxerga o que a anterior gravou.
-    _travar(c, conversa_id)
-    ultima, tipo_midia = _ultima_do_paciente(c, conta_id, conversa_id, msgs)
+    # O QUE O PACIENTE MANDOU DESDE A NOSSA ÚLTIMA MENSAGEM, e não só a mais nova: na
+    # rajada "estou sangrando" + foto + "??", a urgência está no meio. (A trava de
+    # uma volta por conversa é do `agente._atender`, antes de ler o histórico.)
+    pend = _pendentes(c, conta_id, conversa_id, msgs)
+    ultima = pend[0][0] if pend else ""
 
     # 1) urgência pela regra, ANTES de tudo: nem o "não consigo respirar" que começa
     #    igual a um "não consigo ir", nem uma foto, passam na frente dela
-    if urgente(ultima):
+    if any(urgente(t) for t, _tp in pend):
         repassar(pool, c, conta_id, conversa_id, lead, "urgencia", nome, enviar)
         return
     if not cfg["pode_responder"]:
         return
     # 2) mídia: o agente não vê — passa, sem gastar IA pra fingir que viu
-    m = midia(ultima, tipo_midia)
+    m = next((mm for mm in (midia(t, tp) for t, tp in pend) if mm), None)
     if m:
         repassar(pool, c, conta_id, conversa_id, lead, m, nome, enviar)
         return
@@ -740,6 +825,12 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
     ack = resposta_da_vespera(c, conta_id, conversa_id, lead, fone, ultima, agora)
     if ack:
         enviar(ack)
+        return
+    # 4) convênio e desconto pedidos pelo paciente: é da recepção, sem perguntar à IA
+    #    (o "Isso mesmo!" dela não teria palavra nenhuma pra rede pegar)
+    p = next((pp for pp in (pediu(t) for t, _tp in pend) if pp), None)
+    if p:
+        repassar(pool, c, conta_id, conversa_id, lead, p, nome, enviar)
         return
 
     # sem card ou sem celular (DM do Instagram) não dá pra marcar: a agenda precisa
@@ -790,11 +881,14 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
         repassar(pool, c, conta_id, conversa_id, lead, assunto, nome, enviar)
         return
     if diz_que_marcou(resposta):
-        # disse "marquei" sem marcar: o paciente não pode sair achando que tem horário
-        if ja:
-            enviar(texto_ja_marcada(c, conta_id, ja[0]))
+        # disse "marquei" sem marcar: o paciente não pode sair achando que tem horário.
+        # Se ela falava de uma consulta que existe (o dia dela está na frase), é essa;
+        # senão, é pedido novo e ninguém marcou nada ainda.
+        citada = next((ev for ev in ja if f"{ca.local(ev['inicio']):%d/%m}" in resposta), None)
+        if citada:
+            enviar(texto_ja_marcada(c, conta_id, citada))
             return
-        _nao_deu(menu, None, "Pra eu marcar, escolha um destes horários:", enviar,
+        _nao_deu(menu, None, "Ainda não marquei 😊 Escolha um destes horários:", enviar,
                  sem_horario=lambda: repassar(pool, c, conta_id, conversa_id, lead, "marcar", nome, enviar))
         return
     enviar(resposta or "Oi! Me conta como posso te ajudar 😊")
@@ -803,29 +897,55 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
 _LOCK_CONVERSA = 771163   # vizinho das travas da agenda (771161/771162)
 
 
-def _travar(c, conversa_id: int) -> None:
-    c.execute("select pg_advisory_xact_lock(%s::int, %s::int)",
-              (_LOCK_CONVERSA, int(conversa_id) % 2147483647))
+def tentar_travar(c, conversa_id: int) -> bool:
+    """UMA VOLTA POR CONVERSA DE CADA VEZ (trava da transação, solta no commit).
+
+    Três fotos do álbum são três webhooks ao mesmo tempo, e sem isto as três mandavam
+    o mesmo recado (e o "segunda 8h" e o "meu nome é Ana" logo depois disputavam a
+    mesma marcação). É um TRY: quem chega com a trava ocupada sai na hora, sem prender
+    uma conexão do pool esperando a IA da outra volta — e a volta que está com a
+    trava, depois de responder, confere se chegou mensagem nova e roda de novo
+    (`agente.atender`)."""
+    return bool(c.execute("select pg_try_advisory_xact_lock(%s::int, %s::int)",
+                          (_LOCK_CONVERSA, int(conversa_id) % 2147483647)).fetchone()[0])
 
 
-def _ultima_do_paciente(c, conta_id: int, conversa_id: int, msgs) -> tuple[str, str]:
-    """(texto, midia_tipo) da última mensagem do paciente. O tipo vem da coluna (foto
-    com legenda não tem marcador no texto); tolerante a banco sem a coluna."""
-    texto = next((t for (_d, a, t) in msgs if a == "lead"), "") or ""
+def ultimo_do_paciente(c, conta_id: int, conversa_id: int) -> int:
+    """O id da última mensagem do paciente (pra saber se chegou outra depois)."""
+    r = c.execute("""select max(m.id) from mensagens m join conversas cv on cv.id = m.conversa_id
+                      where m.conversa_id=%s and cv.conta_id=%s and m.autor='lead'""",
+                  (conversa_id, conta_id)).fetchone()
+    return int(r[0] or 0)
+
+
+def _pendentes(c, conta_id: int, conversa_id: int, msgs) -> list[tuple[str, str]]:
+    """[(texto, midia_tipo)] do paciente desde a nossa última mensagem, a mais nova
+    primeiro (até 10). O tipo vem da coluna (foto com legenda não tem marcador no
+    texto); tolerante a banco sem a coluna. Sem nenhuma pendente, a última dele."""
     for coluna in ("coalesce(m.midia_tipo, '')", "''"):
         try:
             with c.transaction():
-                r = c.execute(f"""select m.texto, {coluna} from mensagens m
-                                   join conversas cv on cv.id = m.conversa_id
-                                  where m.conversa_id=%s and cv.conta_id=%s and m.autor='lead'
-                                  order by m.criado_em desc, m.id desc limit 1""",
-                              (conversa_id, conta_id)).fetchone()
-            break
+                rows = c.execute(
+                    f"""select m.texto, {coluna} from mensagens m
+                          join conversas cv on cv.id = m.conversa_id
+                         where m.conversa_id=%s and cv.conta_id=%s and m.autor='lead'
+                           and m.criado_em >= coalesce((select max(o.criado_em) from mensagens o
+                                                         where o.conversa_id = m.conversa_id
+                                                           and o.direcao = 'out'), '-infinity')
+                         order by m.criado_em desc, m.id desc limit 10""",
+                    (conversa_id, conta_id)).fetchall()
+                if not rows:
+                    rows = c.execute(
+                        f"""select m.texto, {coluna} from mensagens m
+                              join conversas cv on cv.id = m.conversa_id
+                             where m.conversa_id=%s and cv.conta_id=%s and m.autor='lead'
+                             order by m.criado_em desc, m.id desc limit 1""",
+                        (conversa_id, conta_id)).fetchall()
+            return [(r[0] or "", r[1] or "") for r in rows]
         except Exception:  # noqa: BLE001 — banco sem midia_tipo: lê só o texto
-            r = None
-    if r:
-        return r[0] or "", r[1] or ""
-    return texto, ""
+            continue
+    t = next((t for (_d, a, t) in msgs if a == "lead"), "") or ""
+    return [(t, "")]
 
 
 def _ler_json(txt: str) -> dict | None:
@@ -848,10 +968,37 @@ def so_urgencia(pool, c, conta_id: int, conversa_id: int, lead: int | None, envi
     """Fora do horário do agente (ou com "responder dúvidas" desligado) ele fica
     quieto — MENOS na urgência: a orientação de pronto-socorro/192 e o item vermelho
     na tela Hoje não esperam o expediente. Só a regra, sem IA."""
-    _travar(c, conversa_id)
-    ultima, _tipo = _ultima_do_paciente(c, conta_id, conversa_id, [])
-    if not urgente(ultima):
+    if not any(urgente(t) for t, _tp in _pendentes(c, conta_id, conversa_id, [])):
         return False
     repassar(pool, c, conta_id, conversa_id, lead, "urgencia",
              _nome_do_contato(c, conta_id, conversa_id, lead), enviar)
     return True
+
+
+def urgencia_transcrita(pool, conta_id: int, conversa_id: int, texto: str) -> bool:
+    """A transcrição do áudio chegou (webhook do wa-qr, depois do agente já ter
+    respondido "recebi o seu áudio"): confere a urgência no que foi FALADO. Só na
+    clínica, só com o agente ligado na conversa; sem IA. Nunca estoura."""
+    if not urgente(texto):
+        return False
+    try:
+        from finance import agente as ag
+        with pool.connection() as c:
+            if not e_clinica(c, conta_id):
+                return False
+            conv = c.execute(
+                """select cv.agente_ativo, cv.prospeccao_id, cv.contato_ref, p.whatsapp, p.telefone, cv.canal
+                     from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
+                    where cv.id=%s and cv.conta_id=%s""", (conversa_id, conta_id)).fetchone()
+            if not conv or not conv[0] or not tentar_travar(c, conversa_id):
+                return False
+            canal = conv[5] or "whatsapp"
+            destino = conv[2] if canal in ("messenger", "instagram") else (conv[3] or conv[4] or conv[2])
+            repassar(pool, c, conta_id, conversa_id, conv[1], "urgencia",
+                     _nome_do_contato(c, conta_id, conversa_id, conv[1]),
+                     lambda t: ag._enviar(c, conta_id, conversa_id, canal, destino, t))
+            c.commit()
+            return True
+    except Exception:  # noqa: BLE001
+        _log.info("agente da clínica: urgência do áudio não conferida (conversa %s)", conversa_id, exc_info=True)
+        return False

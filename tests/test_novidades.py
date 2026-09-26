@@ -156,6 +156,8 @@ def pool():
                   "('ia-do-numero-marca-visita','visita-meia-hora')")
         # 393: o aviso do orçamento pela IA (mesmo portão da 391)
         c.execute((BASE / "393_novidade_ia_orcamento.sql").read_text(encoding="utf-8"))
+        # 395: o aviso do painel do desafio (mesmo portão)
+        c.execute((BASE / "395_novidade_desafio_ia.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1344,3 +1346,10 @@ def test_o_aviso_do_orcamento_da_ia_mira_quem_ve_a_chave(pool):
         r = c.execute("""select publico, pra_quem, resumo, link from novidades
                           where chave='ia-do-numero-monta-orcamento'""").fetchone()
     assert r[0] == "visita_da_ia" and r[1] == ["dono", "gestor"] and r[2] and r[3]
+
+
+def test_o_aviso_do_desafio_mira_quem_ve_a_tela(pool):
+    with pool.connection() as c:
+        r = c.execute("""select publico, pra_quem, resumo, link from novidades
+                          where chave='desafio-ia-x-equipe'""").fetchone()
+    assert r == ("visita_da_ia", ["dono", "gestor"], r[2], "/painel/prospeccao/desafio-ia") and r[2]

@@ -4398,6 +4398,28 @@ def _salvar_regra_chip(conta_id: int, chip_id: int, dados: dict) -> dict:
     return r
 
 
+@router.get("/painel/prospeccao/desafio-ia", response_class=HTMLResponse)
+def prospeccao_desafio_ia(request: Request, mes: str = ""):
+    """O DESAFIO: a IA do número × a equipe, mês a mês (etapa 4 do vendedor IA,
+    finance/desafio_ia.py). Visão de dono/gestor, só de quem vende festa — as medidas
+    são de festa (data e convidados, visita ao espaço)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "O desafio da IA é visão de dono/gestor."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    pool = get_pool()
+    from finance import vendas as _vendas
+    if not _vendas.vende_data(pool, ctx["conta_id"]):
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    from finance import desafio_ia as _dia
+    d = _dia.dados(pool, ctx["conta_id"], mes)
+    return _render("prospeccao_desafio_ia", request, titulo="Desafio: IA × equipe",
+                   secao_ativa="prospeccao", nav_ativo="comunicacao", gerencia=True,
+                   d=d, brl=brl, dur=_dur)
+
+
 @router.post("/painel/prospeccao/comunicacao/regra-chip")
 async def comunicacao_regra_chip(request: Request):
     """Salva a regra de UM chip (finance/chip_regra.py). Só dono/gestor.
@@ -14491,6 +14513,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div style="font-size:1.6rem">📱</div>
       <div style="flex:1"><b style="font-size:1rem">Regras por número<span class="tag-new">novo</span></b>
         <div class="mut" style="font-size:.8rem">Cada chip pode ter um dono só para os contatos novos, com a IA atendendo só nele. Sem regra, o chip segue no rodízio.</div></div>
+      {% if regra_eventos and regras_chip | selectattr('regra') | map(attribute='regra') | selectattr('ia_ligada') | list %}<a class="pbtn ghost" href="/painel/prospeccao/desafio-ia">🏁 Desafio IA × equipe</a>{% endif %}
     </div>
     {% if regra_cat and regra_cat.total %}
     <div class="{{ 'distalerta' if not regra_cat.liberados else 'distnote' }}" style="margin-top:.7rem">
@@ -17991,3 +18014,76 @@ _RITMO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 {% endblock %}"""
 
 _env.loader.mapping["prospeccao_ritmo"] = _RITMO_TPL
+
+
+_DESAFIO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+.ds-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.7rem;margin-top:1rem}
+.ds-k{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:.9rem 1rem}
+.ds-k .v{font-family:var(--mono);font-weight:700;font-size:1.6rem;letter-spacing:-.02em}
+.ds-k .l{font-size:.82rem;color:var(--txt-mut);margin-top:.2rem}
+.ds-k .m{font-size:.72rem;color:var(--text-faint);margin-top:.15rem}
+.ds-tab{width:100%;border-collapse:collapse;font-size:.84rem;margin-top:1rem}
+.ds-tab th,.ds-tab td{padding:.5rem .55rem;border-bottom:1px solid var(--borda);text-align:right;white-space:nowrap}
+.ds-tab th:first-child,.ds-tab td:first-child{text-align:left;white-space:normal}
+.ds-tab th{color:var(--txt-mut);font-weight:600;font-size:.76rem}
+.ds-tab td.ia,.ds-tab th.ia{background:#1a1226;color:#c9a3e0}
+.ds-tab td.meta{color:var(--text-faint)}
+.ds-wrap{overflow-x:auto;background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:.2rem .6rem .6rem}
+.ds-mes{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.8rem}
+.ds-mes a{padding:.28rem .65rem;border-radius:999px;border:1px solid var(--borda);font-size:.78rem;color:var(--txt-mut);text-decoration:none}
+.ds-mes a.on{border-color:#4a3163;background:#241634;color:#c9a3e0}
+</style>
+<div class="pw">
+""" + _navbar('comunicacao') + """
+  <div style="display:flex;align-items:flex-start;gap:.8rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:260px">
+      <h2 class="tt">Desafio: IA × equipe · {{ d.mes_rotulo }}</h2>
+      <div class="mut" style="font-size:.84rem;margin-top:.25rem;line-height:1.55;max-width:78ch">
+        As mesmas medidas pra todos, por lead recebido no mês. A 1ª resposta conta a da IA e a
+        de gente — é justamente o que se mede aqui.</div>
+    </div>
+    <a class="pbtn ghost" href="/painel/prospeccao/comunicacao?aba=agente">📱 Regras por número</a>
+  </div>
+  <div class="ds-mes">{% for m in d.meses %}<a href="?mes={{ m }}" class="{{ 'on' if m == d.mes }}">{{ m[5:] }}/{{ m[2:4] }}</a>{% endfor %}</div>
+  {% if not d.tem_ia %}
+  <div class="distnote" style="margin-top:1rem">Nenhum número está com a IA ligada. Ligue em <b>Comunicação › Agente › Regras por número</b> e o desafio começa a contar.</div>
+  {% endif %}
+  {% set ia = d.colunas | selectattr('ia') | list %}
+  {% if ia %}{% set a = ia[0] %}
+  <div class="ds-kpis">
+    <div class="ds-k"><div class="v">{{ a.leads }}</div><div class="l">Leads da IA no mês</div><div class="m">{{ a.nome }}</div></div>
+    <div class="ds-k"><div class="v">{{ ('%.1f' % a.resp_mediana_min).replace('.', ',') ~ ' min' if a.resp_mediana_min is not none else '—' }}</div><div class="l">1ª resposta da IA (mediana)</div><div class="m">meta: menos de {{ d.meta_min }} min</div></div>
+    <div class="ds-k"><div class="v">{{ a.visitas }}{% if a.visitas_pct is not none %} <span style="font-size:.9rem">· {{ a.visitas_pct }}%</span>{% endif %}</div><div class="l">Visitas marcadas</div><div class="m">meta do time: {{ d.meta_visita_pct }}% dos leads</div></div>
+    <div class="ds-k"><div class="v">{{ brl(d.custo_centavos) if d.custo_centavos is not none else '—' }}</div><div class="l">Custo da IA no mês</div><div class="m">{{ ('por lead ' ~ brl(d.custo_por_lead)) if d.custo_por_lead is not none else 'por lead —' }} · {{ ('por contrato ' ~ brl(d.custo_por_contrato)) if d.custo_por_contrato is not none else 'por contrato —' }}</div></div>
+  </div>
+  {% endif %}
+  <div class="ds-wrap" style="margin-top:1rem"><table class="ds-tab">
+    <thead><tr><th>{{ d.mes_rotulo }}</th>{% for c in d.colunas %}<th class="{{ 'ia' if c.ia }}">{{ c.nome }}{% if c.ia %} · IA{% endif %}</th>{% endfor %}<th>Meta</th></tr></thead>
+    <tbody>
+      <tr><td>Leads novos</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.leads }}</td>{% endfor %}<td class="meta"></td></tr>
+      <tr><td>1ª resposta (mediana)</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ ('%.1f' % c.resp_mediana_min).replace('.', ',') ~ ' min' if c.resp_mediana_min is not none else '—' }}</td>{% endfor %}<td class="meta">&lt; {{ d.meta_min }} min</td></tr>
+      <tr><td>Respondidos em até 5 min</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ (c.resp_5min_pct ~ '%') if c.resp_5min_pct is not none else '—' }}</td>{% endfor %}<td class="meta">95%</td></tr>
+      <tr><td>Qualificados (data e convidados)</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.qualif }}</td>{% endfor %}<td class="meta"></td></tr>
+      <tr><td>Visitas agendadas</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.visitas }}</td>{% endfor %}<td class="meta">{{ d.meta_visita_pct }}% dos leads</td></tr>
+      <tr><td>Leads com orçamento</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.orcamentos }}</td>{% endfor %}<td class="meta"></td></tr>
+      <tr><td>Contratos assinados</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.contratos }}</td>{% endfor %}<td class="meta"></td></tr>
+    </tbody></table></div>
+  <div class="egrid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:1rem">
+    <div class="cx-card"><b>Por que a IA chamou gente</b>
+      {% for a in d.avisos %}<div style="display:flex;gap:.5rem;justify-content:space-between;font-size:.84rem;padding:.35rem 0;border-top:1px solid var(--borda)">
+        <span>{{ a.motivo }} <span class="mut">· {{ a.n }}</span></span>
+        <span class="mut">{% if a.agiu is none %}—{% elif a.mediana_min is not none %}a equipe respondeu em {{ dur(a.mediana_min) }}{% if a.agiu < a.n %} · {{ a.n - a.agiu }} sem resposta{% endif %}{% else %}ainda sem resposta{% endif %}</span></div>
+      {% else %}<div class="mut" style="font-size:.82rem;margin-top:.4rem">Nenhum aviso neste mês.</div>{% endfor %}
+    </div>
+    <div class="cx-card"><b>Onde a IA tende a ganhar</b>
+      <div class="mut" style="font-size:.84rem;margin-top:.4rem;line-height:1.55">{% if d.fora.leads_pct is not none %}Fora do horário comercial (seg–sáb, 8h–18h), a equipe responde em <b style="color:var(--txt)">{{ dur(d.fora.mediana_min) if d.fora.mediana_min is not none else '—' }}</b> (mediana) e <b style="color:var(--txt)">{{ d.fora.em5_pct if d.fora.em5_pct is not none else 0 }}%</b> em até 5 minutos. São <b style="color:var(--txt)">{{ d.fora.leads_pct }}%</b> dos leads novos da equipe.{% else %}Sem leads da equipe neste mês.{% endif %}</div>
+    </div>
+    <div class="cx-card"><b>Leitura com cuidado</b>
+      <div class="mut" style="font-size:.84rem;margin-top:.4rem;line-height:1.55">O tráfego da campanha do número da IA não é o mesmo do chip principal. A comparação indica; pra uma comparação limpa, metade da campanha teria de ir pra equipe.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}"""
+
+_env.loader.mapping["prospeccao_desafio_ia"] = _DESAFIO_TPL

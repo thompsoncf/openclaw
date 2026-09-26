@@ -586,6 +586,10 @@ def bloco_persona(pool, conta_id: int) -> str:
             "dividir_entre_obras com o id do lançamento.",
             "- \"quanto já gastei na casa 2?\", \"como está a obra?\" -> consultar_obra.",
             "- \"terminou o telhado da casa 3\" -> marcar_etapa (uma chamada por etapa).",
+            "- PAGAMENTO DO EMPREITEIRO POR ETAPA (\"paguei 10 mil pro empreiteiro, primeira "
+            "etapa da casa 2\"): lance a mão de obra na obra (Servicos, centro_custo = a obra), "
+            "pergunte que etapas o pagamento fecha se ele não disse, e chame pagar_etapa com "
+            "o id do lançamento. Pagar etapa NÃO marca a etapa como feita.",
             "- FOTO QUE NÃO É NOTA (telhado, parede, piso, obra pronta — sem valor, sem "
             "loja, sem CNPJ): NÃO lance nada. Guarde com guardar_foto_da_obra (a obra e, se "
             "der, a etapa); se ele disse que a etapa terminou, marcar_etapa também. Na "

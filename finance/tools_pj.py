@@ -569,6 +569,13 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
         txt = ob.resumo_da_obra(o, venda=sit["venda"] if sit else None)
         if sit:
             txt += " " + ov.resumo_caminho(o, sit)
+        try:
+            from . import obra_empreita as oe
+            emp = oe.resumo(o, oe.situacao(pool, conta_id, o))
+            if emp:
+                txt += " " + emp
+        except Exception:  # noqa: BLE001 — sem a 371
+            pass
         return txt
 
     def consultar_obra(e: dict) -> str:
@@ -678,6 +685,32 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                 "entre as linhas, sem mudar nada, e diga que quando o cliente pagar é só "
                 f"avisar que você dá baixa{aviso}:" + sep
                 + sep.join(cb["mensagem"] for cb in cbs) + "\n---")
+
+    def pagar_etapa(e: dict) -> str:
+        """O pagamento do empreiteiro por etapa (finance/obra_empreita.py): o
+        lançamento de mão de obra da obra passa a dizer QUE etapas ele fechou."""
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
+        from . import obra_empreita as oe
+        etapas = e.get("etapas") or []
+        if isinstance(etapas, str):
+            etapas = [x.strip() for x in etapas.replace(" e ", ",").split(",") if x.strip()]
+        try:
+            r = oe.pagar_etapas(pool, conta_id, o["id"], etapas,
+                                lancamento_id=int(e.get("lancamento_id") or 0),
+                                obs=(e.get("obs") or "").strip())
+        except (ValueError, TypeError) as err:
+            return str(err)
+        partes = ", ".join(f"{x['nome'].lower()} ({ob._brl(x['valor_centavos'])})" for x in r["etapas"])
+        txt = f"Marquei como PAGAS na {r['obra']}: {partes}."
+        if r["adiantadas"]:
+            txt += (" ⚠️ Ainda não estão concluídas: " + ", ".join(n.lower() for n in r["adiantadas"])
+                    + " — foi adiantamento? Avise, uma vez, sem sermão.")
+        if r["ja_pagas"]:
+            txt += " ⚠️ Já tinha pagamento antes: " + "; ".join(r["ja_pagas"]) + \
+                   ". Confirme se é parcela combinada ou pagamento em dobro."
+        return txt
 
     def guardar_foto_da_obra(e: dict) -> str:
         """A foto que NÃO é nota (telhado, parede, piso pronto): guarda na obra e na
@@ -850,6 +883,22 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             parametros={"type": "object", "properties": {"obra": obra_s},
                         "required": ["obra"]},
             executar=cobrar_parcela,
+        ),
+        Ferramenta(
+            nome="pagar_etapa",
+            descricao=("Marca que um pagamento de MÃO DE OBRA (empreiteiro, pedreiro) fechou "
+                       "certas etapas da obra. Primeiro o pagamento tem que estar LANÇADO na "
+                       "obra (lancar_despesa com centro_custo = a obra, ou por_na_obra); aqui "
+                       "vai o id desse lançamento e as etapas como ele falou (\"fundação e "
+                       "estrutura\", \"até a laje\"). Avisa etapa paga antes de ficar pronta "
+                       "e etapa paga duas vezes."),
+            parametros={"type": "object",
+                        "properties": {"obra": obra_s,
+                                       "etapas": {"type": "array", "items": {"type": "string"}},
+                                       "lancamento_id": {"type": "integer"},
+                                       "obs": {"type": "string"}},
+                        "required": ["obra", "etapas", "lancamento_id"]},
+            executar=pagar_etapa,
         ),
         Ferramenta(
             nome="guardar_foto_da_obra",

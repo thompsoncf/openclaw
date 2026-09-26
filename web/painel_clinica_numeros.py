@@ -94,6 +94,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="nx-c {% if d.falta_pct and d.falta_pct >= 10 %}al{% endif %}"><span class="r">Faltas</span><span class="v">{{ d.faltas }}</span><span class="n">{% if d.falta_pct is not none %}{{ d.falta_pct }}% dos atendimentos · {% endif %}{{ d.cancelamentos }} cancelamento{{ 's' if d.cancelamentos != 1 }}</span></div>
     <div class="nx-c"><span class="r">Confirmados depois do lembrete</span><span class="v">{{ d.confirmacao_pct if d.confirmacao_pct is not none else '—' }}{% if d.confirmacao_pct is not none %}%{% endif %}</span><span class="n">{{ d.confirmaram }} de {{ d.lembrados }} lembretes</span></div>
     <div class="nx-c"><span class="r">Retornos pedidos</span><span class="v">{{ d.retornos_pedidos }}</span><span class="n">{{ d.retornos_marcados }} marcados · {{ d.retornos_perdidos }} perdidos</span></div>
+    <div class="nx-c"><span class="r">Assinantes hoje</span><span class="v">{{ d.assinantes }}</span><span class="n">{{ brl(d.recorrente) }}/mês recorrente · {{ brl(d.mensalidades) }} lançados no mês</span></div>
     <div class="nx-c"><span class="r">Vagas liberadas</span><span class="v">{{ d.vagas }}</span><span class="n">{{ d.vagas_preenchidas }} preenchidas · {{ brl(d.vagas_valor) }}</span></div>
   </div>
 

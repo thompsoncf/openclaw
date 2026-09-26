@@ -136,6 +136,7 @@ from web.painel_clinica_vagas import router as clinica_vagas_router
 from web.painel_clinica_planos import router as clinica_planos_router
 from web.painel_clinica_pacotes import router as clinica_pacotes_router
 from web.painel_clinica_numeros import router as clinica_numeros_router
+from web.painel_clinica_assinaturas import router as clinica_assinaturas_router
 from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
@@ -325,6 +326,7 @@ app.include_router(clinica_vagas_router)
 app.include_router(clinica_planos_router)
 app.include_router(clinica_pacotes_router)
 app.include_router(clinica_numeros_router)
+app.include_router(clinica_assinaturas_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)
@@ -647,6 +649,14 @@ def _iniciar_poller_email() -> None:
                              ciclo, _pk["sessao"], _pk["retorno"], _pk["validade"], _pk["vencidos"])
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — pacotes falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
+                # Assinatura da clínica (migração 384): a mensalidade do mês vira título.
+                from finance import clinica_assinaturas as _cas
+                _as = _cas.rodar(pool)
+                if _as["mensalidades"]:
+                    log.info("poller: ciclo #%d — assinaturas: %d mensalidade(s)", ciclo, _as["mensalidades"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — assinaturas falhou: %s: %s", ciclo, type(e).__name__, e)
 
     try:
         threading.Thread(target=_loop, daemon=True, name="email-poller").start()

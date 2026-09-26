@@ -247,7 +247,10 @@ def salvar(c, conta_id: int, *, plano_id: int | None = None, lead: int | None, e
     # O TETO É DO DESCONTO EFETIVO: o que o paciente paga no Pix contra o preço de
     # tabela. Sem isso, "desconto 10% + Pix 50%" ou "Criolipólise a R$ 100 a sessão"
     # passavam sem ninguém aprovar.
-    acima = contas["desconto_efetivo"] > cfg["teto_desconto"] + 0.005
+    # o assinante tem o desconto do plano dele (fase 7b) sem pedir o dono
+    from finance import clinica_assinaturas as cas
+    teto = max(cfg["teto_desconto"], cas.desconto_procedimento(c, conta_id, lead, fone, paciente)[0])
+    acima = contas["desconto_efetivo"] > teto + 0.005
     status = "aguardando_aprovacao" if (acima and not pode_aprovar) else "rascunho"
     aprov = (membro_id, datetime.now(timezone.utc)) if (acima and pode_aprovar) else (None, None)
     if plano_id:

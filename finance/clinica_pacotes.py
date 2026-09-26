@@ -265,15 +265,17 @@ def criar_do_plano(c, conta_id: int, plano: dict, agora: datetime | None = None)
 
 # ------------------------------------------------------------------ finalizar: baixa e retorno
 
-def ao_finalizar(c, conta_id: int, evento_id: int, retorno_dias: int | None = None) -> dict:
+def ao_finalizar(c, conta_id: int, evento_id: int, retorno_dias: int | None = None,
+                 baixa: bool = True) -> dict:
     """Chamado por `clinica_agenda.mudar_situacao` quando o atendimento é finalizado.
     Baixa uma sessão do pacote (se houver) e agenda o retorno pedido. Na mesma
-    transação da mudança de status: finalizou, baixou."""
+    transação da mudança de status: finalizou, baixou. `baixa=False`: a sessão foi
+    coberta pela assinatura (clinica_assinaturas) e o saldo do pacote fica."""
     out = {"pacote": None, "retorno": None}
     ev = ca.evento(c, conta_id, evento_id)
     if not ev:
         return out
-    k = _achar(c, conta_id, ev, trava=True)
+    k = _achar(c, conta_id, ev, trava=True) if baixa else None
     if k and c.execute("""insert into clinica_pacote_consumos (conta_id, pacote_id, evento_id)
                           values (%s,%s,%s) on conflict (evento_id) do nothing returning id""",
                        (conta_id, k, evento_id)).fetchone():

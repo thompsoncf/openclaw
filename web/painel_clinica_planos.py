@@ -109,10 +109,12 @@ def novo(request: Request):
         cfg = cp.config(c, conta_id)
         tipos = list(_tipos(c, conta_id).values())
         profs = ca._profs_que_atendem(c, conta_id)
+        from finance import clinica_assinaturas as cas
+        assin = cas.desconto_procedimento(c, conta_id, base["lead"], base["fone"], base["paciente"])
     form = request.session.pop("plano_form", None) or {}
     return _render("clinica_plano_form.html", request, titulo="Plano de tratamento", **_ctx(request),
                    base=base, cfg=cfg, tipos=tipos, profs=profs, p=None, form=form, gerencia=gerencia,
-                   linhas=range(cp.MAX_ITENS))
+                   linhas=range(cp.MAX_ITENS), assin=assin)
 
 
 def _itens_do_form(form) -> list[dict]:
@@ -371,7 +373,7 @@ _TPL_FORM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     </div>{% endfor %}
     <h3 style="margin-top:.9rem">Desconto e pagamento</h3>
     <div class="pl-grid">
-      <div><label>Desconto no total (%) · seu teto: {{ cfg.teto_desconto|round(2) }}%</label><input name="desconto" inputmode="decimal" value="{{ form.desconto or (p.desconto_pct|round(2) if p else '0') }}"></div>
+      <div><label>Desconto no total (%) · seu teto: {{ cfg.teto_desconto|round(2) }}%{% if assin and assin[0] %} · assinante {{ assin[1] }}: {{ assin[0]|round(2) }}%{% endif %}</label><input name="desconto" inputmode="decimal" value="{{ form.desconto or (p.desconto_pct|round(2) if p else ((assin[0]|round(2)) if assin and assin[0] else '0')) }}"></div>
       <div><label>Desconto no Pix à vista (%)</label><input name="pix" inputmode="decimal" value="{{ form.pix or (p.pix_desconto_pct|round(2) if p else cfg.pix_desconto|round(2)) }}"></div>
       <div><label>Até quantas vezes no cartão</label><input name="parcelas" inputmode="numeric" value="{{ form.parcelas or (p.cartao_parcelas if p else cfg.cartao_parcelas) }}"></div>
       <div><label style="display:flex;gap:.4rem;align-items:center;margin-top:1.2rem"><input type="checkbox" name="parcelado" value="1" style="width:auto" {% if (p and p.parcelado) or (not p) %}checked{% endif %}> Oferecer entrada + parcelas no boleto/Pix</label></div>

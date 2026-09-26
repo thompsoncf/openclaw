@@ -89,7 +89,7 @@ def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int
                   coalesce(e.paciente_nome, e.titulo), e.paciente_fone, e.servico_id,
                   s.nome, s.cor, s.categoria, e.clinica_local_id, e.encaixe, e.origem,
                   e.confirmacao_enviada_em, e.confirmado_em, e.pede_remarcar_em, e.prospeccao_id,
-                  coalesce(e.observacao_interna, '')
+                  coalesce(e.observacao_interna, ''), coalesce(e.marcado_por, '')
              from eventos_agenda e
              left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
             where e.conta_id = %s and e.situacao is not null
@@ -101,7 +101,8 @@ def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int
              "tipo": r[8] or "Atendimento", "cor": r[9] or cc.CORES[0], "categoria": r[10] or "",
              "local_id": r[11], "encaixe": r[12], "origem": r[13] or "",
              "confirmacao_enviada_em": r[14], "confirmado_em": r[15], "pede_remarcar_em": r[16],
-             "lead": r[17], "observacao": r[18], "hora": hora_txt(r[2]), "fim_txt": hora_txt(r[3]),
+             "lead": r[17], "observacao": r[18], "marcado_por": r[19],
+             "hora": hora_txt(r[2]), "fim_txt": hora_txt(r[3]),
              "sit_txt": SIT_D.get(r[4], r[4])} for r in rows]
 
 
@@ -324,8 +325,12 @@ def _faixa_do_horario(c, conta_id: int, profissional_id: int, inicio: datetime) 
 def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: datetime,
             lead_id: int | None = None, nome: str = "", fone: str = "", origem: str = "",
             observacao: str = "", encaixe: bool = False, membro_id: int | None = None,
-            agora: datetime | None = None) -> tuple[int | None, str | None]:
-    """Marca. Devolve (evento_id, None) ou (None, erro pra tela). Não faz commit."""
+            agora: datetime | None = None, paciente: str = "",
+            marcado_por: str = "recepcao") -> tuple[int | None, str | None]:
+    """Marca. Devolve (evento_id, None) ou (None, erro pra tela). Não faz commit.
+
+    `paciente` é quem vai ser atendido quando não é o dono do card (a mãe marca pro
+    filho pelo WhatsApp dela); `marcado_por` é 'recepcao' ou 'ia' (o agente, 3b)."""
     agora = agora or datetime.now(timezone.utc)
     prof = next((p for p in _profs_que_atendem(c, conta_id) if p["id"] == profissional_id), None)
     if not prof:
@@ -361,6 +366,10 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
     lid, nome_pac, fone_pac, erro = _lead_do_paciente(c, conta_id, lead_id, nome, fone)
     if erro:
         return None, erro
+    if (paciente or "").strip():
+        nome_pac = paciente.strip()
+    if not fone_pac and _digitos(fone):
+        fone_pac = fone if fone.startswith("+") else "+" + _digitos(fone)
     _mover_card(c, conta_id, lid, membro_id)
     loc_id = faixa["local_id"] if faixa else None
     loc = next((x for x in cc.listar_locais(c, conta_id) if x["id"] == loc_id), None)
@@ -372,11 +381,12 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
              (conta_id, titulo, inicio, fim, local, tipo, prospeccao_id, profissional_id,
               servico_id, clinica_local_id, situacao, situacao_em, origem, paciente_nome, paciente_fone,
               encaixe, marcado_por, status, observacao_interna)
-           values (%s,%s,%s,%s,%s,'empresa',%s,%s,%s,%s,'agendado',now(),%s,%s,%s,%s,'recepcao','ativo',%s)
+           values (%s,%s,%s,%s,%s,'empresa',%s,%s,%s,%s,'agendado',now(),%s,%s,%s,%s,%s,'ativo',%s)
            returning id""",
         (conta_id, f"{nome_pac} · {palavra}"[:200], inicio, fim, loc["nome"] if loc else None,
          lid, profissional_id, servico_id, loc_id,
          origem if origem in ORIGENS else None, nome_pac[:120], fone_pac, bool(encaixe and not livre),
+         marcado_por if marcado_por in ("recepcao", "ia") else "recepcao",
          (observacao or "").strip()[:500] or None)).fetchone()[0]
     return eid, None
 

@@ -166,6 +166,7 @@ TABELAS: dict[str, tuple[str, ...]] = {
     "clinica_profissional_tipos": ('conta_id',),
     "clinica_grade": ('conta_id',),
     "clinica_bloqueios": ('conta_id',),
+    "clinica_repasses": ('conta_id',),      # 363: o agente passou pra recepção
 }
 
 # Só código de produção. tests/ monta cenário de propósito e scripts/ são

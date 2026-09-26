@@ -508,7 +508,7 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div><b>Status:</b> <span class="ev s-{{ ev.situacao }}" style="display:inline-block;padding:.1rem .5rem;border-radius:6px;border:1px solid var(--borda)">{{ SIT_D[ev.situacao] }}</span>
       {% if ev.pede_remarcar_em %} · <b>pediu para remarcar</b>{% endif %}
       {% if ev.confirmado_em %} · confirmou{% elif ev.confirmacao_enviada_em %} · lembrete da véspera enviado{% endif %}</div>
-    <div class="mut" style="margin-top:.3rem">{% if ev.fone %}Celular {{ ev.fone }}{% endif %}{% if ev.origem %} · veio por {{ ev.origem }}{% endif %}{% if ev.observacao %} · {{ ev.observacao }}{% endif %}</div>
+    <div class="mut" style="margin-top:.3rem">{% if ev.fone %}Celular {{ ev.fone }}{% endif %}{% if ev.origem %} · veio por {{ ev.origem }}{% endif %}{% if ev.marcado_por == 'ia' %} · marcado pelo agente no WhatsApp{% endif %}{% if ev.observacao %} · {{ ev.observacao }}{% endif %}</div>
     {% if proximos %}<div class="ag-acoes">{% for s in proximos if s != 'finalizado' %}
       <form method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao"><input type="hidden" name="nova" value="{{ s }}"><button class="{% if s in ('faltou','cancelou') %}sec{% endif %}">{{ {'agendado':'Reabrir','confirmado':'Confirmar','presente':'Chegou','atendimento':'Entrou no atendimento','faltou':'Faltou','cancelou':'Cancelar'}[s] }}</button></form>
     {% endfor %}</div>

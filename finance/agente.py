@@ -365,6 +365,22 @@ def _atender(pool, conta_id, conversa_id):
         escondidos = _precos_escondidos(c, conta_id)
         cat_txt = "\n".join(_linha_catalogo(s, s["slug"] in escondidos) for s in catalogo) \
             or "(sem catálogo)"
+        _slug_n = c.execute("""select coalesce(n.slug,'') from contas ct
+                                 left join nichos n on n.id = ct.nicho_id
+                                where ct.id=%s""", (conta_id,)).fetchone()
+        _perfil = _rxp.perfil_por_nicho(_slug_n[0] if _slug_n else "")
+        # A CLÍNICA TEM O AGENTE DELA (fase 3b, finance/clinica_agente.py): preço,
+        # horário livre de verdade, marcar e passar pra recepção. Desvia AQUI, antes
+        # de tudo que é de festa (visita ao espaço, orçamento, evento no lead); o
+        # caminho das outras contas segue daqui pra baixo sem mudar nada.
+        if _perfil == "clinica":
+            from finance import clinica_agente as _cla
+            _cla.atender(pool, c, conta_id, conversa_id, cfg, conv, msgs, historico=historico,
+                         gemeo_nota=_nota_gemeo(c, conta_id, conv), instr=instr, faqs=faqs,
+                         cat_txt=cat_txt, canal=canal, destino=destino,
+                         enviar=lambda texto: _enviar(c, conta_id, conversa_id, canal, destino, texto))
+            c.commit()      # o silêncio (recado já com a recepção) também grava a temperatura
+            return
         # A VISITA (migração 259). O bloco só entra quando a conta ligou a chave E
         # estamos na janela comercial — fora dela quem resolve é gente, e instruir a
         # IA sobre visita que ela não pode marcar é convidá-la a prometer horário.
@@ -398,10 +414,7 @@ def _atender(pool, conta_id, conversa_id):
         # O leitor automático (migração 304) é quem lê o documento de verdade, e
         # ele não conversa: deixa o pré-cadastro pronto pra corretora conferir.
         seguros_txt = ""
-        _slug_n = c.execute("""select coalesce(n.slug,'') from contas ct
-                                 left join nichos n on n.id = ct.nicho_id
-                                where ct.id=%s""", (conta_id,)).fetchone()
-        if _rxp.perfil_por_nicho(_slug_n[0] if _slug_n else "") == "seguros":
+        if _perfil == "seguros":
             seguros_txt = (
                 "\n\nESTA EMPRESA É UMA CORRETORA DE SEGUROS. Nunca fale de festa, "
                 "evento, convidados ou data de festa — esse vocabulário não existe aqui.\n"
@@ -443,27 +456,7 @@ def _atender(pool, conta_id, conversa_id):
             f"INSTRUÇÕES DA EMPRESA:\n{instr or '(nenhuma)'}\n\n"
             f"PERGUNTAS FREQUENTES:\n{faqs or '(nenhuma)'}\n\n"
             f"CATÁLOGO DE SERVIÇOS:\n{cat_txt}")
-        # MESMO NÚMERO NO OUTRO CHIP. Numa empresa de dois números o mesmo cliente
-        # pode estar em duas campanhas, e cada chip tem a SUA conversa — de propósito,
-        # pra resposta sair pelo número que recebeu. O agente só enxerga a thread
-        # daqui, então sem este aviso ele fala como se fosse o primeiro contato com
-        # alguém que já está negociando do outro lado. Ele não deve puxar o assunto
-        # (não é dele, e o cliente pode nem saber que são dois números da mesma casa);
-        # deve parar de prometer sozinho e passar pra gente.
-        #
-        # `_gemeos_de_outro_chip` já engole o próprio erro (num SAVEPOINT, pra não
-        # abortar esta transação) e devolve vazio — o aviso é enfeite, a resposta ao
-        # cliente não é. Por isso aqui não há try: falhar de vez seria outra coisa.
-        gemeo_nota = ""
-        from web.painel_prospeccao import _gemeos_de_outro_chip, _aviso_gemeo
-        _g = _gemeos_de_outro_chip(c, conta_id, [conv[1]]).get(conv[1]) if conv[1] else None
-        if _g:
-            gemeo_nota = (
-                "\n\nATENÇÃO: " + _aviso_gemeo(_g) + " É a mesma pessoa falando "
-                "com outro número desta empresa, numa conversa que você NÃO vê. "
-                "Não cite isso ao cliente e não repita oferta: se ele falar de "
-                "preço, prazo ou de algo já combinado, diga que vai confirmar "
-                "com a equipe e NÃO feche nada por conta própria.")
+        gemeo_nota = _nota_gemeo(c, conta_id, conv)
 
         pedir = (
             f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{visita_txt}{seguros_txt}\n\n"
@@ -562,6 +555,29 @@ def _atender(pool, conta_id, conversa_id):
         # responde tudo (nunca escala/desliga automático)
         _enviar(c, conta_id, conversa_id, canal, destino, resposta or
                 "Boa! Me conta um pouquinho mais que já te ajudo 😊")
+
+
+def _nota_gemeo(c, conta_id, conv) -> str:
+    """MESMO NÚMERO NO OUTRO CHIP. Numa empresa de dois números o mesmo cliente
+    pode estar em duas campanhas, e cada chip tem a SUA conversa — de propósito,
+    pra resposta sair pelo número que recebeu. O agente só enxerga a thread
+    daqui, então sem este aviso ele fala como se fosse o primeiro contato com
+    alguém que já está negociando do outro lado. Ele não deve puxar o assunto
+    (não é dele, e o cliente pode nem saber que são dois números da mesma casa);
+    deve parar de prometer sozinho e passar pra gente.
+
+    `_gemeos_de_outro_chip` já engole o próprio erro (num SAVEPOINT, pra não
+    abortar esta transação) e devolve vazio — o aviso é enfeite, a resposta ao
+    cliente não é. Por isso aqui não há try: falhar de vez seria outra coisa."""
+    from web.painel_prospeccao import _gemeos_de_outro_chip, _aviso_gemeo
+    _g = _gemeos_de_outro_chip(c, conta_id, [conv[1]]).get(conv[1]) if conv[1] else None
+    if not _g:
+        return ""
+    return ("\n\nATENÇÃO: " + _aviso_gemeo(_g) + " É a mesma pessoa falando "
+            "com outro número desta empresa, numa conversa que você NÃO vê. "
+            "Não cite isso ao cliente e não repita oferta: se ele falar de "
+            "preço, prazo ou de algo já combinado, diga que vai confirmar "
+            "com a equipe e NÃO feche nada por conta própria.")
 
 
 def _enviar(c, conta_id, conversa_id, canal, destino, texto):

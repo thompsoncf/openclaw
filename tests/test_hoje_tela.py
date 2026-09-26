@@ -186,3 +186,46 @@ def test_erro_de_validacao_aparece_uma_vez(cli):
     assert r.headers["location"] == "/painel/hoje"
     assert "não pode falar de saúde" in cli.get("/painel/hoje").text
     assert "não pode falar de saúde" not in cli.get("/painel/hoje").text
+
+
+# ------------------------------------------------------------------ fase 3b: o agente passou pra você
+
+def _repasse(pool, motivo, nome):  # noqa: F811
+    from pathlib import Path
+    sql = (Path(__file__).resolve().parent.parent / "db" / "migracoes" / "363_clinica_repasses.sql")
+    with pool.connection() as c:
+        c.execute(sql.read_text(encoding="utf-8"))
+        conv = c.execute("""insert into conversas (conta_id, contato_ref, contato_nome)
+                            values (%s,'+5599911112222',%s) returning id""", (CLINICA, nome)).fetchone()[0]
+        rid = c.execute("""insert into clinica_repasses (conta_id, conversa_id, motivo)
+                           values (%s,%s,%s) returning id""", (CLINICA, conv, motivo)).fetchone()[0]
+        c.commit()
+    return conv, rid
+
+
+def test_o_agente_passou_aparece_no_topo_e_some_com_resolvido(cli, pool):  # noqa: F811
+    conv, rid = _repasse(pool, "urgencia", '<b>Ana</b>')
+    html = cli.get("/painel/hoje").text
+    assert "O agente passou pra você" in html and "urgência" in html
+    assert html.index("O agente passou pra você") < html.index("Esperando resposta")
+    assert "<b>Ana</b>" not in html and "&lt;b&gt;Ana&lt;/b&gt;" in html
+    cli.get("/_papel/vendedor")                            # a recepção resolve
+    r = cli.post(f"/painel/hoje/repasse/{rid}/resolvido")
+    assert r.headers["location"] == "/painel/hoje?aviso=resolvido"
+    assert "O agente passou pra você" not in cli.get("/painel/hoje").text
+
+
+def test_responder_a_conversa_tira_da_lista(cli, pool):  # noqa: F811
+    conv, rid = _repasse(pool, "foto", "Bia")
+    assert "mandou foto ou vídeo" in cli.get("/painel/hoje").text
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
+                     values (%s,'whatsapp','out','humano','Oi Bia!')""", (conv,))
+        c.commit()
+    assert "O agente passou pra você" not in cli.get("/painel/hoje").text
+
+
+def test_sem_a_tabela_a_tela_abre_igual(cli):
+    """Antes da 363 rodar (deploy no meio), a tela não quebra: só não tem a seção."""
+    r = cli.get("/painel/hoje")
+    assert r.status_code == 200 and "O agente passou pra você" not in r.text

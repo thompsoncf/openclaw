@@ -419,7 +419,7 @@ _TPL_TIPO = r"""<form class="cl-form" method="post" action="/painel/clinica/tipo
   <label>Por que volta (só pra recepção)<input name="volta_motivo" maxlength="200" value="{{ f.volta_motivo if f else '' }}" placeholder="reaplicação, resultado da biópsia"></label>
   <div class="inteira"><span class="meta">Cor na agenda</span><div class="cl-cores">{% for c in CORES %}<label class="cx"><input type="radio" name="cor" value="{{ c }}" {% if (f and f.cor == c) or (not f and loop.first) %}checked{% endif %}><span class="cl-cor" style="background:{{ c }}"></span></label>{% endfor %}</div></div>
   <label class="cx inteira"><input type="checkbox" name="agente_diz_preco" value="1" {% if f and f.agente_diz_preco %}checked{% endif %}> O agente pode dizer este preço no WhatsApp (desmarcado, ele responde "sob consulta" e a recepção informa)</label>
-  <label class="cx inteira"><input type="checkbox" name="agente_marca" value="1" {% if f and f.agente_marca %}checked{% endif %}> O agente pode marcar este atendimento sozinho (quando o agente de agenda estiver no ar)</label>
+  <label class="cx inteira"><input type="checkbox" name="agente_marca" value="1" {% if f and f.agente_marca %}checked{% endif %}> O agente pode marcar este atendimento sozinho pelo WhatsApp, nos horários livres da grade (retorno e sessão, só para quem já foi atendido aqui)</label>
   <div class="cl-acoes"><button>Salvar</button></div>
 </form>"""
 

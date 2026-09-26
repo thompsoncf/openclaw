@@ -34,6 +34,7 @@ import pytest
 from jinja2 import DictLoader, Environment
 
 from web import portal as pt
+from finance.raio_x_perfil import VOC_PESSOA_PADRAO as _VOC_PADRAO
 
 
 def _monta(liberadas=0, esperando=0, recusadas=0, receber=0, com_conciliar=False):
@@ -44,6 +45,7 @@ def _monta(liberadas=0, esperando=0, recusadas=0, receber=0, com_conciliar=False
     j = tpl.index('{% else %}<div class="mut" style="font-size:.85rem">'
                   "Nenhum título em aberto")
     env = Environment(loader=DictLoader({"t": tpl[i:j]}))
+    env.globals["voc"] = dict(_VOC_PADRAO)   # o global que o _env do portal tem
     env.filters["brl"] = pt.brl
     env.filters["n2"] = lambda v: f"{v:.2f}"
 
@@ -216,6 +218,7 @@ def _render_filtro(liberadas=0, esperando=0, receber=0):
     j = tpl.index('{% else %}<div class="mut" style="font-size:.85rem">'
                   "Nenhum título em aberto")
     env = Environment(loader=DictLoader({"t": tpl[i:j]}))
+    env.globals["voc"] = dict(_VOC_PADRAO)   # o global que o _env do portal tem
     env.filters["brl"] = pt.brl
     env.filters["n2"] = lambda v: f"{v:.2f}"
 

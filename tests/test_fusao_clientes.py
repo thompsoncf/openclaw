@@ -29,6 +29,7 @@ from psycopg_pool import ConnectionPool
 from db.conexao import init_schema
 from finance import clientes as cli
 from finance import dedup_clientes as dd
+from finance.raio_x_perfil import VOC_PESSOA_PADRAO as _VOC_PADRAO
 
 # ordem importa: 053 cria `titulos`, 064 cria `clientes`, e a 067 liga uma na
 # outra. 070 dá conta_id ao orçamento (é por ele que a fusão isola o lojista).
@@ -567,6 +568,7 @@ def _lista_html(grupos) -> str:
     from web import portal as pt
     corpo = pt._CLIENTES_DUP.split("{% block conteudo %}", 1)[1].rsplit("{% endblock %}", 1)[0]
     env = Environment(loader=DictLoader({"t": corpo}))
+    env.globals["voc"] = dict(_VOC_PADRAO)   # o global que o _env do portal tem
     return env.get_template("t").render(grupos=grupos, historico=[], erro=None,
                                         aviso=None)
 
@@ -643,6 +645,7 @@ def test_inverter_some_quando_os_dois_lados_sao_o_mesmo_cadastro():
     corpo = pt._CLIENTES_DUP_REVISAR.split("{% block conteudo %}", 1)[1] \
                                     .rsplit("{% endblock %}", 1)[0]
     env = Environment(loader=DictLoader({"t": corpo}))
+    env.globals["voc"] = dict(_VOC_PADRAO)   # o global que o _env do portal tem
     mesmo = {"id": 5, "nome": "Ana Clara", "documento_fmt": "", "telefone": "",
              "email": ""}
     html = env.get_template("t").render(

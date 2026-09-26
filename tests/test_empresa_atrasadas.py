@@ -29,6 +29,7 @@ import pytest
 from jinja2 import DictLoader, Environment
 
 from web import portal as pt
+from finance.raio_x_perfil import VOC_PESSOA_PADRAO as _VOC_PADRAO
 
 
 def _t(desc, apro="aguardando", tipo="pagar", atrasado=False, cent=10000):
@@ -107,6 +108,7 @@ def _fatia():
 
 def _render(blocos):
     env = Environment(loader=DictLoader({"t": _fatia()}))
+    env.globals["voc"] = dict(_VOC_PADRAO)   # o global que o _env do portal tem
     env.filters["brl"] = pt.brl
     env.filters["n2"] = lambda v: f"{v:.2f}"
     tot = pt._lente_atrasadas(blocos)

@@ -248,6 +248,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div>
     <h1>Raio-X</h1>
     <p class="lede">O placar de <b>{{ d.rotulo }}</b>, comparado com o período anterior. Os filtros cortam tudo que está abaixo; a linha por vendedor é a mesma que o grupo recebe na segunda.</p>
+    {% if perfil.chave == 'clinica' %}<p class="lede">Ocupação da agenda, horários vazios, consulta → plano → fechado, sessões devidas, faltas e retornos: <a href="/painel/clinica/numeros">Números da clínica ›</a></p>{% endif %}
     {% if not perfil.nicho_escolhido %}<p class="lede" style="color:var(--ambar)">Sua conta ainda não escolheu o nicho. O Raio-X está usando o perfil de serviço; escolha o nicho em <a href="/painel/empresa">Empresa</a> pra ele acertar o vocabulário.</p>{% endif %}
   </div>
 

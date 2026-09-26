@@ -534,3 +534,21 @@ def test_o_mesmo_horario_vira_vaga_de_novo(pool, zap):
         assert cvg.detectar(c, CLINICA, AGORA) == 1
         v = cvg.vaga(c, CLINICA, vid)
         assert (v["estado"], v["origem_evento_id"]) == ("aguardando", ev)
+
+
+def test_assinante_com_prioridade_passa_na_frente_de_todos_os_grupos(pool):
+    """Fase 7b: o assinante é chamado antes de quem pediu ou recebeu o preço, mesmo
+    estando no último grupo (retorno)."""
+    with pool.connection() as c:
+        c.execute((BASE / "384_clinica_assinaturas.sql").read_text(encoding="utf-8"))
+        gente, vid = _cenario(c)
+        pl = c.execute("""insert into clinica_assinatura_planos (conta_id, nome, preco_centavos, prioridade_vagas)
+                          values (39, 'Pele em dia', 14900, true) returning id""").fetchone()[0]
+        c.execute("""insert into clinica_assinantes (conta_id, plano_id, prospeccao_id, paciente_nome, paciente_fone,
+                                                    preco_centavos, dia_cobranca, inicio)
+                     values (39, %s, %s, 'Rui Retorno', '+5599911110003', 14900, 10, current_date - 1)""",
+                  (pl, gente["rui"][0]))
+        c.commit()
+        chamar, _fora = cvg.candidatos(c, CLINICA, cvg.vaga(c, CLINICA, vid), AGORA)
+    assert [p["nome"] for p in chamar] == ["Rui Retorno", "Paula Pedido", "Rita Preço"]
+    assert chamar[0]["porque"].endswith(" · assinante")

@@ -210,7 +210,7 @@ def numeros(c, conta_id: int, ini: date, fim: date, agora: datetime | None = Non
         "consulta_preco": int(consulta["preco_centavos"]) if consulta else None,
         "consulta_min": int(consulta["duracao_min"]) if consulta else None,
         "fora_h": round(sum(o["fora_h"] for o in ocup), 1), "passado": fim <= hoje,
-        "atendimentos": atend, "receita": receita, "ticket": receita // atend if atend else None,
+        "atendimentos": atend, "receita": receita, "ticket": (receita_avulsa + valor_aceito) // atend if atend else None,
         "receita_avulsa": receita_avulsa, "valor_aceito": valor_aceito, "mensalidades": mensalidades,
         "assinantes": len(assinantes), "recorrente": sum(int(r[0]) for r in assinantes),
         "consultas": len(consultas_fin), "planos_enviados": len(enviados), "planos_aceitos": len(aceitos),

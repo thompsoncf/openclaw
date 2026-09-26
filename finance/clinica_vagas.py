@@ -408,7 +408,7 @@ def candidatos(c, conta_id: int, v: dict, agora: datetime) -> tuple[list[dict], 
             item = {**item, "grupo": "vem", "grupo_d": GRUPO_D["vem"],
                     "porque": f"já vem nesse dia às {ca.hora_txt(mesmo_dia[0][1])} · {item['porque']}"}
         chamar.append({**item, "servico_id": tipo["id"], "tipo": tipo["nome"]})
-    chamar.sort(key=lambda x: ordem[x["grupo"]])
+    chamar.sort(key=lambda x: (x["lead"] not in prior, ordem[x["grupo"]]))
     return chamar, fora
 
 

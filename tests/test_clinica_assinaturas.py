@@ -207,3 +207,48 @@ def test_tela_recepcao_ativa_e_so_gerencia_mexe_no_plano(cli, banco):  # noqa: F
     html = cli.get("/painel/clinica/assinaturas").text
     assert "Rita Souza" in html and "Pele em dia" in html and "Novo plano" not in html
     assert "cancelar" not in html.split("Assinantes</h3>")[1].split("Já vieram")[0]
+
+
+def test_desconto_do_assinante_soma_o_pix_da_clinica_e_nao_se_herda_pelo_formulario(banco, zap):  # noqa: F811
+    pool = banco
+    with pool.connection() as c:
+        pid = _plano(c)
+        lead, _conv = _paciente(c)
+        outra, _ = _paciente(c, nome="Lúcia Souza", fone="+5599977770000")
+        cp.salvar_config(c, CLINICA, teto="10", pix="5", parcelas="4", validade="7", cobranca="ligado")
+        c.commit()
+    cas.assinar(pool, CLINICA, plano_id=pid, lead=lead, paciente="", fone="", inicio="2026-09-25",
+                membro_id=None, hoje=HOJE)
+    itens = [{"servico_id": None, "nome": "Peeling", "sessoes": 2, "valor_unit_centavos": 50000,
+              "preco_catalogo_centavos": 0}]
+    base = dict(evento_id=None, profissional_id=None, paciente="Lúcia", itens=itens, cartao_parcelas="1",
+                parcelado=False, membro_id=None, pode_aprovar=False, desconto_pct="15", pix_desconto_pct="5")
+    with pool.connection() as c:
+        p1, _ = cp.salvar(c, CLINICA, lead=lead, fone=FONE, **base)            # 15% + Pix 5%: a assinante
+        assert cp.plano(c, CLINICA, p1)["status"] == "rascunho"
+        p2, _ = cp.salvar(c, CLINICA, lead=outra, fone=FONE, **base)           # o celular dela no card da outra
+        assert cp.plano(c, CLINICA, p2)["status"] == "aguardando_aprovacao"
+        p3, _ = cp.salvar(c, CLINICA, lead=lead, fone="+5599977770000", **base)  # o card dela com outro celular
+        assert cp.plano(c, CLINICA, p3)["status"] == "aguardando_aprovacao"
+        c.rollback()
+
+
+def test_assinar_sem_card_cria_o_card_e_inicio_nao_volta_antes_do_mes(banco, zap):  # noqa: F811
+    pool = banco
+    with pool.connection() as c:
+        pid = _plano(c)
+    assert "dia 1º" in cas.assinar(pool, CLINICA, plano_id=pid, lead=None, paciente="Rita Souza",
+                                   fone="11988887777", inicio="2026-08-31", membro_id=None, hoje=HOJE)[1]
+    aid, erro = cas.assinar(pool, CLINICA, plano_id=pid, lead=None, paciente="Rita Souza", fone="11988887777",
+                            inicio="2026-11-01", membro_id=None, hoje=HOJE)
+    assert erro is None
+    _a2, erro = cas.assinar(pool, CLINICA, plano_id=pid, lead=None, paciente="Rita Souza", fone="11988887777",
+                            inicio="", membro_id=None, hoje=HOJE)
+    assert "já é assinante" in erro                   # o duplo clique não vira duas assinaturas
+    with pool.connection() as c:
+        lead = c.execute("select prospeccao_id from clinica_assinantes where id=%s", (aid,)).fetchone()[0]
+        assert lead is not None
+        # começa em novembro: antes disso, nem desconto nem prioridade, nem mensalidade
+        assert cas.desconto_procedimento(c, CLINICA, lead, "+5511988887777", "") == (0.0, "")
+        assert cas.prioritarios(c, CLINICA) == set()
+        assert c.execute("select count(*) from clinica_assinatura_mensalidades").fetchone()[0] == 0

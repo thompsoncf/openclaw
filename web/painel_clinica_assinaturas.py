@@ -154,7 +154,7 @@ details.as-can summary{cursor:pointer;font-size:.8rem;color:var(--txt-mut)}
 
   <div class="as-kpi">
     <div><span>Assinantes</span><b>{{ r.ativos }}</b></div>
-    <div><span>Receita recorrente</span><b>{{ brl(r.recorrente) if r.recorrente else 'R$ 0' }}</b><span>por mês</span></div>
+    {% if gerencia %}<div><span>Receita recorrente</span><b>{{ brl(r.recorrente) if r.recorrente else 'R$ 0' }}</b><span>por mês</span></div>{% endif %}
     <div><span>Com mensalidade atrasada</span><b>{{ r.atrasados }}</b></div>
     <div><span>Planos ativos</span><b>{{ planos|selectattr('ativo')|list|length }}</b></div>
   </div>
@@ -162,7 +162,7 @@ details.as-can summary{cursor:pointer;font-size:.8rem;color:var(--txt-mut)}
   {% if planos|selectattr('ativo')|list %}
   <form class="as-cx" method="post" action="/painel/clinica/assinaturas/nova">
     <b>Ativar assinatura</b>
-    <div class="as-m" style="margin:.3rem 0 .6rem">Ofereça no fim do atendimento. A mensalidade do mês é lançada na hora; as próximas, no dia de cobrança do plano.</div>
+    <div class="as-m" style="margin:.3rem 0 .6rem">Ofereça no fim do atendimento. A mensalidade do mês é lançada na hora; as próximas, no dia 1º de cada mês, vencendo no dia de cobrança do plano.</div>
     <input type="hidden" name="lead" value="{{ base.lead or '' }}">
     <div class="as-grid">
       <div><label>Plano</label><select name="plano_id">{% for p in planos if p.ativo %}<option value="{{ p.id }}">{{ p.nome }} · {{ p.preco }}/mês</option>{% endfor %}</select></div>
@@ -199,7 +199,7 @@ details.as-can summary{cursor:pointer;font-size:.8rem;color:var(--txt-mut)}
   {% if gerencia %}
   <form class="as-cx" id="plano" method="post" action="/painel/clinica/assinaturas/plano">
     <b>{{ 'Editar ' ~ editar.nome if editar else 'Novo plano' }}</b>
-    <div class="as-m" style="margin:.3rem 0 .6rem">Mudar o preço ou o dia vale para quem assinar daqui pra frente; quem já assinou fica com o que combinou. O desconto em procedimentos vale no plano de tratamento sem pedir sua aprovação; o de produtos entra na venda de produto.</div>
+    <div class="as-m" style="margin:.3rem 0 .6rem">Mudar o preço ou o dia vale para quem assinar daqui pra frente (quem já assinou paga o que combinou); os benefícios valem para todos os assinantes do plano. O desconto em procedimentos vale no plano de tratamento sem pedir sua aprovação; o de produtos entra na venda de produto.</div>
     <input type="hidden" name="plano_id" value="{{ editar.id if editar else '' }}">
     <div class="as-grid">
       <div><label>Nome</label><input name="nome" maxlength="80" value="{{ editar.nome if editar else '' }}" placeholder="Pele em dia" required></div>

@@ -18,8 +18,12 @@ poller). Sem cobrança automática no cartão por enquanto: o Asaas de hoje é a
 Zaq (ASAAS_API_KEY), e o dinheiro do paciente não pode cair nela. Quando a clínica
 tiver a própria conta, a cobrança recorrente entra aqui.
 
-O assinante guarda o preço e o dia de quando assinou: mudar o plano depois não muda o
-combinado com quem já assinou.
+O assinante guarda o preço e o dia de quando assinou: mudar o preço do plano depois
+não muda o que ele paga. Os BENEFÍCIOS são do plano e valem para todos os assinantes.
+
+LIMITE CONHECIDO: um card tem uma assinatura ativa. A mãe assinante e o filho no mesmo
+celular: o benefício de sessão e o desconto são só da mãe (o nome confere), mas a
+prioridade na fila de vagas é do card.
 """
 from __future__ import annotations
 
@@ -145,23 +149,28 @@ def salvar_plano(c, conta_id: int, *, plano_id: int | None, nome: str, preco, di
 # ------------------------------------------------------------------ o assinante
 
 def do_paciente(c, conta_id: int, lead: int | None, fone: str | None, paciente: str = "",
-                trava: bool = False) -> dict | None:
-    """A assinatura ATIVA deste paciente, com o plano. Pelo card ou pelo celular (8
-    últimos dígitos); se o nome do paciente vier, o primeiro nome tem que bater (a mãe
-    assinante e o filho no mesmo celular: o benefício é da mãe)."""
+                trava: bool = False, hoje: date | None = None, so_card: bool = False) -> dict | None:
+    """A assinatura ATIVA (e já começada) deste paciente, com o plano. Pelo card ou pelo
+    celular (8 últimos dígitos); se o nome do paciente vier, o primeiro nome tem que
+    bater (a mãe assinante e o filho no mesmo celular: o benefício é da mãe).
+    `so_card=True`: só pelo card, e o celular informado tem que ser o da assinatura
+    (o desconto sem aprovação não se herda trocando o celular ou o card no formulário)."""
     from finance.clinica_pacotes import _primeiro
     dig = ca._digitos(fone)
+    if so_card and not lead:
+        return None
     try:
         with c.transaction():
             rows = c.execute(
-                r"""select a.id, a.plano_id, a.paciente_nome, a.inicio, a.prospeccao_id
+                r"""select a.id, a.plano_id, a.paciente_nome, a.inicio, a.prospeccao_id, a.paciente_fone
                       from clinica_assinantes a
-                     where a.conta_id=%s and a.estado='ativa'
+                     where a.conta_id=%s and a.estado='ativa' and a.inicio <= %s
                        and (a.prospeccao_id = %s
-                            or (length(%s) >= 8 and right(regexp_replace(a.paciente_fone, '\D', '', 'g'), 8) = %s))
+                            or (not %s and length(%s) >= 8
+                                and right(regexp_replace(a.paciente_fone, '\D', '', 'g'), 8) = %s))
                      order by (a.prospeccao_id = %s) desc nulls last, a.id limit 5"""
                 + (" for update of a" if trava else ""),
-                (conta_id, lead, dig, dig[-8:], lead)).fetchall()
+                (conta_id, hoje or ca.hoje_br(), lead, so_card, dig, dig[-8:], lead)).fetchall()
     except Exception as e:  # noqa: BLE001
         if _falta_migracao(e):
             return None
@@ -171,6 +180,8 @@ def do_paciente(c, conta_id: int, lead: int | None, fone: str | None, paciente: 
     for r in rows:
         if quem and _primeiro(r[2]) and _primeiro(r[2]) != quem:
             continue
+        if so_card and ca._digitos(r[5])[-8:] != dig[-8:]:
+            continue
         p = plano(c, conta_id, r[1])
         if p:
             return {**p, "assinante_id": r[0], "plano_id": r[1], "paciente": r[2], "inicio": r[3], "lead": r[4]}
@@ -178,8 +189,9 @@ def do_paciente(c, conta_id: int, lead: int | None, fone: str | None, paciente: 
 
 
 def desconto_procedimento(c, conta_id: int, lead: int | None, fone: str | None, paciente: str = "") -> tuple[float, str]:
-    """(o % de desconto em procedimentos do plano do assinante, o nome do plano)."""
-    a = do_paciente(c, conta_id, lead, fone, paciente)
+    """(o % de desconto em procedimentos do plano do assinante, o nome do plano). Só
+    pelo card do paciente, com o celular dele (`do_paciente(so_card=True)`)."""
+    a = do_paciente(c, conta_id, lead, fone, paciente, so_card=True)
     return (a["desconto_procedimento_pct"], a["nome"]) if a and a["desconto_procedimento_pct"] else (0.0, "")
 
 
@@ -190,8 +202,9 @@ def prioritarios(c, conta_id: int) -> set[int]:
             return {r[0] for r in c.execute(
                 """select a.prospeccao_id from clinica_assinantes a
                      join clinica_assinatura_planos p on p.id = a.plano_id and p.conta_id = a.conta_id
-                    where a.conta_id=%s and a.estado='ativa' and p.prioridade_vagas and a.prospeccao_id is not null""",
-                (conta_id,)).fetchall()}
+                    where a.conta_id=%s and a.estado='ativa' and a.inicio <= %s
+                      and p.prioridade_vagas and a.prospeccao_id is not null""",
+                (conta_id, ca.hoje_br())).fetchall()}
     except Exception:  # noqa: BLE001 — sem a 384, ninguém fura a fila
         return set()
 
@@ -238,25 +251,30 @@ def assinar(pool, conta_id: int, *, plano_id: int | None, lead: int | None, paci
             ini = date.fromisoformat((inicio or "").strip()) if (inicio or "").strip() else hoje
         except ValueError:
             return None, "Data de início inválida."
-    if not hoje - timedelta(days=31) <= ini <= hoje + timedelta(days=62):
-        return None, "O início vai de um mês atrás a dois meses pra frente."
+    # retroativo lançaria mensalidades já vencidas no mesmo instante
+    if not hoje.replace(day=1) <= ini <= hoje + timedelta(days=62):
+        return None, "O início vai do dia 1º deste mês a dois meses pra frente."
     with pool.connection() as c:
         p = plano(c, conta_id, plano_id)
         if not p or not p["ativo"]:
             return None, "Escolha um plano ativo."
-        if lead:
-            r = c.execute("""select coalesce(nullif(contato,''), empresa, ''), coalesce(nullif(whatsapp,''), telefone, '')
-                               from prospeccao where id=%s and conta_id=%s""", (lead, conta_id)).fetchone()
-            if not r:
-                return None, "Paciente não encontrado."
-            paciente, fone = (paciente or "").strip() or r[0], (fone or "").strip() or r[1]
-        paciente = " ".join((paciente or "").split())[:120]
+        # um "Ativar" de cada vez por conta: o duplo clique não vira duas assinaturas
+        c.execute("select pg_advisory_xact_lock(%s, %s)", (_LOCK, conta_id))
+        digitado = " ".join((paciente or "").split())[:120]
+        lead, nome_card, fone_card, erro = ca._lead_do_paciente(c, conta_id, lead, digitado, fone)
+        if erro:
+            c.rollback()
+            return None, erro
+        paciente, fone = digitado or nome_card, (fone or "").strip() or fone_card
         if not paciente:
+            c.rollback()
             return None, "Informe o nome do paciente."
         if len(ca._digitos(fone)) < 10:
+            c.rollback()
             return None, "Informe o celular do paciente (com DDD)."
-        ja = do_paciente(c, conta_id, lead, fone, paciente)
+        ja = do_paciente(c, conta_id, lead, fone, paciente, hoje=date(2100, 1, 1))
         if ja:
+            c.rollback()
             return None, f"{ja['paciente']} já é assinante do plano {ja['nome']}."
         try:
             aid = c.execute(
@@ -316,25 +334,53 @@ def resumo(lista: list[dict]) -> dict:
 
 # ------------------------------------------------------------------ o benefício usado
 
+def _cobertura(c, conta_id: int, ev: dict, trava: bool) -> tuple[dict, date, int] | None:
+    """(a assinatura, a competência, as sessões já usadas no mês) se este atendimento
+    é o incluso no plano e ainda há sessão do mês."""
+    if not ev or not ev.get("servico_id"):
+        return None
+    dia = ca.local(ev["inicio"]).date()
+    a = do_paciente(c, conta_id, ev["lead"], ev["fone"], ev["paciente"], trava=trava, hoje=dia)
+    if not a or a["servico_id"] != ev["servico_id"] or a["sessoes_mes"] <= 0:
+        return None
+    comp = dia.replace(day=1)
+    try:
+        with c.transaction():
+            usados = c.execute("""select count(*) from clinica_assinatura_usos
+                                   where conta_id=%s and assinante_id=%s and competencia=%s""",
+                               (conta_id, a["assinante_id"], comp)).fetchone()[0]
+    except Exception:  # noqa: BLE001
+        return None
+    return (a, comp, int(usados)) if usados < a["sessoes_mes"] else None
+
+
+def cobre(c, conta_id: int, ev: dict) -> dict | None:
+    """Pra tela do agendamento: finalizar vai usar a sessão do mês da assinatura?"""
+    r = _cobertura(c, conta_id, ev, trava=False)
+    return {"plano": r[0]["nome"], "usadas": r[2], "sessoes": r[0]["sessoes_mes"]} if r else None
+
+
+def do_evento(c, conta_id: int, evento_id: int) -> str | None:
+    """O nome do plano, se este atendimento usou a sessão inclusa da assinatura."""
+    try:
+        with c.transaction():
+            r = c.execute("""select p.nome from clinica_assinatura_usos u
+                               join clinica_assinantes a on a.id = u.assinante_id and a.conta_id = u.conta_id
+                               join clinica_assinatura_planos p on p.id = a.plano_id and p.conta_id = u.conta_id
+                              where u.conta_id=%s and u.evento_id=%s""", (conta_id, evento_id)).fetchone()
+    except Exception:  # noqa: BLE001
+        return None
+    return r[0] if r else None
+
+
 def ao_finalizar(c, conta_id: int, evento_id: int) -> bool:
     """Chamado por `clinica_agenda.mudar_situacao` ANTES da baixa do pacote. Se o
     atendimento é o incluso no plano do assinante e ainda há sessão do mês, usa o
     benefício e devolve True (aí o pacote não baixa)."""
-    ev = ca.evento(c, conta_id, evento_id)
-    if not ev or not ev.get("servico_id"):
+    r = _cobertura(c, conta_id, ca.evento(c, conta_id, evento_id), trava=True)
+    if not r:
         return False
-    a = do_paciente(c, conta_id, ev["lead"], ev["fone"], ev["paciente"], trava=True)
-    if not a or a["servico_id"] != ev["servico_id"] or a["sessoes_mes"] <= 0:
-        return False
-    dia = ca.local(ev["inicio"]).date()
-    if dia < a["inicio"]:
-        return False
-    comp = dia.replace(day=1)
-    usados = c.execute("""select count(*) from clinica_assinatura_usos
-                           where conta_id=%s and assinante_id=%s and competencia=%s""",
-                       (conta_id, a["assinante_id"], comp)).fetchone()[0]
-    if usados >= a["sessoes_mes"]:
-        return False
+    a, comp, _usados = r
     return c.execute("""insert into clinica_assinatura_usos (conta_id, assinante_id, competencia, evento_id)
                         values (%s,%s,%s,%s) on conflict (evento_id) do nothing returning id""",
                      (conta_id, a["assinante_id"], comp, evento_id)).fetchone() is not None
@@ -347,9 +393,19 @@ def _vencimento(comp: date, dia: int, inicio: date) -> date:
     return max(v, inicio) if (comp.year, comp.month) == (inicio.year, inicio.month) else v
 
 
-def _titulo(pool, conta_id: int, paciente: str, fone: str, plano_nome: str, valor: int, venc: date,
+def _titulo(pool, conta_id: int, mid: int, paciente: str, fone: str, plano_nome: str, valor: int, venc: date,
             comp: date) -> int | None:
     from finance import empresa as _emp
+    marca = f"mensalidade nº {mid}"
+    # o processo caiu entre criar o título e gravar o id: o título já existe
+    try:
+        with pool.connection() as c:
+            r = c.execute("""select id from titulos where conta_id=%s and tipo='receber' and descricao like %s
+                              order by id limit 1""", (conta_id, f"%({marca})")).fetchone()
+            if r:
+                return r[0]
+    except Exception:  # noqa: BLE001
+        pass
     cliente_id = None
     try:
         from finance import clientes as _cli
@@ -359,7 +415,7 @@ def _titulo(pool, conta_id: int, paciente: str, fone: str, plano_nome: str, valo
         cliente_id = None
     try:
         t = _emp.criar_titulo(pool, conta_id, "receber",
-                              f"Assinatura {plano_nome} · {paciente} — {MESES[comp.month - 1]}/{comp.year}",
+                              f"Assinatura {plano_nome} · {paciente} — {MESES[comp.month - 1]}/{comp.year} ({marca})",
                               int(valor), venc, contraparte=paciente, categoria="Vendas", cliente_id=cliente_id)
         return t["id"]
     except Exception:  # noqa: BLE001 — a mensalidade fica registrada; o próximo ciclo tenta de novo
@@ -407,7 +463,7 @@ def gerar(pool, conta_id: int, hoje: date, so: int | None = None) -> int:
             novos.append((mid, pac, fone, pnome, valor, venc, comp))
         c.commit()
     for mid, pac, fone, pnome, valor, venc, comp in novos:
-        tid = _titulo(pool, conta_id, pac, fone, pnome, valor, venc, comp)
+        tid = _titulo(pool, conta_id, mid, pac, fone, pnome, valor, venc, comp)
         if tid:
             with pool.connection() as c:
                 c.execute("update clinica_assinatura_mensalidades set titulo_id=%s where id=%s and conta_id=%s",
@@ -427,7 +483,9 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                 try:
                     with c.transaction():
                         contas = [r[0] for r in c.execute(
-                            "select distinct conta_id from clinica_assinantes where estado='ativa'").fetchall()]
+                            """select conta_id from clinica_assinantes where estado='ativa'
+                               union select conta_id from clinica_assinatura_mensalidades where titulo_id is null"""
+                        ).fetchall()]
                 except Exception:  # noqa: BLE001 — sem a 384
                     contas = []
             for conta_id in contas:

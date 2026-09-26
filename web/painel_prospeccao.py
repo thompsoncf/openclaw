@@ -2798,6 +2798,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                                        escopo=escopo)
         ag_cfg, ag_conhec = None, None
         dist_cfg, dist_membros, dist_chips, dist_qr = None, [], [], False
+        regras_chip, regra_cat = [], None
         perfil = {"instagram": "", "cargo": "", "material": "", "material_tipo": "link"}
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
@@ -2808,6 +2809,13 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
             # pra escolher por qual número o aviso sai. Reusa a mesma listagem dos
             # cartões de QR — inclusive o estado, que é o que faz a escolha informada.
             dist_chips = chips_da_conta(c, ctx["conta_id"])
+            # REGRAS POR NÚMERO (migração 388): só com dois chips ou mais — com um só,
+            # "quem recebe o lead deste número" é o próprio rodízio
+            if len(dist_chips) > 1 and ctx["gerencia"]:
+                from finance import chip_regra as _cr
+                regras_chip = _cr.listar(c, ctx["conta_id"], dist_chips)
+                regra_cat = _cr.catalogo_liberado(c, ctx["conta_id"])
+                c.commit()
             # QR x Twilio/Meta decide QUAL tela mostrar: no QR o aviso é texto livre e
             # há chip pra escolher; em Twilio/Meta a janela de 24h obriga template e não
             # existe chip nenhum. Pedir template pra quem está no QR — como esta tela
@@ -2854,7 +2862,8 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    # automação de conta, como o agente e o rodízio
                    resumo=_resumo_cfg(pool, ctx["conta_id"]), resumo_max=_rs_max(),
                    dist_cfg=dist_cfg, dist_membros=dist_membros, dist_chips=dist_chips,
-                   dist_qr=dist_qr,
+                   dist_qr=dist_qr, regras_chip=regras_chip, regra_cat=regra_cat,
+                   regra_eventos=modo_evento,
                    abrir=abrir, embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -4345,6 +4354,48 @@ async def comunicacao_distribuicao(request: Request):
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
+def _salvar_regra_chip(conta_id: int, chip_id: int, dados: dict) -> dict:
+    from finance import chip_regra as _cr
+    with get_pool().connection() as c:
+        r = _cr.salvar(c, conta_id, chip_id, dados)
+        if r.get("ok"):
+            c.commit()
+        else:
+            c.rollback()
+    return r
+
+
+@router.post("/painel/prospeccao/comunicacao/regra-chip")
+async def comunicacao_regra_chip(request: Request):
+    """Salva a regra de UM chip (finance/chip_regra.py). Só dono/gestor.
+
+    Não toca na conexão do chip nem em `canais_config` (CLAUDE.md §1): a regra é
+    uma linha à parte, lida na entrada da mensagem."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor configura as regras por número."
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    f = await request.form()
+    sim = lambda k: str(f.get(k) or "").lower() in ("1", "on", "true", "sim")  # noqa: E731
+    try:
+        chip_id = int(f.get("chip_id") or 0)
+    except (TypeError, ValueError):
+        chip_id = 0
+    # o async só lê o formulário; o banco vai pra threadpool (test_event_loop_nao_trava)
+    r = await run_in_threadpool(_salvar_regra_chip, ctx["conta_id"], chip_id, {"ativa": sim("ativa"), "membro_id": f.get("membro_id"),
+             "ia_ligada": sim("ia_ligada"), "ia_horario": f.get("ia_horario"),
+             "ia_dias": f.getlist("ia_dias"), "ia_hora_ini": f.get("ia_hora_ini"),
+             "ia_hora_fim": f.get("ia_hora_fim"), "ia_fora_texto": f.get("ia_fora_texto"),
+             "ia_apresentacao": f.get("ia_apresentacao"),
+             "aviso_agenda_membro_id": f.get("aviso_agenda_membro_id"),
+             "aviso_dono_membro_id": f.get("aviso_dono_membro_id")})
+    request.session["prosp_aviso"] = ("Regra do número salva ✓" if r.get("ok")
+                                      else r.get("erro") or "Não consegui salvar a regra.")
+    return RedirectResponse(_AG_DESTINO, status_code=303)
+
+
 @router.post("/painel/prospeccao/comunicacao/agente-instrucoes")
 def comunicacao_agente_instrucoes(request: Request, texto: str = Form("")):
     """Salva as instruções gerais do agente (uma linha tipo='instrucoes' por conta)."""
@@ -5139,13 +5190,32 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # WhatsApp leva 200 como se tivesse dado tudo certo. Falhar o rodízio custa um lead
     # sem dono; perder a mensagem custa o cliente.
     _mid = None
+    # A REGRA POR NÚMERO (migração 388): o contato NOVO que entra por um chip com
+    # regra vai pro dono dela em vez do rodízio — e, com a IA ligada, é ela quem
+    # atende. Ninguém da equipe é avisado de "lead novo pra você" nesse caso: o lead
+    # é da IA, e ela chama gente pelo `chip_regra.avisar` quando precisar.
+    _ia_da_regra = False
     try:
         with c.transaction():
             from finance import distribuicao as _dist
+            from finance import chip_regra as _cr
             # da equipe não entra no rodízio: era assim que o recado de um vendedor
             # virava "🔥 Novo lead pra você" no celular de um COLEGA.
-            _mid = None if da_equipe else _dist.atribuir_se_sem_dono(c, conta_id, lead_id)
-            if _mid:
+            _regra = None if da_equipe else _cr.dono_do_contato_novo(
+                c, conta_id, chip_id, contato_novo=lead_novo)
+            _gemeo = _cr.dono_do_gemeo(c, conta_id, lead_id) if _regra else None
+            if _gemeo:
+                # já é cliente de alguém pelo outro chip: fica com ele, sem IA
+                _mid = _gemeo if c.execute(
+                    "update prospeccao set vendedor_id=%s, atualizado_em=now() "
+                    "where id=%s and conta_id=%s and vendedor_id is null",
+                    (_gemeo, lead_id, conta_id)).rowcount else None
+            elif _regra:
+                _mid = _cr.atribuir(c, conta_id, lead_id, conv_id, _regra)
+                _ia_da_regra = bool(_mid and _regra.get("ia_ligada"))
+            else:
+                _mid = None if da_equipe else _dist.atribuir_se_sem_dono(c, conta_id, lead_id)
+            if _mid and not _ia_da_regra:
                 _emp = (c.execute("select coalesce(empresa,'') from prospeccao where id=%s",
                                   (lead_id,)).fetchone() or [""])[0]
                 import threading
@@ -5160,13 +5230,16 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     except Exception:  # noqa: BLE001
         import logging
         _mid = None
+        _ia_da_regra = False
         logging.getLogger("prospeccao.rodizio").warning(
             "rodízio falhou no inbound conta=%s lead=%s — mensagem preservada",
             conta_id, lead_id, exc_info=True)
     # Lead novo de verdade (não resposta de alguém que já tinha entrada na base) já
     # sai da caixa com um retorno agendado — assim ninguém esquece de responder.
     # Best-effort: nunca deixa a entrada da mensagem quebrar por isso.
-    if lead_novo and not da_equipe:
+    # Com a IA da regra atendendo, o "Retornar contato" seria tarefa pra ninguém: o
+    # dono do lead é a IA, e quem responde é ela, na hora.
+    if lead_novo and not da_equipe and not _ia_da_regra:
         try:
             from finance import agenda as _agenda
             _agenda.criar_evento(
@@ -6129,6 +6202,14 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
         # `nova` corta a reentrega: o wa-qr manda a mesma mensagem de novo quando a
         # conexão oscila, e sem isto o cliente recebia uma resposta por entrega.
         atender = nova and _agente_atende(c, conv_id, agente_on)
+        # A IA DA REGRA ABRIU? Quem escreveu fora do horário próprio recebeu o recado
+        # e ficou esperando; não há relógio que acorde a IA na abertura, então a
+        # primeira mensagem que entra na empresa acorda as que ficaram (chip_regra).
+        # Na MESMA conexão (savepoint próprio): nada de segunda conexão por mensagem.
+        abertas = []
+        if nova:
+            from finance import chip_regra as _cr
+            abertas = [x for x in _cr.pendentes_da_abertura(c, empresa_id) if x != conv_id]
         c.commit()
     log.info("webhook_wa_qr: chip=%s empresa=%s conv_id=%s gravado ✓ (mestre=%s nova=%s atende=%s)",
              chip_id, empresa_id, conv_id, agente_on, nova, atender)
@@ -6145,6 +6226,9 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
     if atender:
         from finance import agente as _ag
         background_tasks.add_task(_ag.atender, get_pool(), empresa_id, conv_id)
+    for _cid in abertas:
+        from finance import agente as _ag
+        background_tasks.add_task(_ag.atender, get_pool(), empresa_id, _cid)
     return Response("ok", media_type="text/plain")
 
 
@@ -14327,6 +14411,95 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     });
   })();
   </script>
+
+  {% if regras_chip %}
+  {# REGRAS POR NÚMERO (migração 388, mockup docs/mockups/vendedor_ia_chip.html).
+     Uma regra por chip: quem recebe o contato NOVO dele e se a IA atende. Sem regra,
+     o chip segue no rodízio do cartão de cima. #}
+  <style>
+  .rgchip{border:1px solid var(--borda);border-radius:11px;background:var(--bg);margin-top:.6rem}
+  .rgchip>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.6rem;padding:.65rem .75rem;flex-wrap:wrap}
+  .rgchip>summary::-webkit-details-marker{display:none}
+  .rgchip .nm{font-weight:700;font-size:.92rem}
+  .rgchip .res{flex:1;min-width:12rem;font-size:.8rem;color:var(--txt-mut)}
+  .rgchip .res b{color:var(--txt)}
+  .rgcorpo{padding:.2rem .75rem .8rem;border-top:1px solid var(--borda)}
+  .rgdias{display:flex;flex-wrap:wrap;gap:.3rem}
+  .rgdias label{display:inline-flex;align-items:center;gap:.25rem;font-size:.8rem;border:1px solid var(--borda);border-radius:8px;padding:.2rem .45rem;cursor:pointer;text-transform:none;letter-spacing:0;color:var(--txt);margin:0}
+  .rghoras{display:flex;gap:.4rem;align-items:center;font-size:.82rem}
+  .rghoras select{width:auto}
+  </style>
+  <div class="cx-card">
+    <div style="display:flex;align-items:center;gap:.7rem">
+      <div style="font-size:1.6rem">📱</div>
+      <div style="flex:1"><b style="font-size:1rem">Regras por número<span class="tag-new">novo</span></b>
+        <div class="mut" style="font-size:.8rem">Cada chip pode ter um dono só para os contatos novos, com a IA atendendo só nele. Sem regra, o chip segue no rodízio.</div></div>
+    </div>
+    {% if regra_cat and regra_cat.total %}
+    <div class="{{ 'distalerta' if not regra_cat.liberados else 'distnote' }}" style="margin-top:.7rem">
+      {% if not regra_cat.liberados %}⚠️ <b>Nenhum item do catálogo está liberado para a IA dizer o preço.</b>
+      Com a IA ligada, ela não cita valor nenhum: convida {{ 'para a visita' if regra_eventos else 'para uma reunião' }} e diz que o orçamento sai conferido.
+      {% else %}💬 <b>{{ regra_cat.liberados }} de {{ regra_cat.total }}</b> itens do catálogo liberados para a IA dizer o preço, sempre como valor de referência ("a partir de").{% endif %}
+      Libere item por item em <a href="/painel/servicos" style="color:inherit"><b>Serviços › Catálogo</b></a> ("A IA pode dizer este preço").
+    </div>
+    {% endif %}
+    {% for ch in regras_chip %}{% set r = ch.regra %}
+    <details class="rgchip" {% if r and r.ativa %}open{% endif %}>
+      <summary>
+        <span class="nm">{{ ch.rotulo }}{% if ch.principal %} <span class="mut" style="font-weight:400;font-size:.76rem">· principal</span>{% endif %}</span>
+        <span class="zappill {{ 'ok' if ch.ativo else 'off' }}">{{ 'conectado' if ch.ativo else 'fora do ar' }}</span>
+        <span class="res">{% if r and r.ativa %}Contato novo vai para <b>{% for m in dist_membros if m.id == r.membro_id %}{{ m.nome }}{% endfor %}</b>{% if r.ia_ligada %} · <b>IA atende</b> ({{ '24 horas' if r.ia_horario == '24h' else 'horário próprio' }}){% endif %}{% else %}Rodízio da empresa{% endif %}</span>
+      </summary>
+      <form class="rgcorpo" method="post" action="/painel/prospeccao/comunicacao/regra-chip">
+        <input type="hidden" name="chip_id" value="{{ ch.id }}">
+        <div class="agrow"><div class="lab"><b>Regra ligada</b><div>Desligada, o contato novo deste número volta para o rodízio.</div></div>
+          <label class="sw"><input type="checkbox" name="ativa" {% if r and r.ativa %}checked{% endif %}><span></span></label></div>
+        <div class="aggrid">
+          <div class="agfield"><label>Quem recebe o contato novo</label>
+            <select class="fld" name="membro_id"><option value="">escolha</option>
+              {% for m in dist_membros %}<option value="{{ m.id }}" {% if r and r.membro_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+          <div class="agfield"><label>Vale para</label>
+            <div style="font-size:.84rem;padding:.45rem 0">{% if r and r.ativa and r.vale_desde_txt %}Contatos novos a partir de {{ r.vale_desde_txt }}{% else %}Contatos novos a partir de quando ligar{% endif %}</div></div>
+        </div>
+        <div class="agrow" style="margin-top:.5rem"><div class="lab"><b>A IA atende as conversas deste dono, neste número</b><div>Só os contatos novos que caírem na regra. A chave geral do agente não muda.</div></div>
+          <label class="sw"><input type="checkbox" name="ia_ligada" {% if r and r.ia_ligada %}checked{% endif %}><span></span></label></div>
+        <div class="agfield" style="margin-top:.4rem"><label>Horário da IA</label>
+          <span class="ag-seg">
+            <input type="radio" id="rgh24-{{ ch.id }}" name="ia_horario" value="24h" {% if not r or r.ia_horario != 'proprio' %}checked{% endif %}><label for="rgh24-{{ ch.id }}">24 horas</label>
+            <input type="radio" id="rghpr-{{ ch.id }}" name="ia_horario" value="proprio" {% if r and r.ia_horario == 'proprio' %}checked{% endif %}><label for="rghpr-{{ ch.id }}">Horário próprio</label>
+          </span></div>
+        {% set dias = r.ia_dias if r else [0,1,2,3,4,5] %}
+        <div class="aggrid">
+          <div class="agfield"><label>Dias (horário próprio)</label><div class="rgdias">
+            {% for d, nome in [(0,'seg'),(1,'ter'),(2,'qua'),(3,'qui'),(4,'sex'),(5,'sáb'),(6,'dom')] %}
+            <label><input type="checkbox" name="ia_dias" value="{{ d }}" {% if d in dias %}checked{% endif %}>{{ nome }}</label>{% endfor %}</div></div>
+          <div class="agfield"><label>Das / até (Brasília)</label><div class="rghoras">
+            <select class="fld" name="ia_hora_ini">{% for h in range(0,24) %}<option value="{{ h }}" {% if (r.ia_hora_ini if r else 8) == h %}selected{% endif %}>{{ h }}h</option>{% endfor %}</select>
+            até
+            <select class="fld" name="ia_hora_fim">{% for h in range(1,25) %}<option value="{{ h }}" {% if (r.ia_hora_fim if r else 22) == h %}selected{% endif %}>{{ h }}h</option>{% endfor %}</select></div></div>
+        </div>
+        <div class="agfield" style="margin-top:.6rem"><label>Recado fora do horário</label>
+          <textarea class="fld" name="ia_fora_texto" rows="2" placeholder="Oi! Recebi sua mensagem 😊 Nosso atendimento volta às 8h, e eu te respondo assim que abrir.">{{ r.ia_fora_texto if r else '' }}</textarea></div>
+        <div class="agfield" style="margin-top:.6rem"><label>Como a IA se apresenta</label>
+          <input class="fld" name="ia_apresentacao" maxlength="160" value="{{ r.ia_apresentacao if r else '' }}" placeholder="Sou a assistente Zaq, da sua empresa"></div>
+        <div class="aggrid" style="margin-top:.6rem">
+          <div class="agfield"><label>Quem a IA chama para {{ 'agenda e visita' if regra_eventos else 'agenda e reunião' }}</label>
+            <select class="fld" name="aviso_agenda_membro_id"><option value="">ninguém</option>
+              {% for m in dist_membros %}<option value="{{ m.id }}" {% if r and r.aviso_agenda_membro_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+          <div class="agfield"><label>Quem a IA chama para desconto e {{ 'sinal' if regra_eventos else 'fechamento' }}</label>
+            <select class="fld" name="aviso_dono_membro_id"><option value="">ninguém</option>
+              {% for m in dist_membros %}<option value="{{ m.id }}" {% if r and r.aviso_dono_membro_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+        </div>
+        {% if ch.celular_pct is not none %}
+        <div class="distnote">Nos últimos 30 dias, <b>{{ ch.celular_pct }}% das mensagens enviadas por este número saíram do celular</b>. Com a IA ligada, quem responder pelo celular ou pelo painel <b>pausa a IA naquela conversa</b>, para os dois não falarem com o cliente ao mesmo tempo.</div>
+        {% endif %}
+        <div class="distnote">A regra nunca tira lead de ninguém: vale só para contato <b>novo</b>. Quem já é cliente de alguém pelo outro número continua com essa pessoa, sem IA.</div>
+        <div style="display:flex;justify-content:flex-end"><button class="pbtn">Salvar regra</button></div>
+      </form>
+    </details>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <div class="cx-card">
     <h3>🧠 Treinar o agente</h3>

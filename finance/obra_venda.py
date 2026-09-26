@@ -498,3 +498,24 @@ def resumo_caminho(obra: dict, sit: dict) -> str:
     for a in sit["alertas"][:2]:
         txt += f" ⚠️ {a}"
     return txt
+
+
+def topo_financeiro(pool, conta_id: int) -> dict | None:
+    """A faixa das obras no topo do Financeiro (desenho, seção 06): o dinheiro
+    parado em casa que a Caixa ainda não pagou e o gasto de obra sem obra. None
+    quando não há nada a dizer — a faixa só aparece com número."""
+    obras = [o for o in _ob.listar_obras(pool, conta_id) if o["status"] != "arquivada"]
+    parado = parado_em_casas(pool, conta_id, obras) if obras else 0
+    travadas = []
+    for o in obras:
+        if o["tipo"] == "casa" and o["pct"] == 100 and o["status"] not in ("entregue",):
+            t = situacao_da_casa(pool, conta_id, o)["trava"]
+            if t and t["chave"] != "creditado":
+                travadas.append(f"{o['nome']} ({t['nome'].lower()})")
+            elif t:
+                travadas.append(f"{o['nome']} (crédito da Caixa)")
+    sem = _ob.sem_obra(pool, conta_id, limite=1)
+    if not parado and not sem["n"]:
+        return None
+    return {"parado": parado, "travadas": travadas,
+            "sem_n": sem["n"], "sem_total": sem["total_centavos"]}

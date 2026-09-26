@@ -557,13 +557,16 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
 
     def _com_caminho(o: dict) -> str:
         """O resumo da obra e, se for casa, o caminho do dinheiro dela."""
-        txt = ob.resumo_da_obra(o)
+        sit = None
         if o["tipo"] == "casa":
             try:
                 from . import obra_venda as ov
-                txt += " " + ov.resumo_caminho(o, ov.situacao_da_casa(pool, conta_id, o))
+                sit = ov.situacao_da_casa(pool, conta_id, o)
             except Exception:  # noqa: BLE001 — sem a 353, só o custo
-                pass
+                sit = None
+        txt = ob.resumo_da_obra(o, venda=sit["venda"] if sit else None)
+        if sit:
+            txt += " " + ov.resumo_caminho(o, sit)
         return txt
 
     def consultar_obra(e: dict) -> str:

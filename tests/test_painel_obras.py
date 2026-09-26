@@ -260,6 +260,18 @@ def test_a_ficha_da_casa_mostra_o_caminho_e_o_que_trava(pool, conta, monkeypatch
     assert "trava: habite-se" in c.get("/painel/obras").text
 
 
+def test_a_ficha_mostra_a_margem(pool, conta, monkeypatch):
+    o = ob.criar_obra(pool, conta, "Casa 8", "casa", custo_previsto_centavos=8_200_000,
+                      valor_centavos=15_000_000)
+    sem_preco = ob.criar_obra(pool, conta, "Casa 9", "casa")
+    c = _cliente(pool, conta, monkeypatch)
+    _entrar(c)
+    html = c.get(f"/painel/obras/{o['id']}").text
+    assert "Margem prevista" in html and "R$ 68.000,00" in html
+    assert "45% de R$ 150.000,00 · com o custo previsto" in html
+    assert "Margem" not in c.get(f"/painel/obras/{sem_preco['id']}").text
+
+
 def test_a_reforma_nao_tem_venda_nem_papeis(pool, conta, monkeypatch):
     r = ob.criar_obra(pool, conta, "Reforma", "reforma")
     c = _cliente(pool, conta, monkeypatch)

@@ -437,6 +437,16 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — raio_x falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # O lembrete de segunda das obras (perfil `obras`): o que trava cada
+                # casa e as parcelas de reforma que já dá pra cobrar. Só faz algo na
+                # segunda, das 8h às 20h, uma vez por pessoa e semana (obras_lembretes).
+                from finance import obras_lembrete as _obl
+                n_obl = _obl.rodar(pool)
+                if n_obl:
+                    log.info("poller: ciclo #%d — lembrete das obras: %d", ciclo, n_obl)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — obras_lembrete falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 from finance import aprovacao_aviso as _ap
                 # A fila de liberação do dono só existe pra quem abre a tela de
                 # Empresa — e quem abre a tela todo dia é quem LANÇA, não quem

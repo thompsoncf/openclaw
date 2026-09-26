@@ -188,6 +188,7 @@ def ficha(request: Request, obra_id: int):
     return _render("obra", request, titulo=o["nome"], secao_ativa="obras", brl=_brl,
                    o=o, tipos=ob.ROTULO_TIPO, status=ob.ROTULO_STATUS,
                    rotulo_custo=ob.ROTULO_CUSTO, sit=sit, orc=orc,
+                   margem=ob.margem(o, sit["venda"] if sit else None),
                    tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, modelos=orf.MODELOS,
                    status_doc=ov.STATUS_DOC, modalidades=ov.MODALIDADES,
                    situacoes=[(k, ov.ROTULO_SITUACAO[k]) for k in ov.SITUACOES],
@@ -571,6 +572,9 @@ _TPL_FICHA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="ob-cx"><span class="r">{{ 'Venda prevista' if o.tipo == 'casa' else 'Contrato' }}</span>
     <span class="v">{{ brl(o.valor_centavos) if o.valor_centavos else '—' }}</span>
     <span class="n">recebido nesta obra: {{ brl(o.custos.recebido) }}</span></div>
+  {% if margem %}<div class="ob-cx"><span class="r">{{ 'Margem prevista' if margem.base == 'previsto' else 'Margem' }}</span>
+    <span class="v"{% if margem.valor < 0 %} style="color:var(--coral)"{% endif %}>{{ brl(margem.valor) }}</span>
+    <span class="n">{{ margem.pct }}% de {{ brl(margem.preco) }} · {{ 'com o custo previsto' if margem.base == 'previsto' else 'com o gasto até agora' }}</span></div>{% endif %}
 </div>
 
 <div class="ob-box"><b>O custo</b>

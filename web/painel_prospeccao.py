@@ -9162,6 +9162,20 @@ def _perda_da_ficha(c, conta_id: int, lead_id: int):
         return [], None
 
 
+def _reforma_da_ficha(c, ctx: dict, lead_id: int) -> dict:
+    """O botão da reforma na ficha (migração 375): só no perfil `obras` e só pra
+    quem gerencia — a aba Obras é de dono, gestor e financeiro. Best-effort."""
+    try:
+        with c.transaction():
+            liberada = bool(ctx.get("gerencia")) and _fr.perfil_da_conta(c, ctx["conta_id"]) == "obras"
+        if not liberada:
+            return {"liberada": False, "obra": None}
+        from finance import obra_lead as _ol
+        return {"liberada": True, "obra": _ol.reforma_do_lead(get_pool(), ctx["conta_id"], lead_id)}
+    except Exception:  # noqa: BLE001
+        return {"liberada": False, "obra": None}
+
+
 def _teto_da_ficha(c, conta_id: int, lead_id: int, status: str):
     """O estado do teto deste lead, pronto pra tela — ou (None, []) quando a etapa
     não tem teto, que é como toda conta nasce.
@@ -9270,9 +9284,10 @@ def prospeccao_ficha(request: Request, alvo_id: int):
         # `c.transaction()` (foi o que test_lead_resumo pegou). A semente da lista,
         # se foi a 1ª vez, fica gravada do mesmo jeito.
         motivos_conta, perda = _perda_da_ficha(c, ctx["conta_id"], alvo_id)
+        reforma = _reforma_da_ficha(c, ctx, alvo_id)
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
                    **avisos, teto=teto, teto_hist=teto_hist,
-                   motivos_conta=motivos_conta, perda=perda,
+                   motivos_conta=motivos_conta, perda=perda, reforma=reforma,
                    canais_contato=canais_contato, origem_ch=origem_ch,
                    a=alvo, timeline=timeline, status=status_ficha, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -9283,6 +9298,27 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                    wa_numeros=_numeros_candidatos(alvo),
                    embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.post("/painel/prospeccao/{alvo_id}/reforma")
+def prospeccao_abrir_reforma(request: Request, alvo_id: int):
+    """Abre (ou reabre) a obra de reforma do lead e leva pro orçamento dela."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx) or not ctx.get("gerencia"):
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    with pool.connection() as c:
+        if _fr.perfil_da_conta(c, ctx["conta_id"]) != "obras":
+            return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+    from finance import obra_lead as _ol
+    try:
+        o = _ol.abrir_reforma(pool, ctx["conta_id"], alvo_id)
+    except ValueError:
+        return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+    return RedirectResponse(f"/painel/obras/{o['id']}#orcamento", status_code=303)
 
 
 @router.post("/painel/prospeccao/{alvo_id}/editar")
@@ -13115,7 +13151,9 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if a.maps_url %}<a class="pbtn ghost" href="{{ a.maps_url }}" target="_blank" rel="noopener">🗺️ Mapa</a>{% endif %}
       {% if a.site_url %}<a class="pbtn ghost" href="{{ a.site_url }}" target="_blank" rel="noopener">🌐 Site</a>{% endif %}
       <span style="flex:1"></span>
-      {% if not vende_servico %}<button type="button" class="pbtn" disabled title="Disponível pra empresas que vendem serviço">📄 Gerar orçamento</button>
+      {% if reforma and reforma.liberada %}{% if reforma.obra %}<a class="pbtn" href="/painel/obras/{{ reforma.obra.id }}#orcamento">🔨 Ver a reforma</a>
+      {% else %}<form method="post" action="/painel/prospeccao/{{ a.id }}/reforma" style="margin:0"><button class="pbtn" title="Abre a obra de reforma deste cliente, com o orçamento">🔨 Abrir a reforma</button></form>{% endif %}
+      {% elif not vende_servico %}<button type="button" class="pbtn" disabled title="Disponível pra empresas que vendem serviço">📄 Gerar orçamento</button>
       {% elif a.orcamento_id %}<a class="pbtn" href="/painel/servicos?abrir={{ a.orcamento_id }}">📄 Ver orçamento</a>
       {% else %}<form method="post" action="/painel/prospeccao/{{ a.id }}/orcamento" style="margin:0"><button class="pbtn">📄 Gerar orçamento</button></form>{% endif %}
       {% if a.site_url %}<button type="button" class="pbtn ghost" id="enrqf-btn" onclick="enrqLead({{ a.id }})" title="Raspa o site e descobre e-mail, Instagram e WhatsApp">🔎 Verificar canais</button>{% endif %}

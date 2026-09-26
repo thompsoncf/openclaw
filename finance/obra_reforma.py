@@ -305,6 +305,8 @@ def enviar(pool, conta_id: int, orcamento_id: int) -> dict:
                       where id=%s and conta_id=%s""",
                   (token, date.today() + timedelta(days=VALIDADE_DIAS), orcamento_id, conta_id))
         c.commit()
+    from . import obra_lead as _ol          # o card do lead da reforma vai pra Proposta
+    _ol.orcamento_enviado(pool, conta_id, r[0])
     return next(o for o in orcamentos(pool, conta_id, r[0]) if o["id"] == orcamento_id)
 
 
@@ -342,7 +344,11 @@ def aceitar(pool, token: str, nome: str, doc: str, ip: str) -> bool:
         c.execute("""update obras set valor_centavos=coalesce(valor_centavos, 0) + %s,
                             atualizado_em=now()
                       where id=%s and conta_id=%s""", (int(total), obra_id, conta_id))
+        modelo = c.execute("select modelo_pagamento from obra_orcamentos where id=%s",
+                           (oid,)).fetchone()[0]
         c.commit()
+    from . import obra_lead as _ol          # Fechado (ou Crédito em análise, no RCB)
+    _ol.orcamento_aceito(pool, conta_id, obra_id, modelo)
     return True
 
 
@@ -444,6 +450,10 @@ def cobrancas(pool, conta_id: int, obra: dict) -> list[dict]:
         return []
     versoes = {o["versao"]: o for o in orcamentos(pool, conta_id, obra["id"])}
     chave = _pix.da_conta(pool, conta_id)
+    from urllib.parse import quote
+    from . import obra_lead as _ol
+    lead = _ol.lead_da_obra(pool, conta_id, obra["id"])
+    numero = _ol.wa_numero(lead["whatsapp"]) if lead else ""
     with pool.connection() as c:
         r = c.execute("select coalesce(nullif(nome_fantasia,''), nullif(razao_social,''), nome) "
                       "from contas where id=%s", (conta_id,)).fetchone()
@@ -461,7 +471,8 @@ def cobrancas(pool, conta_id: int, obra: dict) -> list[dict]:
                 codigo = None
         msg = mensagem_de_cobranca(p, v.get("aceito_nome") or "", empresa, codigo, link)
         out.append(dict(p, cliente=v.get("aceito_nome") or "", token=v.get("token"),
-                        pix=codigo, link=link, mensagem=msg))
+                        pix=codigo, link=link, mensagem=msg,
+                        wa_url=f"https://wa.me/{numero}?text={quote(msg)}"))
     return out
 
 

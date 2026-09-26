@@ -2863,7 +2863,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    resumo=_resumo_cfg(pool, ctx["conta_id"]), resumo_max=_rs_max(),
                    dist_cfg=dist_cfg, dist_membros=dist_membros, dist_chips=dist_chips,
                    dist_qr=dist_qr, regras_chip=regras_chip, regra_cat=regra_cat,
-                   regra_eventos=modo_evento,
+                   regra_eventos=modo_evento, **_ctx_grade_visita(),
                    abrir=abrir, embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -3276,6 +3276,14 @@ def _qr_relogio_retencao(conta_id: int, status: str | None) -> None:
         import logging
         logging.getLogger("prospeccao.wa_qr").warning(
             "não deu pra zerar o relógio de retenção da conta %s: %s", conta_id, e)
+
+
+def _ctx_grade_visita() -> dict:
+    """O que a grade da visita (cartão Regras por número) precisa pra desenhar."""
+    from finance import ia_visita as _iv
+    return {"rg_dias": _iv.DIAS, "rg_horas": list(_iv.HORAS_DA_GRADE),
+            "rg_rotulo": _iv.ROTULO_ESTADO,
+            "regra_visita_padrao": _iv.config_tela(None, None)}
 
 
 def chips_da_conta(c, conta_id: int) -> list[dict]:
@@ -4354,10 +4362,21 @@ async def comunicacao_distribuicao(request: Request):
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
+def _iv_grade_do_form(f) -> dict:
+    from finance import ia_visita as _iv
+    return _iv.grade_do_form(lambda k: (f.get(k) or "").strip())
+
+
 def _salvar_regra_chip(conta_id: int, chip_id: int, dados: dict) -> dict:
     from finance import chip_regra as _cr
+    visita = dados.pop("visita", None)
     with get_pool().connection() as c:
         r = _cr.salvar(c, conta_id, chip_id, dados)
+        if r.get("ok") and visita is not None:
+            from finance import ia_visita as _iv
+            erro = _iv.salvar(c, conta_id, chip_id, visita)
+            if erro:
+                r = {"ok": False, "erro": erro}
         if r.get("ok"):
             c.commit()
         else:
@@ -4390,7 +4409,18 @@ async def comunicacao_regra_chip(request: Request):
              "ia_hora_fim": f.get("ia_hora_fim"), "ia_fora_texto": f.get("ia_fora_texto"),
              "ia_apresentacao": f.get("ia_apresentacao"),
              "aviso_agenda_membro_id": f.get("aviso_agenda_membro_id"),
-             "aviso_dono_membro_id": f.get("aviso_dono_membro_id")})
+             "aviso_dono_membro_id": f.get("aviso_dono_membro_id"),
+             # a visita que a IA marca (migração 390) — só o cartão de quem vende festa
+             # manda estes campos; sem eles, `_salvar_regra_chip` não mexe na visita
+             "visita": ({"visita_marca": sim("visita_marca"),
+                         "visita_anfitria_id": f.get("visita_anfitria_id"),
+                         "visita_grade": _iv_grade_do_form(f),
+                         "visita_dur_min": f.get("visita_dur_min"),
+                         "visita_folga_min": f.get("visita_folga_min"),
+                         "visita_antes_festa_h": f.get("visita_antes_festa_h"),
+                         "visita_min_h": f.get("visita_min_h"),
+                         "visita_max_dias": f.get("visita_max_dias")}
+                        if f.get("tem_visita") else None)})
     request.session["prosp_aviso"] = ("Regra do número salva ✓" if r.get("ok")
                                       else r.get("erro") or "Não consegui salvar a regra.")
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -14428,6 +14458,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   .rgdias label{display:inline-flex;align-items:center;gap:.25rem;font-size:.8rem;border:1px solid var(--borda);border-radius:8px;padding:.2rem .45rem;cursor:pointer;text-transform:none;letter-spacing:0;color:var(--txt);margin:0}
   .rghoras{display:flex;gap:.4rem;align-items:center;font-size:.82rem}
   .rghoras select{width:auto}
+  .rggrade{display:grid;grid-template-columns:auto repeat(7,1fr);gap:3px;font-size:.7rem;margin-top:.2rem}
+  .rggrade .h{color:var(--txt-mut);text-align:center;padding:.2rem 0}
+  .rgcel{border:1px solid var(--borda);background:var(--bg);color:var(--txt-mut);border-radius:5px;padding:.25rem 0;cursor:pointer;min-height:1.6rem;font-size:.68rem}
+  .rgcel.ok{background:#10241A;border-color:#1E4A3A;color:var(--verde)}
+  .rgcel.conf_dia{background:#2a1d0c;border-color:#6b4d17;color:#f7d9a8}
+  .rgcel.sem_festa{background:#1a1226;border-color:#3a2b52;color:#c9a3e0}
   </style>
   <div class="cx-card">
     <div style="display:flex;align-items:center;gap:.7rem">
@@ -14490,6 +14526,32 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <select class="fld" name="aviso_dono_membro_id"><option value="">ninguém</option>
               {% for m in dist_membros %}<option value="{{ m.id }}" {% if r and r.aviso_dono_membro_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
         </div>
+        {% if regra_eventos %}{% set v = r.visita if r and r.visita else regra_visita_padrao %}
+        <input type="hidden" name="tem_visita" value="1">
+        <div class="agrow" style="margin-top:.6rem"><div class="lab"><b>A IA marca a visita ao espaço</b><div>Confere a agenda, as festas e o que foi combinado nas conversas; manda o convite, confirma na véspera às 18h e 2h antes, e remarca. Desligada, ela pega o dia preferido e chama a anfitriã.</div></div>
+          <label class="sw"><input type="checkbox" name="visita_marca" {% if v.marca %}checked{% endif %}><span></span></label></div>
+        <div class="aggrid">
+          <div class="agfield"><label>Anfitriã (recebe o cliente e é avisada)</label>
+            <select class="fld" name="visita_anfitria_id"><option value="">ninguém</option>
+              {% for m in dist_membros %}<option value="{{ m.id }}" {% if v.anfitria_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+          <div class="agfield"><label>Duração da visita + folga (min)</label>
+            <div class="rghoras"><input class="fld" name="visita_dur_min" type="number" min="15" max="240" step="15" value="{{ v.dur }}" style="max-width:5.5rem"> + <input class="fld" name="visita_folga_min" type="number" min="0" max="120" step="15" value="{{ v.folga }}" style="max-width:5.5rem"></div></div>
+          <div class="agfield"><label>Sem visita antes de festa (horas)</label>
+            <input class="fld" name="visita_antes_festa_h" type="number" min="0" max="12" value="{{ v.antes_festa_h }}" style="max-width:5.5rem"></div>
+          <div class="agfield"><label>Antecedência: de (horas) / até (dias)</label>
+            <div class="rghoras"><input class="fld" name="visita_min_h" type="number" min="1" max="72" value="{{ v.min_h }}" style="max-width:5.5rem"> / <input class="fld" name="visita_max_dias" type="number" min="1" max="60" value="{{ v.max_dias }}" style="max-width:5.5rem"></div></div>
+        </div>
+        <div class="agfield" style="margin-top:.6rem"><label>Grade de visita · toque pra mudar: ✓ livre · conf. = confirma no dia · s/ festa = só em dia sem festa · vazio = não</label>
+          <div class="rggrade">
+            <span></span>{% for nome in rg_dias %}<span class="h">{{ nome }}</span>{% endfor %}
+            {% for h in rg_horas %}<span class="h">{{ h }}h</span>
+              {% for d in range(7) %}{% set e = (v.grade.get(d|string) or {}).get(h|string, '') %}
+              <button type="button" class="rgcel {{ e }}" data-e="{{ e }}"><span>{{ rg_rotulo.get(e, '') }}</span><input type="hidden" name="g_{{ d }}_{{ h }}" value="{{ e }}"></button>
+              {% endfor %}
+            {% endfor %}
+          </div>
+          <small class="mut" style="font-size:.72rem">Meia hora vale: 9h30 cabe se 9h está marcado. Domingo sem horário = só a pedido, e a IA chama a anfitriã.</small></div>
+        {% endif %}
         {% if ch.celular_pct is not none %}
         <div class="distnote">Nos últimos 30 dias, <b>{{ ch.celular_pct }}% das mensagens enviadas por este número saíram do celular</b>. Com a IA ligada, quem responder pelo celular ou pelo painel <b>pausa a IA naquela conversa</b>, para os dois não falarem com o cliente ao mesmo tempo.</div>
         {% endif %}
@@ -14499,6 +14561,20 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </details>
     {% endfor %}
   </div>
+  <script>
+  (function(){
+    // a grade da visita: cada toque passa pro próximo estado
+    var ORDEM=['','ok','conf_dia','sem_festa'], ROT={'':'','ok':'✓','conf_dia':'conf.','sem_festa':'s/ festa'};
+    document.querySelectorAll('.rgcel').forEach(function(b){
+      b.addEventListener('click',function(){
+        var e=b.getAttribute('data-e')||'', n=ORDEM[(ORDEM.indexOf(e)+1)%ORDEM.length];
+        b.setAttribute('data-e',n); b.className='rgcel '+n;
+        var inp=b.querySelector('input'); inp.value=n;
+        b.querySelector('span').textContent=ROT[n];
+      });
+    });
+  })();
+  </script>
   {% endif %}
 
   <div class="cx-card">

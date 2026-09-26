@@ -147,6 +147,13 @@ def pool():
         # 389 amplia pela sétima, com `mais_de_um_chip` — o terceiro portão de CONTA
         # (a regra por número só existe em empresa de dois chips)
         c.execute((BASE / "389_novidade_regras_por_numero.sql").read_text(encoding="utf-8"))
+        # 391 amplia pela oitava, com `visita_da_ia` (dois chips e vende festa). Os dois
+        # avisos dela saem logo em seguida: um deles mira `eventos`, e a Buffet daqui
+        # passaria a contar um aviso que os testes de contagem não esperam. O conteúdo
+        # deles é conferido em `test_os_avisos_da_391`, que reaplica a migração.
+        c.execute((BASE / "391_novidade_ia_marca_visita.sql").read_text(encoding="utf-8"))
+        c.execute("delete from novidades where chave in "
+                  "('ia-do-numero-marca-visita','visita-meia-hora')")
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1310,3 +1317,21 @@ def test_o_cabecalho_do_funil_avisa_quem_tem_funil(pool):
     assert "festa" not in (tit + res + corpo).lower()
     assert res and link == "/painel/prospeccao"
     assert "DONO E GESTOR" in corpo, "o que é só da gerência tem que dizer que é"
+
+
+def test_os_avisos_da_391(pool):
+    """A etapa 2 do vendedor IA: o aviso da visita marcada pela IA mira quem VÊ a
+    chave (dois chips e vende festa) e só a gerência; o da meia hora mira quem vende
+    festa, vendedor incluído — é ele quem marca pelo app. A chave não pode colidir
+    com a da 260 ('ia-marca-visita'), senão o `on conflict do nothing` engole o aviso."""
+    with pool.connection() as c:
+        c.execute((BASE / "391_novidade_ia_marca_visita.sql").read_text(encoding="utf-8"))
+        rows = {r[0]: r[1:] for r in c.execute(
+            """select chave, publico, pra_quem, resumo, link from novidades
+                where chave in ('ia-do-numero-marca-visita','visita-meia-hora')""").fetchall()}
+        c.execute("delete from novidades where chave in "
+                  "('ia-do-numero-marca-visita','visita-meia-hora')")
+        c.commit()
+    assert rows["ia-do-numero-marca-visita"][:2] == ("visita_da_ia", ["dono", "gestor"])
+    assert rows["visita-meia-hora"][:2] == ("eventos", ["dono", "gestor", "vendedor"])
+    assert all(r[2] and r[3] for r in rows.values())

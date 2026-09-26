@@ -317,6 +317,9 @@ def listar(c, conta_id: int, chips: list[dict]) -> list[dict]:
                 regras[d["chip_id"]] = d
     except Exception:  # noqa: BLE001
         regras = {}
+    from finance import ia_visita as _iv
+    for d in regras.values():
+        d["visita"] = _iv.config_tela(c, d["id"])
     saida = []
     for ch in chips:
         cid = int(ch.get("id") or conta_id)
@@ -467,11 +470,34 @@ def avisar(pool, conta_id: int, r: dict, motivo: str, *, prospeccao_id=None,
         return None
     if not m:
         return None
-    nome, email, wa = m
     quem = (lead or "").strip() or "Um cliente"
     titulo = f"🤖 A IA precisa de você · {rotulo}"
     corpo = f"{quem}: {(resumo or '').strip() or rotulo}"
     url = f"/cockpit/lead/{prospeccao_id}" if prospeccao_id else "/cockpit"
+    _enviar_aviso(pool, conta_id, mid, m, titulo, corpo, url)
+    return mid
+
+
+def notificar(pool, conta_id: int, membro_id: int, titulo: str, corpo: str, url: str) -> bool:
+    """Avisa uma pessoa da equipe de algo que a IA FEZ (marcou, remarcou uma visita) —
+    sem entrar em `ia_avisos`, que é a conta de quando a IA PRECISOU de gente. Nunca
+    levanta."""
+    try:
+        with pool.connection() as c:
+            m = c.execute("select coalesce(nullif(nome,''), email), email, coalesce(whatsapp,'') "
+                          "from membros where id=%s and conta_id=%s and ativo",
+                          (membro_id, conta_id)).fetchone()
+    except Exception:  # noqa: BLE001
+        return False
+    if not m:
+        return False
+    _enviar_aviso(pool, conta_id, membro_id, m, titulo, corpo, url)
+    return True
+
+
+def _enviar_aviso(pool, conta_id: int, mid: int, m, titulo: str, corpo: str, url: str) -> None:
+    """Push, e-mail e WhatsApp — cada um no seu try: um canal caído não cala os outros."""
+    nome, email, wa = m
     try:
         from finance import cockpit as _ck
         _ck.enviar_push(pool, conta_id, mid, titulo, corpo[:140], url)
@@ -495,4 +521,3 @@ def avisar(pool, conta_id: int, r: dict, motivo: str, *, prospeccao_id=None,
                 wo.enviar(c2, conta_id, wa, f"{titulo}\n\n{corpo}" + (f"\n\n{link}" if link else ""))
         except Exception as e:  # noqa: BLE001
             _log.info("chip_regra.avisar: WhatsApp não saiu (conta=%s): %s", conta_id, e)
-    return mid

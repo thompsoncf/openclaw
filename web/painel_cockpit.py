@@ -4177,8 +4177,14 @@ _VISITA_JS = r"""
     $("dias").innerHTML=V.dias.map(function(d){
       return '<div class="esc'+(d.iso===st.dia?' on':'')+'" data-d="'+d.iso+'">'+d.lab+'</div>';}).join("")
       +'<div class="esc outra'+(foraDaLista?' on':'')+'">'+lblOutra+'</div>';
+    // MEIA HORA (26/09/2026): a lista é de horas cheias, e o cliente que pedia 9h30
+    // não tinha como ser marcado pelo app. A pílula "e meia" leva a hora escolhida
+    // pros :30 e volta — a hora cheia continua sendo o toque de sempre.
+    var meia=st.hora.slice(3)==="30";
     $("horas").innerHTML=V.horas.map(function(h){
-      return '<div class="esc'+(h===st.hora?' on':'')+'" data-h="'+h+'">'+h+'</div>';}).join("");
+      return '<div class="esc'+(h.slice(0,2)===st.hora.slice(0,2)?' on':'')+'" data-h="'+h+'">'
+        +(meia&&h.slice(0,2)===st.hora.slice(0,2)?st.hora:h)+'</div>';}).join("")
+      +'<div class="esc meia'+(meia?' on':'')+'" data-meia="1">+ meia hora</div>';
     $("durs").innerHTML=DURS.map(function(o){
       return '<div class="esc'+(o[1]===st.dur?' on':'')+'" data-dur="'+o[1]+'">'+o[0]+'</div>';}).join("");
     $("lembr").innerHTML=LEMBR.map(function(o){
@@ -4211,6 +4217,7 @@ _VISITA_JS = r"""
       return;
     }
     if(t.dataset.d!=null)st.dia=t.dataset.d;
+    else if(t.dataset.meia!=null)st.hora=st.hora.slice(0,3)+(st.hora.slice(3)==="30"?"00":"30");
     else if(t.dataset.h!=null)st.hora=t.dataset.h;
     else if(t.dataset.dur!=null)st.dur=parseInt(t.dataset.dur,10);
     else if(t.dataset.lb!=null)st.lembr=parseInt(t.dataset.lb,10);

@@ -184,6 +184,23 @@ def _mais_de_um_chip(pool, conta_id: int) -> bool:
     return _cr.tem_mais_de_um_chip(pool, conta_id)
 
 
+def _visita_da_ia(pool, conta_id: int) -> bool:
+    """Dois chips E vende festa (migração 390): é quem vê "A IA marca a visita ao
+    espaço" no cartão Regras por número. Os dois portões são os da própria tela —
+    `chip_regra.tem_mais_de_um_chip` e `vendas.vende_data` (o `modo_evento` dela) —,
+    pra aviso e tela nunca discordarem. A corretora de dois chips vê a regra e não
+    vê a visita; o aviso dela é o `mais_de_um_chip`. Falha fechada."""
+    if not _mais_de_um_chip(pool, conta_id):
+        return False
+    try:
+        from finance import vendas as _vendas
+        return bool(_vendas.vende_data(pool, conta_id))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ver se a conta %s vende festa: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
 # O REGISTRO. Cada chave aponta pro portão que já decide quem vê a funcionalidade.
 # Acrescentar um público aqui EXIGE mexer no check da migração — e um teste
 # compara as duas listas, pra deriva virar falha em vez de surpresa.
@@ -211,6 +228,7 @@ PUBLICOS_CONTA = {
     "canal_proprio": _canal_proprio,
     "empresa": _empresa,
     "mais_de_um_chip": _mais_de_um_chip,
+    "visita_da_ia": _visita_da_ia,
 }
 
 # A lista completa — é ela que o check da migração espelha.

@@ -3098,6 +3098,23 @@ def _cliente_do_lead(pool, conta_id: int, numero: str) -> int | None:
     return achado["id"] if achado else None
 
 
+def _chip_do_lead(c, conta_id: int, lead_id: int):
+    """O chip por onde o lead fala com a empresa: o da conversa de WhatsApp dele.
+
+    Sem isto, a confirmação da visita saía SEMPRE pelo chip principal — e o cliente
+    que escreveu pro número da campanha recebia a confirmação de um número que ele
+    não conhece (a mesma razão do `whatsapp_out.chip_da_conversa` no agente)."""
+    try:
+        with c.transaction():
+            r = c.execute("""select chip_id from conversas
+                              where conta_id=%s and prospeccao_id=%s and canal='whatsapp'
+                              order by ultima_msg_em desc nulls last limit 1""",
+                          (conta_id, lead_id)).fetchone()
+    except Exception:  # noqa: BLE001
+        return None
+    return r[0] if r else None
+
+
 def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: str, hora: str,
                    dur_min: int = 60, local: str = "", lembrete_min: int | None = 60,
                    avisar_cliente: bool = True) -> dict:
@@ -3195,7 +3212,7 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
             from finance import whatsapp_out as wo
             from web.painel_prospeccao import _registrar_msg
             with pool.connection() as c:
-                res = wo.enviar(c, conta_id, numero, msg)
+                res = wo.enviar(c, conta_id, numero, msg, chip_id=_chip_do_lead(c, conta_id, lead_id))
                 if res.get("ok"):
                     _registrar_msg(c, conta_id, lead_id, "whatsapp", "out", "humano", msg, membro_id, res.get("sid"))
                     c.commit()
@@ -3299,7 +3316,7 @@ def remarcar_visita(pool, conta_id: int, membro_id: int | None, evento_id: int, 
             from finance import whatsapp_out as wo
             from web.painel_prospeccao import _registrar_msg
             with pool.connection() as c:
-                res = wo.enviar(c, conta_id, numero, msg)
+                res = wo.enviar(c, conta_id, numero, msg, chip_id=_chip_do_lead(c, conta_id, lead_id))
                 if res.get("ok"):
                     _registrar_msg(c, conta_id, lead_id, "whatsapp", "out", "humano",
                                    msg, membro_id, res.get("sid"))

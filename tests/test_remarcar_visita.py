@@ -288,8 +288,9 @@ def test_avisa_o_cliente_pela_conversa_da_empresa(pool, monkeypatch):
     enviados = []
     import finance.whatsapp_out as wo
     monkeypatch.setattr(wo, "enviar",
-                        lambda c, conta, num, txt: (enviados.append((num, txt))
-                                                    or {"ok": True, "sid": "x"}))
+                        # `chip_id` (26/09/2026): o aviso sai pelo chip da conversa do lead
+                        lambda c, conta, num, txt, chip_id=None: (enviados.append((num, txt))
+                                                                  or {"ok": True, "sid": "x"}))
     monkeypatch.setattr("web.painel_prospeccao._registrar_msg", lambda *a, **k: None)
     lead = _lead(pool)
     eid = _visita(pool, lead=lead)
@@ -305,7 +306,7 @@ def test_sem_avisar_nao_manda_nada(pool, monkeypatch):
     enviados = []
     import finance.whatsapp_out as wo
     monkeypatch.setattr(wo, "enviar",
-                        lambda *a: (enviados.append(1) or {"ok": True, "sid": "x"}))
+                        lambda *a, **k: (enviados.append(1) or {"ok": True, "sid": "x"}))
     lead = _lead(pool)
     eid = _visita(pool, lead=lead)
     r = ck.remarcar_visita(pool, CONTA, VEND, eid, data=_daqui(20).strftime("%Y-%m-%d"),

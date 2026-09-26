@@ -645,10 +645,37 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
                 for p in orf.parcelas_liberadas(pool, conta_id, ob.obter_obra(pool, conta_id, o["id"])):
                     if p["etapa"] == r["etapa"]:
                         txt += (f" A parcela \"{p['rotulo']}\" ({ob._brl(p['valor_centavos'])}) "
-                                "já pode ser cobrada do cliente.")
+                                "já pode ser cobrada do cliente — ofereça montar a cobrança "
+                                "com o Pix (cobrar_parcela).")
             except Exception:  # noqa: BLE001 — sem a 355, sem parcela
                 pass
         return txt
+
+    def cobrar_parcela(e: dict) -> str:
+        """A cobrança pronta das parcelas liberadas da reforma, pro dono encaminhar
+        do WhatsApp dele (decisão do dono em 26/09/2026: o cliente recebe de um
+        número que conhece, e o Pix é da própria empresa)."""
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
+        if o["tipo"] != "reforma":
+            return f"{o['nome']} é casa: a cobrança da casa é a entrada e o repasse da venda."
+        from . import obra_reforma as orf
+        try:
+            cbs = orf.cobrancas(pool, conta_id, ob.obter_obra(pool, conta_id, o["id"]))
+        except Exception:  # noqa: BLE001 — sem a 355/367
+            cbs = []
+        if not cbs:
+            return (f"Nenhuma parcela liberada em aberto em {o['nome']}: ou a etapa ainda não "
+                    "foi concluída, ou já foi paga.")
+        sep = "\n---\n"
+        aviso = "" if all(cb["pix"] for cb in cbs) else (
+            " (sem Pix: a chave da empresa não está cadastrada — o dono cadastra na ficha da "
+            f"obra, {ob.LINK_OBRAS})")
+        return ("MENSAGEM PRONTA PRA ELE ENCAMINHAR AO CLIENTE — mande exatamente o texto "
+                "entre as linhas, sem mudar nada, e diga que quando o cliente pagar é só "
+                f"avisar que você dá baixa{aviso}:" + sep
+                + sep.join(cb["mensagem"] for cb in cbs) + "\n---")
 
     def marcar_documento(e: dict) -> str:
         from . import obra_venda as ov
@@ -785,6 +812,16 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
                 "required": ["obra", "passo"],
             },
             executar=andar_venda,
+        ),
+        Ferramenta(
+            nome="cobrar_parcela",
+            descricao=("Monta a mensagem de cobrança das parcelas da REFORMA que a etapa "
+                       "concluída liberou (com o Pix copia e cola da própria empresa), "
+                       "pra pessoa encaminhar ao cliente pelo WhatsApp dela. Quando o "
+                       "cliente pagar, a baixa é pelo dar_baixa_titulo."),
+            parametros={"type": "object", "properties": {"obra": obra_s},
+                        "required": ["obra"]},
+            executar=cobrar_parcela,
         ),
         Ferramenta(
             nome="gastos_sem_obra",

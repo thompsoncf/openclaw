@@ -23,3 +23,4 @@ numpy>=1.26
 pymupdf>=1.24
 pyzbar>=0.1.9
 Pillow>=10.0
+segno>=1.6          # QR do Pix copia e cola (finance/pix.py), Python puro

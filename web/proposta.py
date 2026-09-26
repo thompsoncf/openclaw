@@ -161,7 +161,7 @@ def _card_e_cliente(pool, conta_id: int, orcamento_id) -> tuple[int | None, int 
         return None, None
 
 
-def _reservar_na_agenda(d: dict, pool=None) -> int | None:
+def _reservar_na_agenda(d: dict, pool=None, *, aprovacao: bool = True) -> int | None:
     """Cliente aprovou o orçamento de EVENTO -> a data entra na agenda da empresa.
 
     COM SINAL a data entra como PRÉ-RESERVA, com prazo: é o que a própria proposta
@@ -194,6 +194,26 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
                   ev.get("data"), ev.get("inicio"))
         return None
     pool = pool or get_pool()
+    # O ORÇAMENTO DA IA (migração 392) segura a data por 72h esperando o sinal — e sob
+    # a trava do DIA, pra duas aprovações no mesmo segundo não segurarem a mesma data.
+    # Dia que já tem festa não é segurado de novo: a equipe decide (ia_orcamento).
+    # Orçamento de vendedor segue exatamente como era.
+    # `aprovacao=False` é o "marcar a data" manual do painel: ali quem decide é a
+    # pessoa, e a regra da IA (72h, dia com festa) não se aplica.
+    from finance import ia_orcamento as _iao
+    ia = _iao.da_ia(pool, d["conta_id"], d["id"]) if aprovacao else None
+    if ia:
+        with _iao.trava_do_dia(pool, d["conta_id"], inicio.astimezone(ag.BRT).date()) as pegou:
+            if not pegou or _iao.festa_no_dia(pool, d["conta_id"], inicio):
+                _iao.bloquear(pool, d["conta_id"], d["id"], ia,
+                              "dia_com_festa" if pegou else "trava", inicio)
+                return None
+            return _criar_reserva(d, pool, inicio, fim, ev, ia=ia)
+    return _criar_reserva(d, pool, inicio, fim, ev)
+
+
+def _criar_reserva(d: dict, pool, inicio, fim, ev: dict, *, ia: dict | None = None) -> int | None:
+    """O compromisso da festa aprovada (o miolo de `_reservar_na_agenda`)."""
     cliente = (d.get("empresa") or d.get("contato") or "").strip()
     titulo = " — ".join(x for x in [(ev.get("tipo") or "Evento"), cliente] if x)
     conv = ev.get("convidados")
@@ -205,6 +225,9 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
         # o prazo acompanha a festa, não o relógio de hoje — é por AQUI que as nove
         # datas canceladas sozinhas nasceram (ver agenda.prazo_da_pre_reserva).
         ate = ag.prazo_da_pre_reserva(inicio, dias_config=dias)
+        if ia:
+            from finance import ia_orcamento as _iao
+            ate = _iao.prazo(inicio, ia["reserva_h"])
     descricao = " · ".join(x for x in [
         f"Orçamento {d.get('doc_num') or ''}".strip(),
         (f"{conv} convidados" if conv else ""),

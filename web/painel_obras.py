@@ -188,6 +188,8 @@ def ficha(request: Request, obra_id: int):
     return _render("obra", request, titulo=o["nome"], secao_ativa="obras", brl=_brl,
                    o=o, tipos=ob.ROTULO_TIPO, status=ob.ROTULO_STATUS,
                    rotulo_custo=ob.ROTULO_CUSTO, sit=sit, orc=orc,
+                   margem=ob.margem(o, sit["venda"] if sit else None),
+                   sou_dono=request.session.get("papel", "dono") == "dono",
                    tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, modelos=orf.MODELOS,
                    status_doc=ov.STATUS_DOC, modalidades=ov.MODALIDADES,
                    situacoes=[(k, ov.ROTULO_SITUACAO[k]) for k in ov.SITUACOES],
@@ -286,13 +288,21 @@ def _orcamento_da_reforma(pool, conta_id: int, o: dict) -> dict:
     """As versões (orçamento e aditivos), as parcelas que já podem ser cobradas e o
     que o editor mostra: a versão em aberto, ou uma nova se não houver nenhuma."""
     versoes = orf.orcamentos(pool, conta_id, o["id"])
-    liberadas = {(x["versao"], x["titulo_id"]) for x in orf.parcelas_liberadas(pool, conta_id, o)}
+    # a cobrança pronta (Pix da empresa + mensagem) de cada parcela liberada e aberta
+    cobrar = {x["titulo_id"]: x for x in orf.cobrancas(pool, conta_id, o)}
+    todos = [t for v in versoes for t in v["titulos"]]
+    with pool.connection() as c:
+        pagos = {r[0] for r in c.execute(
+            "select id from titulos where conta_id=%s and id = any(%s) and status='pago'",
+            (conta_id, todos or [0])).fetchall()}
     for v in versoes:
         pagaveis = [p for p in v["parcelas"] if int(p.get("valor_centavos") or 0) > 0]
         for p in v["parcelas"]:
-            p["liberada"] = False
+            p["liberada"], p["titulo_id"], p["pago"], p["cobranca"] = False, None, False, None
         for p, tid in zip(pagaveis, v["titulos"]):
-            p["liberada"] = (v["versao"], tid) in liberadas
+            p["titulo_id"], p["pago"] = tid, tid in pagos
+            p["cobranca"] = cobrar.get(tid)
+            p["liberada"] = p["cobranca"] is not None
         if v["aceito_em"]:
             v["aceito_em"] = v["aceito_em"].astimezone(_TZ)
     aberta = versoes[-1] if versoes and versoes[-1]["status"] != "aceito" else None
@@ -309,7 +319,9 @@ def _orcamento_da_reforma(pool, conta_id: int, o: dict) -> dict:
                                                                    o["etapas"])
         editor = dict(base, linhas=linhas,
                       parcelas_linhas=parcelas + [{"rotulo": "", "pct": 0, "etapa": None}])
+    from finance import pix as _pix
     return {"versoes": versoes, "editor": editor, "base": _app_url(),
+            "pix": _pix.da_conta(pool, conta_id),
             "pode_aditivo": bool(versoes) and versoes[-1]["status"] == "aceito",
             "nome_etapa": {e["chave"]: e["nome"] for e in o["etapas"]}}
 
@@ -373,6 +385,45 @@ def abrir_aditivo(request: Request, obra_id: int):
     except ValueError as e:
         return _volta(f"/painel/obras/{obra_id}", str(e))
     return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
+
+
+@router.post("/painel/obras/{obra_id}/parcela/{titulo_id}/recebi")
+def parcela_recebida(request: Request, obra_id: int, titulo_id: int):
+    """O cliente pagou a parcela (o Pix cai na conta da empresa, então a baixa é
+    dela): dá baixa no título, que lança a receita no centro da obra. Só título de
+    orçamento DESTA obra — o id na URL não abre título de outra obra nem de outra
+    conta."""
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    da_obra = {t for v in orf.orcamentos(pool, conta[0], obra_id) for t in v["titulos"]}
+    if titulo_id not in da_obra:
+        return _volta(f"/painel/obras/{obra_id}", "Essa parcela não é desta obra.")
+    from finance import empresa as emp
+    r = emp.dar_baixa_titulo(pool, conta[0], titulo_id)
+    if not (r or {}).get("ok"):
+        return _volta(f"/painel/obras/{obra_id}", (r or {}).get("erro") or "Não deu pra dar baixa.")
+    return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
+
+
+@router.post("/painel/obras/pix")
+def salvar_pix(request: Request, chave: str = Form(""), recebedor: str = Form(""),
+               cidade: str = Form(""), volta: str = Form("")):
+    """A chave Pix da empresa. SÓ O DONO: quem troca a chave troca pra onde vai o
+    dinheiro do cliente, e isso não é tarefa de gestor nem de financeiro."""
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    destino = f"/painel/obras/{int(volta)}" if volta.isdigit() else "/painel/obras"
+    if request.session.get("papel", "dono") != "dono":
+        return _volta(destino, "Só o dono troca a chave Pix da empresa.")
+    from finance import pix as _pix
+    try:
+        _pix.salvar(get_pool(), conta[0], chave, recebedor, cidade)
+    except ValueError as e:
+        return _volta(destino, str(e))
+    return RedirectResponse(destino + "#orcamento", status_code=303)
 
 
 @router.post("/painel/obras/{obra_id}/etapa")
@@ -571,6 +622,9 @@ _TPL_FICHA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="ob-cx"><span class="r">{{ 'Venda prevista' if o.tipo == 'casa' else 'Contrato' }}</span>
     <span class="v">{{ brl(o.valor_centavos) if o.valor_centavos else '—' }}</span>
     <span class="n">recebido nesta obra: {{ brl(o.custos.recebido) }}</span></div>
+  {% if margem %}<div class="ob-cx"><span class="r">{{ 'Margem prevista' if margem.base == 'previsto' else 'Margem' }}</span>
+    <span class="v"{% if margem.valor < 0 %} style="color:var(--coral)"{% endif %}>{{ brl(margem.valor) }}</span>
+    <span class="n">{{ margem.pct }}% de {{ brl(margem.preco) }} · {{ 'com o custo previsto' if margem.base == 'previsto' else 'com o gasto até agora' }}</span></div>{% endif %}
 </div>
 
 <div class="ob-box"><b>O custo</b>
@@ -665,14 +719,30 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
   {% if v.status == 'enviado' %}<div class="ob-mut">Enviado · vale até {{ v.validade_ate.strftime('%d/%m/%Y') if v.validade_ate }}.
     Mudar aqui muda o que o cliente vê no mesmo link.</div>{% endif %}
   <table class="ob-tab" style="margin-top:.4rem"><tr><th>Parcela</th><th>Quando</th><th style="text-align:right">Valor</th></tr>
-  {% for p in v.parcelas %}<tr><td>{{ p.rotulo|e }}{% if p.liberada %} <span class="ob-chip">pode cobrar</span>{% endif %}</td>
+  {% for p in v.parcelas %}<tr><td>{{ p.rotulo|e }}{% if p.pago %} <span class="ob-pill pronta">paga</span>{% elif p.liberada %} <span class="ob-chip">pode cobrar</span>{% endif %}</td>
     <td class="ob-mut">{{ ('ao concluir ' ~ (orc.nome_etapa[p.etapa] or p.etapa)|lower) if p.etapa else 'na assinatura' }}</td>
-    <td class="v">{{ brl(p.valor_centavos) }}</td></tr>{% endfor %}
+    <td class="v">{{ brl(p.valor_centavos) }}</td></tr>
+  {% if p.cobranca %}<tr><td colspan="3"><div class="ob-acoes">
+    <a class="ob-bt prim" target="_blank" rel="noopener" href="https://wa.me/?text={{ p.cobranca.mensagem|urlencode }}">Cobrar no WhatsApp</a>
+    <form method="post" action="/painel/obras/{{ o.id }}/parcela/{{ p.titulo_id }}/recebi" style="margin:0"><button class="ob-bt">Recebi</button></form>
+    <span class="ob-mut">{{ 'com o Pix da empresa' if p.cobranca.pix else 'sem Pix: cadastre a chave abaixo' }}</span></div></td></tr>{% endif %}{% endfor %}
   </table>
   {% if v.status in ('rascunho', 'enviado', 'recusado') %}
   <form method="post" action="/painel/obras/{{ o.id }}/orcamento/{{ v.id }}/enviar" style="margin-top:.5rem">
     <button class="ob-bt prim">{{ 'Gerar o link pro cliente' if v.status != 'enviado' else 'Renovar a validade do link' }}</button></form>{% endif %}
 </div>{% endfor %}
+
+<div class="ob-box"><b>Chave Pix da empresa</b>
+  <p class="ob-mut" style="margin:.3rem 0">A cobrança da parcela vai com o Pix copia e cola e o QR desta chave: o dinheiro cai direto na conta da empresa. {% if not sou_dono %}Só o dono troca a chave.{% endif %}</p>
+  {% if orc.pix %}<div>{{ orc.pix.rotulo_tipo }}: <b>{{ orc.pix.chave|e }}</b> · {{ orc.pix.recebedor|e }}{% if orc.pix.cidade %} · {{ orc.pix.cidade|e }}{% endif %}</div>{% endif %}
+  {% if sou_dono %}<form method="post" action="/painel/obras/pix" class="ob-grid" style="margin-top:.5rem">
+    <input type="hidden" name="volta" value="{{ o.id }}">
+    <div><label>Chave</label><input name="chave" value="{{ orc.pix.chave|e if orc.pix else '' }}" placeholder="CNPJ, e-mail, celular ou aleatória"></div>
+    <div><label>Nome do recebedor</label><input name="recebedor" value="{{ orc.pix.recebedor|e if orc.pix else '' }}"></div>
+    <div><label>Cidade</label><input name="cidade" value="{{ orc.pix.cidade|e if orc.pix else '' }}"></div>
+    <div><label>&nbsp;</label><button class="ob-bt prim">Salvar a chave</button></div>
+  </form>{% elif not orc.pix %}<div class="ob-mut">Nenhuma chave cadastrada: a cobrança sai sem o Pix.</div>{% endif %}
+</div>
 
 {% if orc.pode_aditivo %}<form method="post" action="/painel/obras/{{ o.id }}/aditivo" class="ob-box ob-acoes">
   <span>Serviço extra no meio da obra? Ele entra como <b>aditivo</b>, com link e aceite próprios.</span>
@@ -866,6 +936,13 @@ button{padding:.65rem 1.1rem;border-radius:9px;border:0;font-size:1rem;cursor:po
 <div class="cx"><b>Como paga</b><table style="margin-top:.4rem">
 {% for p in o.parcelas %}<tr><td>{{ p.rotulo }}</td><td class="mut">{{ ('ao concluir ' ~ (p.etapa_nome or p.etapa)|lower) if p.etapa else 'na assinatura' }}</td><td class="v">{{ brl(p.valor_centavos) }}</td></tr>{% endfor %}
 </table></div>
+
+{% for p in o.pagar %}<div class="cx ok"><b>Pagar: {{ p.rotulo }} · {{ brl(p.valor_centavos) }}</b>
+<div class="mut" style="color:#155c3b">A etapa {{ p.etapa|lower }} ficou pronta. O Pix vai direto pra {{ o.empresa }}.</div>
+{% if p.qr %}<div style="text-align:center;margin:.6rem 0">{{ p.qr|safe }}</div>{% endif %}
+<label>Pix copia e cola</label><input type="text" readonly value="{{ p.pix }}" onclick="this.select()">
+<button type="button" class="sim" style="margin-top:.5rem" onclick="var i=this.previousElementSibling;i.select();if(navigator.clipboard){navigator.clipboard.writeText(i.value)}else{document.execCommand('copy')}this.textContent='Copiado ✓'">Copiar o código</button>
+</div>{% endfor %}
 
 <div class="cx">{% for t, txt in o.clausulas %}<p><b>{{ t }}.</b> {{ txt }}</p>{% endfor %}
 {% if o.validade_ate %}<p class="mut">Este orçamento vale até {{ o.validade_ate.strftime('%d/%m/%Y') }}.</p>{% endif %}</div>

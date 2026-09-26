@@ -655,12 +655,40 @@ def _bloco_das_casas(pool, conta_id: int, obras: list[dict]) -> list[str]:
         "obra, no painel.",
     ]
     if pend:
-        linhas.append("- PENDÊNCIAS DAS CASAS (lembre no máximo uma vez por semana, sem "
-                      "insistir): " + " | ".join(pend) + ".")
+        linhas.append("- PENDÊNCIAS DAS CASAS (a lista já sai sozinha toda segunda de manhã; "
+                      "não repita por conta própria, use quando ele perguntar ou quando o "
+                      "assunto for a casa): " + " | ".join(pend) + ".")
     return linhas
 
 
-def resumo_da_obra(o: dict) -> str:
+def margem(o: dict, venda: dict | None = None) -> dict | None:
+    """Quanto sobra da obra: o preço menos o custo. None sem preço.
+
+    O PREÇO é o da venda cadastrada (casa com comprador) ou, sem ela, o "venda
+    prevista ou contrato" da obra. O CUSTO é o gasto até agora — mas, enquanto a
+    obra não termina, o gasto ainda vai crescer: se o custo previsto for maior, é
+    ele que entra, pra margem não parecer maior do que vai ser. Pronta, vale o
+    gasto real (o que faltar entra como lançamento e a conta se refaz).
+    """
+    preco = None
+    if venda and venda.get("situacao") != "desistiu" and venda.get("valor_venda_centavos"):
+        preco = int(venda["valor_venda_centavos"])
+    elif o.get("valor_centavos"):
+        preco = int(o["valor_centavos"])
+    if not preco:
+        return None
+    gasto = int((o.get("custos") or {}).get("total") or 0)
+    previsto = int(o.get("custo_previsto_centavos") or 0)
+    terminou = o.get("status") in ("pronta", "vendida", "entregue") or o.get("pct") == 100
+    usa_previsto = not terminou and previsto > gasto
+    custo = previsto if usa_previsto else gasto
+    valor = preco - custo
+    return {"preco": preco, "custo": custo, "valor": valor,
+            "pct": int(round(100 * valor / preco)),
+            "base": "previsto" if usa_previsto else "gasto"}
+
+
+def resumo_da_obra(o: dict, venda: dict | None = None) -> str:
     """Uma obra em uma mensagem de WhatsApp."""
     cu = o["custos"]
     txt = (f"{o['nome']}: {_brl(cu['total'])} gastos (material {_brl(cu[MATERIAL])} · "
@@ -675,4 +703,9 @@ def resumo_da_obra(o: dict) -> str:
     txt += f". Situação: {o['rotulo_status'].lower()}."
     if cu["recebido"]:
         txt += f" Recebido nesta obra: {_brl(cu['recebido'])}."
+    m = margem(o, venda)
+    if m:
+        base = "com o custo previsto" if m["base"] == "previsto" else "com o gasto até agora"
+        txt += (f" Margem {'prevista ' if m['base'] == 'previsto' else ''}"
+                f"{_brl(m['valor'])} ({m['pct']}% de {_brl(m['preco'])}, {base}).")
     return txt

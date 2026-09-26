@@ -632,6 +632,16 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — visitas da IA falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # O orçamento que a IA montou (migração 392): a mensagem do sinal na
+                # aprovação, lembretes de 24h/48h, data liberada e data confirmada.
+                from finance import ia_orcamento as _iaos
+                _io = _iaos.rodar(pool)
+                if any(_io.values()):
+                    log.info("poller: ciclo #%d — orçamentos da IA: %s", ciclo, _io)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — orçamentos da IA falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # Vaga liberada da clínica (migração 369): consulta cancelada vira
                 # convite pra quem cabe no horário; lê o 1/2/PARAR e manda a 2ª rodada.
                 from finance import clinica_vagas as _cvg

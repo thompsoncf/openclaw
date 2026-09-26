@@ -462,9 +462,22 @@ def _atender(pool, conta_id, conversa_id):
         # A IA DA REGRA MARCA A VISITA (migração 390, finance/ia_visita.py) — só quem
         # vende festa, e só com a chave "a IA marca a visita" ligada na regra.
         vcfg, remarcar, confirmou_e_mais, livres_visita = None, False, False, []
+        ocfg = None
         if regra and _perfil == "eventos" and conv[1]:
             from finance import ia_visita as _iv
+            from finance import ia_orcamento as _iao
             vcfg = _iv.config(c, regra)
+            # O ORÇAMENTO PELA IA (migração 392): monta, alguém confere, a data fica
+            # segurada 72h depois da aprovação, e o comprovante vai pro dono.
+            ocfg = _iao.config(c, regra)
+            _ult0 = next((t for (_d, a, t) in msgs if a == "lead"), "")
+            _txt_comp = _iao.comprovante(pool, c, conta_id, conv[1], _ult0)
+            if _txt_comp:
+                _c0 = conv[9] or "whatsapp"
+                _enviar(c, conta_id, conversa_id, _c0,
+                        conv[2] if _c0 in ("messenger", "instagram") else (conv[4] or conv[5] or conv[2]),
+                        _txt_comp)
+                return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
         if vcfg:
             _ult = next((t for (_d, a, t) in msgs if a == "lead"), "")
             _canal0 = conv[9] or "whatsapp"
@@ -525,7 +538,7 @@ def _atender(pool, conta_id, conversa_id):
             if vcfg:
                 _vp, livres_visita = _regra_visita_prompt(pool, c, conta_id, conversa_id, conv,
                                                           vcfg, remarcar, confirmou_e_mais)
-            visita_txt = _regra_prompt(regra, msgs, _perfil, visita=_vp)
+            visita_txt = _regra_prompt(regra, msgs, _perfil, visita=_vp, orcamento=bool(ocfg))
         elif _av.pode_agora(cfg, _agora):
             visita_livres = _av.sugestoes(pool, conta_id, _agora, quantas=2)
             if visita_livres:
@@ -601,7 +614,8 @@ def _atender(pool, conta_id, conversa_id):
         pedir = (
             f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{visita_txt}{seguros_txt}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
-            + ('{"acao":"responder|visita","resposta":"texto pra mandar ao cliente",' if vcfg else
+            + ('{"acao":"responder' + ("|visita" if vcfg else "") + ("|orcamento" if ocfg else "")
+               + '","resposta":"texto pra mandar ao cliente",' if (vcfg or ocfg) else
                '{"acao":"responder","resposta":"texto pra mandar ao cliente",' if regra else
                '{"acao":"responder|orcamento|visita","resposta":"texto pra mandar ao cliente",')
             + '"visita":{"data":"AAAA-MM-DD","hora":"HH:MM"},'
@@ -644,6 +658,17 @@ def _atender(pool, conta_id, conversa_id):
                         return False
                     _enviar(c, conta_id, conversa_id, canal, destino, _txt)
                     return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
+            if ocfg and acao == "orcamento":
+                # as travas de sempre: sem data, horário e convidados não se orça
+                evento = _evento_do_json(d)
+                falta = _falta_pro_orcamento(evento)
+                if falta:
+                    _enviar(c, conta_id, conversa_id, canal, destino,
+                            _texto_perguntando(resposta, falta))
+                    return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
+                _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino,
+                           resposta, evento, ia=ocfg)
+                return _cla.ultimo_do_paciente(c, conta_id, conversa_id) > _visto
             if vcfg and d.get("oferecer_horarios") is True and livres_visita:
                 # A LISTA SAI DO CÓDIGO, e só aqui é guardada: a letra que o cliente
                 # responder é a desta mensagem, não a de uma oferta que ele nem viu
@@ -781,7 +806,8 @@ def _regra_antes(c, conta_id: int, conversa_id: int, regra: dict, enviar) -> boo
     return True
 
 
-def _regra_prompt(regra: dict, msgs, perfil: str = "eventos", *, visita: str | None = None) -> str:
+def _regra_prompt(regra: dict, msgs, perfil: str = "eventos", *, visita: str | None = None,
+                  orcamento: bool = False) -> str:
     """O que a IA da regra sabe a mais: como se apresenta, que o preço dela é de
     referência, qual é o próximo passo, e como chamar gente.
 
@@ -806,8 +832,16 @@ def _regra_prompt(regra: dict, msgs, perfil: str = "eventos", *, visita: str | N
          "combinam com a festa." if eventos else
          "- Quando falar de um serviço, cite também 1 ou 2 complementos do catálogo "
          "que combinam com o que o cliente precisa."),
-        "- NÃO monte orçamento formal nem mande link de proposta: diga que o orçamento "
-        "sai conferido pela equipe.",
+        ("- ORÇAMENTO: pergunte se o cliente prefere conhecer o espaço antes (é o que "
+         "recomendamos) ou receber um orçamento prévio agora. Quem pediu preço recebe o "
+         "valor de referência do pacote JUNTO com o convite pra visita. Se ele quiser o "
+         "orçamento e você já souber a data, o horário de início e quantos convidados, "
+         "devolva acao=orcamento com os slugs em servicos: o pacote certo pro dia da semana "
+         "e o ano da festa, mais os adicionais que ele quis. Nunca mande link: o orçamento "
+         "é conferido pela equipe antes de ir, e o sistema avisa o cliente disso."
+         if orcamento else
+         "- NÃO monte orçamento formal nem mande link de proposta: diga que o orçamento "
+         "sai conferido pela equipe."),
         visita or (
             f"- O melhor caminho é {passo}. Se ele "
             "topar, pergunte o dia e o horário de preferência e diga que a equipe confirma "
@@ -960,7 +994,10 @@ def _enviar(c, conta_id, conversa_id, canal, destino, texto, status=None):
     c.commit()
 
 
-def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta, evento):
+def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta, evento,
+               *, ia: dict | None = None):
+    """Monta o orçamento. `ia` (a config da regra por número, migração 392): NÃO manda
+    — vai pra conferência de alguém da equipe, com sinal e validade (ia_orcamento)."""
     slugs_ok = {s["slug"]: s for s in catalogo}
     escolhidos = _itens_escolhidos(d, slugs_ok)
     if not escolhidos:
@@ -1002,17 +1039,23 @@ def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino
     # numerada ao nascer — o agente criava sem número até 06/09 (ver
     # finance.vendas.NUMERO_SQL). O retry usa savepoint de propósito: a conversa
     # já foi gravada nesta transação e uma colisão de número não pode apagá-la.
+    condicoes, plano = _CONDICOES, None
+    if ia:
+        from finance import ia_orcamento as _iao
+        condicoes = _iao.condicoes(_CONDICOES, ia)
+        plano = _iao.parcelas(setup, evento, ia)
     _r = _vendas.com_retry_numero(c, lambda: c.execute(
         f"""insert into orcamentos (conta_id, cliente, empresa, modulos, itens, escopo,
              evento, setup_centavos, mensal_centavos, primeiro_ano_centavos, whatsapp,
-             n_modulos, criado_por, token, status, modo, numero)
+             n_modulos, criado_por, token, status, modo, numero{', parcelas' if plano else ''})
            values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s::jsonb,%s,%s,%s,%s,%s,'agente',%s,'rascunho',%s,
-                   {_vendas.NUMERO_SQL})
+                   {_vendas.NUMERO_SQL}{', %s::jsonb' if plano else ''})
            returning id""",
         (conta_id, empresa, empresa, json.dumps([s["slug"] for s in escolhidos]),
-         json.dumps(itens), _CONDICOES, json.dumps(evento), setup, mensal, setup,
+         json.dumps(itens), condicoes, json.dumps(evento), setup, mensal, setup,
          fone[:60], len(escolhidos), token,
-         _vendas.modo_por_nicho(_n[0] if _n else ""), conta_id)).fetchone())
+         _vendas.modo_por_nicho(_n[0] if _n else ""), conta_id)
+        + ((json.dumps(plano),) if plano else ())).fetchone())
     if not _r:
         raise RuntimeError("não consegui numerar a proposta depois de 3 tentativas")
     orc_id = _r[0]
@@ -1036,6 +1079,17 @@ def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino
         except Exception:  # noqa: BLE001 — o vínculo não pode derrubar o atendimento
             _log.warning("agente: não amarrei a proposta %s ao lead %s",
                          orc_id, conv[1], exc_info=True)
+
+    if ia:
+        # CONFERÊNCIA ANTES DE IR (decisão do dono): o link não sai daqui
+        from finance import ia_orcamento as _iao
+        esc = _precos_escondidos(c, conta_id, todos=True)
+        liberado = esc is not None and not any(s["slug"] in esc for s in escolhidos)
+        txt = _iao.para_conferir(pool, c, conta_id, conversa_id, conv, orc_id, escolhidos, ia,
+                                 preco_liberado=liberado, total_centavos=setup,
+                                 quem=empresa)
+        return _enviar(c, conta_id, conversa_id, canal, destino,
+                       (resposta + "\n\n" if resposta else "") + txt)
 
     from finance.email_sender import _app_url
     link = _app_url() + "/proposta/" + token

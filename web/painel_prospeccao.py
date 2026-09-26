@@ -2864,6 +2864,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    dist_cfg=dist_cfg, dist_membros=dist_membros, dist_chips=dist_chips,
                    dist_qr=dist_qr, regras_chip=regras_chip, regra_cat=regra_cat,
                    regra_eventos=modo_evento, **_ctx_grade_visita(),
+                   regra_tem_pix=(_ia_tem_pix(ctx["conta_id"]) if regras_chip else True),
                    abrir=abrir, embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -3279,11 +3280,18 @@ def _qr_relogio_retencao(conta_id: int, status: str | None) -> None:
 
 
 def _ctx_grade_visita() -> dict:
-    """O que a grade da visita (cartão Regras por número) precisa pra desenhar."""
+    """O que a grade da visita e o orçamento (cartão Regras por número) precisam."""
+    from finance import ia_orcamento as _iao
     from finance import ia_visita as _iv
     return {"rg_dias": _iv.DIAS, "rg_horas": list(_iv.HORAS_DA_GRADE),
             "rg_rotulo": _iv.ROTULO_ESTADO,
-            "regra_visita_padrao": _iv.config_tela(None, None)}
+            "regra_visita_padrao": _iv.config_tela(None, None),
+            "regra_orc_padrao": _iao.config_tela(None, None)}
+
+
+def _ia_tem_pix(conta_id: int) -> bool:
+    from finance import ia_orcamento as _iao
+    return _iao.tem_pix(get_pool(), conta_id)
 
 
 def chips_da_conta(c, conta_id: int) -> list[dict]:
@@ -4370,11 +4378,17 @@ def _iv_grade_do_form(f) -> dict:
 def _salvar_regra_chip(conta_id: int, chip_id: int, dados: dict) -> dict:
     from finance import chip_regra as _cr
     visita = dados.pop("visita", None)
+    orcamento = dados.pop("orcamento", None)
     with get_pool().connection() as c:
         r = _cr.salvar(c, conta_id, chip_id, dados)
         if r.get("ok") and visita is not None:
             from finance import ia_visita as _iv
             erro = _iv.salvar(c, conta_id, chip_id, visita)
+            if erro:
+                r = {"ok": False, "erro": erro}
+        if r.get("ok") and orcamento is not None:
+            from finance import ia_orcamento as _iao
+            erro = _iao.salvar(c, conta_id, chip_id, orcamento)
             if erro:
                 r = {"ok": False, "erro": erro}
         if r.get("ok"):
@@ -4420,7 +4434,14 @@ async def comunicacao_regra_chip(request: Request):
                          "visita_antes_festa_h": f.get("visita_antes_festa_h"),
                          "visita_min_h": f.get("visita_min_h"),
                          "visita_max_dias": f.get("visita_max_dias")}
-                        if f.get("tem_visita") else None)})
+                        if f.get("tem_visita") else None),
+             # o orçamento pela IA (migração 392) — o mesmo cartão de quem vende festa
+             "orcamento": ({"orc_ia": sim("orc_ia"),
+                            "orc_conferente_id": f.get("orc_conferente_id"),
+                            "orc_sinal_pct": f.get("orc_sinal_pct"),
+                            "orc_validade_dias": f.get("orc_validade_dias"),
+                            "orc_reserva_h": f.get("orc_reserva_h")}
+                           if f.get("tem_visita") else None)})
     request.session["prosp_aviso"] = ("Regra do número salva ✓" if r.get("ok")
                                       else r.get("erro") or "Não consegui salvar a regra.")
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -14551,6 +14572,17 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             {% endfor %}
           </div>
           <small class="mut" style="font-size:.72rem">Meia hora vale: 9h30 cabe se 9h está marcado. Domingo sem horário = só a pedido, e a IA chama a anfitriã.</small></div>
+        {% set o = r.orcamento if r and r.orcamento else regra_orc_padrao %}
+        <div class="agrow" style="margin-top:.6rem"><div class="lab"><b>A IA monta o orçamento</b><div>Pergunta se o cliente prefere conhecer o espaço ou receber um orçamento prévio. O orçamento que ela monta só vai pro cliente depois que alguém conferir, com um toque no app. Depois da aprovação, a data fica segurada esperando o sinal.</div></div>
+          <label class="sw"><input type="checkbox" name="orc_ia" {% if o.ligado %}checked{% endif %}><span></span></label></div>
+        <div class="aggrid">
+          <div class="agfield"><label>Quem confere o orçamento</label>
+            <select class="fld" name="orc_conferente_id"><option value="">quem cuida da agenda</option>
+              {% for m in dist_membros %}<option value="{{ m.id }}" {% if o.conferente_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+          <div class="agfield"><label>Sinal (%) · validade (dias) · data segurada (horas)</label>
+            <div class="rghoras"><input class="fld" name="orc_sinal_pct" type="number" min="0" max="100" value="{{ o.sinal_pct }}" style="max-width:4.5rem"> · <input class="fld" name="orc_validade_dias" type="number" min="1" max="60" value="{{ o.validade_dias }}" style="max-width:4.5rem"> · <input class="fld" name="orc_reserva_h" type="number" min="12" max="240" value="{{ o.reserva_h }}" style="max-width:4.5rem"></div></div>
+        </div>
+        {% if not regra_tem_pix %}<div class="distalerta">⚠️ <b>A empresa não tem chave Pix cadastrada.</b> Quando o cliente aprovar, a IA diz o valor do sinal e que o dono manda os dados do pagamento — e quem decide desconto e sinal é avisado. Cadastre a chave em <b>Empresa</b> pra IA mandar o Pix copia e cola.</div>{% endif %}
         {% endif %}
         {% if ch.celular_pct is not none %}
         <div class="distnote">Nos últimos 30 dias, <b>{{ ch.celular_pct }}% das mensagens enviadas por este número saíram do celular</b>. Com a IA ligada, quem responder pelo celular ou pelo painel <b>pausa a IA naquela conversa</b>, para os dois não falarem com o cliente ao mesmo tempo.</div>

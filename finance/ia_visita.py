@@ -194,13 +194,16 @@ def combinado_em_conversa(c, conta_id: int, ini: datetime, conversa_id: int | No
     agenda. Conservador de propósito — só casa com o dia E a hora escritos."""
     loc = ini.astimezone(ag.BRT)
     dia = rf"\m0?{loc.day}/0?{loc.month}\M"
-    hora = (rf"\m{loc.hour}\s*(h|hs|horas|:00)" if loc.minute == 0
-            else rf"\m{loc.hour}\s*(h|:)\s*30")
+    hora = (rf"\m0?{loc.hour}\s*(h|hs|horas|:00)" if loc.minute == 0
+            else rf"\m0?{loc.hour}\s*(h|:)\s*30")
+    # só o que a EQUIPE escreveu (humano, saindo): a oferta da própria IA ("A) quinta
+    # 01/10 às 17h") e o que o cliente pediu não são combinação feita
     rows = c.execute(
         """select distinct m.conversa_id from mensagens m
              join conversas cv on cv.id = m.conversa_id
             where cv.conta_id=%s and m.criado_em > now() - interval '21 days'
               and m.conversa_id is distinct from %s
+              and m.autor='humano' and m.direcao='out'
               and m.texto ~* 'visit' and m.texto ~ %s and m.texto ~* %s
             limit 5""", (conta_id, conversa_id, dia, hora)).fetchall()
     return [r[0] for r in rows]
@@ -229,7 +232,10 @@ def cabe(pool, conta_id: int, cfg: dict, ini: datetime, agora: datetime, *,
             return False, "festa"
         if combinado_em_conversa(c, conta_id, ini, conversa_id):
             return False, "combinado"
-    if ag.conflitos(pool, conta_id, ini, fim, ignorar_id=ignorar_evento):
+    # a folga vale dos DOIS lados: a visita das 9h–10h também precisa de intervalo
+    # antes da próxima começar, não só depois dela
+    if ag.conflitos(pool, conta_id, ini - timedelta(minutes=cfg["folga"]), fim,
+                    ignorar_id=ignorar_evento):
         return False, "ocupado"
     return True, est
 
@@ -308,13 +314,19 @@ def horario_da_letra(c, conta_id: int, conversa_id: int, texto: str | None) -> d
 
 def visita_viva(c, conta_id: int, lead_id: int) -> dict | None:
     """A visita que a IA marcou e ainda vai acontecer (ou aconteceu há pouco)."""
+    # TAMBÉM a que um vendedor marcou (painel, app): sem isto, o cliente que escolhe
+    # outro horário na conversa ganharia uma SEGUNDA visita em vez de mudar a dele.
+    # Visita = card ligado, sem tipo de festa, sem situação da clínica, título "Visita".
     try:
         with c.transaction():
             r = c.execute(
-                """select v.evento_id, e.inicio, v.confirmado_em, v.pede_remarcar_em,
-                          v.remarcacoes, v.vespera_em, v.duas_horas_em, v.conf_no_dia
-                     from ia_visitas v join eventos_agenda e on e.id = v.evento_id
-                    where v.conta_id=%s and v.prospeccao_id=%s and e.status='ativo'
+                """select e.id, e.inicio, v.confirmado_em, v.pede_remarcar_em,
+                          v.remarcacoes, v.vespera_em, v.duas_horas_em, v.conf_no_dia,
+                          v.evento_id is not null
+                     from eventos_agenda e left join ia_visitas v on v.evento_id = e.id
+                    where e.conta_id=%s and e.prospeccao_id=%s and e.status='ativo'
+                      and e.tipo_evento is null and (to_jsonb(e) ->> 'situacao') is null
+                      and e.titulo ~* '^\\s*visita'
                       and e.inicio > now() - interval '2 hours'
                     order by e.inicio desc limit 1""", (conta_id, lead_id)).fetchone()
     except Exception:  # noqa: BLE001
@@ -323,7 +335,7 @@ def visita_viva(c, conta_id: int, lead_id: int) -> dict | None:
         return None
     return {"evento_id": r[0], "inicio": r[1], "confirmado_em": r[2], "pede_remarcar_em": r[3],
             "remarcacoes": int(r[4] or 0), "vespera_em": r[5], "duas_horas_em": r[6],
-            "conf_no_dia": bool(r[7])}
+            "conf_no_dia": bool(r[7]), "da_ia": bool(r[8])}
 
 
 MAX_REMARCACOES = 2
@@ -347,14 +359,27 @@ def marcar(pool, conta_id: int, regra: dict, cfg: dict, lead_id: int, conversa_i
     vai pro cliente (quem manda é o agente, pelo chip da conversa)."""
     from finance import cockpit as ck
     from finance import chip_regra as _cr
+    import time
     with pool.connection() as lk:
         # trava de SESSÃO numa conexão só dela (o mesmo desenho do relógio da clínica):
-        # os passos abaixo abrem as próprias conexões, e a trava tem que durar todos
-        lk.execute("select pg_advisory_lock(%s::int, %s::int)", (_LOCK_MARCAR, int(conta_id)))
+        # os passos abaixo abrem as próprias conexões, e a trava tem que durar todos.
+        # TRY com prazo, e não espera cega: conexão presa esperando trava é conexão a
+        # menos no pool do painel inteiro.
+        prazo = time.monotonic() + 15
+        while not lk.execute("select pg_try_advisory_lock(%s::int, %s::int)",
+                             (_LOCK_MARCAR, int(conta_id))).fetchone()[0]:
+            if time.monotonic() > prazo:
+                return {"ok": False, "motivo": "falhou"}
+            time.sleep(0.3)
         try:
             with pool.connection() as c:
                 viva = visita_viva(c, conta_id, lead_id)
                 c.commit()
+            if viva and abs((viva["inicio"] - ini).total_seconds()) < 60:
+                # o cliente repetiu o horário que já tem: nada muda, nada conta
+                return {"ok": True, "evento_id": viva["evento_id"], "remarcou": False,
+                        "mesmo": True,
+                        "texto": f"Sua visita já está marcada: {fmt(ini)}. Te esperamos! 😊"}
             if viva and viva["remarcacoes"] >= MAX_REMARCACOES:
                 return {"ok": False, "motivo": "remarcacoes"}
             ok, motivo = cabe(pool, conta_id, cfg, ini, agora, conversa_id=conversa_id,
@@ -370,11 +395,18 @@ def marcar(pool, conta_id: int, regra: dict, cfg: dict, lead_id: int, conversa_i
                 if not r.get("ok"):
                     return {"ok": False, "motivo": "falhou"}
                 with pool.connection() as c:
-                    c.execute("""update ia_visitas set remarcacoes=remarcacoes+1, conf_no_dia=%s,
-                                        vespera_em=null, duas_horas_em=null, confirmado_em=null,
-                                        pede_remarcar_em=null, sem_resposta_em=null, falta_em=null
-                                  where evento_id=%s and conta_id=%s""",
-                              (conf_dia, viva["evento_id"], conta_id))
+                    # a visita que um vendedor marcou ganha a linha aqui: daqui pra frente
+                    # o relógio da IA cuida dela
+                    c.execute("""insert into ia_visitas (evento_id, conta_id, prospeccao_id,
+                                                         conversa_id, conf_no_dia, remarcacoes)
+                                 values (%s,%s,%s,%s,%s,1)
+                                 on conflict (evento_id) do update set
+                                   remarcacoes=ia_visitas.remarcacoes+1, conf_no_dia=excluded.conf_no_dia,
+                                   conversa_id=coalesce(excluded.conversa_id, ia_visitas.conversa_id),
+                                   vespera_em=null, duas_horas_em=null, confirmado_em=null,
+                                   pede_remarcar_em=null, sem_resposta_em=null, falta_em=null,
+                                   envio_falhas=0, envio_falhou_em=null, marcado_em=now()""",
+                              (viva["evento_id"], conta_id, lead_id, conversa_id, conf_dia))
                     c.commit()
                 evento_id = viva["evento_id"]
             else:
@@ -398,6 +430,7 @@ def marcar(pool, conta_id: int, regra: dict, cfg: dict, lead_id: int, conversa_i
                     c.commit()
         finally:
             lk.execute("select pg_advisory_unlock(%s::int, %s::int)", (_LOCK_MARCAR, int(conta_id)))
+            lk.commit()
     with pool.connection() as c:
         anf = _nome(c, conta_id, cfg.get("anfitria_id"))
     texto = (("Remarcado! ✅ " if viva else "Marcado! ✅ ") + fmt(ini)
@@ -414,24 +447,37 @@ def marcar(pool, conta_id: int, regra: dict, cfg: dict, lead_id: int, conversa_i
 
 # ------------------------------------------------------------------ a resposta 1/2
 
-def responder_confirmacao(c, conta_id: int, lead_id: int, texto: str | None) -> tuple[str | None, str | None]:
+def responder_confirmacao(pool, c, conta_id: int, lead_id: int,
+                          texto: str | None) -> tuple[str | None, str | None]:
     """O cliente respondeu ao "1 confirma, 2 remarca"? Devolve (o_que, texto_pra_ele):
-    ("confirmou", "…"), ("remarcar", None) — a IA oferece outros horários —, ou
-    (None, None) quando não era isso. Só vale com a pergunta feita e sem resposta."""
-    from finance.clinica_agenda import _RE_REMARCAR, _RE_SIM
+    ("confirmou", "…") — só a confirmação, a resposta é do código —,
+    ("confirmou_e_mais", None) — confirmou E perguntou algo ("sim, qual o endereço?"):
+    fica gravado e a IA responde o resto —, ("remarcar", None) — a IA oferece outros
+    horários —, ou (None, None). Só vale com a pergunta feita e sem resposta.
+
+    A escrita vai numa conexão PRÓPRIA e curta: `c` segura a conversa durante a
+    chamada da IA, e a linha da visita não pode ficar travada esse tempo todo (o
+    relógio do poller esperaria por ela)."""
+    from finance.clinica_agenda import _RE_REMARCAR, _RE_SIM, _SO_NUMERO
     v = visita_viva(c, conta_id, lead_id)
-    if not v or not (v["vespera_em"] or v["duas_horas_em"]) or v["confirmado_em"] \
-            or v["pede_remarcar_em"]:
+    if not v or not v["da_ia"] or not (v["vespera_em"] or v["duas_horas_em"]) \
+            or v["confirmado_em"] or v["pede_remarcar_em"]:
         return None, None
-    if _RE_SIM.match(texto or ""):
-        c.execute("update ia_visitas set confirmado_em=now() where evento_id=%s and conta_id=%s",
+    t = (texto or "").strip()
+    coluna = ("confirmado_em" if _RE_SIM.match(t)
+              else "pede_remarcar_em" if _RE_REMARCAR.match(t) else None)
+    if not coluna:
+        return None, None
+    with pool.connection() as w:
+        w.execute(f"update ia_visitas set {coluna}=now() where evento_id=%s and conta_id=%s",
                   (v["evento_id"], conta_id))
-        return "confirmou", f"Confirmadíssimo! 🎉 Te esperamos {fmt(v['inicio'])}."
-    if _RE_REMARCAR.match(texto or ""):
-        c.execute("update ia_visitas set pede_remarcar_em=now() where evento_id=%s and conta_id=%s",
-                  (v["evento_id"], conta_id))
+        w.commit()
+    if coluna == "pede_remarcar_em":
         return "remarcar", None
-    return None, None
+    so_isso = bool(_SO_NUMERO.match(t)) or (len(t) <= 25 and "?" not in t)
+    if so_isso:
+        return "confirmou", f"Confirmadíssimo! 🎉 Te esperamos {fmt(v['inicio'])}."
+    return "confirmou_e_mais", None
 
 
 # ------------------------------------------------------------------ o relógio
@@ -464,43 +510,57 @@ def _momento_vespera(ini: datetime, conf_no_dia: bool) -> datetime:
     return datetime(d.year, d.month, d.day, 18, tzinfo=ag.BRT)
 
 
-def _mandar(c, conta_id: int, conversa_id: int, texto: str) -> bool:
-    """Pelo chip da conversa, gravado como fala da IA (autor bot)."""
+def _mandar(c, conta_id: int, conversa_id: int, texto: str) -> dict:
+    """Pelo chip da conversa. Devolve o resultado do provedor ({ok, sid?})."""
     from finance import agente
     r = c.execute("""select coalesce(p.whatsapp, p.telefone, cv.contato_ref)
                        from conversas cv left join prospeccao p
                             on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
                       where cv.id=%s and cv.conta_id=%s""", (conversa_id, conta_id)).fetchone()
     if not r or not r[0]:
-        return False
-    res = agente._mandar(c, conta_id, "whatsapp", r[0], texto, conversa_id) or {}
-    if not res.get("ok"):
-        return False
-    agente._add_bot_msg(c, conversa_id, "whatsapp", texto, res.get("sid"))
-    return True
+        return {"ok": False}
+    return agente._mandar(c, conta_id, "whatsapp", r[0], texto, conversa_id) or {}
+
+
+MAX_FALHAS = 5
+INTERVALO_FALHA = timedelta(minutes=15)
 
 
 def _passo(pool, conta_id: int, v: dict, coluna: str, texto: str) -> bool:
-    """Reivindica o passo (a coluna nula vira agora) ANTES de mandar, e devolve a
-    reivindicação se o envio falhar — o próximo ciclo tenta de novo. É o mesmo desenho
-    da véspera da clínica: dois workers nunca mandam a mesma pergunta duas vezes."""
+    """Reivindica o passo (a coluna nula vira agora) ANTES de mandar — dois workers
+    nunca mandam a mesma pergunta duas vezes. Se o provedor ACEITOU, a reivindicação
+    fica, mesmo que gravar a mensagem na conversa falhe depois: mandar de novo seria
+    o cliente recebendo duas vezes. Se o envio falhou, devolve a reivindicação e conta
+    a falha — o relógio tenta de novo depois de 15 min, e desiste na quinta."""
+    from finance import agente
     with pool.connection() as c:
         pegou = c.execute(f"update ia_visitas set {coluna}=now() where evento_id=%s and {coluna} is null "
                           "returning evento_id", (v["evento_id"],)).fetchone()
         c.commit()
         if not pegou:
             return False
-        ok = False
         try:
-            ok = _mandar(c, conta_id, v["conversa_id"], texto)
-            c.commit()
+            res = _mandar(c, conta_id, v["conversa_id"], texto)
         except Exception as e:  # noqa: BLE001
             _log.warning("ia_visita: envio falhou (evento %s): %s", v["evento_id"], e)
             c.rollback()
-        if not ok:
-            c.execute(f"update ia_visitas set {coluna}=null where evento_id=%s", (v["evento_id"],))
-            c.commit()
-        return ok
+            res = {"ok": False}
+        if res.get("ok"):
+            try:
+                agente._add_bot_msg(c, v["conversa_id"], "whatsapp", texto, res.get("sid"))
+                c.execute("update ia_visitas set envio_falhas=0, envio_falhou_em=null "
+                          "where evento_id=%s", (v["evento_id"],))
+                c.commit()
+            except Exception:  # noqa: BLE001 — saiu; só não ficou gravado
+                c.rollback()
+                _log.warning("ia_visita: saiu mas não gravou (evento %s)", v["evento_id"],
+                             exc_info=True)
+            return True
+        c.execute(f"""update ia_visitas set {coluna}=null, envio_falhas=envio_falhas+1,
+                                            envio_falhou_em=now()
+                       where evento_id=%s""", (v["evento_id"],))
+        c.commit()
+        return False
 
 
 def rodar(pool, agora: datetime | None = None) -> dict:
@@ -518,17 +578,23 @@ def rodar(pool, agora: datetime | None = None) -> dict:
             try:
                 with pool.connection() as c:
                     rows = c.execute(
+                        # só conversa que ainda é da IA: gente assumiu (Assumir, resposta
+                        # pelo celular) → quem fala com o cliente é a pessoa, não o relógio
                         """select v.evento_id, v.conta_id, v.prospeccao_id, v.conversa_id,
                                   v.conf_no_dia, v.vespera_em, v.duas_horas_em, v.confirmado_em,
-                                  v.pede_remarcar_em, v.sem_resposta_em, v.falta_em, v.criado_em,
+                                  v.pede_remarcar_em, v.sem_resposta_em, v.falta_em, v.marcado_em,
                                   e.inicio, e.desfecho, e.local,
                                   coalesce(nullif(p.contato,''), nullif(p.empresa,''), '')
                              from ia_visitas v
                              join eventos_agenda e on e.id = v.evento_id and e.conta_id = v.conta_id
+                             join conversas cv on cv.id = v.conversa_id and cv.conta_id = v.conta_id
                              left join prospeccao p on p.id = v.prospeccao_id and p.conta_id = v.conta_id
-                            where e.status='ativo' and v.conversa_id is not null
+                            where e.status='ativo' and cv.agente_ativo and cv.status <> 'pendente'
+                              and v.envio_falhas < %s
+                              and (v.envio_falhou_em is null or v.envio_falhou_em < %s)
                               and e.inicio between %s and %s""",
-                        (agora - timedelta(days=3), agora + timedelta(days=2))).fetchall()
+                        (MAX_FALHAS, agora - INTERVALO_FALHA,
+                         agora - timedelta(days=3), agora + timedelta(days=2))).fetchall()
             except Exception:  # noqa: BLE001
                 return out
             from finance.cockpit import endereco_empresa
@@ -537,7 +603,7 @@ def rodar(pool, agora: datetime | None = None) -> dict:
             for r in rows:
                 v = dict(zip(("evento_id", "conta_id", "lead", "conversa_id", "conf_no_dia",
                               "vespera_em", "duas_horas_em", "confirmado_em", "pede_remarcar_em",
-                              "sem_resposta_em", "falta_em", "criado_em", "inicio", "desfecho",
+                              "sem_resposta_em", "falta_em", "marcado_em", "inicio", "desfecho",
                               "local", "quem"), r))
                 conta, ini = v["conta_id"], v["inicio"]
                 try:
@@ -552,13 +618,13 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                         continue
                     momento = _momento_vespera(ini, v["conf_no_dia"])
                     if (not v["vespera_em"] and not v["confirmado_em"] and agora >= momento
-                            and v["criado_em"] < momento and ini - agora > timedelta(hours=2, minutes=30)):
+                            and v["marcado_em"] < momento and ini - agora > timedelta(hours=2, minutes=30)):
                         if _passo(pool, conta, v, "vespera_em",
                                   texto_vespera(ini, nome, agora, esp["nome"])):
                             out["vesperas"] += 1
                         continue
                     if not v["duas_horas_em"] and ini - agora <= timedelta(hours=2) \
-                            and v["criado_em"] < ini - timedelta(hours=2):
+                            and v["marcado_em"] < ini - timedelta(hours=2):
                         if _passo(pool, conta, v, "duas_horas_em",
                                   texto_duas_horas(ini, esp["nome"],
                                                    v["local"] or esp["endereco"] or esp["nome"],

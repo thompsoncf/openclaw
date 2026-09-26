@@ -285,17 +285,21 @@ def test_1_confirma_e_2_pede_remarcar_so_depois_da_pergunta(pool, prime):
     lead, conv = _lead(pool, prime)
     ini = datetime.now(timezone.utc) + timedelta(days=1)
     with pool.connection() as c:
-        ev = c.execute("insert into eventos_agenda (conta_id, titulo, inicio, status) "
-                       "values (%s,'Visita — Larissa',%s,'ativo') returning id", (EMPRESA, ini)).fetchone()[0]
+        ev = c.execute("insert into eventos_agenda (conta_id, titulo, inicio, status, prospeccao_id) "
+                       "values (%s,'Visita — Larissa',%s,'ativo',%s) returning id",
+                       (EMPRESA, ini, lead)).fetchone()[0]
         c.execute("insert into ia_visitas (evento_id, conta_id, prospeccao_id, conversa_id) "
                   "values (%s,%s,%s,%s)", (ev, EMPRESA, lead, conv))
-        assert iv.responder_confirmacao(c, EMPRESA, lead, "1") == (None, None)   # sem pergunta
+        c.commit()
+        assert iv.responder_confirmacao(pool, c, EMPRESA, lead, "1") == (None, None)   # sem pergunta
         c.execute("update ia_visitas set vespera_em=now()")
-        o, t = iv.responder_confirmacao(c, EMPRESA, lead, "1")
+        c.commit()
+        o, t = iv.responder_confirmacao(pool, c, EMPRESA, lead, "1")
         assert o == "confirmou" and t.startswith("Confirmadíssimo")
-        assert iv.responder_confirmacao(c, EMPRESA, lead, "2") == (None, None)   # já respondeu
+        assert iv.responder_confirmacao(pool, c, EMPRESA, lead, "2") == (None, None)   # já respondeu
         c.execute("update ia_visitas set confirmado_em=null")
-        assert iv.responder_confirmacao(c, EMPRESA, lead, "não vou conseguir")[0] == "remarcar"
+        c.commit()
+        assert iv.responder_confirmacao(pool, c, EMPRESA, lead, "não vou conseguir")[0] == "remarcar"
 
 
 # ══════════════════════════════════════════════ o relógio
@@ -314,13 +318,14 @@ def envios(monkeypatch):
 def _visita_marcada(pool, prime, ini, *, criado=None, conf_no_dia=False):
     lead, conv = _lead(pool, prime)
     with pool.connection() as c:
-        ev = c.execute("insert into eventos_agenda (conta_id, titulo, inicio, fim, status, local) "
-                       "values (%s,'Visita — Larissa',%s,%s,'ativo','Rua A, 10') returning id",
-                       (EMPRESA, ini, ini + timedelta(hours=1))).fetchone()[0]
+        ev = c.execute("insert into eventos_agenda (conta_id, titulo, inicio, fim, status, local, "
+                       "prospeccao_id) values (%s,'Visita — Larissa',%s,%s,'ativo','Rua A, 10',%s) "
+                       "returning id", (EMPRESA, ini, ini + timedelta(hours=1), lead)).fetchone()[0]
         c.execute("""insert into ia_visitas (evento_id, conta_id, prospeccao_id, conversa_id,
-                                             conf_no_dia, criado_em)
-                     values (%s,%s,%s,%s,%s,%s)""",
-                  (ev, EMPRESA, lead, conv, conf_no_dia, criado or ini - timedelta(days=3)))
+                                             conf_no_dia, criado_em, marcado_em)
+                     values (%s,%s,%s,%s,%s,%s,%s)""",
+                  (ev, EMPRESA, lead, conv, conf_no_dia, criado or ini - timedelta(days=3),
+                   criado or ini - timedelta(days=3)))
         c.commit()
     return ev, lead, conv
 
@@ -487,16 +492,26 @@ def _visitas(pool):
                          "where titulo like 'Visita%%' order by id").fetchall()
 
 
-def test_a_ia_oferece_horarios_com_letra_e_guarda_a_oferta(pool, prime, agente_ia):
+def test_a_lista_de_horarios_sai_do_codigo_e_so_entao_e_guardada(pool, prime, agente_ia):
+    """A IA pede a lista (`oferecer_horarios`); o código põe as letras no fim da
+    mensagem e só então guarda — a letra do cliente é a da mensagem que ele leu."""
     lead, conv = _lead(pool, prime)
-    _fala(pool, conv, "oi, queria conhecer o espaço")
+    _fala(pool, conv, "oi, onde fica?")
     agente.atender(pool, EMPRESA, conv)
     pedir = agente_ia["prompts"][0]
-    assert "você MARCA" in pedir and "A) " in pedir and "B) " in pedir
-    assert "acao\":\"responder|visita" in pedir
+    assert "você MARCA" in pedir and "oferecer_horarios" in pedir and "A) " not in pedir
     with pool.connection() as c:
-        assert c.execute("select array_length(horarios,1) from ia_ofertas where conversa_id=%s",
-                         (conv,)).fetchone()[0] == 3
+        assert c.execute("select count(*) from ia_ofertas").fetchone()[0] == 0
+    agente_ia["json"] = {"acao": "responder", "resposta": "Vem conhecer!",
+                         "oferecer_horarios": True}
+    _fala(pool, conv, "quero conhecer o espaço", seg=-1)
+    agente.atender(pool, EMPRESA, conv)
+    txt = agente_ia["enviados"][-1]
+    assert txt.startswith("Vem conhecer!\n\nA) ") and "\nC) " in txt
+    with pool.connection() as c:
+        guardados = c.execute("select horarios from ia_ofertas where conversa_id=%s",
+                              (conv,)).fetchone()[0]
+    assert iv.texto_ofertas(guardados) in txt
 
 
 def test_a_letra_marca_sem_passar_pela_ia(pool, prime, agente_ia):
@@ -595,3 +610,120 @@ def test_sem_a_chave_a_ia_nao_marca(pool, prime, agente_ia):
     agente.atender(pool, EMPRESA, conv)
     assert agente_ia["enviados"] == ["Vou confirmar com a equipe"] and _visitas(pool) == []
     assert "você MARCA" not in agente_ia["prompts"][0]
+
+
+
+# ══════════════════════════════════════════════ o que a revisão de 26/09 achou
+
+def test_a_oferta_da_propria_ia_nao_e_combinacao(pool, prime):
+    lead, conv = _lead(pool, prime)
+    _, outra = _lead(pool, prime, nome="Ana")
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (conversa_id, direcao, autor, texto) values
+                     (%s,'out','bot','Que tal uma visita? A) quinta 01/10 às 17h'),
+                     (%s,'in','lead','posso fazer a visita 01/10 às 17h?')""", (outra, outra))
+        c.commit()
+    assert iv.cabe(pool, EMPRESA, prime["cfg"], _dia(1, 17), QUA_10, conversa_id=conv)[0]
+
+
+def test_hora_com_zero_na_frente_tambem_e_combinacao(pool, prime):
+    lead, conv = _lead(pool, prime)
+    _, outra = _lead(pool, prime, nome="Ana")
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (conversa_id, direcao, autor, texto)
+                     values (%s,'out','humano','visita confirmada 01/10 às 09h')""", (outra,))
+        c.commit()
+    assert iv.cabe(pool, EMPRESA, prime["cfg"], _dia(1, 9), QUA_10, conversa_id=conv) \
+        == (False, "combinado")
+
+
+def test_a_folga_vale_antes_tambem(pool, prime):
+    """Visita das 9h–10h: a próxima não começa às 10h em ponto."""
+    _evento(pool, _dia(1, 9), horas=1, titulo="Visita — Ana")
+    assert iv.cabe(pool, EMPRESA, prime["cfg"], _dia(1, 10), QUA_10) == (False, "ocupado")
+    assert iv.cabe(pool, EMPRESA, prime["cfg"], _dia(1, 11), QUA_10)[0]
+
+
+def test_repetir_o_horario_que_ja_tem_nao_e_remarcar(pool, prime):
+    lead, conv = _lead(pool, prime)
+    a = iv.marcar(pool, EMPRESA, prime["regra"], prime["cfg"], lead, conv, _dia(1, 9), QUA_10)
+    n_avisos = len(prime["avisos"])
+    b = iv.marcar(pool, EMPRESA, prime["regra"], prime["cfg"], lead, conv, _dia(1, 9), QUA_10)
+    assert b["ok"] and b.get("mesmo") and b["evento_id"] == a["evento_id"]
+    assert b["texto"].startswith("Sua visita já está marcada")
+    assert len(prime["avisos"]) == n_avisos
+    with pool.connection() as c:
+        assert c.execute("select remarcacoes from ia_visitas").fetchone()[0] == 0
+
+
+def test_a_visita_que_o_vendedor_marcou_e_remarcada_e_nao_duplicada(pool, prime):
+    lead, conv = _lead(pool, prime)
+    r = ck.agendar_visita(pool, EMPRESA, prime["ids"]["ZAQ"], lead, data="2026-10-01",
+                          hora="09:00", avisar_cliente=False)
+    b = iv.marcar(pool, EMPRESA, prime["regra"], prime["cfg"], lead, conv, _dia(2, 10), QUA_10)
+    assert b["ok"] and b["remarcou"] and b["evento_id"] == r["evento_id"]
+    with pool.connection() as c:
+        assert c.execute("select count(*) from eventos_agenda").fetchone()[0] == 1
+        assert c.execute("select remarcacoes, conversa_id from ia_visitas").fetchone() == (1, conv)
+
+
+def test_saiu_mas_nao_gravou_nao_manda_de_novo(pool, prime, envios, monkeypatch):
+    ini = datetime.now(timezone.utc) + timedelta(days=2)
+    _visita_marcada(pool, prime, ini)
+
+    def _quebra(*a, **k):
+        raise RuntimeError("banco")
+    monkeypatch.setattr(agente, "_add_bot_msg", _quebra)
+    assert iv.rodar(pool, ini - timedelta(minutes=110))["duas_horas"] == 1
+    assert iv.rodar(pool, ini - timedelta(minutes=100))["duas_horas"] == 0
+    assert len(envios) == 1
+
+
+def test_envio_que_falha_espera_e_desiste_na_quinta(pool, prime, monkeypatch):
+    tent = []
+    monkeypatch.setattr(agente, "_mandar", lambda *a, **k: tent.append(1) or {"ok": False})
+    # o intervalo é medido no relógio do banco: a visita é daqui a 110 min, agora
+    t0 = datetime.now(timezone.utc)
+    _visita_marcada(pool, prime, t0 + timedelta(minutes=110))
+    iv.rodar(pool, t0)
+    iv.rodar(pool, t0 + timedelta(minutes=2))          # dentro do intervalo: não tenta
+    assert len(tent) == 1
+    with pool.connection() as c:
+        c.execute("update ia_visitas set envio_falhas=5, envio_falhou_em=now() - interval '1 hour'")
+        c.commit()
+    iv.rodar(pool, t0 + timedelta(minutes=30))
+    assert len(tent) == 1
+
+
+def test_a_vespera_nao_sai_logo_depois_de_remarcar(pool, prime, envios):
+    ini = datetime.now(timezone.utc) + timedelta(days=1)
+    ev, lead, conv = _visita_marcada(pool, prime, ini)
+    loc = ini.astimezone(BRT)
+    depois_das_18 = datetime(loc.year, loc.month, loc.day, 18, 30, tzinfo=BRT) - timedelta(days=1)
+    with pool.connection() as c:
+        # remarcou às 18h20 pra amanhã: a pergunta da véspera já seria "agora"
+        c.execute("update ia_visitas set marcado_em=%s", (depois_das_18 - timedelta(minutes=10),))
+        c.commit()
+    assert iv.rodar(pool, depois_das_18)["vesperas"] == 0
+
+
+def test_conversa_que_gente_assumiu_o_relogio_nao_fala(pool, prime, envios):
+    ini = datetime.now(timezone.utc) + timedelta(days=2)
+    ev, lead, conv = _visita_marcada(pool, prime, ini)
+    with pool.connection() as c:
+        c.execute("update conversas set status='pendente', agente_ativo=false where id=%s", (conv,))
+        c.commit()
+    assert iv.rodar(pool, ini - timedelta(minutes=110))["duas_horas"] == 0 and envios == []
+
+
+def test_sim_com_pergunta_confirma_e_a_ia_responde_o_resto(pool, prime, agente_ia):
+    ini = datetime.now(timezone.utc) + timedelta(days=1)
+    ev, lead, conv = _visita_marcada(pool, prime, ini)
+    with pool.connection() as c:
+        c.execute("update ia_visitas set vespera_em=now()")
+        c.commit()
+    _fala(pool, conv, "Sim! Qual o endereço mesmo? tem estacionamento?")
+    agente.atender(pool, EMPRESA, conv)
+    assert "acabou de CONFIRMAR" in agente_ia["prompts"][0]
+    with pool.connection() as c:
+        assert c.execute("select confirmado_em is not null from ia_visitas").fetchone()[0]

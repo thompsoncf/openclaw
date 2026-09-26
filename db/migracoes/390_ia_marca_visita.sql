@@ -40,6 +40,12 @@ create table if not exists public.ia_visitas (
   sem_resposta_em   timestamptz,     -- a anfitriã foi avisada de que ninguém confirmou
   falta_em          timestamptz,     -- a mensagem de "sentimos sua falta" saiu
   remarcacoes       smallint not null default 0,
+  -- quando a IA marcou ou REMARCOU por último: é daqui que o relógio conta (a
+  -- pergunta da véspera não sai logo depois de o cliente acabar de escolher)
+  marcado_em        timestamptz not null default now(),
+  -- envio que falhou: tenta de novo com intervalo, e desiste depois de 5
+  envio_falhas      smallint not null default 0,
+  envio_falhou_em   timestamptz,
   criado_em         timestamptz not null default now()
 );
 create index if not exists ia_visitas_conta_idx on public.ia_visitas (conta_id, criado_em desc);

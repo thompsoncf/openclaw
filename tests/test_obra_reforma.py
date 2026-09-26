@@ -40,7 +40,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "196_titulo_recorrencia.sql", "197_titulo_acrescimo.sql",
               "317_titulo_classificacao.sql", "325_tipo_despesa.sql",
               "336_plano_fardamentos.sql", "349_plano_obras.sql", "351_obras.sql",
-              "353_obra_venda_documentos.sql", "355_reforma_orcamento.sql")
+              "353_obra_venda_documentos.sql", "355_reforma_orcamento.sql",
+              "367_pix_da_empresa.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 HOJE = date.today()
 ITENS = [
@@ -334,3 +335,118 @@ def test_montar_mandar_e_abrir_aditivo_pela_ficha(pool, conta, monkeypatch):
     orf.aceitar(pool, v["token"], "Márcia", "", "")
     c.post(f"/painel/obras/{o['id']}/aditivo")
     assert [x["versao"] for x in orf.orcamentos(pool, conta, o["id"])] == [1, 2]
+
+
+# ── cobrar a parcela liberada com o Pix da empresa (367) ──────────────────
+from finance import pix  # noqa: E402
+
+
+def _aceito_com_etapa_feita(pool, conta):
+    """Orçamento aceito e a etapa da parcela do meio concluída: essa parcela libera."""
+    o, env = _enviado(pool, conta)
+    assert orf.aceitar(pool, env["token"], "Márcia Souza", "", "")
+    v = orf.orcamentos(pool, conta, o["id"])[0]
+    meio = [p for p in v["parcelas"] if p.get("etapa")][0]
+    completa = ob.obter_obra(pool, conta, o["id"])
+    etapa = next(e for e in completa["etapas"] if e["chave"] == meio["etapa"])
+    ob.marcar_etapa(pool, conta, o["id"], etapa["id"])
+    return o, env, meio
+
+
+def test_sem_chave_a_cobranca_vai_sem_pix(pool, conta):
+    o, env, meio = _aceito_com_etapa_feita(pool, conta)
+    [cb] = orf.cobrancas(pool, conta, ob.obter_obra(pool, conta, o["id"]))
+    assert cb["pix"] is None and cb["rotulo"] == meio["rotulo"]
+    assert cb["mensagem"].startswith("Olá, Márcia! A etapa")
+    assert "Pix copia e cola" not in cb["mensagem"] and env["token"] in cb["mensagem"]
+
+
+def test_com_chave_a_cobranca_leva_o_pix_da_empresa(pool, conta):
+    pix.salvar(pool, conta, "66.683.521/0001-07", "PX2 Empreendimentos Ltda", "Lago da Pedra")
+    o, env, meio = _aceito_com_etapa_feita(pool, conta)
+    [cb] = orf.cobrancas(pool, conta, ob.obter_obra(pool, conta, o["id"]))
+    assert "0114" + "66683521000107" in cb["pix"]                   # a chave, no campo 26
+    valor = f"{meio['valor_centavos'] / 100:.2f}"
+    assert f"54{len(valor):02d}{valor}" in cb["pix"]                   # o valor, no campo 54
+    assert pix.crc16(cb["pix"][:-4]) == cb["pix"][-4:]
+    assert cb["pix"] in cb["mensagem"] and "Pix copia e cola" in cb["mensagem"]
+
+
+def test_o_cliente_ve_o_qr_no_link_so_da_parcela_liberada(pool, conta, monkeypatch):
+    pix.salvar(pool, conta, "pablo@px2.com.br", "", "Lago da Pedra")
+    o, env = _enviado(pool, conta)
+    assert orf.aceitar(pool, env["token"], "Márcia", "", "")
+    c = _app(pool, monkeypatch)
+    assert "Pix copia e cola" not in c.get(f"/orcamento-obra/{env['token']}").text
+    v = orf.orcamentos(pool, conta, o["id"])[0]
+    meio = [p for p in v["parcelas"] if p.get("etapa")][0]
+    completa = ob.obter_obra(pool, conta, o["id"])
+    ob.marcar_etapa(pool, conta, o["id"],
+                    next(e["id"] for e in completa["etapas"] if e["chave"] == meio["etapa"]))
+    html = c.get(f"/orcamento-obra/{env['token']}").text
+    assert f"Pagar: {meio['rotulo']}" in html and "Pix copia e cola" in html and "<svg" in html
+
+
+def _painel_como(pool, conta, monkeypatch, papel):
+    c = _painel(pool, conta, monkeypatch)
+    app = c.app
+
+    @app.post("/_papel")
+    async def _papel(request: Request):
+        request.session["papel"] = papel
+        return {"ok": True}
+
+    c.post("/_papel", json={})
+    return c
+
+
+def test_cobrar_e_dar_baixa_pela_ficha(pool, conta, monkeypatch):
+    pix.salvar(pool, conta, "pablo@px2.com.br", "", "Lago da Pedra")
+    o, env, meio = _aceito_com_etapa_feita(pool, conta)
+    c = _painel(pool, conta, monkeypatch)
+    html = c.get(f"/painel/obras/{o['id']}").text
+    assert "Cobrar no WhatsApp" in html and "https://wa.me/?text=Ol%C3%A1%2C%20M%C3%A1rcia" in html
+    [cb] = orf.cobrancas(pool, conta, ob.obter_obra(pool, conta, o["id"]))
+    r = c.post(f"/painel/obras/{o['id']}/parcela/{cb['titulo_id']}/recebi")
+    assert r.status_code == 303 and "erro" not in r.headers["location"]
+    assert _titulos(pool, [cb["titulo_id"]])[0]["status"] == "pago"
+    html = c.get(f"/painel/obras/{o['id']}").text
+    assert "Cobrar no WhatsApp" not in html and ">paga<" in html
+    assert orf.cobrancas(pool, conta, ob.obter_obra(pool, conta, o["id"])) == []
+
+
+def test_recebi_nao_baixa_titulo_de_outra_obra(pool, conta, monkeypatch):
+    o, env, meio = _aceito_com_etapa_feita(pool, conta)
+    outra = _reforma(pool, conta, "Reforma do vizinho")
+    [cb] = orf.cobrancas(pool, conta, ob.obter_obra(pool, conta, o["id"]))
+    c = _painel(pool, conta, monkeypatch)
+    r = c.post(f"/painel/obras/{outra['id']}/parcela/{cb['titulo_id']}/recebi")
+    assert "erro=" in r.headers["location"]
+    assert _titulos(pool, [cb["titulo_id"]])[0]["status"] == "aberto"
+
+
+def test_so_o_dono_troca_a_chave_pix(pool, conta, monkeypatch):
+    o = _reforma(pool, conta)
+    g = _painel_como(pool, conta, monkeypatch, "gestor")
+    assert "Só o dono troca a chave" in g.get(f"/painel/obras/{o['id']}").text
+    r = g.post("/painel/obras/pix", data={"chave": "ladrao@golpe.com", "volta": str(o["id"])})
+    assert "erro=" in r.headers["location"] and pix.da_conta(pool, conta) is None
+    d = _painel(pool, conta, monkeypatch)
+    r = d.post("/painel/obras/pix", data={"chave": "66.683.521/0001-07", "recebedor": "",
+                                          "cidade": "Lago da Pedra", "volta": str(o["id"])})
+    assert "erro=" not in r.headers["location"]
+    assert pix.da_conta(pool, conta)["chave"] == "66683521000107"
+    r = d.post("/painel/obras/pix", data={"chave": "66.683.521/0001-08", "volta": str(o["id"])})
+    assert "erro=" in r.headers["location"]
+    assert pix.da_conta(pool, conta)["chave"] == "66683521000107"    # a errada não apaga a boa
+
+
+def test_o_agente_monta_a_cobranca(pool, conta, monkeypatch):
+    pix.salvar(pool, conta, "pablo@px2.com.br", "", "Lago da Pedra")
+    o, env, meio = _aceito_com_etapa_feita(pool, conta)
+    monkeypatch.setattr(tools_pj, "_nicho_da_conta", lambda pool, cid: "construcao")
+    f = {x.nome: x for x in tools_pj.construir_ferramentas_pj(pool, conta)}
+    txt = f["cobrar_parcela"].executar({"obra": o["nome"]})
+    assert "MENSAGEM PRONTA" in txt and "Pix copia e cola" in txt and meio["rotulo"] in txt
+    casa = ob.criar_obra(pool, conta, "Casa 1", "casa")
+    assert "é casa" in f["cobrar_parcela"].executar({"obra": casa["nome"]})

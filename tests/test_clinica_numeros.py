@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from finance import clinica_agenda as ca
 from finance import clinica_numeros as cn
 from tests.test_clinica_agenda import AGORA, CLINICA, SEG
-from tests.test_clinica_pacotes import _finalizar, _paciente, _plano_aceito, _sessao, pool, zap  # noqa: F401
+from tests.test_clinica_pacotes import _finalizar, _manoel, _paciente, _plano_aceito, _sessao, _tipo, pool, zap  # noqa: F401
 
 OUT = (date(2026, 10, 1), date(2026, 11, 1))
 
@@ -87,3 +87,38 @@ def test_tela_so_pra_gerencia(cli):
     cli.get("/_papel/dono")
     html = cli.get("/painel/clinica/numeros?mes=2026-10").text
     assert "Números da clínica · out/2026" in html and "Ocupação da agenda" in html and "Dr. Manoel" in html
+
+
+def test_encaixe_em_cima_nao_conta_o_minuto_duas_vezes(pool, zap):  # noqa: F811
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        _sessao(c, lead, date(2026, 10, 5), tipo="Consulta")
+        outro, _ = _paciente(c, nome="Rita Souza", fone="5511988887777")
+        eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c), servico_id=_tipo(c, "Consulta")["id"],
+                               inicio=ca.utc(date(2026, 10, 5), time(8)), lead_id=outro, agora=AGORA, encaixe=True)
+        assert erro is None, erro
+        c.commit()
+        d = cn.numeros(c, CLINICA, *OUT, agora=ca.utc(date(2026, 11, 1), time(9)))
+    manoel = next(o for o in d["ocupacao"] if o["prof"] == "Dr. Manoel")
+    assert manoel["vendido_h"] == 0.5 and manoel["vazios"] == 154 * 2 - 1
+
+
+def test_sessao_do_pacote_conta_no_mes_do_atendimento(pool, zap):  # noqa: F811
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        _finalizar(c, _sessao(c, lead, date(2026, 10, 2)))    # a baixa grava now(), o atendimento é de outubro
+        d = cn.numeros(c, CLINICA, *OUT, agora=ca.utc(date(2026, 11, 1), time(9)))
+    assert d["usadas"] == 1 and d["atendimentos"] == 1 and d["receita_avulsa"] == 0
+
+
+def test_profissional_desativado_aparece_no_mes_que_atendeu(pool, zap):  # noqa: F811
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        _sessao(c, lead, date(2026, 10, 5), tipo="Consulta")
+        c.execute("update clinica_profissionais set ativo=false where conta_id=%s and id=%s", (CLINICA, _manoel(c)))
+        c.commit()
+        d = cn.numeros(c, CLINICA, *OUT, agora=ca.utc(date(2026, 11, 1), time(9)))
+    manoel = next(o for o in d["ocupacao"] if o["prof"] == "Dr. Manoel")
+    assert (manoel["ativo"], manoel["grade_h"], manoel["fora_h"]) == (False, 0.0, 0.5)

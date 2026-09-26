@@ -63,16 +63,16 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 </style>
 <div class="nx-pag">
   <div class="nx-topo"><div><h2>Números da clínica · {{ rotulo }}</h2>
-    <div class="sub">O que a agenda, os planos, os pacotes e as vagas contam do negócio.{% if parcial %} O mês ainda está correndo.{% endif %} Receita e ticket são estimados pelo preço de tabela e pelo plano aceito; o caixa de verdade está no Financeiro.</div></div>
+    <div class="sub">O que a agenda, os planos, os pacotes e as vagas contam do negócio.{% if parcial %} O mês ainda está correndo.{% endif %}{% if d.passado %} A grade usada é a de hoje (a grade não guarda histórico).{% endif %} Receita e ticket são estimados pelo preço de tabela e pelo plano aceito; o caixa de verdade está no Financeiro.</div></div>
     <form class="nx-sel" method="get" action="/painel/clinica/numeros">
       <select name="mes" onchange="this.form.submit()">{% for k, r in meses %}<option value="{{ k }}" {% if k == mes %}selected{% endif %}>{{ r }}</option>{% endfor %}</select>
       <a href="/painel/raio-x">Raio-X</a></form></div>
 
   <div class="nx-g">
     <div class="nx-c"><span class="r">Ocupação da agenda</span><span class="v">{{ d.ocupacao_pct if d.ocupacao_pct is not none else '—' }}{% if d.ocupacao_pct is not none %}%{% endif %}</span><span class="n">{{ d.vendido_h }} h vendidas de {{ d.grade_h }} h de grade</span></div>
-    <div class="nx-c {% if d.vazios %}al{% endif %}"><span class="r">Horários que passaram vazios</span><span class="v">{{ d.vazios }}</span><span class="n">{% if d.vazios_valor %}até {{ brl(d.vazios_valor) }} se fossem consultas de {{ brl(d.consulta_preco) }}{% else %}de 30 min{% endif %}</span></div>
+    <div class="nx-c {% if d.vazios %}al{% endif %}"><span class="r">Horários que passaram vazios</span><span class="v">{{ d.vazios }}</span><span class="n">de 30 min sem ninguém{% if d.vazios_valor %} · até {{ brl(d.vazios_valor) }} em consultas de {{ brl(d.consulta_preco) }} ({{ d.consulta_min }} min){% endif %}</span></div>
     <div class="nx-c"><span class="r">Ticket médio</span><span class="v">{{ brl(d.ticket) if d.ticket else '—' }}</span><span class="n">{{ d.atendimentos }} atendimento{{ 's' if d.atendimentos != 1 }} · {{ brl(d.receita) }} estimados</span></div>
-    <div class="nx-c {% if d.devidas %}al{% endif %}"><span class="r">Sessões devidas</span><span class="v">{{ d.devidas }}</span><span class="n">vendidas {{ d.vendidas }} · usadas {{ d.usadas }} no mês · é atendimento que a clínica deve</span></div>
+    <div class="nx-c {% if d.devidas %}al{% endif %}"><span class="r">Sessões devidas hoje</span><span class="v">{{ d.devidas }}</span><span class="n">no mês: vendidas {{ d.vendidas }} · usadas {{ d.usadas }} · é atendimento que a clínica deve</span></div>
   </div>
 
   <h3 class="nx-h">Da consulta ao tratamento fechado</h3>
@@ -85,14 +85,14 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 
   <h3 class="nx-h">Ocupação por profissional</h3>
   {% if d.ocupacao %}<table class="nx-t"><tr><th>Profissional</th><th>Grade</th><th>Vendido</th><th></th><th>Vazios que passaram</th></tr>
-  {% for o in d.ocupacao %}<tr><td>{{ o.prof }}</td><td>{{ o.grade_h }} h</td><td>{{ o.vendido_h }} h</td>
+  {% for o in d.ocupacao %}<tr><td>{{ o.prof }}{% if not o.ativo %} <small>(desativado)</small>{% endif %}</td><td>{{ o.grade_h }} h</td><td>{{ o.vendido_h }} h{% if o.fora_h %} <small>+ {{ o.fora_h }} h fora da grade</small>{% endif %}</td>
     <td><div class="nx-bar"><i style="width:{{ o.pct or 0 }}%"></i></div></td><td class="v">{{ o.vazios }}</td></tr>{% endfor %}</table>
   {% else %}<div class="nx-ex">Nenhum profissional com grade neste mês. Cadastre os horários em Configurar.</div>{% endif %}
 
   <h3 class="nx-h">Faltas, confirmação e retorno</h3>
   <div class="nx-g">
     <div class="nx-c {% if d.falta_pct and d.falta_pct >= 10 %}al{% endif %}"><span class="r">Faltas</span><span class="v">{{ d.faltas }}</span><span class="n">{% if d.falta_pct is not none %}{{ d.falta_pct }}% dos atendimentos · {% endif %}{{ d.cancelamentos }} cancelamento{{ 's' if d.cancelamentos != 1 }}</span></div>
-    <div class="nx-c"><span class="r">Confirmaram na véspera</span><span class="v">{{ d.confirmacao_pct if d.confirmacao_pct is not none else '—' }}{% if d.confirmacao_pct is not none %}%{% endif %}</span><span class="n">{{ d.confirmaram }} de {{ d.lembrados }} lembretes</span></div>
+    <div class="nx-c"><span class="r">Confirmados depois do lembrete</span><span class="v">{{ d.confirmacao_pct if d.confirmacao_pct is not none else '—' }}{% if d.confirmacao_pct is not none %}%{% endif %}</span><span class="n">{{ d.confirmaram }} de {{ d.lembrados }} lembretes</span></div>
     <div class="nx-c"><span class="r">Retornos pedidos</span><span class="v">{{ d.retornos_pedidos }}</span><span class="n">{{ d.retornos_marcados }} marcados · {{ d.retornos_perdidos }} perdidos</span></div>
     <div class="nx-c"><span class="r">Vagas liberadas</span><span class="v">{{ d.vagas }}</span><span class="n">{{ d.vagas_preenchidas }} preenchidas · {{ brl(d.vagas_valor) }}</span></div>
   </div>
@@ -102,7 +102,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="nx-c"><span class="r">Recepção</span><span class="v">{{ d.origem.recepcao }}</span></div>
     <div class="nx-c"><span class="r">Agente no WhatsApp</span><span class="v">{{ d.origem.ia }}</span></div>
     <div class="nx-c"><span class="r">Vaga liberada</span><span class="v">{{ d.origem.vaga }}</span></div>
-    <div class="nx-c"><span class="r">Pacotes vencidos com saldo</span><span class="v">{{ d.vencidas }}</span><span class="n">sessões que venceram sem uso</span></div>
+    <div class="nx-c"><span class="r">Sessões vencidas hoje</span><span class="v">{{ d.vencidas }}</span><span class="n">de pacotes que venceram com saldo</span></div>
   </div>
 </div>
 {% endblock %}"""

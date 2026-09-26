@@ -132,6 +132,7 @@ from web.painel_hoje import router as hoje_router
 from web.painel_clinica import router as clinica_router
 from web.painel_obras import router as obras_router
 from web.painel_clinica_agenda import router as clinica_agenda_router
+from web.painel_clinica_vagas import router as clinica_vagas_router
 from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
@@ -317,6 +318,7 @@ app.include_router(hoje_router)
 app.include_router(clinica_router)
 app.include_router(obras_router)
 app.include_router(clinica_agenda_router)
+app.include_router(clinica_vagas_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)
@@ -589,6 +591,16 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — confirmação da véspera falhou: %s: %s",
                          ciclo, type(e).__name__, e)
+            try:
+                # Vaga liberada da clínica (migração 369): consulta cancelada vira
+                # convite pra quem cabe no horário; lê o 1/2/PARAR e manda a 2ª rodada.
+                from finance import clinica_vagas as _cvg
+                _vg = _cvg.rodar(pool)
+                if _vg["novas"] or _vg["enviadas"] or _vg["respostas"]:
+                    log.info("poller: ciclo #%d — vagas: %d nova(s), %d convite(s), %d resposta(s)",
+                             ciclo, _vg["novas"], _vg["enviadas"], _vg["respostas"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — vagas falhou: %s: %s", ciclo, type(e).__name__, e)
 
     try:
         threading.Thread(target=_loop, daemon=True, name="email-poller").start()

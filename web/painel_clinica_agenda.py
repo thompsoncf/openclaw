@@ -103,6 +103,8 @@ def agenda(request: Request):
         profs = [p for p in cc.listar_profissionais(c, conta_id) if p["funcao"] != "Recepção, não atende"]
         locais = cc.listar_locais(c, conta_id)
         cfg = ca.config(c, conta_id)
+        from finance import clinica_vagas as cvg
+        vagas_esperando = cvg.esperando(c, conta_id)
         prof_id = _int(q.get("prof")) or (profs[0]["id"] if profs else None)
         if vista == "semana" and prof_id:
             segunda = data - timedelta(days=data.isoweekday() - 1)
@@ -124,6 +126,7 @@ def agenda(request: Request):
     return _render("clinica_agenda.html", request, titulo="Agenda", **_ctx_base(request),
                    vista=vista, d=dados, profs=profs, locais=locais, local_id=local_id,
                    prof_id=prof_id, titulo_data=titulo_data, gerencia=gerencia, cfg=cfg,
+                   vagas_esperando=vagas_esperando,
                    data_iso=data.isoformat(), link_ant=link(data=ant.isoformat()),
                    link_prox=link(data=prox.isoformat()), link_hoje=link(data=hoje.isoformat()),
                    link_dia=link(vista="dia", data=data.isoformat()),
@@ -392,7 +395,9 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="ag-pag">
   <div class="ag-topo"><div><h2>Agenda</h2>
     <div class="sub">{% if vista == 'dia' %}Uma coluna por profissional. Clique num horário livre para agendar e num agendamento para mudar o status.{% else %}A semana de um profissional, dia a dia.{% endif %}</div></div>
-    <a class="ag-bt" href="/painel/clinica/agenda/novo?data={{ data_iso }}">+ Agendar</a></div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+      <a class="ag-bt sec" href="/painel/clinica/vagas">⚡ Vagas liberadas{% if vagas_esperando %} ({{ vagas_esperando }}){% endif %}</a>
+      <a class="ag-bt" href="/painel/clinica/agenda/novo?data={{ data_iso }}">+ Agendar</a></div></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
 
@@ -508,7 +513,7 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div><b>Status:</b> <span class="ev s-{{ ev.situacao }}" style="display:inline-block;padding:.1rem .5rem;border-radius:6px;border:1px solid var(--borda)">{{ SIT_D[ev.situacao] }}</span>
       {% if ev.pede_remarcar_em %} · <b>pediu para remarcar</b>{% endif %}
       {% if ev.confirmado_em %} · confirmou{% elif ev.confirmacao_enviada_em %} · lembrete da véspera enviado{% endif %}</div>
-    <div class="mut" style="margin-top:.3rem">{% if ev.fone %}Celular {{ ev.fone }}{% endif %}{% if ev.origem %} · veio por {{ ev.origem }}{% endif %}{% if ev.marcado_por == 'ia' %} · marcado pelo agente no WhatsApp{% endif %}{% if ev.observacao %} · {{ ev.observacao }}{% endif %}</div>
+    <div class="mut" style="margin-top:.3rem">{% if ev.fone %}Celular {{ ev.fone }}{% endif %}{% if ev.origem %} · veio por {{ ev.origem }}{% endif %}{% if ev.marcado_por == 'ia' %} · marcado pelo agente no WhatsApp{% elif ev.marcado_por == 'vaga' %} · veio de vaga liberada{% endif %}{% if ev.observacao %} · {{ ev.observacao }}{% endif %}</div>
     {% if proximos %}<div class="ag-acoes">{% for s in proximos if s != 'finalizado' %}
       <form method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao"><input type="hidden" name="nova" value="{{ s }}"><button class="{% if s in ('faltou','cancelou') %}sec{% endif %}">{{ {'agendado':'Reabrir','confirmado':'Confirmar','presente':'Chegou','atendimento':'Entrou no atendimento','faltou':'Faltou','cancelou':'Cancelar'}[s] }}</button></form>
     {% endfor %}</div>

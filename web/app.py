@@ -133,6 +133,7 @@ from web.painel_clinica import router as clinica_router
 from web.painel_obras import router as obras_router
 from web.painel_clinica_agenda import router as clinica_agenda_router
 from web.painel_clinica_vagas import router as clinica_vagas_router
+from web.painel_clinica_planos import router as clinica_planos_router
 from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
@@ -319,6 +320,7 @@ app.include_router(clinica_router)
 app.include_router(obras_router)
 app.include_router(clinica_agenda_router)
 app.include_router(clinica_vagas_router)
+app.include_router(clinica_planos_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)
@@ -621,6 +623,16 @@ def _iniciar_poller_email() -> None:
                              ciclo, _vg["novas"], _vg["enviadas"], _vg["respostas"])
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — vagas falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
+                # Plano de tratamento da clínica (migração 379): o "1/2/3" do paciente,
+                # a cobrança da decisão (D+1, D+3), o aviso da véspera e o vencimento.
+                from finance import clinica_planos as _cpl
+                _pl = _cpl.rodar(pool)
+                if _pl["aceites"] or _pl["toques"] or _pl["avisos"] or _pl["vencidos"]:
+                    log.info("poller: ciclo #%d — planos: %d aceite(s), %d lembrete(s), %d aviso(s), "
+                             "%d vencido(s)", ciclo, _pl["aceites"], _pl["toques"], _pl["avisos"], _pl["vencidos"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — planos falhou: %s: %s", ciclo, type(e).__name__, e)
 
     try:
         threading.Thread(target=_loop, daemon=True, name="email-poller").start()

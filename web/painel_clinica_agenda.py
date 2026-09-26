@@ -279,6 +279,9 @@ def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
         erro = ca.mudar_situacao(c, conta[0], evento_id, nova, tratamento=(tratamento or None),
                                  valor_centavos=valor_c, membro_id=request.session.get("membro_id"))
         (c.rollback if erro else c.commit)()
+    if not erro and nova == "finalizado" and tratamento == "sim":
+        # o médico propôs tratamento: a recepção monta o plano agora, com o paciente na frente
+        return RedirectResponse(f"/painel/clinica/planos/novo?evento={evento_id}", status_code=303)
     return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", "" if erro else "situacao", erro or "")
 
 
@@ -528,6 +531,7 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <div class="ag-acoes inteira"><button>Finalizar</button></div>
     </form>
     {% endif %}{% endif %}
+    {% if ev.situacao == 'finalizado' %}<div class="ag-acoes" style="margin-top:.7rem"><a class="ag-bt sec" href="/painel/clinica/planos/novo?evento={{ ev.id }}">Plano de tratamento</a></div>{% endif %}
   </div>
 
   {% if remarcar %}

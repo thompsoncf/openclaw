@@ -1,5 +1,5 @@
--- 366_novidade_vaga_liberada.sql
--- O aviso da vaga liberada da clínica (finance/clinica_vagas.py, 365), seguindo a
+-- 370_novidade_vaga_liberada.sql
+-- O aviso da vaga liberada da clínica (finance/clinica_vagas.py, 369), seguindo a
 -- seção 5 do CLAUDE.md.
 --
 -- PÚBLICO `clinica`. PRA QUEM: dono, gestor e vendedor (a recepção aprova o convite).

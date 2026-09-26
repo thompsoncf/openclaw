@@ -44,7 +44,7 @@ def pool():
                   "350_clinica_semente_espaco_pelle.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
-        for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "365_clinica_vagas.sql"):
+        for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.commit()

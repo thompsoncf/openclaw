@@ -72,7 +72,7 @@ def config(c, conta_id: int) -> dict:
         with c.transaction():
             r = c.execute("select vagas_modo, vagas_teto_dia from clinica_agenda_config where conta_id=%s",
                           (conta_id,)).fetchone()
-    except Exception:  # noqa: BLE001 — migração 365 ainda não rodou
+    except Exception:  # noqa: BLE001 — migração 369 ainda não rodou
         return {"modo": "off", "teto_dia": 20}
     return {"modo": r[0] if r else "aprova", "teto_dia": int(r[1]) if r else 20}
 
@@ -844,8 +844,8 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                             """select distinct conta_id from eventos_agenda
                                 where situacao is not null and inicio > %s - interval '1 day'""",
                             (agora,)).fetchall()]
-                        c.execute("select 1 from clinica_vagas where conta_id = 0 limit 1")   # a 365 já rodou?
-                except Exception:  # noqa: BLE001 — migração 365 ainda não rodou
+                        c.execute("select 1 from clinica_vagas where conta_id = 0 limit 1")   # a 369 já rodou?
+                except Exception:  # noqa: BLE001 — migração 369 ainda não rodou
                     contas = []
                 from finance import clinica_agente as cla
                 for conta_id in contas:

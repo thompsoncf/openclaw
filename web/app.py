@@ -582,7 +582,7 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — confirmação da véspera falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
-                # Vaga liberada da clínica (migração 365): consulta cancelada vira
+                # Vaga liberada da clínica (migração 369): consulta cancelada vira
                 # convite pra quem cabe no horário; lê o 1/2/PARAR e manda a 2ª rodada.
                 from finance import clinica_vagas as _cvg
                 _vg = _cvg.rodar(pool)

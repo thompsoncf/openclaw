@@ -834,7 +834,7 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
             return
         if cvg.ja_respondida(c, conta_id, conversa_id):
             return                          # o poller respondeu este "1" um instante antes
-    except Exception:  # noqa: BLE001 — sem a 365, ou vaga com problema: segue a conversa
+    except Exception:  # noqa: BLE001 — sem a 369, ou vaga com problema: segue a conversa
         c.rollback()
         _log.info("agente da clínica: resposta de vaga não tratada (conversa %s)", conversa_id, exc_info=True)
         if not tentar_travar(c, conversa_id):

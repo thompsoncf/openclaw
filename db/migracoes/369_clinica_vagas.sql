@@ -1,4 +1,4 @@
--- 365_clinica_vagas.sql
+-- 369_clinica_vagas.sql
 -- Fase 4 da clínica, primeira parte: a VAGA LIBERADA (o "motor de ocupação" de
 -- docs/mockups/clinica_agenda_itinerante.html, seção 04). Horário que abre por
 -- cancelamento vai pra quem cabe nele, e fica com quem responder "1" primeiro

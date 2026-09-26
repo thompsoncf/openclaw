@@ -194,7 +194,9 @@ def numeros(c, conta_id: int, ini: date, fim: date, agora: datetime | None = Non
                       where v.conta_id=%s and v.inicio >= %s and v.inicio < %s""", (conta_id, a, b))
 
     atend = len(finalizados)
-    receita = receita_avulsa + valor_aceito + mensalidades
+    from finance import clinica_produtos as cpr
+    produtos_vendidos = cpr.vendido_no_periodo(c, conta_id, a, b)
+    receita = receita_avulsa + valor_aceito + mensalidades + produtos_vendidos
     vazios = sum(o["vazios"] for o in ocup)
     origem = {"recepcao": 0, "ia": 0, "vaga": 0}
     for r in ags:
@@ -211,7 +213,7 @@ def numeros(c, conta_id: int, ini: date, fim: date, agora: datetime | None = Non
         "consulta_min": int(consulta["duracao_min"]) if consulta else None,
         "fora_h": round(sum(o["fora_h"] for o in ocup), 1), "passado": fim <= hoje,
         "atendimentos": atend, "receita": receita, "ticket": (receita_avulsa + valor_aceito) // atend if atend else None,
-        "receita_avulsa": receita_avulsa, "valor_aceito": valor_aceito, "mensalidades": mensalidades,
+        "receita_avulsa": receita_avulsa, "valor_aceito": valor_aceito, "mensalidades": mensalidades, "produtos": produtos_vendidos,
         "assinantes": len(assinantes), "recorrente": sum(int(r[0]) for r in assinantes),
         "consultas": len(consultas_fin), "planos_enviados": len(enviados), "planos_aceitos": len(aceitos),
         "consulta_proposta_pct": _pct(len(enviados), len(consultas_fin)),

@@ -131,6 +131,14 @@ create table pessoas (id bigserial primary key, cpf text, celular text,
 create table clientes (id bigserial primary key, dono_id bigint references contas(id),
   pessoa_id bigint references pessoas(id), nome text, telefone text, email text,
   obs text, ativo boolean not null default true);
+-- catalogo_produtos vem da 032 (dentro do baseline). A 386 (produto da clínica)
+-- acrescenta a duração do produto e aponta pra ela nas FKs dos lotes e das vendas.
+create table catalogo_produtos (id bigserial primary key, fornecedor_id bigint not null references contas(id),
+  nome text not null, unidade text not null default 'kg', categoria text,
+  preco_venda_centavos bigint not null default 0, custo_medio_centavos bigint not null default 0,
+  saldo numeric(12,3) not null default 0, estoque_minimo numeric(12,3) not null default 0,
+  disponivel boolean not null default true, ativo boolean not null default true,
+  criado_em timestamptz not null default now(), atualizado_em timestamptz not null default now());
 create table schema_migrations (id serial primary key, nome text unique not null,
   executada_em timestamptz default now());
 """

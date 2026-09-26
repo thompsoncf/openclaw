@@ -31,6 +31,7 @@ _AVISOS = {
     "mensagem": "Mensagem enviada.",
     "sem_mensagem": "A mensagem não saiu (sem WhatsApp conectado ou número inválido).",
     "salvo": "Configuração salva.",
+    "vendido": "Venda registrada: o estoque baixou e a receita está no Financeiro.",
 }
 
 
@@ -282,9 +283,16 @@ def ver_evento(request: Request, evento_id: int):
             r = None
         retorno = {"vence": r[0], "estado": r[1]} if r else None
         pac_cfg = ckp.config(c, conta_id)
+        # produto no fim do atendimento (fase 7c): a reposição do paciente e o que vence logo
+        prod = None
+        if ev["situacao"] in ("presente", "atendimento", "finalizado"):
+            from finance import clinica_produtos as cpr
+            prod = {"lista": [p for p in cpr.produtos(c, conta_id, hoje) if p["saldo"] > 0 and p["preco_centavos"]],
+                    "sugestoes": cpr.sugestoes(c, conta_id, ev, hoje),
+                    "vendas": cpr.vendas_do_evento(c, conta_id, evento_id), "pagamentos": cpr.PAGAMENTOS}
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
                    pacote_feito=pacote_feito, pacote_vai=pacote_vai, assin_vai=assin_vai, assin_feito=assin_feito, volta_padrao=volta_padrao, retorno=retorno,
-                   pac_cfg=pac_cfg,
+                   pac_cfg=pac_cfg, prod=prod,
                    ev=ev, prof=prof, proximos=ca.PROXIMOS.get(ev["situacao"], ()), remarcar=remarcar,
                    conversa=conversa, quando=f"{ca.dia_txt(ev['inicio'])} {ev['hora']}–{ev['fim_txt']}",
                    msg_marcado=msg_marcado, msg_vespera=msg_vespera,
@@ -570,6 +578,7 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     {% endif %}{% endif %}
     {% if ev.situacao == 'finalizado' %}
     {% if pacote_feito %}<div class="ok" style="margin-top:.7rem">Sessão {{ pacote_feito.usadas }} de {{ pacote_feito.total }} baixada ({{ pacote_feito.nome }}).{% if pacote_feito.saldo %} Faltam {{ pacote_feito.saldo }}; a próxima fica boa a partir de {{ pacote_feito.proxima.strftime('%d/%m') }} (intervalo de {{ pacote_feito.intervalo }} dias).{% else %} Pacote concluído.{% endif %}</div>{% endif %}
+    {% if assin_feito %}<div class="ok" style="margin-top:.7rem">Sessão inclusa na assinatura {{ assin_feito }} usada; o pacote não baixou.</div>{% endif %}
     {% if retorno %}<div class="mut" style="margin-top:.4rem">Retorno pedido até {{ retorno.vence.strftime('%d/%m/%Y') }}{% if retorno.estado == 'marcado' %} · já marcado{% elif pac_cfg.lembretes == 'ligado' %} · o Zaq chama o paciente {{ pac_cfg.retorno_aviso_dias }} dias antes{% else %} · os lembretes estão desligados: a recepção chama{% endif %}.</div>{% endif %}
     <div class="ag-acoes" style="margin-top:.7rem">
       {% if pacote_feito and pacote_feito.saldo %}<a class="ag-bt" href="/painel/clinica/agenda/novo?prof={{ ev.profissional_id }}&tipo={{ ev.servico_id }}&data={{ pacote_feito.proxima.isoformat() }}&lead={{ ev.lead or '' }}">Marcar a {{ pacote_feito.proxima_n }}ª sessão</a>{% endif %}
@@ -582,6 +591,23 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="inteira"><b>Remarcar</b><div class="ag-ops" style="margin-top:.4rem">{% for o in remarcar %}<label><input type="radio" name="inicio" value="{{ o.valor }}" {% if loop.first %}checked{% endif %}> {{ o.txt }}</label>{% endfor %}</div></div>
     <div class="ag-acoes inteira"><button>Remarcar para este horário</button></div>
   </form>
+  {% endif %}
+
+  {% if prod %}
+  <div class="ag-caixa"><b>Produto</b>
+    {% for v in prod.vendas %}<div class="ok" style="margin-top:.4rem">Vendido: {{ v.nome }} × {{ v.qtd }} · {{ v.valor }}{% if v.recompra_em %} · reposição lembrada em {{ v.recompra_em.strftime('%d/%m') }}{% endif %}</div>{% endfor %}
+    {% for r in prod.sugestoes.recompra %}<div class="mut" style="margin-top:.4rem">Reposição: {{ r.produto }} (levou em {{ r.comprado_em.strftime('%d/%m') }}, deve acabar {{ r.recompra_em.strftime('%d/%m') }}).</div>{% endfor %}
+    {% for v in prod.sugestoes.vencendo %}<div class="mut" style="margin-top:.2rem">Na prateleira, vence logo: {{ v.nome }} ({{ v.validade.strftime('%d/%m') }}, {{ v.quantidade }} no lote).</div>{% endfor %}
+    {% if prod.lista %}
+    <form class="ag-form" method="post" action="/painel/clinica/produtos/vender" style="margin-top:.6rem">
+      <input type="hidden" name="evento_id" value="{{ ev.id }}">
+      <label>Produto<select name="produto_id">{% for p in prod.lista %}<option value="{{ p.id }}">{{ p.nome }} · {{ p.preco }}</option>{% endfor %}</select></label>
+      <label>Quantidade<input name="quantidade" value="1" inputmode="decimal"></label>
+      <label>Pagamento<select name="pagamento">{% for k, v in prod.pagamentos.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+      <div class="ag-acoes inteira"><button class="sec" onclick="this.disabled=true;this.form.submit()">Vender</button><span class="mut">assinante leva o desconto do plano sozinho</span></div>
+    </form>
+    {% else %}<div class="mut" style="margin-top:.4rem">Nenhum produto com estoque e preço. <a href="/painel/clinica/produtos">Produtos da clínica</a></div>{% endif %}
+  </div>
   {% endif %}
 
   {% if ev.situacao in ('agendado','confirmado') %}

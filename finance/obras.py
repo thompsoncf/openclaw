@@ -586,6 +586,10 @@ def bloco_persona(pool, conta_id: int) -> str:
             "dividir_entre_obras com o id do lançamento.",
             "- \"quanto já gastei na casa 2?\", \"como está a obra?\" -> consultar_obra.",
             "- \"terminou o telhado da casa 3\" -> marcar_etapa (uma chamada por etapa).",
+            "- FOTO QUE NÃO É NOTA (telhado, parede, piso, obra pronta — sem valor, sem "
+            "loja, sem CNPJ): NÃO lance nada. Guarde com guardar_foto_da_obra (a obra e, se "
+            "der, a etapa); se ele disse que a etapa terminou, marcar_etapa também. Na "
+            "dúvida entre nota e foto de obra, pergunte.",
         ]
     else:
         linhas = ["OBRAS: nenhuma cadastrada ainda."]

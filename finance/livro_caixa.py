@@ -141,6 +141,9 @@ class LivroCaixa:
         self.conta_id = conta_id
         self.membro_id = membro_id
         self.chave_nfce_atual = None  # webhook pode setar isso pra que tools usem
+        # a imagem da mensagem atual, (bytes, content-type): o webhook do WhatsApp
+        # põe aqui pra `guardar_foto_da_obra` guardar a foto que não é nota
+        self.midia_atual = None
 
     def lancamento_por_chave(self, chave: str | None, global_: bool = False) -> dict | None:
         """Consulta se ja' existe lancamento com essa chave (NFC-e).

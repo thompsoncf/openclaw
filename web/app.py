@@ -1240,6 +1240,10 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
         # Se lemos uma chave, passa pro livro pra que tools a usem ao gravar lançamento
         if chave_nfce:
             agente.livro.chave_nfce_atual = chave_nfce
+        # A foto da mensagem fica à mão das ferramentas: na construção, a foto que
+        # não é nota (o telhado pronto) vai pra obra (guardar_foto_da_obra).
+        if media_url and imagem_b64 and (media_type or "").startswith("image/"):
+            agente.livro.midia_atual = (dados, media_type)
         resposta = agente.responder(texto, imagem_b64, media_type)
         # Dica de QR SO' pra cupom fiscal (chave lida OU itens registrados);
         # comprovante de Pix/banco nao tem QR - nada de dica de QR nesse caso.

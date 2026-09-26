@@ -244,6 +244,7 @@ tbody tr:last-child td{border-bottom:0}
 .zap .pe{color:var(--faint);font-size:.68rem}
 .zap.eu{align-self:flex-end;max-width:86%;background:#123322;border-color:var(--neon-borda)}
 .zap.ia2{align-self:flex-start;max-width:86%;background:#1d1728;border-color:var(--ia-borda)}
+.sel.txt::after{content:none}
 .fones{display:flex;gap:18px;flex-wrap:wrap}
 .fones .leg{font-size:.78rem;color:var(--dim);max-width:300px;margin-top:.5rem}
 .fones .leg b{color:var(--text)}
@@ -260,13 +261,14 @@ tbody tr:last-child td{border-bottom:0}
 <header class="head">
   <span class="k">Mockup · pra aprovação · 26/09/2026</span>
   <h1>Resgate da IA: o zaq teste vira SDR da Prime</h1>
-  <p>Todo lead que fica <b>7 dias sem mensagem nossa</b> passa pro zaq teste, que volta a
+  <p>No <b>8º dia sem mensagem nossa</b>, o lead passa pro zaq teste, a não ser que o vendedor
+  abra a ficha e <b>justifique no histórico</b> por que está segurando. A IA volta a
   chamar o cliente, qualifica e segue com o que já sabe fazer: <b>preço do catálogo, visita e
   orçamento com conferência</b>. Tudo sob o olho de um <b>supervisor</b>, que recebe no próprio
   WhatsApp o que a IA faz e pode <b>testar conversando com ela</b> antes de ligar.</p>
   <div class="quem">
     <span class="pill">Prime Eventos · nicho eventos</span>
-    <span class="pill ia">319 leads na fila hoje</span>
+    <span class="pill ia">309 leads na fila hoje</span>
     <span class="pill ok">20 mensagens por dia</span>
     <span class="pill warn">nasce em Ensaio: nada sai pra cliente</span>
   </div>
@@ -279,14 +281,20 @@ tbody tr:last-child td{border-bottom:0}
       <p>O lead resgatado passa a ser do <b>zaq teste</b> e fica com ele até fechar. Você
       supervisiona pelo seu número.</p></div>
     <div class="vc sim"><h3><span class="st ok">2</span> Os perdidos entram</h3>
-      <p>Os <b>54 já marcados como perdido</b> também são chamados. Se o cliente responder, o
+      <p>Os leads já marcados como perdido também são chamados (<b>45 na fila hoje</b>). Se o cliente responder, o
       lead volta pra Contatado sozinho.</p></div>
-    <div class="vc sim"><h3><span class="st ok">3</span> Tudo pra IA depois de 7 dias</h3>
-      <p>Sem grupo de comparação: é uma <b>regra fixa</b>, não um teste de um mês. Todo lead que
-      completar 7 dias sem mensagem nossa entra na fila, hoje e daqui pra frente.</p></div>
+    <div class="vc sim"><h3><span class="st ok">3</span> Tudo pra IA no 8º dia</h3>
+      <p>Sem grupo de comparação: é uma <b>regra fixa</b>, não um teste de um mês. Passaram 7 dias
+      inteiros sem mensagem nossa, o lead entra na fila no 8º, hoje e daqui pra frente.</p></div>
     <div class="vc sim"><h3><span class="st ok">4</span> Teto de 20 por dia</h3>
       <p>Contando <b>toda</b> mensagem do resgate (a primeira e os toques seguintes), nunca
       mais de 20 por dia.</p></div>
+    <div class="vc sim"><h3><span class="st ok">5</span> Só segura quem justifica</h3>
+      <p>O vendedor só fica com o lead parado se <b>abrir a ficha e registrar o motivo</b> no
+      histórico que já existe. Sem registro, vai pra IA.</p></div>
+    <div class="vc sim"><h3><span class="st ok">6</span> Supervisor: só você</h3>
+      <p>Aviso 2 dias antes pro vendedor, resgate de segunda a sábado das 9h às 19h, e
+      <b>sem trava</b> pra sair do Ensaio: você liga quando quiser.</p></div>
   </div>
 </section>
 
@@ -305,13 +313,13 @@ tbody tr:last-child td{border-bottom:0}
         <span class="n">Resgate da IA</span>
         <span class="t">lead parado → zaq teste</span>
         <span class="con">chip principal de pé</span>
-        <span class="uso">319 na fila · 0 chamados hoje</span>
+        <span class="uso">309 na fila · 8 segurados · 0 chamados hoje</span>
       </div>
       <div class="campos">
         <div class="cp full"><label>Situação</label>
           <div class="seg"><span>Desligado</span><span class="on">Ensaio</span><span>Ligado</span></div></div>
         <div class="cp"><label>Passa pra IA quando</label>
-          <div class="sel">7 dias sem mensagem nossa</div></div>
+          <div class="sel">no 8º dia sem mensagem nossa</div></div>
         <div class="cp"><label>Vai pra</label>
           <div class="sel"><span class="avia">IA</span> zaq teste</div></div>
         <div class="cp"><label>Mensagens por dia (teto)</label>
@@ -322,8 +330,9 @@ tbody tr:last-child td{border-bottom:0}
           <div class="sel">(11) 9····-····</div></div>
         <div class="cp"><label>O supervisor recebe</label>
           <div class="sel">prévias, avisos e o resumo das 19h</div></div>
-        <div class="sw full"><span class="tg on"></span> Incluir os leads já marcados como perdido (54)</div>
-        <div class="sw full"><span class="tg on"></span> Avisar o vendedor 2 dias antes de o lead dele ir pro resgate</div>
+        <div class="sw full"><span class="tg on"></span> Incluir os leads já marcados como perdido (45 na fila)</div>
+        <div class="sw full"><span class="tg on"></span> Avisar o vendedor 2 dias antes (no 6º dia) de o lead dele ir pro resgate</div>
+        <div class="sw full"><span class="tg on"></span> O vendedor segura o lead registrando o motivo no histórico da ficha</div>
         <div class="alerta"><b>Sai pelo chip onde a conversa já está</b> (317 dos 326 estão no chip
         principal). Uma a cada 20 a 30 minutos, com um texto diferente pra cada cliente. <b>Freio
         automático:</b> se o chip cair, se 3 clientes pedirem pra parar no mesmo dia ou se 3 envios
@@ -339,30 +348,31 @@ tbody tr:last-child td{border-bottom:0}
   <p class="nota"><i>Por quê</i><span>O chip principal da Prime é WhatsApp por QR, não a API oficial.
   Disparar 300 mensagens de uma vez é o jeito mais rápido de o WhatsApp banir o número, e esse é
   o chip de onde vem a receita. Por isso: <b>teto, espaçamento, horário comercial e freio</b>. A
-  fila anda mais devagar (cerca de 4 semanas pros 319), mas o chip não corre risco.</span></p>
+  fila anda mais devagar (cerca de 4 semanas pros 309), mas o chip não corre risco.</span></p>
 </section>
 
 <section class="sec">
   <header>
     <h2>A fila: quem é chamado primeiro</h2>
-    <p>Números de hoje na Prime, contados sem repetir o mesmo lead. Os leads que forem
-    completando 7 dias entram na fila na posição da faixa deles.</p>
+    <p>Números de hoje na Prime, contados sem repetir o mesmo lead e já tirando os 8 que o
+    vendedor segurou com um registro no histórico. Quem for chegando ao 8º dia entra na posição
+    da faixa dele.</p>
   </header>
   <div class="fila">
     <div class="fl"><span class="o">1º</span>
-      <span class="t"><b>O cliente escreveu por último e ninguém respondeu</b></span><span class="n">49</span>
+      <span class="t"><b>O cliente escreveu por último e ninguém respondeu</b></span><span class="n">48</span>
       <span class="d">A falha foi nossa. A IA começa pedindo desculpa e respondendo o que ele perguntou. 9 deles já estavam como perdido.</span></div>
     <div class="fl"><span class="o">2º</span>
-      <span class="t"><b>Festa com data por vir, a mais próxima primeiro</b></span><span class="n">100</span>
-      <span class="d">11 têm festa nos próximos 30 dias. A IA confere na agenda se a data ainda está livre antes de chamar.</span></div>
+      <span class="t"><b>Festa com data por vir, a mais próxima primeiro</b></span><span class="n">95</span>
+      <span class="d">8 têm festa nos próximos 30 dias. A IA confere na agenda se a data ainda está livre antes de chamar.</span></div>
     <div class="fl"><span class="o">3º</span>
       <span class="t"><b>Abertos sem data, os mais recentes primeiro</b></span><span class="n">136</span>
       <span class="d">Quanto mais novo o contato, maior a chance de o cliente lembrar da conversa.</span></div>
     <div class="fl"><span class="o">4º</span>
-      <span class="t"><b>Perdidos sem data</b></span><span class="n">34</span>
+      <span class="t"><b>Perdidos sem data</b></span><span class="n">30</span>
       <span class="d">Por último: é onde a chance é menor.</span></div>
     <div class="fl fora"><span class="o">fora</span>
-      <span class="t"><b>A festa já passou, ou é em menos de 3 dias</b></span><span class="n">7</span>
+      <span class="t"><b>A festa já passou, ou é em menos de 3 dias</b></span><span class="n">9</span>
       <span class="d">Não se chama. Festa daqui a 1 ou 2 dias vai pro supervisor decidir, não pra IA.</span></div>
   </div>
 </section>
@@ -421,7 +431,8 @@ tbody tr:last-child td{border-bottom:0}
         <div class="zap"><span class="de">Zaq · Resgate · hoje, 19h</span>
           <span><b>20 chamados · 5 responderam</b></span>
           <span>1 visita marcada (sáb 10h, anfitriã Jacqueline)<br>1 orçamento esperando conferência<br>2 pediram pra parar (não chamo mais)<br>1 vendedor respondeu o cliente, então eu pausei</span>
-          <span class="pe">Fila: 299 · faltam ~15 dias úteis</span></div>
+          <span>Segurados com justificativa: 2 (Pedro: "cliente viajando, volta dia 10")</span>
+          <span class="pe">Fila: 289 · faltam ~15 dias úteis</span></div>
         <div class="zap"><span class="de">Zaq · o resgate precisa de você</span>
           <span>O cliente do lead #···· pediu desconto de 15%. Isso é com o Manoel, e ele não tem WhatsApp cadastrado. Pode ver?</span></div>
       </div></div>
@@ -433,14 +444,50 @@ tbody tr:last-child td{border-bottom:0}
 
 <section class="sec">
   <header>
+    <h2>Como o vendedor segura um lead</h2>
+    <p>Um jeito só: <b>abrir a ficha e registrar o motivo</b> em "Registrar atividade", o histórico
+    que já existe. Vale qualquer tipo (nota, ligação, visita, reunião), desde que seja
+    <b>ele</b> registrando e <b>com texto</b>. O registro conta como contato: o prazo de 7 dias
+    recomeça a partir dele.</p>
+  </header>
+  <div class="fones">
+    <div>
+      <div class="fone"><div class="in">
+        <div class="not"><span class="ap">Zaq · 6º dia</span>
+          <b>Seu lead vai pro resgate da IA em 2 dias</b>
+          <p>Carla (exemplo), festa 15/11. Última mensagem sua em 20/09. Pra ficar com ele, mande
+          uma mensagem ou abra a ficha e registre o motivo no histórico.</p></div>
+      </div></div>
+      <p class="leg"><b>No celular do vendedor.</b> Push, e-mail e WhatsApp, como os avisos de hoje.
+      O toque abre a ficha do lead.</p>
+    </div>
+    <div style="flex:1;min-width:280px">
+      <div class="ficha">
+        <h3>Registrar atividade</h3>
+        <div class="chips"><span class="chip">Ligação</span><span class="chip">WhatsApp</span><span class="chip">Reunião</span><span class="chip">Visita</span><span class="chip ok">Nota</span></div>
+        <div class="sel txt" style="min-height:3.2em;align-items:flex-start">Cliente está viajando, pediu pra falar depois do dia 10.</div>
+        <div class="rodape"><span class="bt pri">Registrar</span></div>
+        <div class="chips"><span class="chip ok">Segurado até 03/10</span><span class="chip">o prazo recomeçou pelo registro</span></div>
+      </div>
+      <p class="leg" style="max-width:none"><b>O que não segura:</b> registro automático do sistema,
+      registro sem texto, ou registro de outra pessoa que não o vendedor do lead. Passados 7 dias do
+      registro sem mensagem nem registro novo, o lead vai pra IA. Hoje, 8 leads parados já estariam
+      segurados assim. As justificativas aparecem no seu resumo das 19h.</p>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <header>
     <h2>O que muda pra equipe</h2>
   </header>
   <div class="tres">
     <div class="col3 a"><h3>Vendedor</h3><ul>
-      <li>No <b>5º dia</b> sem mensagem, recebe: "o lead X vai pro resgate da IA em 2 dias".</li>
-      <li>No 7º dia, o lead passa pro zaq teste. A ficha mostra <b>"com a IA desde 03/10 · resgate · era do Pedro"</b>.</li>
+      <li>No <b>6º dia</b> sem mensagem, recebe: "o lead X vai pro resgate da IA em 2 dias".</li>
+      <li>Pra segurar: mandar mensagem, ou <b>registrar o motivo no histórico da ficha</b>.</li>
+      <li>No <b>8º dia</b> sem nada disso, o lead passa pro zaq teste. A ficha mostra <b>"com a IA desde 03/10 · resgate · era do Pedro"</b>.</li>
       <li>Se ele escrever pro cliente depois disso, a IA pausa e o supervisor é avisado. O lead continua sendo da IA.</li>
-      <li>Recebe a novidade: "lead parado há 7 dias vai pra IA".</li>
+      <li>Recebe a novidade: "lead parado 7 dias vai pra IA no 8º, a não ser que você justifique na ficha".</li>
     </ul></div>
     <div class="col3 c"><h3>Follow-up</h3><ul>
       <li>O follow-up da Prime está <b>ligado</b> e cobra o dono do lead. Lead da IA sai da cobrança, senão os avisos iriam pro zaq teste, que não tem celular.</li>
@@ -487,7 +534,7 @@ tbody tr:last-child td{border-bottom:0}
     <div class="ps"><b>Etapa 1: o motor, o Ensaio e o supervisor</b>
       <p>O card do Resgate, a fila por faixa, a passagem do lead pro zaq teste (com o registro de quem
       era), o envio pelo chip da conversa com teto, espaçamento, horário e freio, as prévias do Ensaio,
-      o "Testar comigo", o resumo das 19h, o aviso de 2 dias pro vendedor, a saída dos leads da IA do
+      o "Testar comigo", o resumo das 19h, o aviso de 2 dias pro vendedor, a justificativa no histórico que segura o lead, a saída dos leads da IA do
       follow-up e a novidade pra equipe.</p></div>
     <div class="ps"><b>Etapa 2: os toques e o desafio</b>
       <p>O 2º e o 3º toque, o perdido no 10º dia, a volta pra Contatado quando o cliente responde, e a
@@ -499,23 +546,16 @@ tbody tr:last-child td{border-bottom:0}
 </section>
 
 <section class="sec">
-  <header><h2>Faltam 4 respostas suas</h2></header>
+  <header><h2>Faltam 2 confirmações</h2></header>
   <div class="dec">
-    <div class="q2"><span class="qn">1</span><h3>O supervisor é só você?</h3>
-      <p>O campo aceita um número. O Manoel (dono) não tem WhatsApp cadastrado, então hoje os
-      avisos de desconto e sinal não chegam no celular dele.</p>
-      <p class="rec">você como supervisor, e cadastrar o WhatsApp do Manoel em Equipe.</p></div>
-    <div class="q2"><span class="qn">2</span><h3>Aviso pro vendedor 2 dias antes?</h3>
-      <p>Não muda a sua regra (o lead vai pra IA no 7º dia do mesmo jeito): só dá ao vendedor a chance
-      de segurar o lead mandando uma mensagem antes.</p>
-      <p class="rec">sim. Sem isso, o vendedor descobre depois que perdeu o lead.</p></div>
-    <div class="q2"><span class="qn">3</span><h3>Horário do resgate: seg a sáb, 9h às 19h?</h3>
-      <p>A IA continua respondendo 24h quem escrever. O horário vale só pra ela <b>puxar</b> conversa.</p>
-      <p class="rec">sim. Mensagem de venda às 22h irrita o cliente e aumenta o risco pro chip.</p></div>
-    <div class="q2"><span class="qn">4</span><h3>Quanto tempo em Ensaio antes de ligar?</h3>
-      <p>Você decide quando passa pra Ligado. A pergunta é se o sistema deve <b>impedir</b> de ligar
-      antes de um mínimo de prévias.</p>
-      <p class="rec">sem trava. Recomendo ver ao menos 1 dia de prévias (20) e fazer 2 ou 3 "Testar comigo".</p></div>
+    <div class="q2"><span class="qn">1</span><h3>A justificativa vale por 7 dias?</h3>
+      <p>O registro no histórico conta como contato: segura o lead por mais 7 dias a partir dele.
+      Passado isso sem mensagem, o vendedor precisa justificar de novo ou o lead vai pra IA.</p>
+      <p class="rec">sim. Sem prazo, uma nota só seguraria o lead pra sempre.</p></div>
+    <div class="q2"><span class="qn">2</span><h3>Visita marcada na agenda segura sozinha?</h3>
+      <p>Se o lead tem visita marcada pra frente na agenda, a IA puxar a conversa atropela o
+      vendedor. Hoje são <b>0 casos</b> entre os parados, mas pode acontecer.</p>
+      <p class="rec">sim, segura sem precisar de nota. É um fato do sistema, não uma desculpa.</p></div>
   </div>
 </section>
 

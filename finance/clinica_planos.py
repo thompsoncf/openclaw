@@ -179,11 +179,12 @@ def plano(c, conta_id: int, plano_id: int) -> dict | None:
 
 
 def por_token(c, token: str) -> dict | None:
-    if not token or len(token) > 64:
+    from finance.clinica_planos_publico import dono_do_token
+    dono = dono_do_token(c, token)
+    if not dono:
         return None
-    r = c.execute(f"select {_COLS} from clinica_planos p where p.token=%s and p.status <> 'cancelado'",
-                  (token,)).fetchone()
-    return _dict(c, r) if r else None
+    p = plano(c, dono[1], dono[0])
+    return p if p and p["status"] != "cancelado" else None
 
 
 def listar(c, conta_id: int) -> list[dict]:
@@ -406,8 +407,11 @@ def enviar(c, conta_id: int, plano_id: int, membro_id: int | None, agora: dateti
 # ------------------------------------------------------------------ o aceite
 
 def marcar_visto(c, token: str) -> None:
-    c.execute("update clinica_planos set visto_em=now() where token=%s and visto_em is null and status='enviado'",
-              (token,))
+    from finance.clinica_planos_publico import dono_do_token
+    dono = dono_do_token(c, token)
+    if dono:
+        c.execute("""update clinica_planos set visto_em=now()
+                      where id=%s and conta_id=%s and visto_em is null and status='enviado'""", dono)
 
 
 def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str = "link",
@@ -418,14 +422,17 @@ def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str =
     nome = " ".join((nome or "").split())
     if not nome or forma not in FORMA_D:
         return False
+    from finance.clinica_planos_publico import dono_do_token
     with pool.connection() as c:
-        r = c.execute(
+        dono = dono_do_token(c, token)
+        r = dono and c.execute(
             """update clinica_planos set status='aceito', aceito_em=%s, aceito_forma=%s, aceito_nome=%s,
                       aceito_ip=%s, aceito_por=%s, atualizado_em=now()
-                where token=%s and status='enviado' and (validade_ate is null or validade_ate >= %s)
+                where id=%s and conta_id=%s and status='enviado' and (validade_ate is null or validade_ate >= %s)
                   and (%s <> 'parcelado' or parcelado)
             returning id, conta_id""",
-            (agora, forma, nome[:120], (ip or "")[:60], por, token, ca.hoje_br(agora), forma)).fetchone()
+            (agora, forma, nome[:120], (ip or "")[:60], por, dono[0], dono[1], ca.hoje_br(agora),
+             forma)).fetchone()
         if not r:
             c.rollback()
             return False
@@ -492,8 +499,11 @@ def _titulos(pool, p: dict, forma: str, agora: datetime) -> list[int]:
 
 
 def recusar(c, token: str) -> bool:
-    r = c.execute("""update clinica_planos set status='recusado', atualizado_em=now()
-                      where token=%s and status='enviado' returning id, conta_id""", (token,)).fetchone()
+    from finance.clinica_planos_publico import dono_do_token
+    dono = dono_do_token(c, token)
+    r = dono and c.execute("""update clinica_planos set status='recusado', atualizado_em=now()
+                               where id=%s and conta_id=%s and status='enviado' returning id, conta_id""",
+                           dono).fetchone()
     if r:
         p = plano(c, r[1], r[0])
         _avisar(c, r[1], p, f"Plano recusado: {p['paciente']}", "Recusou pelo link. Vale uma ligação.")
@@ -697,8 +707,8 @@ def rodar(pool, agora: datetime | None = None) -> dict:
             with pool.connection() as c:
                 try:
                     with c.transaction():
-                        contas = [r[0] for r in c.execute(
-                            "select distinct conta_id from clinica_planos where status='enviado'").fetchall()]
+                        from finance.clinica_planos_publico import contas_com_plano_enviado
+                        contas = contas_com_plano_enviado(c)
                 except Exception:  # noqa: BLE001 — sem a 373
                     contas = []
                 for conta_id in contas:

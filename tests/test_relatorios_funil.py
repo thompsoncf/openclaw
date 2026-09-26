@@ -28,7 +28,10 @@ _BASE_SQL = """
 create table contas (id bigserial primary key, nome text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
-  sinal_pago_em timestamptz);
+  sinal_pago_em timestamptz, status text not null default 'rascunho',
+  criado_por text, criado_em timestamptz not null default now());
+create table orcamento_envios (id bigserial primary key, conta_id bigint,
+  orcamento_id bigint, ok boolean not null default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   whatsapp text, telefone text, criado_em timestamptz not null default now(),
   contato text, vendedor_id bigint);
@@ -237,9 +240,37 @@ def test_taxa_com_cobertura_cheia_sai_limpa():
     assert t["confiavel"] is True and t["tom"] == "ok"
 
 
+def test_sinal_pago_segue_o_periodo_e_o_vendedor(pool, cen):
+    """"Viraram sinal pago" contava a conta inteira desde sempre: "4 de 230" igual
+    pra qualquer mês e qualquer vendedor (Prime, 26/09/2026). Agora é dos
+    orçamentos feitos no período e, com vendedor escolhido, dos dele. Rascunho não
+    entra: nunca chegou ao cliente."""
+    conta, pedro = cen["conta"], cen["pedro"]
+    velho = AGORA - timedelta(days=90)
+    with pool.connection() as c:
+        for numero, por, quando, sinal, status in (
+                (1, str(pedro), AGORA, AGORA, "fechado"),
+                (2, str(pedro), AGORA, None, "enviado"),
+                (3, "999", AGORA, None, "enviado"),
+                (4, str(pedro), velho, velho, "fechado"),
+                (5, str(pedro), AGORA, None, "rascunho")):
+            c.execute("""insert into orcamentos (conta_id, numero, criado_por, criado_em,
+                           sinal_pago_em, status) values (%s,%s,%s,%s,%s,%s)""",
+                      (conta, numero, por, quando, sinal, status))
+        c.commit()
+    tudo = _metrica(_rel(pool, conta), "Viraram sinal")
+    assert tudo.endswith("2 de 4 orçamentos"), tudo
+    do_pedro = _metrica(_rel(pool, conta, vendedor=str(pedro)), "Viraram sinal")
+    assert do_pedro.endswith("2 de 3 orçamentos"), do_pedro
+    mes = rel._dados_funil(pool, conta, "30d", "", str(pedro), "")
+    assert _metrica(mes, "Viraram sinal").endswith("1 de 2 orçamentos"), (
+        "o orçamento de 90 dias atrás não é do período")
+
+
 def test_sinal_pago_zerado_nao_vira_taxa_falsa(pool, cen):
     with pool.connection() as c:
-        c.execute("insert into orcamentos (conta_id, numero) values (%s,1)", (cen["conta"],))
+        c.execute("insert into orcamentos (conta_id, numero, status) values (%s,1,'enviado')",
+                  (cen["conta"],))
         c.commit()
     assert _metrica(_rel(pool, cen["conta"]), "Viraram sinal").startswith("0%")
 

@@ -143,6 +143,24 @@ def test_placar_da_o_contrato_a_quem_fez_o_orcamento(pool, monkeypatch):
     assert v["ganhos"] == 2 and v["sem_lead"] == 1 and v["por_contrato"] is True
 
 
+def test_ganhos_do_perfil_do_vendedor_seguem_o_contrato_e_nao_a_edicao(pool, monkeypatch):
+    """"Ganhos do mês" de `perfil()` contava lead ganho pela ÚLTIMA EDIÇÃO: na
+    Prime (26/09/2026) daria 3 no mês pro Pedro, que assinou 2 — o terceiro era de
+    agosto, editado em setembro. Agora é a régua do placar do dono."""
+    from finance import cockpit as ck
+    agora = datetime.now(cd._brt())
+    monkeypatch.setattr(cd, "_range", lambda periodo="semana", de=None, ate=None:
+                        (agora - timedelta(days=7), agora + timedelta(minutes=1)))
+    with pool.connection() as c:
+        conta, dono, jac, thi = _prime(c)
+    # o Thiago tem 4 leads "ganho", todos editados agora; contrato dele na janela, 1
+    # (Carla). Bianca é da Jacqueline (fez o orçamento), a de agosto é de 40 dias
+    # atrás e "Sem contrato" não é venda numa conta que assina contrato
+    assert ck.perfil(pool, conta, thi)["ganhos"] == 1
+    assert ck.perfil(pool, conta, jac)["ganhos"] == 2
+    assert ck.perfil(pool, conta, thi)["ganhos"] == cd.vendedor(pool, conta, thi)["ganhos"]
+
+
 def test_conta_sem_contrato_segue_pelo_lead(pool):
     with pool.connection() as c:
         conta = c.execute("insert into contas (nome, nome_fantasia) values ('C','Sem') returning id").fetchone()[0]

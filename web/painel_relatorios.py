@@ -49,6 +49,7 @@ _PERIODO_ROTULO = _per.ROTULO
 _dia = _per.dia
 _fim_do_mes = _per.fim_do_mes
 _intervalo = _per.intervalo
+from finance import relogio as _relogio  # noqa: E402 — o "hoje" de Brasília
 
 
 def periodos_da_aba(tipo: str) -> list[tuple[str, str]]:
@@ -286,7 +287,7 @@ def _dados_vendas(pool, conta_id, periodo):
 
     total = _soma(linhas, "valor_centavos")
     n = len(linhas)
-    hoje_str = _fmt(date.today())
+    hoje_str = _fmt(_relogio.hoje())      # o dia de Brasília, como o período
     vendido_hoje = _soma([r for r in linhas if r["data"] == hoje_str], "valor_centavos")
     dados = {
         "label": "Vendas", "mock": False,
@@ -372,7 +373,7 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
     "Fornecedores" nas 34 contas a pagar, "Serviços"/"Vendas" nas a receber. Uma
     coluna constante não informa; ocupa. (O campo continua no banco, no filtro e
     no que a aba Empresa mostra — o que saiu é a coluna desta tabela.)"""
-    hoje = date.today()
+    hoje = _relogio.hoje()
     tits = emp.listar_titulos(pool, conta_id, status="aberto", tipo=tipo, limite=300)
     candidatos = emp.pagamentos_candidatos(pool, conta_id, tits, tipo)
     verbo = "pago" if tipo == "pagar" else "recebido"
@@ -721,6 +722,43 @@ def _contrato_tag(numero, status, enviado_em, assinado_em) -> tuple[str, str]:
 
 _VALOR_ORC = "coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0)"
 
+#: O DIA DE TERESINA, não o do banco. `x::date` corta no dia do servidor (UTC), e o
+#: lead que chega entre 21h e meia-noite caía no dia seguinte — no último dia do mês,
+#: no mês seguinte. As abas Contratos e Funil e o Raio-X já cortavam em Brasília; a
+#: aba Leads, a de Orçamentos e a Agenda cortavam em UTC (conferido em 26/09/2026:
+#: 297 × 294 leads na mesma janela). Uma expressão só, pra ninguém voltar ao `::date`.
+_DIA_BRT = "({} at time zone 'America/Sao_Paulo')::date"
+
+#: O STATUS QUE O ORÇAMENTO TEM DE FATO. A venda se perde no LEAD (o vendedor marca
+#: Perdido no funil, a esteira fecha o parado), e ninguém volta no orçamento pra
+#: marcá-lo — então `orcamentos.status='perdido'` quase nunca existe, e a métrica
+#: "Perdidos" desta aba ficava em 0 pra sempre (na Prime, 26/09/2026, com 67 leads
+#: perdidos). Orçamento em aberto cujo(s) lead(s) foram TODOS perdidos conta como
+#: perdido; fechado segue fechado, mesmo que alguém tenha perdido o card depois.
+#: Dinheiro que entrou (sinal pago) ou contrato assinado também não é venda
+#: perdida: o sinal é confirmado sem fechar o orçamento (`vendas.confirmar_sinal`),
+#: e a esteira não olha o orçamento antes de fechar o lead parado.
+_ORC_STATUS = """(case when o.status not in ('fechado', 'perdido')
+          and exists (select 1 from prospeccao px where px.orcamento_id = o.id
+                         and px.conta_id = o.conta_id and px.status = 'perdido')
+          and not exists (select 1 from prospeccao px where px.orcamento_id = o.id
+                         and px.conta_id = o.conta_id and px.status <> 'perdido')
+          and o.sinal_pago_em is null
+          and not exists (select 1 from contratos cx where cx.orcamento_id = o.id
+                         and cx.conta_id = o.conta_id and cx.substitui_id is null
+                         and cx.assinado_em is not null
+                         and cx.status in ('assinado', 'cumprido'))
+     then 'perdido' else o.status end)"""
+
+#: O ORÇAMENTO CHEGOU AO CLIENTE? A régua do gatilho "orçamento enviado" do funil
+#: (`funil_regua._SQL_ORCAMENTO_ENVIADO`): status além de rascunho OU um envio que
+#: deu certo. Mandar pelo WhatsApp, e-mail ou link grava `orcamento_envios` e NÃO
+#: muda o status — na Prime (26/09/2026) 13 dos 16 "rascunhos" do Pedro tinham ido
+#: pro cliente. Olhar só o status chamaria de não enviado o que foi enviado.
+_ORC_CHEGOU = """(coalesce(o.status, 'rascunho') <> 'rascunho'
+          or exists (select 1 from orcamento_envios ex where ex.orcamento_id = o.id
+                        and ex.conta_id = o.conta_id and ex.ok))"""
+
 
 def _vendedores_da_conta(pool, conta_id: int) -> list[tuple[int, str]]:
     with pool.connection() as c:
@@ -752,7 +790,7 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     where = ["o.conta_id=%s"]
     params: list = [conta_id]
     if periodo != "todos":
-        where.append("o.criado_em::date >= %s and o.criado_em::date <= %s")
+        where.append(_DIA_BRT.format("o.criado_em") + " >= %s and " + _DIA_BRT.format("o.criado_em") + " <= %s")
         params += [ini, fim]
     if vendedor_sel:
         where.append("o.criado_por = %s")
@@ -764,8 +802,8 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
 
     with pool.connection() as c:
         por_status = c.execute(
-            f"select o.status, count(*), sum({_VALOR_ORC}) from orcamentos o "
-            f"where {base_sql} group by o.status", params).fetchall()
+            f"select {_ORC_STATUS}, count(*), sum({_VALOR_ORC}) from orcamentos o "
+            f"where {base_sql} group by 1", params).fetchall()
 
     def _grupo(quais):
         n = sum(int(r[1]) for r in por_status if r[0] in quais)
@@ -779,13 +817,13 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     where2, params2 = list(where), list(params)
     quais = ORC_STATUS_FILTROS.get(status_sel)
     if quais:
-        where2.append("o.status = any(%s)")
+        where2.append(_ORC_STATUS + " = any(%s)")
         params2.append(quais)
     where2_sql = " and ".join(where2)
 
     with pool.connection() as c:
         rows = c.execute(
-            f"""select o.numero, o.cliente, o.empresa, o.status, o.criado_em,
+            f"""select o.numero, o.cliente, o.empresa, {_ORC_STATUS}, o.criado_em,
                        o.aprovada_em,
                        -- criado_por guarda o id do membro OU a palavra 'dono' (quem
                        -- abriu a conta, sem vendedor específico — mesma leitura de
@@ -1171,7 +1209,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     where = ["e.conta_id=%s"]
     params: list = [conta_id]
     if periodo != "todos":
-        where.append("e.inicio::date >= %s and e.inicio::date <= %s")
+        where.append(_DIA_BRT.format("e.inicio") + " >= %s and " + _DIA_BRT.format("e.inicio") + " <= %s")
         params += [ini, fim]
     e_vis = _e_visita(_vis.vende_festa(pool, conta_id))
     # DE QUEM É A LINHA: a VISITA é do dono do card (sem card, de quem marcou); a
@@ -1550,7 +1588,7 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
     onde.append("(l.lead_id is not null or coalesce(p.origem,'') <> all(%s))")
     params.append(list(ORIGENS_GARIMPO))
     if periodo != "todos":
-        onde.append("p.criado_em::date >= %s and p.criado_em::date <= %s")
+        onde.append(_DIA_BRT.format("p.criado_em") + " >= %s and " + _DIA_BRT.format("p.criado_em") + " <= %s")
         params += [ini, fim]
     if chip_sel:
         # Escolher um chip é perguntar "quem entrou POR ELE": quem não veio de
@@ -1599,7 +1637,10 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
            -- passariam a mentir por truncagem justo quando a base cresce. Janela
            -- roda antes do LIMIT.
            count(*) over () as n_total,
-           count(o.numero) over () as n_orc
+           -- SÓ O ORÇAMENTO QUE CHEGOU AO CLIENTE (ver _ORC_CHEGOU): o que ficou
+           -- aberto na tela do vendedor e nunca saiu não é conversão
+           count(o.numero) filter (where {_ORC_CHEGOU}) over () as n_orc,
+           (o.id is null or {_ORC_CHEGOU}) as chegou
       from prospeccao p
       left join por_lead l on l.lead_id = p.id
       left join membros mb on mb.id = coalesce(l.memb, p.vendedor_id)
@@ -1646,7 +1687,7 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
             "msgs": int(r[5] or 0),
             "vendedor": r[7],
             "ultima": ultima,
-            "orcamento": f"nº {r[8]}" if r[8] else "—",
+            "orcamento": (f"nº {r[8]}" + ("" if r[13] else " (não enviado)")) if r[8] else "—",
         })
 
     med = vendas.mediana(esperas)
@@ -1791,14 +1832,27 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
         sql_leads = ("select count(distinct cv.prospeccao_id) from conversas cv "
                      "where cv.conta_id=%s and cv.prospeccao_id is not null")
         if periodo != "todos":
-            sql_leads += " and cv.criado_em::date >= %s and cv.criado_em::date <= %s"
+            sql_leads += (" and " + _DIA_BRT.format("cv.criado_em") + " >= %s and "
+                          + _DIA_BRT.format("cv.criado_em") + " <= %s")
             p2 += [ini, fim]
         n_leads = c.execute(sql_leads, p2).fetchone()[0] or 0
-        n_sinal = c.execute(
-            "select count(*) from orcamentos where conta_id=%s and sinal_pago_em is not null",
-            (conta_id,)).fetchone()[0] or 0
-        n_orc = c.execute("select count(*) from orcamentos where conta_id=%s",
-                          (conta_id,)).fetchone()[0] or 0
+        # "VIRARAM SINAL PAGO" é dos orçamentos feitos NO PERÍODO e, com vendedor
+        # escolhido, dos DELE (quem fez o orçamento, a régua da aba Orçamentos). Antes
+        # contava a conta inteira desde sempre: "4 de 230" aparecia igual pra qualquer
+        # mês e qualquer vendedor, e a linha não servia pra comparar ninguém.
+        # O que não chegou ao cliente fica de fora: não tinha como virar sinal.
+        onde_o, p3 = "o.conta_id=%s and " + _ORC_CHEGOU, [conta_id]
+        if periodo != "todos":
+            onde_o += (" and " + _DIA_BRT.format("o.criado_em") + " >= %s and "
+                       + _DIA_BRT.format("o.criado_em") + " <= %s")
+            p3 += [ini, fim]
+        if vendedor_sel:
+            onde_o += " and o.criado_por = %s"
+            p3.append(str(vendedor_sel))
+        n_orc, n_sinal = c.execute(
+            "select count(*), count(*) filter (where o.sinal_pago_em is not null) "
+            "from orcamentos o where " + onde_o, p3).fetchone()
+        n_orc, n_sinal = int(n_orc or 0), int(n_sinal or 0)
 
     linhas, esperas = [], []
     n_agendadas = n_ligadas = n_passou = n_respondidas = n_apareceu = 0

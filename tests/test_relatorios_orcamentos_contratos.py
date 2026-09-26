@@ -24,11 +24,14 @@ create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
   cliente text, empresa text, token text, setup_centavos bigint default 0,
   mensal_centavos bigint default 0, primeiro_ano_centavos bigint,
   status text default 'rascunho', criado_por text, aprovada_em timestamptz,
+  sinal_pago_em timestamptz,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table contratos (id bigserial primary key, conta_id bigint, numero int,
   orcamento_id bigint, status text default 'enviado', valor_centavos bigint,
   assinado_em timestamptz, enviado_em timestamptz, substitui_id bigint, token text,
   criado_em timestamptz default now());
+create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
+  orcamento_id bigint, status text default 'novo');
 """
 
 HOJE = date.today()
@@ -55,7 +58,7 @@ def pool():
 @pytest.fixture
 def cen(pool):
     with pool.connection() as c:
-        c.execute("truncate contas, membros, orcamentos, contratos restart identity")
+        c.execute("truncate contas, membros, orcamentos, contratos, prospeccao restart identity")
         conta = c.execute("insert into contas (nome) values ('Prime Eventos') returning id").fetchone()[0]
         jacqueline = c.execute("insert into membros (conta_id, nome) values (%s,'Jacqueline') "
                                "returning id", (conta,)).fetchone()[0]
@@ -522,3 +525,58 @@ def test_a_data_do_contrato_sai_em_brasilia(pool, cen):
               assinado_em=datetime(2026, 9, 9, 0, 27, tzinfo=timezone.utc))
     dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
     assert dados["linhas"][0]["assinado_em"] == "08/09/2026"
+
+
+def test_orcamento_de_lead_perdido_conta_como_perdido(pool, cen):
+    """A venda se perde no LEAD, e ninguém volta no orçamento pra marcá-lo. Lido só
+    de `orcamentos.status`, "Perdidos" ficava em 0 pra sempre — na Prime (26/09/2026)
+    com 67 leads perdidos. Orçamento em aberto com o lead perdido é perdido; o
+    fechado continua fechado; lead reaberto devolve o orçamento pro aberto."""
+    conta = cen["conta"]
+    with pool.connection() as c:
+        ids = {}
+        for numero, status in ((1, "enviado"), (2, "enviado"), (3, "fechado"), (4, "enviado")):
+            ids[numero] = c.execute(
+                "insert into orcamentos (conta_id, numero, status, primeiro_ano_centavos) "
+                "values (%s,%s,%s,100000) returning id", (conta, numero, status)).fetchone()[0]
+        for numero, st in ((1, "perdido"), (2, "proposta"), (3, "perdido")):
+            c.execute("insert into prospeccao (conta_id, orcamento_id, status) values (%s,%s,%s)",
+                      (conta, ids[numero], st))
+        # o nº 4 tem dois leads: um perdido e um ainda em jogo — segue em aberto
+        c.execute("insert into prospeccao (conta_id, orcamento_id, status) values (%s,%s,'perdido')",
+                  (conta, ids[4]))
+        c.execute("insert into prospeccao (conta_id, orcamento_id, status) values (%s,%s,'contatado')",
+                  (conta, ids[4]))
+        c.commit()
+    d = rel._dados_orcamentos(pool, conta, "todos", "", "", "")
+    met = dict(d["metricas"])
+    assert met["Perdidos"].startswith("1 ·"), met
+    assert met["Fechados"].startswith("1 ·"), met
+    assert met["Em aberto"].startswith("2 ·"), met
+    status = {l["numero"]: l["status"] for l in d["linhas"]}
+    assert status[1] == "Perdido" and status[3] == "Fechado"
+    so_perdidos = rel._dados_orcamentos(pool, conta, "todos", "perdido", "", "")
+    assert [l["numero"] for l in so_perdidos["linhas"]] == [1]
+
+
+def test_sinal_pago_ou_contrato_assinado_nunca_vira_perdido(pool, cen):
+    """O sinal é confirmado sem fechar o orçamento, e a esteira fecha o lead parado
+    sem olhar o orçamento. Dinheiro que entrou não é venda perdida."""
+    conta = cen["conta"]
+    with pool.connection() as c:
+        com_sinal = c.execute(
+            "insert into orcamentos (conta_id, numero, status, sinal_pago_em, primeiro_ano_centavos) "
+            "values (%s,1,'aprovada',now(),500000) returning id", (conta,)).fetchone()[0]
+        com_ct = c.execute(
+            "insert into orcamentos (conta_id, numero, status, primeiro_ano_centavos) "
+            "values (%s,2,'aprovada',500000) returning id", (conta,)).fetchone()[0]
+        c.execute("insert into contratos (conta_id, orcamento_id, status, assinado_em) "
+                  "values (%s,%s,'assinado',now())", (conta, com_ct))
+        for oid in (com_sinal, com_ct):
+            c.execute("insert into prospeccao (conta_id, orcamento_id, status) values (%s,%s,'perdido')",
+                      (conta, oid))
+        c.commit()
+    d = rel._dados_orcamentos(pool, conta, "todos", "", "", "")
+    met = dict(d["metricas"])
+    assert met["Perdidos"].startswith("0 ·"), met
+    assert {l["status"] for l in d["linhas"]} == {"Aprovada"}

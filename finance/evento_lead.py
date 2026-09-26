@@ -220,7 +220,7 @@ def data_curta(d: date | None, hoje: date | None = None) -> str:
     """'28 nov' no ano corrente, '16 jan 27' fora dele — cabe numa linha do card."""
     if not d:
         return ""
-    hoje = hoje or date.today()
+    hoje = hoje or hoje_brt()
     s = f"{d.day:02d} {_MESES[d.month - 1]}"
     return s if d.year == hoje.year else f"{s} {d.year % 100:02d}"
 
@@ -319,7 +319,7 @@ def _ordem_por_festa(card: dict, agora: datetime) -> tuple:
     faixa ela ocuparia o topo do grupo — a Prime tem lead aberto com data vencida,
     e o topo da coluna é justamente onde ele não pode estar.
     """
-    hoje = agora.date()
+    hoje = _dia_brt(agora)
     festa = card.get("evento_em")
     if isinstance(festa, datetime):
         festa = festa.date()
@@ -369,6 +369,7 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
     "Entrou na semana de 14/09" / "Entrou em ago" — a mesma chave, a mesma ordem."""
     agora = agora or datetime.now(timezone.utc)
     limite = agora - timedelta(days=PARADO_DIAS)
+    hoje = _dia_brt(agora)      # o dia e o mês de Brasília, como a pílula de entrada
     esperando: list = []
     evento: dict[str, list] = {}
     entrada: dict[str, list] = {}
@@ -377,14 +378,14 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
         # quem entrou pela pílula de fora (esperando resposta, festa em 30 dias)
         # entrou porque é urgente: nunca se esconde na dobra
         if (ultima_atividade(c, agora) < limite and not c.get("fora")
-                and not festa_em_30_dias(c, agora.date())):
+                and not festa_em_30_dias(c, hoje)):
             parados.append(c)
         elif esperando_resposta(c):
             esperando.append(c)
         elif c.get("evento_em"):
             evento.setdefault(mes_chave(c["evento_em"]), []).append(c)
         else:
-            base = (_aware(c.get("criado_em")) or agora).date()
+            base = _dia_brt(c.get("criado_em")) or hoje
             entrada.setdefault(_semana_chave(base) if por_semana else mes_chave(base), []).append(c)
     grupos = []
     if esperando:
@@ -418,20 +419,36 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
 
 
 # ------------------------------------------------------------------ o período do quadro
+#: O MÊS É O DE BRASÍLIA. `criado_em` vem em UTC, e `.date()` dele é o dia do
+#: servidor: o lead que chegava às 22h do dia 30 entrava no quadro do mês seguinte,
+#: e das 21h à meia-noite do último dia o "mês atual" do servidor já era o outro
+#: (26/09/2026 — o Raio-X e os Relatórios cortam em Brasília; o Funil agora também).
+_BRT = timezone(timedelta(hours=-3))
+
+
+def _dia_brt(dt) -> date | None:
+    base = _aware(dt)
+    return base.astimezone(_BRT).date() if base else None
+
+
+def hoje_brt() -> date:
+    return datetime.now(_BRT).date()
+
+
 def periodo_atual(hoje: date | None = None) -> str:
-    return mes_chave(hoje or date.today())
+    return mes_chave(hoje or hoje_brt())
 
 
 def no_periodo(card: dict, entrou: str) -> bool:
     """O card entrou no mês `entrou` ('AAAA-MM')? 'tudo' aceita todo mundo."""
     if entrou == "tudo":
         return True
-    base = _aware(card.get("criado_em"))
-    return bool(base) and mes_chave(base.date()) == entrou
+    dia = _dia_brt(card.get("criado_em"))
+    return bool(dia) and mes_chave(dia) == entrou
 
 
 def festa_em_30_dias(card: dict, hoje: date | None = None) -> bool:
-    hoje = hoje or date.today()
+    hoje = hoje or hoje_brt()
     d = card.get("evento_em")
     return bool(d) and hoje <= d <= hoje + timedelta(days=30)
 
@@ -440,12 +457,12 @@ def meses_entrada(cards: list[dict], hoje: date | None = None) -> list[dict]:
     """As pílulas "Entraram em": um mês por leva, do mais novo pro mais velho, com o
     mês corrente sempre presente (mesmo com zero — é o padrão), e "Tudo" no fim.
     [{chave, rotulo, n}]."""
-    hoje = hoje or date.today()
+    hoje = hoje or hoje_brt()
     cont: dict[str, int] = {periodo_atual(hoje): 0}
     for c in cards:
-        base = _aware(c.get("criado_em"))
-        if base:
-            k = mes_chave(base.date())
+        dia = _dia_brt(c.get("criado_em"))
+        if dia:
+            k = mes_chave(dia)
             cont[k] = cont.get(k, 0) + 1
     itens = [{"chave": k, "rotulo": _NOME_MES_CHEIO[int(k[5:7]) - 1].capitalize()
               + ("" if k[:4] == str(hoje.year) else f" {k[2:4]}"), "n": n}
@@ -493,7 +510,7 @@ def regua(contagens: dict, mes_sel: str = "", hoje: date | None = None) -> list[
         primeiro mês só ganha divisa quando não é do ano corrente.
     O rótulo curto ("Jan") só vale porque a divisa diz o ano: sem ela, "Jan" seria
     ambíguo — o motivo de `mes_rotulo` levar o ano."""
-    hoje = hoje or date.today()
+    hoje = hoje or hoje_brt()
     itens = trilho(contagens, mes_sel)
     total = itens[0]["n"]
     meses = [it for it in itens if it["chave"] and it["chave"] != "sem"]

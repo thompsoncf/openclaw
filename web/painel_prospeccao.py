@@ -717,7 +717,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     _entrou_q = (entrou or "").strip()
     if _entrou_q == "tudo" or _evl.mes_valido(_entrou_q):
         sess["funil_entrou"] = _entrou_q
-    filtro_entrou = sess.get("funil_entrou") or _evl.periodo_atual(_agora().date())
+    filtro_entrou = sess.get("funil_entrou") or _evl.periodo_atual()
     if fora is not None:
         sess["funil_fora"] = ",".join(x for x in (fora or "").split(",") if x in ("esperando", "festa30"))
     fora_on = [x for x in (sess.get("funil_fora") or "").split(",") if x]
@@ -1001,7 +1001,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             except Exception:  # noqa: BLE001
                 por_ler = 0
     colunas = {e["chave"]: [] for e in etapas}
-    hoje = _agora().date()
+    hoje = _evl.hoje_brt()      # o dia de Brasília: das 21h em diante o UTC já é amanhã
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
     # os cards dos OUTROS vendedores (gerência com um vendedor escolhido): não vão
@@ -1117,7 +1117,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         cc["festa30"] = _evl.festa_em_30_dias(cc, hoje)
         cc["no_periodo"] = _evl.no_periodo(cc, filtro_entrou)
         cc["fora"] = not cc["no_periodo"]
-        _ce = _evl._aware(cc.get("criado_em"))
+        _ce = _evl._dia_brt(cc.get("criado_em"))
         cc["entrou_rot"] = _evl._MESES[_ce.month - 1] if _ce else ""
     fora_cont = {"esperando": sum(1 for cc in todos_cards if cc["fora"] and cc["esperando"] and cc["status"] != "perdido"),
                  "festa30": sum(1 for cc in todos_cards if cc["fora"] and cc["festa30"] and cc["status"] != "perdido")}

@@ -18,13 +18,13 @@ insert into public.novidades (chave, tipo, publico, pra_quem, titulo, resumo, li
 
 NO FIM DO ATENDIMENTO
 
-- A tela do agendamento tem a caixa Produto: escolha, a quantidade e a forma de pagamento. O estoque baixa e a receita entra em Vendas no Financeiro.
+- A tela do agendamento tem a caixa Produto: escolha, a quantidade e a forma de pagamento. O estoque baixa e a receita entra em Vendas no Financeiro (no fiado, fica uma conta a receber).
 - Ela sugere a reposição do que o paciente já leva e o que está vencendo na prateleira.
 - Assinante leva o desconto do plano sozinho.
 
 A REPOSIÇÃO VOLTA SOZINHA
 
-- Cadastre quanto cada produto dura (ex.: protetor, 60 dias). Na data prevista, o Zaq pergunta ao paciente se acabou e oferece outro.
+- Cadastre quanto cada produto dura (ex.: protetor, 60 dias). Na data prevista, o Zaq pergunta ao paciente se acabou e oferece outro; a resposta vai pra recepção, que sabe qual é o produto.
 - A mensagem nunca diz o nome do produto, sai só no horário de atendimento e conta no limite de 1 mensagem automática por paciente por dia.
 
 VALIDADE

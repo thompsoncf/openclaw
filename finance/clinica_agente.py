@@ -77,6 +77,8 @@ MOTIVOS = {
                "Anotado! A nossa recepção confirma o horário com você por aqui 😊"),
     "pessoa": ("quer falar com alguém",
                "Claro! Já avisei a nossa recepção, que te responde por aqui 😊"),
+    "produto": ("respondeu a reposição do produto",
+                "Obrigado por responder! Já passei para a nossa recepção, que te responde por aqui 😊"),
 }
 
 #: o que chega pelo WhatsApp quando o paciente manda mídia: o agente só lê TEXTO,
@@ -545,7 +547,7 @@ def _aviso(pool, conta_id: int, membros: list[int], titulo: str, corpo: str, url
 
 #: o que a tela Hoje mostra quando o mesmo item junta vários assuntos
 _PESO = {"urgencia": 9, "sintoma": 5, "remarcar": 3, "marcar": 3, "convenio": 3, "desconto": 3,
-         "pessoa": 2, "foto": 1, "audio": 1, "arquivo": 1}
+         "pessoa": 2, "produto": 2, "foto": 1, "audio": 1, "arquivo": 1}
 
 
 def _aberto(c, conta_id: int, conversa_id: int) -> tuple | None:
@@ -855,6 +857,12 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
         _log.info("agente da clínica: resposta de plano não tratada (conversa %s)", conversa_id, exc_info=True)
         if not tentar_travar(c, conversa_id):
             return
+    # 3c) a resposta ao lembrete da reposição (clinica_produtos): a mensagem não disse o
+    #     produto, então quem responde é a recepção, que sabe qual é
+    from finance import clinica_produtos as cpr
+    if cpr.respondeu_recompra(c, conta_id, conversa_id):
+        repassar(pool, c, conta_id, conversa_id, lead, "produto", nome, enviar)
+        return
     # 4) o "1"/"2" do lembrete: resposta pronta pelo que foi gravado, sem IA
     ack = resposta_da_vespera(c, conta_id, conversa_id, lead, fone, ultima, agora)
     if ack:

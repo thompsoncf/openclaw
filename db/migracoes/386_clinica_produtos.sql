@@ -22,6 +22,7 @@ create table if not exists public.clinica_produto_lotes (
   id bigserial primary key,
   conta_id bigint not null references public.contas(id),
   produto_id bigint not null references public.catalogo_produtos(id),
+  mov_id bigint,                           -- a entrada do estoque (estoque_mov) deste lote
   quantidade numeric(12,3) not null check (quantidade > 0),
   validade date not null,
   criado_por bigint,
@@ -39,7 +40,8 @@ create table if not exists public.clinica_produto_vendas (
   quantidade numeric(12,3) not null check (quantidade > 0),
   valor_centavos integer not null,         -- já com o desconto
   desconto_centavos integer not null default 0,
-  lancamento_id bigint,                    -- a receita (ou o título, no fiado) do balcão
+  lancamento_id bigint,                    -- a receita do balcão
+  titulo_id bigint,                        -- no fiado: o título a receber
   recompra_em date,                        -- a data prevista da reposição (duração × quantidade)
   recompra_estado text not null default 'aguardando'
     check (recompra_estado in ('aguardando','lembrado','comprou','dispensado','sem')),
@@ -54,6 +56,11 @@ alter table public.clinica_lembretes drop constraint if exists clinica_lembretes
 alter table public.clinica_lembretes add constraint clinica_lembretes_tipo_check
   check (tipo in ('sessao','retorno','validade','recompra'));
 
+-- a resposta ao lembrete da reposição vai pra recepção (clinica_agente, motivo "produto")
+alter table public.clinica_repasses drop constraint if exists clinica_repasses_motivo_check;
+alter table public.clinica_repasses add constraint clinica_repasses_motivo_check check (motivo in
+  ('sintoma','foto','audio','arquivo','desconto','convenio','urgencia','remarcar','marcar','pessoa','produto'));
+
 alter table public.clinica_agenda_config
   add column if not exists produto_recompra text not null default 'ligado';
 do $$ begin
@@ -66,6 +73,10 @@ end $$;
 -- rollback:
 --   alter table public.clinica_agenda_config drop constraint if exists clinica_agenda_config_produto_recompra_check,
 --     drop column if exists produto_recompra;
+--   alter table public.clinica_repasses drop constraint if exists clinica_repasses_motivo_check;
+--   alter table public.clinica_repasses add constraint clinica_repasses_motivo_check check (motivo in
+--     ('sintoma','foto','audio','arquivo','desconto','convenio','urgencia','remarcar','marcar','pessoa'));
+--     -- só depois de apagar os 'produto'
 --   alter table public.clinica_lembretes drop constraint if exists clinica_lembretes_tipo_check;
 --   alter table public.clinica_lembretes add constraint clinica_lembretes_tipo_check
 --     check (tipo in ('sessao','retorno','validade'));   -- só depois de apagar os 'recompra'

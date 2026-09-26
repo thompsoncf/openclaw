@@ -127,13 +127,66 @@ def test_comprou_de_novo_fecha_a_reposicao(banco, zap):  # noqa: F811
     pid = _produto(pool)
     with pool.connection() as c:
         lead, _conv = _paciente(c)
-    cpr.vender(pool, CLINICA, lead=lead, itens=[(str(pid), "1")], pagamento="pix", membro_id=51, hoje=HOJE)
-    cpr.vender(pool, CLINICA, lead=lead, itens=[(str(pid), "1")], pagamento="pix", membro_id=51,
-               hoje=HOJE + timedelta(days=50))
+    assert cpr.vender(pool, CLINICA, lead=lead, itens=[(str(pid), "1")], pagamento="pix", membro_id=51,
+                      hoje=HOJE)[1] is None
+    # o clique duplo (a mesma venda de novo em segundos) é recusado, e o estoque não baixa duas vezes
+    assert "acabou de ser vendido" in cpr.vender(pool, CLINICA, lead=lead, itens=[(str(pid), "1")],
+                                                 pagamento="pix", membro_id=51, hoje=HOJE)[1]
+    assert len(zap.vendas) == 1
+    with pool.connection() as c:
+        c.execute("update clinica_produto_vendas set criado_em = now() - interval '50 days'")
+        c.commit()
+    assert cpr.vender(pool, CLINICA, lead=lead, itens=[(str(pid), "1")], pagamento="pix", membro_id=51,
+                      hoje=HOJE + timedelta(days=50))[1] is None
     with pool.connection() as c:
         est = [r[0] for r in c.execute("select recompra_estado from clinica_produto_vendas order by id").fetchall()]
         reps = cpr.recompras(c, CLINICA, HOJE + timedelta(days=100))
     assert est == ["comprou", "aguardando"] and [r["recompra_em"] for r in reps] == [HOJE + timedelta(days=110)]
+
+
+def test_entradas_sem_lote_contam_na_estimativa_e_custo_vazio_usa_o_medio(banco, zap):  # noqa: F811
+    pool = banco
+    pid = _produto(pool, validade=HOJE + timedelta(days=20), qtd=10)
+    cat.registrar_movimentacao(pool, CLINICA, pid, "saida", 10)          # o lote de 20 dias saiu todo
+    cat.registrar_movimentacao(pool, CLINICA, pid, "entrada", 20, 5000)  # entrada pela tela genérica, sem lote
+    with pool.connection() as c:
+        assert cpr.perto_de_vencer(c, CLINICA, HOJE) == []               # não ressuscita o lote que saiu
+    assert cpr.entrada(pool, CLINICA, produto_id=pid, quantidade="NaN", custo="", validade="", membro_id=None,
+                       hoje=HOJE) == "Informe o produto e a quantidade."
+    assert cpr.entrada(pool, CLINICA, produto_id=pid, quantidade="2", custo="", validade="", membro_id=None,
+                       hoje=HOJE) is None
+    with pool.connection() as c:
+        assert c.execute("select custo_medio_centavos from catalogo_produtos where id=%s", (pid,)).fetchone()[0] == 5000
+    novo = _produto(pool, nome="Sérum", qtd=0)
+    assert "primeira entrada" in cpr.entrada(pool, CLINICA, produto_id=novo, quantidade="1", custo="",
+                                             validade="", membro_id=None, hoje=HOJE)
+
+
+def test_venda_so_no_atendimento_e_dois_produtos_um_lembrete(banco, zap):  # noqa: F811
+    pool = banco
+    p1, p2 = _produto(pool), _produto(pool, nome="Hidratante", dias=60)
+    with pool.connection() as c:
+        lead, conv = _paciente(c)
+        eid = _sessao(c, lead, date(2026, 9, 28), tipo="Consulta")
+        c.commit()
+    assert "presente" in cpr.vender(pool, CLINICA, evento_id=eid, itens=[(str(p1), "1")], pagamento="pix",
+                                    membro_id=51, hoje=HOJE)[1]
+    for pid in (p1, p2):
+        assert cpr.vender(pool, CLINICA, lead=lead, itens=[(str(pid), "1")], pagamento="pix", membro_id=51,
+                          hoje=HOJE)[1] is None
+    with pool.connection() as c:
+        c.execute("update clinica_produto_vendas set criado_em = %s", (ca.utc(HOJE, time(10)),))
+        c.commit()
+        vence = HOJE + timedelta(days=60)
+        assert cpr.lembrar(c, CLINICA, ca.utc(vence, time(9))) == 1
+        assert cpr.lembrar(c, CLINICA, ca.utc(vence + timedelta(days=1), time(9))) == 0   # o outro foi junto
+        assert {r[0] for r in c.execute("select recompra_estado from clinica_produto_vendas").fetchall()} == {"lembrado"}
+        # a resposta do paciente é da recepção; depois que alguém responde, não é mais
+        assert cpr.respondeu_recompra(c, CLINICA, conv)
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
+                     values (%s,'whatsapp','out','humano','Oi! Separei aqui')""", (conv,))
+        c.commit()
+        assert not cpr.respondeu_recompra(c, CLINICA, conv)
 
 
 @pytest.fixture()

@@ -31,6 +31,7 @@ _AVISOS = {
     "mensagem": "Mensagem enviada.",
     "sem_mensagem": "A mensagem não saiu (sem WhatsApp conectado ou número inválido).",
     "salvo": "Configuração salva.",
+    "vendido": "Venda registrada: o estoque baixou e a receita está no Financeiro.",
 }
 
 
@@ -603,7 +604,7 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <label>Produto<select name="produto_id">{% for p in prod.lista %}<option value="{{ p.id }}">{{ p.nome }} · {{ p.preco }}</option>{% endfor %}</select></label>
       <label>Quantidade<input name="quantidade" value="1" inputmode="decimal"></label>
       <label>Pagamento<select name="pagamento">{% for k, v in prod.pagamentos.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
-      <div class="ag-acoes inteira"><button class="sec">Vender</button><span class="mut">assinante leva o desconto do plano sozinho</span></div>
+      <div class="ag-acoes inteira"><button class="sec" onclick="this.disabled=true;this.form.submit()">Vender</button><span class="mut">assinante leva o desconto do plano sozinho</span></div>
     </form>
     {% else %}<div class="mut" style="margin-top:.4rem">Nenhum produto com estoque e preço. <a href="/painel/clinica/produtos">Produtos da clínica</a></div>{% endif %}
   </div>

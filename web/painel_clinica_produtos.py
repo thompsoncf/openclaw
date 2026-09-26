@@ -38,7 +38,9 @@ def _int(v) -> int | None:
 
 def _ir(request: Request, url: str, aviso: str = "", erro: str = "") -> RedirectResponse:
     if erro:
-        request.session["produtos_erro"] = erro[:300]
+        # a venda do agendamento volta pra tela dele, que lê o próprio erro
+        chave = "agenda_erro" if url.startswith("/painel/clinica/agenda/") else "produtos_erro"
+        request.session[chave] = erro[:300]
     if aviso in _AVISOS:
         url += ("&" if "?" in url else "?") + f"aviso={aviso}"
     return RedirectResponse(url, status_code=303)
@@ -178,7 +180,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       <div><label>Pagamento</label><select name="pagamento">{% for k, v in pagamentos.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
     </div>
     <div class="pr-m" style="margin-top:.4rem">Assinante leva o desconto do plano sozinho.</div>
-    <div class="pr-acoes" style="margin-top:.6rem"><button>Vender</button><a href="/painel/clinica/produtos">cancelar</a></div>
+    <div class="pr-acoes" style="margin-top:.6rem"><button onclick="this.disabled=true;this.form.submit()">Vender</button><a href="/painel/clinica/produtos">cancelar</a></div>
   </form>
   {% endif %}
 
@@ -208,7 +210,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="pr-grid" style="margin-top:.5rem">
       <div><label>Produto</label><select name="produto_id">{% for p in prods %}<option value="{{ p.id }}">{{ p.nome }}</option>{% endfor %}</select></div>
       <div><label>Quantidade</label><input name="quantidade" inputmode="decimal" required></div>
-      <div><label>Custo por unidade (R$)</label><input name="custo" inputmode="decimal" placeholder="45,90"></div>
+      <div><label>Custo por unidade (R$; vazio: o custo médio)</label><input name="custo" inputmode="decimal" placeholder="45,90"></div>
       <div><label>Validade do lote</label><input type="date" name="validade"></div>
     </div>
     <div class="pr-acoes" style="margin-top:.6rem"><button>Registrar entrada</button></div>

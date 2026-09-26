@@ -473,6 +473,14 @@ def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str =
         c.execute("update clinica_planos set titulos=%s where id=%s and conta_id=%s",
                   (json.dumps(ids), plano_id, conta_id))
         c.commit()
+        # as sessões compradas viram SALDO (fase 6): um pacote por procedimento
+        try:
+            from finance import clinica_pacotes as ckp
+            ckp.criar_do_plano(c, conta_id, p, agora)
+            c.commit()
+        except Exception:  # noqa: BLE001 — sem a 381: o aceite vale; o saldo a recepção cria
+            c.rollback()
+            _log.warning("planos: pacote não criado (plano %s)", plano_id, exc_info=True)
         _avisar(c, conta_id, p, f"✅ Plano aceito: {p['paciente']}",
                 f"{FORMA_D[forma]} · {_brl(p['pix'] if forma == 'pix' else p['total'])}")
     return True

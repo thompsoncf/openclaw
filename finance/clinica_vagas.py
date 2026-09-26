@@ -438,6 +438,14 @@ def _recebeu_hoje(c, conta_id: int, conversa_id: int, inicio_dia: datetime) -> b
         pass
     try:
         with c.transaction():
+            if c.execute("""select 1 from clinica_lembretes where conta_id=%s and conversa_id=%s
+                             and enviado_em >= %s and estado <> 'falhou' limit 1""",
+                         (conta_id, conversa_id, inicio_dia)).fetchone():
+                return True                 # lembrete de sessão, retorno ou validade hoje
+    except Exception:  # noqa: BLE001 — sem a 381
+        pass
+    try:
+        with c.transaction():
             return c.execute("""select 1 from voltar_a_chamar_toques where conta_id=%s and conversa_id=%s
                                  and estado='enviado' and enviado_em >= %s limit 1""",
                              (conta_id, conversa_id, inicio_dia)).fetchone() is not None

@@ -368,6 +368,12 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
     lid, nome_pac, fone_pac, erro = _lead_do_paciente(c, conta_id, lead_id, nome, fone)
     if erro:
         return None, erro
+    # a regra da parcela atrasada (fase 6, nasce desligada) vale pra QUEM marcar: a
+    # recepção, o agente no WhatsApp e a vaga liberada
+    from finance import clinica_pacotes as ckp
+    erro = ckp.bloqueio(c, conta_id, lid, fone_pac or fone, servico_id, (paciente or "").strip() or nome_pac)
+    if erro:
+        return None, erro
     if (paciente or "").strip():
         nome_pac = paciente.strip()
     if not fone_pac and len(_digitos(fone)) >= 10:
@@ -481,8 +487,10 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
 
 
 def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: str | None = None,
-                   valor_centavos: int | None = None, membro_id: int | None = None) -> str | None:
-    """Muda o status e, junto, o card do funil (`card_pela_agenda`)."""
+                   valor_centavos: int | None = None, membro_id: int | None = None,
+                   retorno_dias: int | None = None) -> str | None:
+    """Muda o status e, junto, o card do funil (`card_pela_agenda`). Finalizado: baixa
+    a sessão do pacote e agenda o retorno pedido (clinica_pacotes, fase 6)."""
     ev = c.execute("""select case when status = 'cancelado' then 'cancelou' else situacao end,
                              profissional_id, inicio, coalesce(fim, inicio + interval '30 minutes')
                         from eventos_agenda where id=%s and conta_id=%s and situacao is not null for update""",
@@ -498,6 +506,13 @@ def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: s
         return erro
     card_pela_agenda(c, conta_id, evento_id, nova, tratamento=tratamento,
                      valor_centavos=valor_centavos, membro_id=membro_id)
+    if nova == "finalizado":
+        from finance import clinica_pacotes as ckp
+        try:
+            with c.transaction():
+                ckp.ao_finalizar(c, conta_id, evento_id, retorno_dias)
+        except Exception:  # noqa: BLE001 — finalizar não pode cair por isso; mas deixa rastro
+            _log.warning("agenda da clínica: pacote/retorno não gravado (evento %s)", evento_id, exc_info=True)
     return None
 
 

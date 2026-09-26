@@ -441,3 +441,31 @@ def test_parcela_atrasada_vale_pro_agente_e_pra_vaga(pool, zap):
         eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c), servico_id=_tipo(c, "Procedimento estético")["id"],
                                inicio=ca.utc(SEG, time(8)), lead_id=lead, marcado_por="ia", agora=AGORA)
         assert eid is None and "parcela" in erro
+
+
+def test_voltar_a_chamar_soma_a_cobranca_do_plano_e_o_lembrete(pool, zap):  # noqa: F811
+    """Com as tabelas de verdade (379 e 381): a cobrança do plano de hoje e o lembrete
+    de hoje seguram o toque do voltar a chamar do mesmo paciente."""
+    from finance import voltar_a_chamar as vac
+    with pool.connection() as c:
+        lead, conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        mid = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em)
+                           values (%s,'whatsapp','out','humano','A consulta é R$ 500',now()) returning id""",
+                        (conv,)).fetchone()[0]
+        c.execute("""insert into voltar_a_chamar_toques (conta_id, prospeccao_id, conversa_id, preco_msg_id, toque,
+                                                          estado, devido_em)
+                     values (39,%s,%s,%s,2,'pendente',now())""", (lead, conv, mid))
+        c.commit()
+        hoje = vac._inicio_do_dia(datetime.now(timezone.utc))
+        sql = ("select count(*) from voltar_a_chamar_toques t where t.conta_id=%(conta)s and "
+               + vac._nao_mandado_hoje(c))
+        assert c.execute(sql, {"conta": CLINICA, "hoje": hoje}).fetchone()[0] == 1
+        c.execute("update clinica_planos set toque1_em = now() where conta_id=%s", (CLINICA,))
+        assert c.execute(sql, {"conta": CLINICA, "hoje": hoje}).fetchone()[0] == 0
+        c.execute("update clinica_planos set toque1_em = null where conta_id=%s", (CLINICA,))
+        c.execute("""insert into clinica_lembretes (conta_id, conversa_id, tipo, ref_id, enviado_em)
+                     values (39,%s,'sessao',1,now())""", (conv,))
+        assert c.execute(sql, {"conta": CLINICA, "hoje": hoje}).fetchone()[0] == 0
+        c.rollback()

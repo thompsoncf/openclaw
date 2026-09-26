@@ -3665,7 +3665,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               do cliente acabava dentro do texto do título — onde é texto, não dado:
               51 dos 60 compromissos da Prime apareciam sem cliente no relatório.
               Opcional de propósito; reunião interna não tem dono. -#}
-          <label>Cliente <span style="font-weight:400">(opcional)</span></label>
+          <label>{{ voc.cliente|capitalize }} <span style="font-weight:400">(opcional)</span></label>
           <input name="cliente_nome" id="fCli" placeholder="Buscar por nome, telefone ou CPF…"
                  autocomplete="off" oninput="cliBusca(this.value)">
           <input type="hidden" name="cliente_id" id="fCliId">
@@ -3676,7 +3676,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               festa por telefonema não têm card. -#}
           {% if tem_cards %}
           <label>Card do funil <span style="font-weight:400">(opcional)</span></label>
-          <input id="fCard" placeholder="De qual lead é? Nome ou telefone…"
+          <input id="fCard" placeholder="De qual {{ voc.lead }} é? Nome ou telefone…"
                  autocomplete="off" oninput="cardBusca(this.value)">
           <input type="hidden" name="prospeccao_id" id="fCardId">
           <div id="fCardSug" class="cli-sug" style="display:none"></div>
@@ -3694,7 +3694,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                  oninput="TIT_MEXIDO=true">
           {% if vende_data and tem_clientes %}
           <div class="cli-dica" id="fTitDica" style="display:none">Montado a partir do tipo e do
-            cliente — pode reescrever, o vínculo não depende do texto.</div>
+            {{ voc.cliente }} — pode reescrever, o vínculo não depende do texto.</div>
           {% endif %}
           <div class="row2">
             <div><label>{{ rot.data }}</label><input name="data" id="fData" type="date" value="{{ hoje_iso }}" required></div>
@@ -3850,7 +3850,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if vende_data %}
       <div class="ag-card">
         <h2>⏳ Data segurada</h2>
-        <p class="hint" style="margin-top:0">Quando o cliente aprova um orçamento de evento <b>com sinal</b>, a data entra aqui como segurada — ocupa o dia, mas não vira compromisso nem lembrete. Ela só firma quando você confirma o sinal, na tela do orçamento.</p>
+        <p class="hint" style="margin-top:0">Quando o {{ voc.cliente }} aprova um orçamento de evento <b>com sinal</b>, a data entra aqui como segurada — ocupa o dia, mas não vira compromisso nem lembrete. Ela só firma quando você confirma o sinal, na tela do orçamento.</p>
         <form method="post" action="/painel/agenda/pre-reserva">
           <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
           {# CAMPO LIVRE, não lista fechada. A lista oferecia 1, 2, 3, 5, 7, 10, 15 e
@@ -4036,7 +4036,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
       </div>
       {% endfor %}
-      <p class="hint" style="margin:6px 0 0">Entra sozinho quando o cliente pede um dia já vendido.
+      <p class="hint" style="margin:6px 0 0">Entra sozinho quando o {{ voc.cliente }} pede um dia já vendido.
       Quando a data abre, o vendedor de cada um é avisado no app e você recebe o resumo.</p>
     </div>
     {% endif %}

@@ -31,6 +31,7 @@ from datetime import date
 from jinja2 import DictLoader, Environment
 
 from web import portal as pt
+from finance.raio_x_perfil import VOC_PESSOA_PADRAO as _VOC_PADRAO
 
 TPL = pt._EMPRESA
 
@@ -94,6 +95,7 @@ def _topo(resumo, **ctx):
     i = TPL.index('{% set _MESES')
     j = TPL.index('{#- A BARRA DAS SEÇÕES')
     env = Environment(loader=DictLoader({"t": TPL[i:j] + "</div>"}))
+    env.globals["voc"] = dict(_VOC_PADRAO)   # o global que o _env do portal tem
     env.filters["brl"] = pt.brl
     base = {"resumo": resumo, "empresa_nome": "Prime Eventos", "empresa_doc": "",
             "dre": _dre(), "rotulo_receber": "A receber", "carteira": None}
@@ -195,6 +197,7 @@ def _linhas(*titulos, pode_liberar=True, decide=True):
     j = TPL.index("{% endmacro %}", i) + len("{% endmacro %}")
     env = Environment(loader=DictLoader({"t": TPL[i:j] + (
         "{% for t in lista %}{{ tit_linha(t, decide) }}{% endfor %}")}))
+    env.globals["voc"] = dict(_VOC_PADRAO)   # o global que o _env do portal tem
     env.filters["brl"] = pt.brl
     env.filters["n2"] = lambda v: f"{v:.2f}"
     return env.get_template("t").render(

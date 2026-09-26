@@ -640,7 +640,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
 """ + _navbar("follow_up") + r"""
   <div>
     <h1>Follow-up</h1>
-    <p class="lede">A próxima ação de cada lead em jogo, proposta pelo sistema e corrigida por você.
+    <p class="lede">A próxima ação de cada {{ voc.lead }} em jogo, proposta pelo sistema e corrigida por você.
     O relógio lê a conversa — mensagem enviada pelo celular também conta. Abrir o card não encerra nada.</p>
   </div>
 
@@ -651,7 +651,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
   <div class="fu-modo">
     <div class="txt">
       <b>Follow-up automático</b>
-      <small>marca a próxima ação de cada lead e cobra quando ela vence</small>
+      <small>marca a próxima ação de cada {{ voc.lead }} e cobra quando ela vence</small>
     </div>
     {% if papel in ('dono','gestor') %}
     <form method="post" action="/painel/follow-up/modo" class="fu-seg">
@@ -791,7 +791,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       {% if e.motivo %}<span class="nota">{{ e.motivo }}</span>{% endif %}</span></div>
     {% else %}
     <div class="fu-ev"><span class="h">{{ br(e.quando) }}</span><span class="t"><b>Enviado</b>{% if e.teste %}<span class="tag">teste</span>{% endif %}
-      {% if e.n_leads %}<span class="nota">{{ e.n_leads }} lead{{ 's' if e.n_leads > 1 }}</span>{% endif %}</span></div>
+      {% if e.n_leads %}<span class="nota">{{ e.n_leads }} {{ voc.lead }}{{ 's' if e.n_leads > 1 }}</span>{% endif %}</span></div>
       {% if e.entregue_em %}
       <div class="fu-ev g"><span class="h">{{ br(e.entregue_em) }}</span><span class="t"><b>Entregue ✓✓</b></span></div>
       {% endif %}
@@ -822,7 +822,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
           <span class="nome"><b>{{ p.quem }}</b>
             <span>{{ p.email or 'sem e-mail' }}{% if p.numero %} · {{ p.numero }}{% endif %}</span></span>
           <span class="fu-selo2 {{ p.selo_cls }}">{{ p.selo }}</span>
-          <span class="ult">{% if p.n_leads %}{{ p.n_leads }} lead{{ 's' if p.n_leads > 1 }} · {% endif %}<span class="{{ p.sinal_cls }}">{{ p.sinal }}</span></span>
+          <span class="ult">{% if p.n_leads %}{{ p.n_leads }} {{ voc.lead }}{{ 's' if p.n_leads > 1 }} · {% endif %}<span class="{{ p.sinal_cls }}">{{ p.sinal }}</span></span>
         </summary>
         {% if p.alerta %}<p class="fu-nada" style="padding:0 0 .3rem 1.9rem;color:var(--ambar)">{{ p.alerta.detalhe }}</p>{% endif %}
         <div class="fu-cols">
@@ -855,7 +855,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
   {% endif %}
 
   {% if erro == 'motivo_obrigatorio' %}
-    <div class="fu-erro">Este lead já foi adiado {{ adia_max - 1 }} vezes sem ninguém falar com o cliente. Pra adiar de novo, escreva o motivo.</div>
+    <div class="fu-erro">Este {{ voc.lead }} já foi adiado {{ adia_max - 1 }} vezes sem ninguém falar com o {{ voc.cliente }}. Pra adiar de novo, escreva o motivo.</div>
   {% elif erro == 'data_invalida' %}<div class="fu-erro">Escolha uma data pra próxima ação.</div>
   {% elif erro %}<div class="fu-erro">Não deu pra remarcar agora. Tente de novo.</div>{% endif %}
 
@@ -988,7 +988,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
             <input type="time" name="hora" value="09:00">
             <input type="text" name="acao" maxlength="120" placeholder="o que fazer (opcional)">
             <input type="text" name="motivo" maxlength="300" placeholder="motivo{% if x.adiados >= adia_max - 1 %} (obrigatório){% endif %}"{% if x.adiados >= adia_max - 1 %} required{% endif %}>
-            <span class="dica">{% if x.adiados >= adia_max - 1 %}Já adiado {{ x.adiados }}× sem falar com o cliente: agora o motivo é obrigatório.{% else %}Do {{ adia_max }}º adiamento seguido sem falar com o cliente, o motivo passa a ser obrigatório.{% endif %}</span>
+            <span class="dica">{% if x.adiados >= adia_max - 1 %}Já adiado {{ x.adiados }}× sem falar com o {{ voc.cliente }}: agora o motivo é obrigatório.{% else %}Do {{ adia_max }}º adiamento seguido sem falar com o {{ voc.cliente }}, o motivo passa a ser obrigatório.{% endif %}</span>
             <button type="submit">Remarcar</button>
           </form>
         </details>
@@ -1020,7 +1020,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
         </tbody>
       </table>
     </div>
-    <p class="fu-nota" style="margin-top:.5rem">A coluna de adiamentos conta quem foi empurrado pra frente {{ adia_max }} vezes ou mais <b>sem nenhuma mensagem no meio</b>. Adiar depois de falar com o cliente é trabalho; adiar sem falar é adiar.</p>
+    <p class="fu-nota" style="margin-top:.5rem">A coluna de adiamentos conta quem foi empurrado pra frente {{ adia_max }} vezes ou mais <b>sem nenhuma mensagem no meio</b>. Adiar depois de falar com o {{ voc.cliente }} é trabalho; adiar sem falar é adiar.</p>
   </div>
   {% endif %}
 </div>
@@ -1047,8 +1047,8 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       <h4>A ordem que o sistema segue</h4>
       <ol class="fu-passos">
         <li><b>Ninguém falou com ele ainda</b> → responder.</li>
-        <li><b>O cliente respondeu por último</b> → responder, a bola é nossa.
-          <br>Vem antes de tudo: cliente esperando é mais urgente que card parado.</li>
+        <li><b>O {{ voc.cliente }} respondeu por último</b> → responder, a bola é nossa.
+          <br>Vem antes de tudo: {{ voc.cliente }} esperando é mais urgente que card parado.</li>
         <li><b>Proposta enviada</b> → cobrar retorno em <b>{{ cfg.fu_proposta_dias }} dia{{ '' if cfg.fu_proposta_dias == 1 else 's' }}</b>.</li>
         <li><b>Nenhum caso acima</b> → sobe a escada de toques.
           <div class="fu-chips">
@@ -1089,7 +1089,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       </div>
 
       <h4>Duas travas, pra não virar metralhadora</h4>
-      <p style="margin:0"><b>{{ adia_max }} adiamentos seguidos</b> sem falar com o cliente passam a
+      <p style="margin:0"><b>{{ adia_max }} adiamentos seguidos</b> sem falar com o {{ voc.cliente }} passam a
       exigir um motivo, e há um teto de <b>{{ cfg.fu_teto_dia }} avisos por dia</b> na conta.</p>
     </div>
   </details>

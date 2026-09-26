@@ -11529,14 +11529,14 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">📇 Base de captação</h2>
-      <div class="mut" style="font-size:.82rem;margin-top:.15rem">Capte e gerencie a matéria-prima das campanhas — vira <b style="color:var(--verde-claro)">lead</b> quando topa no WhatsApp ou responde o e-mail.</div>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">Capte e gerencie a matéria-prima das campanhas — vira <b style="color:var(--verde-claro)">{{ voc.lead }}</b> quando topa no WhatsApp ou responde o e-mail.</div>
     </div>
   </div>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
   <div class="capcard">
-    <div class="capttl">➕ Adicionar leads à base</div>
+    <div class="capttl">➕ Adicionar {{ voc.leads }} à base</div>
 """ + _captura_panel('google', '/painel/prospeccao/base') + """
   </div>
 """ + _CAPTURA_JS + """
@@ -11546,7 +11546,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="bt-tile"><div class="v">{{ metr.com_wpp }}</div><div class="l">Com WhatsApp</div></div>
     <div class="bt-tile"><div class="v">{{ metr.com_mail }}</div><div class="l">Com e-mail</div></div>
     <div class="bt-tile"><div class="v">{{ metr.em_camp }}</div><div class="l">Em campanha</div></div>
-    <div class="bt-tile k"><div class="v">{{ metr.virou }}</div><div class="l">Viraram lead 🔥</div></div>
+    <div class="bt-tile k"><div class="v">{{ metr.virou }}</div><div class="l">Viraram {{ voc.lead }} 🔥</div></div>
   </div>
 
   <form method="get" action="/painel/prospeccao/base" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem">
@@ -11563,10 +11563,10 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
-        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseMarcarSemCnpj()" title="Marca só os leads desta página que ainda não têm CNPJ — pra rodar o Buscar CNPJ só neles">🔎 Marcar sem CNPJ</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseMarcarSemCnpj()" title="Marca só os {{ voc.leads }} desta página que ainda não têm CNPJ — pra rodar o Buscar CNPJ só neles">🔎 Marcar sem CNPJ</button>{% endif %}
         {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Achando mais de um candidato, mostra pra você escolher aqui mesmo">🏢 Buscar CNPJ</button>{% endif %}
         {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
-        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no {{ voc.lead }} marcado">🔮 Explorium (teste)</button>{% endif %}
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
         {% if gere_campanha %}
         {% if ver_camp %}
@@ -11581,7 +11581,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <button class="pbtn" formaction="/painel/prospeccao/base/add-campanha" onclick="return baseJogarCheck()" title="Joga os marcados na campanha escolhida">Jogar →</button>
         {% endif %}
         {% endif %}
-        <button class="pbtn ghost" name="only" value="">⬆︎ Promover a lead</button>
+        <button class="pbtn ghost" name="only" value="">⬆︎ Promover a {{ voc.lead }}</button>
       </div>
     </div>
     {% if metr.n_dup %}
@@ -11634,11 +11634,11 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <td>{% if l.campanha %}<span class="bt-chip">{{ l.campanha }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
             <td class="mut" style="font-variant-numeric:tabular-nums;white-space:nowrap">💬 {{ l.toque_wa }} · ✉️ {{ l.toque_mail }}</td>
             <td class="mut" style="font-size:.78rem;white-space:nowrap">{{ l.ult or '—' }}</td>
-            <td style="white-space:nowrap"><button class="pbtn ghost" name="only" value="{{ l.id }}" style="padding:.2rem .5rem;font-size:.76rem" title="Promover a lead">⬆︎</button>
-              {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExcluir({{ l.id }},this)" style="padding:.2rem .5rem;font-size:.76rem;color:var(--coral);border-color:#5c2a27" title="Excluir lead da base">🗑</button>{% endif %}</td>
+            <td style="white-space:nowrap"><button class="pbtn ghost" name="only" value="{{ l.id }}" style="padding:.2rem .5rem;font-size:.76rem" title="Promover a {{ voc.lead }}">⬆︎</button>
+              {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExcluir({{ l.id }},this)" style="padding:.2rem .5rem;font-size:.76rem;color:var(--coral);border-color:#5c2a27" title="Excluir {{ voc.lead }} da base">🗑</button>{% endif %}</td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="mut" style="text-align:center;padding:1.5rem">Nada na base ainda. Use o <b style="color:var(--verde-claro)">➕ Adicionar leads à base</b> acima ↑ pra começar.</td></tr>
+          <tr><td colspan="7" class="mut" style="text-align:center;padding:1.5rem">Nada na base ainda. Use o <b style="color:var(--verde-claro)">➕ Adicionar {{ voc.leads }} à base</b> acima ↑ pra começar.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -11890,7 +11890,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
          (a rota recebe `q`). "/" em qualquer lugar da página põe o foco aqui. #}
       <label class="kbbusca" title="Buscar por nome ou telefone — Enter procura em todos os meses">
         <span aria-hidden="true">🔍</span><input id="kbbusca" type="search" autocomplete="off" enterkeyhint="search"
-          placeholder="Buscar nome ou telefone" aria-label="Buscar lead por nome ou telefone" value="{{ (busca or '')|e }}"
+          placeholder="Buscar nome ou telefone" aria-label="Buscar {{ voc.lead }} por nome ou telefone" value="{{ (busca or '')|e }}"
           oninput="kbBuscaFiltra()" onkeydown="kbBuscaTecla(event)"><kbd>/</kbd></label>
       <button type="button" class="kbbt kbico-busca" onclick="kbBuscaAbre()" aria-label="Buscar">🔍</button>
       {% if modo_evento %}<div class="vseg" title="Colunas por etapa do funil, ou por mês da festa">
@@ -11899,7 +11899,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if gerencia %}<button type="button" class="kbbt" onclick="etAbre()" title="Editar as etapas do funil" aria-label="Etapas">⚙<span class="tx"> Etapas</span></button>{% endif %}
       {# Captar Lead nunca navegou pra lugar nenhum: abre o painel de captação — desde
          25/09/2026 numa gaveta à direita, sem empurrar o quadro pra baixo. #}
-      <button type="button" class="cap-btn" onclick="capToggle()" aria-label="Captar lead">+<span class="tx"> Captar lead</span></button>
+      <button type="button" class="cap-btn" onclick="capToggle()" aria-label="Captar {{ voc.lead }}">+<span class="tx"> Captar {{ voc.lead }}</span></button>
     </div>
   </div>
   {% if busca %}<div class="kbbusca-faixa">🔍 <span>Buscando <b>“{{ busca|e }}”</b> em todos os meses · {{ n_quadro }} encontrado{{ '' if n_quadro == 1 else 's' }}</span><a href="{{ busca_limpa|e }}">✕ limpar</a></div>{% endif %}
@@ -11918,8 +11918,8 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <!-- painel de captação: gaveta à direita, por cima do quadro (desde 25/09/2026) -->
   <div class="kbgav-fundo" id="kbgav-fundo" hidden onclick="kbGavFecha()"></div>
-  <div id="captar" class="fsec kbgav" style="display:none" role="dialog" aria-modal="true" aria-label="Captar lead">
-    <div class="kbgav-hd"><b>🎯 Captar lead</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
+  <div id="captar" class="fsec kbgav" style="display:none" role="dialog" aria-modal="true" aria-label="Captar {{ voc.lead }}">
+    <div class="kbgav-hd"><b>🎯 Captar {{ voc.lead }}</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
     <div class="cabas">
       <button type="button" class="caba on" data-tab="manual" onclick="capTab('manual')">✏️ Manual</button>
       <button type="button" class="caba" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
@@ -12058,8 +12058,8 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if busca %}<input type="hidden" name="q" value="{{ busca|e }}">{% endif %}
     </form>{% endif %}
     {% if entrou_itens and entrou != 'tudo' and ((fora_cont or {}).get('esperando') or (fora_cont or {}).get('festa30')) %}<span class="sep"></span>
-    <span class="rot" title="Leads que entraram em outro mês e pedem atenção agora">+ de outros meses</span>
-    <a class="pil fora{% if 'esperando' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('esperando', '#') }}" title="O cliente falou por último e ninguém respondeu">🟢 esperando resposta <b>{{ (fora_cont or {}).get('esperando', 0) }}</b></a>
+    <span class="rot" title="{{ voc.leads|capitalize }} que entraram em outro mês e pedem atenção agora">+ de outros meses</span>
+    <a class="pil fora{% if 'esperando' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('esperando', '#') }}" title="O {{ voc.cliente }} falou por último e ninguém respondeu">🟢 esperando resposta <b>{{ (fora_cont or {}).get('esperando', 0) }}</b></a>
     {% if modo_evento %}<a class="pil fora{% if 'festa30' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('festa30', '#') }}" title="Data do evento nos próximos 30 dias">🎉 festa em 30 dias <b>{{ (fora_cont or {}).get('festa30', 0) }}</b></a>{% endif %}
     {% endif %}
     {# a legenda da temperatura: a FORMA da bolinha, não só a cor (parte 1) #}
@@ -12072,7 +12072,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {# O ACERVO DO LEITOR (migração 198): quem já chegou e ainda não foi lido. Some
      quando não sobra ninguém — daí em diante o leitor pega tudo na chegada. #}
   {% if por_ler %}
-  <div class="lerconv" id="lerconv">🔎 <span><b>{{ por_ler }}</b> conversa{{ '' if por_ler == 1 else 's' }} de lead{{ '' if por_ler == 1 else 's' }} sem data ainda não {{ 'foi lida' if por_ler == 1 else 'foram lidas' }}</span>
+  <div class="lerconv" id="lerconv">🔎 <span><b>{{ por_ler }}</b> conversa{{ '' if por_ler == 1 else 's' }} de {{ voc.lead }}{{ '' if por_ler == 1 else 's' }} sem data ainda não {{ 'foi lida' if por_ler == 1 else 'foram lidas' }}</span>
     <button type="button" class="pbtn" id="lerconv-btn" onclick="kbLerConversas(this)">Ler as conversas</button></div>
   {% endif %}
   {#- A RÉGUA "FESTA EM" (25/09/2026): uma barra por mês, com a contagem em cima e o
@@ -12122,7 +12122,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="etbody kbgav" role="dialog" aria-label="Etapas do funil">
       <div class="kbgav-hd"><b>⚙ Etapas do funil</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
       <p class="ethint">Renomeie no campo e clique ✓. Reordene com ◀ ▶. O ✕ remove — só quando a etapa
-        estiver <b>sem leads</b>. Pra esvaziar, escolha uma etapa em <b>fundir em…</b> e clique ⇥: os leads
+        estiver <b>sem {{ voc.leads }}</b>. Pra esvaziar, escolha uma etapa em <b>fundir em…</b> e clique ⇥: os {{ voc.leads }}
         vão pra lá com registro no histórico, e a etapa some do quadro sem ser apagada.
         🔒 = etapa fixa (entrada/resultado): pode renomear, mas não remover.</p>
       <div class="etlist">
@@ -12130,13 +12130,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <form method="post" class="etrow">
           {% if e.fixa %}<span class="lock" title="Etapa fixa (entrada/resultado)">🔒</span>{% else %}<span class="grip">⠿</span>{% endif %}
           <input class="etin" name="rotulo" value="{{ e.rotulo }}" maxlength="40" aria-label="Nome da etapa">
-          <span class="etn">{{ e.n }} lead{{ '' if e.n == 1 else 's' }}</span>
+          <span class="etn">{{ e.n }} {{ voc.lead }}{{ '' if e.n == 1 else 's' }}</span>
           <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/renomear" title="Salvar nome">✓</button>
           <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/mover" name="dir" value="esq" {% if e.fixa %}disabled{% endif %} title="Mover pra esquerda">◀</button>
           <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/mover" name="dir" value="dir" {% if e.fixa %}disabled{% endif %} title="Mover pra direita">▶</button>
           <button class="etb del" formaction="/painel/prospeccao/etapas/{{ e.id }}/remover"
                   {% if e.fixa or e.n > 0 %}disabled{% endif %}
-                  title="{% if e.fixa %}Etapa fixa — não remove{% elif e.n > 0 %}Mova os leads primeiro{% else %}Remover etapa{% endif %}"
+                  title="{% if e.fixa %}Etapa fixa — não remove{% elif e.n > 0 %}Mova os {{ voc.leads }} primeiro{% else %}Remover etapa{% endif %}"
                   onclick="return confirm('Remover a etapa “{{ e.rotulo }}”?')">✕</button>
           {% if not e.fixa and etapas|length > 1 %}
           <!-- FUNDIR (12/09/2026). Fica colado no ✕ de propósito: é o ✕ que diz
@@ -12148,7 +12148,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             {% endfor %}
           </select>
           <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/fundir"
-                  title="Levar os leads desta etapa para a escolhida"
+                  title="Levar os {{ voc.leads }} desta etapa para a escolhida"
                   onclick="return etFundir(this,'{{ e.rotulo|e }}',{{ e.n }})">⇥</button>
           {% endif %}
         </form>
@@ -12271,7 +12271,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     {% endfor %}
     {# o mês quase vazio: o espaço livre diz o que houve e leva pro lote (25/09) #}
-    {% if mes_vazio %}<div class="kbnota" id="kbnota"><b>{{ mes_vazio.rotulo }} tem {{ mes_vazio.n }} lead{{ '' if mes_vazio.n == 1 else 's' }}.</b>
+    {% if mes_vazio %}<div class="kbnota" id="kbnota"><b>{{ mes_vazio.rotulo }} tem {{ mes_vazio.n }} {{ voc.lead }}{{ '' if mes_vazio.n == 1 else 's' }}.</b>
       O último lote entrou em {{ mes_vazio.lote_rotulo|lower }} ({{ mes_vazio.lote_n }}).<br>
       <a href="{{ mes_vazio.lote_url }}">Ver {{ mes_vazio.lote_rotulo|lower }}</a> · <a href="{{ mes_vazio.tudo_url }}">Ver tudo ({{ mes_vazio.tudo_n }})</a></div>{% endif %}
   </div>
@@ -13171,7 +13171,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <a href="/painel/prospeccao" class="mut" style="text-decoration:none;font-size:.85rem">‹ Prospecção</a>
     <span style="flex:1"></span>
   </div>
-  <h2 class="tt" style="margin-top:.3rem">Captar leads</h2>
+  <h2 class="tt" style="margin-top:.3rem">Captar {{ voc.leads }}</h2>
   {% if aviso %}<div class="ok" style="margin-top:.6rem">{{ aviso }}</div>{% endif %}
 
   <div class="cabas">
@@ -13202,7 +13202,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div><label class="lbl" data-pj="CNPJ" data-pf="CPF">CNPJ</label><input class="fld" name="documento" inputmode="numeric" data-pj="00.000.000/0000-00" data-pf="000.000.000-00" placeholder="00.000.000/0000-00" oninput="leadDoc(this)"></div>
       <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
       {{ vendsel() }}
-      <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar lead</button></div>
+      <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar {{ voc.lead }}</button></div>
     </form>
   </div>
 
@@ -13339,19 +13339,19 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if a.site_url %}<a class="pbtn ghost" href="{{ a.site_url }}" target="_blank" rel="noopener">🌐 Site</a>{% endif %}
       <span style="flex:1"></span>
       {% if reforma and reforma.liberada %}{% if reforma.obra %}<a class="pbtn" href="/painel/obras/{{ reforma.obra.id }}#orcamento">🔨 Ver a reforma</a>
-      {% else %}<form method="post" action="/painel/prospeccao/{{ a.id }}/reforma" style="margin:0"><button class="pbtn" title="Abre a obra de reforma deste cliente, com o orçamento">🔨 Abrir a reforma</button></form>{% endif %}
+      {% else %}<form method="post" action="/painel/prospeccao/{{ a.id }}/reforma" style="margin:0"><button class="pbtn" title="Abre a obra de reforma deste {{ voc.cliente }}, com o orçamento">🔨 Abrir a reforma</button></form>{% endif %}
       {% elif not vende_servico %}<button type="button" class="pbtn" disabled title="Disponível pra empresas que vendem serviço">📄 Gerar orçamento</button>
       {% elif a.orcamento_id %}<a class="pbtn" href="/painel/servicos?abrir={{ a.orcamento_id }}">📄 Ver orçamento</a>
       {% else %}<form method="post" action="/painel/prospeccao/{{ a.id }}/orcamento" style="margin:0"><button class="pbtn">📄 Gerar orçamento</button></form>{% endif %}
       {% if a.site_url %}<button type="button" class="pbtn ghost" id="enrqf-btn" onclick="enrqLead({{ a.id }})" title="Raspa o site e descobre e-mail, Instagram e WhatsApp">🔎 Verificar canais</button>{% endif %}
-      {% if a.email %}<button type="button" class="pbtn ghost" id="cvz-btn" onclick="convidarZaq({{ a.id }})" title="Manda um e-mail com link pro cliente criar a conta no Zaq">🎟️ Convidar pro Zaq</button>{% endif %}
+      {% if a.email %}<button type="button" class="pbtn ghost" id="cvz-btn" onclick="convidarZaq({{ a.id }})" title="Manda um e-mail com link pro {{ voc.cliente }} criar a conta no Zaq">🎟️ Convidar pro Zaq</button>{% endif %}
     </div>
     <div class="mut" id="enrqf-msg" style="font-size:.82rem;margin-top:.5rem"></div>
     {# mesmo telefone, outro chip: dois leads de propósito, um por número — mas quem
        vai ligar precisa saber que a outra campanha já está falando com essa pessoa. #}
     {% if gemeo_aviso %}<div class="gemeo-faixa">⚠️ {{ gemeo_aviso }}
       {% if gemeo.nome %}<span class="mut">({{ gemeo.nome }})</span>{% endif %}
-      {% if gemeo_abre %}<a href="/painel/prospeccao/{{ gemeo.lead_id }}">Abrir o outro lead →</a>{% endif %}</div>{% endif %}
+      {% if gemeo_abre %}<a href="/painel/prospeccao/{{ gemeo.lead_id }}">Abrir o outro {{ voc.lead }} →</a>{% endif %}</div>{% endif %}
     {% if partida_aviso %}<div class="gemeo-faixa{{ '' if partida_defeito else ' info' }}">{{ '⚠️' if partida_defeito else 'ℹ️' }} {{ partida_aviso }}
       {% if partida_abre and partida.lead_id %}<a href="/painel/prospeccao/{{ partida.lead_id }}">Abrir a outra ficha →</a>{% endif %}</div>{% endif %}
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
@@ -13453,7 +13453,7 @@ function perdaDesc(sel){
             {% if not a.eh_pf %}
             {% if a.cnpj %}<form method="post" action="/painel/prospeccao/{{ a.id }}/enriquecer" style="margin:0"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Puxar dados da Receita (CNPJá/BrasilAPI)">↻ atualizar</button></form>
               {% if tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" data-endereco="{{ _end_lead }}" onclick="acharCnpj({{ a.id }},this)" title="Buscar outro CNPJ (trocar)">🔎 trocar</button>{% endif %}
-              <form method="post" action="/painel/prospeccao/{{ a.id }}/limpar-cnpj" style="margin:0" onsubmit="return confirm('Remover o CNPJ e os dados da Receita deste lead?')"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Remover o CNPJ (escolhido errado)">🗑 limpar</button></form>
+              <form method="post" action="/painel/prospeccao/{{ a.id }}/limpar-cnpj" style="margin:0" onsubmit="return confirm('Remover o CNPJ e os dados da Receita deste {{ voc.lead }}?')"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Remover o CNPJ (escolhido errado)">🗑 limpar</button></form>
             {% elif tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" data-endereco="{{ _end_lead }}" onclick="acharCnpj({{ a.id }},this)" title="Achar o CNPJ por nome+cidade (CNPJá)">🔎 achar CNPJ</button>
             {% else %}<a class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" target="_blank" rel="noopener" title="Achar o CNPJ na web (nome + cidade)" href="https://www.google.com/search?q={{ (a.empresa ~ ' ' ~ (a.cidade or '') ~ ' cnpj')|urlencode }}">🔎 achar CNPJ</a>{% endif %}
             {% if a.cnpj and tem_credify %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" id="dec-btn" onclick="buscarDecisor({{ a.id }})" title="Descobre o sócio-administrador (decisor) pelo CNPJ via Credify — consulta paga">🕵️ {% if a.decisor_nome %}Atualizar decisor{% else %}Buscar decisor{% endif %}</button>{% endif %}
@@ -13531,7 +13531,7 @@ function perdaDesc(sel){
           <form method="post" action="/painel/prospeccao/{{ a.id }}/renovar" style="margin-top:.5rem">
             {% if teto.exige_justificativa %}
             <textarea class="fld" name="justificativa" rows="2" required
-                      placeholder="Por que este lead precisa de mais {{ teto.teto_dias }} dias aqui?"
+                      placeholder="Por que este {{ voc.lead }} precisa de mais {{ teto.teto_dias }} dias aqui?"
                       style="font-size:.8rem"></textarea>
             <div class="mut" style="font-size:.72rem;margin:.25rem 0 .4rem">Obrigatório. Sem justificativa a renovação não é liberada.</div>
             {% endif %}
@@ -13539,13 +13539,13 @@ function perdaDesc(sel){
           </form>
           {% elif not teto.restam and teto.estado == 'esgotado' %}
           <div class="mut" style="font-size:.74rem;margin-top:.4rem;color:var(--coral)">
-            Teto atingido — leve o lead adiante ou para o follow-up.
+            Teto atingido — leve o {{ voc.lead }} adiante ou para o follow-up.
           </div>
           {% endif %}
           {% if teto_hist %}
           <div style="margin-top:.5rem;font-size:.73rem;color:var(--txt-mut);line-height:1.6">
             {% for h in teto_hist %}
-            <div>· {{ h.em.strftime('%d/%m') }} — {{ h.quem }}{% if h.justificativa %}: “{{ h.justificativa }}”{% elif h.automatica %}: renovada sozinha (cliente respondeu){% endif %}</div>
+            <div>· {{ h.em.strftime('%d/%m') }} — {{ h.quem }}{% if h.justificativa %}: “{{ h.justificativa }}”{% elif h.automatica %}: renovada sozinha ({{ voc.cliente }} respondeu){% endif %}</div>
             {% endfor %}
           </div>
           {% endif %}
@@ -13593,7 +13593,7 @@ function perdaDesc(sel){
             <div><label class="lbl">Convidados</label><input class="fld" name="evento_convidados" inputmode="numeric" value="{{ a.evento_convidados or '' }}"></div>
             {# migração 209: de onde o cliente veio e por que perdeu — os filtros "Origem" e
                "Por que perdeu" do Raio-X do dono (/painel/raio-x) leem daqui #}
-            <div><label class="lbl">De onde veio o cliente</label><select class="fld" name="origem_cliente">
+            <div><label class="lbl">De onde veio o {{ voc.cliente }}</label><select class="fld" name="origem_cliente">
               <option value="">—</option>{% for k, r in origens_cliente %}<option value="{{ k }}" {% if a.origem_cliente==k %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
             {# A LISTA É DA CONTA (migração 235): `motivos_conta` vem da rota; o global
                `motivos_perda` continua no fallback pro caminho que ainda não passa
@@ -13601,7 +13601,7 @@ function perdaDesc(sel){
             <div><label class="lbl">Por que perdeu</label><select class="fld" name="perda_motivo" onchange="perdaDesc(this)">
               <option value="">—</option>{% for m in (motivos_conta or motivos_perda_compat) %}<option value="{{ m.chave }}" data-desc="{{ 1 if m.exige_descricao else 0 }}" {% if a.perda_motivo==m.chave %}selected{% endif %}>{{ m.rotulo }}</option>{% endfor %}</select></div>
             {% if volta and volta.liberada %}<div><label class="lbl">Voltar a procurar em</label><input class="fld" type="date" name="perda_volta_em" value="{{ volta.iso }}"
-                 title="O dia que ele deu (ex.: pra limpar o nome). Nesse dia o lead volta sozinho pro Follow-up."></div>{% endif %}
+                 title="O dia que ele deu (ex.: pra limpar o nome). Nesse dia o {{ voc.lead }} volta sozinho pro Follow-up."></div>{% endif %}
             <div class="full" id="perda-desc-campo" style="display:{{ 'block' if a.perda_descricao else 'none' }}">
               <label class="lbl">Conte o que aconteceu</label>
               <input class="fld" name="perda_descricao" value="{{ a.perda_descricao or '' }}"
@@ -13650,7 +13650,7 @@ function perdaDesc(sel){
       <div class="fsec">
         <div class="sh"><b>Histórico</b></div>
         {% if origem_ch %}<div class="tl"><span class="dt" style="background:#3ee0a6"></span>
-          <div style="font-size:.86rem"><b>Entrou por {{ origem_ch.ic }} {{ origem_ch.label }}</b> <span class="mut">— 1º contato do lead</span></div>
+          <div style="font-size:.86rem"><b>Entrou por {{ origem_ch.ic }} {{ origem_ch.label }}</b> <span class="mut">— 1º contato do {{ voc.lead }}</span></div>
           <div class="mut" style="font-size:.72rem;margin-top:.2rem">{{ origem_ch.em.strftime('%d/%m/%Y %H:%M') if origem_ch.em else '' }}</div>
         </div>{% endif %}
         {% if not timeline and not origem_ch %}<p class="mut" style="margin:.2rem 0 0">Nenhum contato registrado ainda.</p>{% endif %}
@@ -14165,7 +14165,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </span>
       </button>
       {% else %}
-      <div class="cx-empty">Nenhuma comunicação ainda.<br><span style="font-size:.82rem">Envie um e-mail ou WhatsApp de 1º contato pela ficha de um lead — aparece aqui.</span></div>
+      <div class="cx-empty">Nenhuma comunicação ainda.<br><span style="font-size:.82rem">Envie um e-mail ou WhatsApp de 1º contato pela ficha de um {{ voc.lead }} — aparece aqui.</span></div>
       {% endfor %}
     </div>
 
@@ -14220,7 +14220,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="cx-card">
         <div style="display:flex;align-items:center;gap:.7rem">
           <div style="font-size:1.6rem">🤖</div>
-          <div style="flex:1"><b style="font-size:1rem">Agente de Atendimento</b><div class="mut" style="font-size:.8rem">Responde os leads, qualifica e te passa quando precisa.</div></div>
+          <div style="flex:1"><b style="font-size:1rem">Agente de Atendimento</b><div class="mut" style="font-size:.8rem">Responde os {{ voc.leads }}, qualifica e te passa quando precisa.</div></div>
           <label class="sw"><input type="checkbox" name="ativo" {% if ag_cfg.ativo %}checked{% endif %}><span></span></label>
         </div>
       </div>
@@ -14264,7 +14264,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>{% endif %}
           <small class="mut" style="font-size:.74rem;display:block;margin-top:.4rem;color:var(--ambar)">
             ⚠️ E-mail cadastrado nos dois campos <b>só recebe o resumo</b>:
-            não entra no painel, não vê lead, não vê conversa.</small>
+            não entra no painel, não vê {{ voc.lead }}, não vê conversa.</small>
         </div>
         <div class="aggrid">
           <div class="agfield"><label>Cada vendedor recebe a parte dele</label>
@@ -14289,20 +14289,20 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div class="agfield"><label>Responder em</label><select class="fld" name="horario"><option value="comercial" {% if ag_cfg.horario=='comercial' %}selected{% endif %}>Horário comercial</option><option value="24h" {% if ag_cfg.horario=='24h' %}selected{% endif %}>24 horas</option></select></div>
           <div class="agfield"><label>Tom</label><select class="fld" name="tom"><option value="informal" {% if ag_cfg.tom=='informal' %}selected{% endif %}>Informal</option><option value="formal" {% if ag_cfg.tom=='formal' %}selected{% endif %}>Formal</option></select></div>
           <div class="agfield"><label>Máx. respostas do bot antes de te chamar</label><input class="fld" name="max_trocas" inputmode="numeric" value="{{ ag_cfg.max_trocas }}"><small class="mut" style="font-size:.72rem">12 ou mais = praticamente sempre ativo (não passa pro humano por quantidade)</small></div>
-          <div class="agfield"><label>Escalar para</label><select class="fld" name="escalar_para"><option value="dono_lead" {% if ag_cfg.escalar_para=='dono_lead' %}selected{% endif %}>Dono do lead</option><option value="plantao" {% if ag_cfg.escalar_para=='plantao' %}selected{% endif %}>Vendedor de plantão</option></select></div>
+          <div class="agfield"><label>Escalar para</label><select class="fld" name="escalar_para"><option value="dono_lead" {% if ag_cfg.escalar_para=='dono_lead' %}selected{% endif %}>Dono do {{ voc.lead }}</option><option value="plantao" {% if ag_cfg.escalar_para=='plantao' %}selected{% endif %}>Vendedor de plantão</option></select></div>
         </div>
       </div>
       <div class="cx-card">
         <h3>✅ O que ele faz sozinho</h3>
         <div class="agrow"><div class="lab"><b>Responder dúvidas frequentes</b><div>Usa a base de conhecimento ao lado</div></div><label class="sw"><input type="checkbox" name="pode_responder" {% if ag_cfg.pode_responder %}checked{% endif %}><span></span></label></div>
-        <div class="agrow"><div class="lab"><b>Qualificar o lead</b><div>Mede interesse e ajusta a temperatura</div></div><label class="sw"><input type="checkbox" name="pode_qualificar" {% if ag_cfg.pode_qualificar %}checked{% endif %}><span></span></label></div>
+        <div class="agrow"><div class="lab"><b>Qualificar o {{ voc.lead }}</b><div>Mede interesse e ajusta a temperatura</div></div><label class="sw"><input type="checkbox" name="pode_qualificar" {% if ag_cfg.pode_qualificar %}checked{% endif %}><span></span></label></div>
         {#- A VISITA (migração 259). Não é interruptor: são três estados, porque o
             dono pediu as duas opções no sistema ("é bom colocar no sistema as 2
             opções", 14/09/2026) e cada empresa decide até onde a IA vai. Só
             aparece pra quem recebe visita — nem toda conta de eventos recebe: a
             Doce Mell tem 0 pedidos em 361 conversas. -#}
         {% if raio_x_perfil and raio_x_perfil.vocab.data %}
-        <div class="agrow"><div class="lab"><b>Marcar visita ao espaço<span class="tag-new">novo</span></b><div>Quando o cliente pedir pra conhecer o espaço, em horário comercial</div></div>
+        <div class="agrow"><div class="lab"><b>Marcar visita ao espaço<span class="tag-new">novo</span></b><div>Quando o {{ voc.cliente }} pedir pra conhecer o espaço, em horário comercial</div></div>
           <span class="ag-seg">
             {% for v, r in [('off','Desligado'),('propoe','Propõe'),('marca','Marca')] %}
             <input type="radio" id="agendar_modo_{{ v }}" name="agendar_modo" value="{{ v }}" {% if ag_cfg.agendar_modo==v %}checked{% endif %}>
@@ -14311,20 +14311,20 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </span>
         </div>
         <div class="ag-nota">
-          <b>Propõe</b> combina dia e hora com o cliente e manda o cartão pro vendedor confirmar — nada entra na agenda sem gente.
+          <b>Propõe</b> combina dia e hora com o {{ voc.cliente }} e manda o cartão pro vendedor confirmar — nada entra na agenda sem gente.
           <b>Marca</b> marca direto e manda a confirmação com o convite de calendário.
-          Nos dois, fora do horário comercial a IA não marca: avisa o vendedor dono do lead.
+          Nos dois, fora do horário comercial a IA não marca: avisa o vendedor dono do {{ voc.lead }}.
         </div>
         {% endif %}
-        <div class="agrow"><div class="lab"><b>Gerar orçamento prévio quando o cliente pedir<span class="tag-new">novo</span></b><div>Monta rascunho com serviços + preço e manda o link</div></div><label class="sw"><input type="checkbox" name="pode_orcamento" {% if ag_cfg.pode_orcamento %}checked{% endif %}><span></span></label></div>
-        <div class="agrow"><div class="lab"><b>Oferecer orçamento proativamente</b><div>Sem o cliente pedir</div></div><label class="sw"><input type="checkbox" name="orcamento_proativo" {% if ag_cfg.orcamento_proativo %}checked{% endif %}><span></span></label></div>
+        <div class="agrow"><div class="lab"><b>Gerar orçamento prévio quando o {{ voc.cliente }} pedir<span class="tag-new">novo</span></b><div>Monta rascunho com serviços + preço e manda o link</div></div><label class="sw"><input type="checkbox" name="pode_orcamento" {% if ag_cfg.pode_orcamento %}checked{% endif %}><span></span></label></div>
+        <div class="agrow"><div class="lab"><b>Oferecer orçamento proativamente</b><div>Sem o {{ voc.cliente }} pedir</div></div><label class="sw"><input type="checkbox" name="orcamento_proativo" {% if ag_cfg.orcamento_proativo %}checked{% endif %}><span></span></label></div>
       </div>
       <div style="display:flex;justify-content:flex-end"><button class="pbtn">Salvar configuração</button></div>
     </div>
     <div>
       <div class="cx-card">
         <h3>🙋 Quando ele te passa (handoff)</h3>
-        <div class="mut" style="font-size:.84rem;line-height:1.9">✓ O cliente pede pra falar com uma pessoa<br>✓ Sentimento negativo / reclamação<br>✓ Confiança abaixo do limiar<br>✓ Negociação de preço / fechamento<br>✓ Assunto fora do escopo dos serviços</div>
+        <div class="mut" style="font-size:.84rem;line-height:1.9">✓ O {{ voc.cliente }} pede pra falar com uma pessoa<br>✓ Sentimento negativo / reclamação<br>✓ Confiança abaixo do limiar<br>✓ Negociação de preço / fechamento<br>✓ Assunto fora do escopo dos serviços</div>
       </div>
     </div>
   </form>
@@ -14363,8 +14363,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <form method="post" action="/painel/prospeccao/comunicacao/distribuicao">
       <div style="display:flex;align-items:center;gap:.7rem">
         <div style="font-size:1.6rem">🎯</div>
-        <div style="flex:1"><b style="font-size:1rem">Distribuição de leads<span class="tag-new">novo</span></b>
-          <div class="mut" style="font-size:.8rem">Reparte os leads novos entre a equipe, por ordem de fila (rodízio).</div></div>
+        <div style="flex:1"><b style="font-size:1rem">Distribuição de {{ voc.leads }}<span class="tag-new">novo</span></b>
+          <div class="mut" style="font-size:.8rem">Reparte os {{ voc.leads }} novos entre a equipe, por ordem de fila (rodízio).</div></div>
         <label class="sw"><input type="checkbox" name="ativo" {% if dist_cfg and dist_cfg.ativo %}checked{% endif %}><span></span></label>
       </div>
       {# fila montada + chave desligada é o estado que não avisa e não reparte: o
@@ -14372,7 +14372,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
          ligou. Enquanto estiver assim, todo lead novo nasce sem dono. #}
       {% if dist_cfg and not dist_cfg.ativo and dist_membros | selectattr('na_fila') | list %}
       <div class="distalerta">⚠️ <b>A fila está montada, mas a distribuição está desligada.</b>
-        Enquanto o interruptor aí em cima estiver apagado, nenhum lead novo é repartido —
+        Enquanto o interruptor aí em cima estiver apagado, nenhum {{ voc.lead }} novo é repartido —
         todos entram <b>sem dono</b>. Ligue e salve pra valer.</div>
       {% endif %}
       <div class="distnote">🤖 O agente dá o 1º toque e qualifica. O <b>vendedor da vez</b> é avisado, observa e
@@ -14384,11 +14384,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
          avisado de nenhum — cada um só descobria o lead abrindo o painel.
          Estado silencioso não se denuncia sozinho: por isso a tela denuncia. #}
       {% if dist_cfg and dist_cfg.ativo and not dist_cfg.avisar %}
-      <div class="distalerta">⚠️ <b>Os leads estão sendo repartidos, mas ninguém é avisado.</b>
-        A distribuição está ligada e o aviso abaixo está apagado — o lead cai na fila do
+      <div class="distalerta">⚠️ <b>Os {{ voc.leads }} estão sendo repartidos, mas ninguém é avisado.</b>
+        A distribuição está ligada e o aviso abaixo está apagado — o {{ voc.lead }} cai na fila do
         vendedor e ele só descobre <b>abrindo o painel</b>. Ligue o aviso e salve.</div>
       {% endif %}
-      <div class="agrow"><div class="lab"><b>Avisar por e-mail e push</b><div>Chega na hora no app do vendedor, com link direto pra ficha do lead</div></div>
+      <div class="agrow"><div class="lab"><b>Avisar por e-mail e push</b><div>Chega na hora no app do vendedor, com link direto pra ficha do {{ voc.lead }}</div></div>
         <label class="sw"><input type="checkbox" name="avisar" {% if not dist_cfg or dist_cfg.avisar %}checked{% endif %}><span></span></label></div>
 
       {# WhatsApp em interruptor PRÓPRIO. Antes o `avisar` governava e-mail, push e zap
@@ -14413,7 +14413,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             </label>
             {% endfor %}
           </div>
-          <small class="mut" style="font-size:.72rem">O chip da campanha costuma ser a melhor escolha: o principal é o que fala com cliente o dia inteiro.</small>
+          <small class="mut" style="font-size:.72rem">O chip da campanha costuma ser a melhor escolha: o principal é o que fala com {{ voc.cliente }} o dia inteiro.</small>
         </div>
         {% endif %}
         {% if dist_qr %}
@@ -14425,16 +14425,16 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             {% endfor %}
           </div>
           <textarea class="fld" name="aviso_zap_texto" id="zaptexto" rows="6">{{ dist_cfg.aviso_zap_texto if dist_cfg else '' }}</textarea>
-          <small class="mut" style="font-size:.72rem">Toque numa variável pra inserir onde o cursor estiver. <b>*asterisco*</b> vira negrito no WhatsApp. A mensagem do cliente entra cortada em 120 caracteres.</small>
+          <small class="mut" style="font-size:.72rem">Toque numa variável pra inserir onde o cursor estiver. <b>*asterisco*</b> vira negrito no WhatsApp. A mensagem do {{ voc.cliente }} entra cortada em 120 caracteres.</small>
         </div>
-        <div class="distnote" style="margin-top:.6rem">Sem template e sem janela de 24h — o chip por QR entrega a qualquer hora. Se o chip escolhido cair, o vendedor <b>continua</b> recebendo por e-mail e push, e o lead continua sendo distribuído. No máximo um WhatsApp a cada 2 minutos por vendedor.</div>
+        <div class="distnote" style="margin-top:.6rem">Sem template e sem janela de 24h — o chip por QR entrega a qualquer hora. Se o chip escolhido cair, o vendedor <b>continua</b> recebendo por e-mail e push, e o {{ voc.lead }} continua sendo distribuído. No máximo um WhatsApp a cada 2 minutos por vendedor.</div>
         {# Twilio/Meta não têm chip pra escolher nem aceitam texto livre fora das 24h:
            lá o template é obrigatório, e é a única coisa que faz sentido pedir. #}
         {% else %}
         <div class="agfield" style="margin-top:.7rem">
           <label>Template do aviso <span style="font-weight:400;color:var(--txt-mut)">(Content SID “HX…” do Twilio ou o nome do template aprovado na Meta)</span></label>
           <input class="fld" name="aviso_template_sid" value="{{ dist_cfg.aviso_template_sid if dist_cfg else '' }}" placeholder="HX… ou nome_do_template">
-          <small class="mut" style="font-size:.72rem">Seu WhatsApp é Twilio/Meta, então a janela de 24h obriga template — a variável {{ '{{1}}' }} é a empresa do lead. Num chip por QR isto não seria necessário.</small>
+          <small class="mut" style="font-size:.72rem">Seu WhatsApp é Twilio/Meta, então a janela de 24h obriga template — a variável {{ '{{1}}' }} é a empresa do {{ voc.lead }}. Num chip por QR isto não seria necessário.</small>
         </div>
         {% endif %}
       </div>
@@ -14575,7 +14575,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div class="agrow" style="margin-top:.6rem"><div class="lab"><b>A IA marca a visita ao espaço</b><div>Confere a agenda, as festas e o que foi combinado nas conversas; manda o convite, confirma na véspera às 18h e 2h antes, e remarca. Desligada, ela pega o dia preferido e chama a anfitriã.</div></div>
           <label class="sw"><input type="checkbox" name="visita_marca" {% if v.marca %}checked{% endif %}><span></span></label></div>
         <div class="aggrid">
-          <div class="agfield"><label>Anfitriã (recebe o cliente e é avisada)</label>
+          <div class="agfield"><label>Anfitriã (recebe o {{ voc.cliente }} e é avisada)</label>
             <select class="fld" name="visita_anfitria_id"><option value="">ninguém</option>
               {% for m in dist_membros %}<option value="{{ m.id }}" {% if v.anfitria_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
           <div class="agfield"><label>Duração da visita + folga (min)</label>
@@ -14596,7 +14596,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
           <small class="mut" style="font-size:.72rem">Meia hora vale: 9h30 cabe se 9h está marcado. Domingo sem horário = só a pedido, e a IA chama a anfitriã.</small></div>
         {% set o = r.orcamento if r and r.orcamento else regra_orc_padrao %}
-        <div class="agrow" style="margin-top:.6rem"><div class="lab"><b>A IA monta o orçamento</b><div>Pergunta se o cliente prefere conhecer o espaço ou receber um orçamento prévio. O orçamento que ela monta só vai pro cliente depois que alguém conferir, com um toque no app. Depois da aprovação, a data fica segurada esperando o sinal.</div></div>
+        <div class="agrow" style="margin-top:.6rem"><div class="lab"><b>A IA monta o orçamento</b><div>Pergunta se o {{ voc.cliente }} prefere conhecer o espaço ou receber um orçamento prévio. O orçamento que ela monta só vai pro {{ voc.cliente }} depois que alguém conferir, com um toque no app. Depois da aprovação, a data fica segurada esperando o sinal.</div></div>
           <label class="sw"><input type="checkbox" name="orc_ia" {% if o.ligado %}checked{% endif %}><span></span></label></div>
         <div class="aggrid">
           <div class="agfield"><label>Quem confere o orçamento</label>
@@ -14605,12 +14605,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div class="agfield"><label>Sinal (%) · validade (dias) · data segurada (horas)</label>
             <div class="rghoras"><input class="fld" name="orc_sinal_pct" type="number" min="0" max="100" value="{{ o.sinal_pct }}" style="max-width:4.5rem"> · <input class="fld" name="orc_validade_dias" type="number" min="1" max="60" value="{{ o.validade_dias }}" style="max-width:4.5rem"> · <input class="fld" name="orc_reserva_h" type="number" min="12" max="240" value="{{ o.reserva_h }}" style="max-width:4.5rem"></div></div>
         </div>
-        {% if not regra_tem_pix %}<div class="distalerta">⚠️ <b>A empresa não tem chave Pix cadastrada.</b> Quando o cliente aprovar, a IA diz o valor do sinal e que o dono manda os dados do pagamento — e quem decide desconto e sinal é avisado. Cadastre a chave em <b>Empresa</b> pra IA mandar o Pix copia e cola.</div>{% endif %}
+        {% if not regra_tem_pix %}<div class="distalerta">⚠️ <b>A empresa não tem chave Pix cadastrada.</b> Quando o {{ voc.cliente }} aprovar, a IA diz o valor do sinal e que o dono manda os dados do pagamento — e quem decide desconto e sinal é avisado. Cadastre a chave em <b>Empresa</b> pra IA mandar o Pix copia e cola.</div>{% endif %}
         {% endif %}
         {% if ch.celular_pct is not none %}
-        <div class="distnote">Nos últimos 30 dias, <b>{{ ch.celular_pct }}% das mensagens enviadas por este número saíram do celular</b>. Com a IA ligada, quem responder pelo celular ou pelo painel <b>pausa a IA naquela conversa</b>, para os dois não falarem com o cliente ao mesmo tempo.</div>
+        <div class="distnote">Nos últimos 30 dias, <b>{{ ch.celular_pct }}% das mensagens enviadas por este número saíram do celular</b>. Com a IA ligada, quem responder pelo celular ou pelo painel <b>pausa a IA naquela conversa</b>, para os dois não falarem com o {{ voc.cliente }} ao mesmo tempo.</div>
         {% endif %}
-        <div class="distnote">A regra nunca tira lead de ninguém: vale só para contato <b>novo</b>. Quem já é cliente de alguém pelo outro número continua com essa pessoa, sem IA.</div>
+        <div class="distnote">A regra nunca tira {{ voc.lead }} de ninguém: vale só para contato <b>novo</b>. Quem já é {{ voc.cliente }} de alguém pelo outro número continua com essa pessoa, sem IA.</div>
         <div style="display:flex;justify-content:flex-end"><button class="pbtn">Salvar regra</button></div>
       </form>
     </details>
@@ -14661,12 +14661,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <p class="mut" style="font-size:.82rem;margin:.1rem 0 .6rem">Personaliza o convite frio e as respostas dos botões. Quem toca <b>“Quero te conhecer”</b> recebe seu Instagram; quem toca <b>“Quero o material”</b> recebe o material da campanha.</p>
     <form method="post" action="/painel/prospeccao/comunicacao/prospec-perfil" enctype="multipart/form-data">
       <div class="aggrid">
-        <div class="agfield"><label>Seu Instagram</label><input class="fld" name="prospec_instagram" value="{{ perfil.instagram }}" placeholder="@seuperfil"><small class="mut" style="font-size:.72rem">@ ou link — é a referência que o lead recebe pra te conhecer.</small></div>
+        <div class="agfield"><label>Seu Instagram</label><input class="fld" name="prospec_instagram" value="{{ perfil.instagram }}" placeholder="@seuperfil"><small class="mut" style="font-size:.72rem">@ ou link — é a referência que o {{ voc.lead }} recebe pra te conhecer.</small></div>
         <div class="agfield"><label>Seu cargo</label><input class="fld" name="prospec_cargo" value="{{ perfil.cargo }}" placeholder="CEO"><small class="mut" style="font-size:.72rem">Aparece no convite: “Aqui é o Fulano, {cargo} da Empresa…”.</small></div>
       </div>
       <div class="agfield" style="margin-top:.6rem">
         <label>Material padrão</label>
-        <small class="mut" style="font-size:.72rem;display:block;margin-bottom:.3rem">Enviado no “Quero o material” quando o lead <b>não está em campanha</b>. Dentro de campanha, vale o material da campanha.</small>
+        <small class="mut" style="font-size:.72rem;display:block;margin-bottom:.3rem">Enviado no “Quero o material” quando o {{ voc.lead }} <b>não está em campanha</b>. Dentro de campanha, vale o material da campanha.</small>
         <input type="hidden" name="prospec_material_tipo" id="pm-tipo" value="{{ perfil.material_tipo }}">
         <div class="pmtabs">
           <button type="button" class="pmtab {% if perfil.material_tipo=='link' %}on{% endif %}" onclick="pmtab(this,'link')">🔗 Link</button>
@@ -14898,7 +14898,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if chip1 %}
         <div class="mut" style="font-size:.8rem;margin-bottom:.35rem">📥 Última recebida neste chip:
           {% if chip1.ultima %}<b style="color:var(--verde-claro)">{{ chip1.ultima }}</b>{% if chip1.sem_receber %}
-          <span style="color:var(--ambar)">({{ chip1.sem_receber }} — se o cliente está mandando mensagem, reconecte abaixo)</span>{% endif %}
+          <span style="color:var(--ambar)">({{ chip1.sem_receber }} — se o {{ voc.cliente }} está mandando mensagem, reconecte abaixo)</span>{% endif %}
           {% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
         {% endif %}
         <div style="font-size:.78rem;color:var(--ambar);background:#2a2113;border:1px solid var(--ambar-borda);border-radius:8px;padding:.55rem .7rem">
@@ -15515,7 +15515,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
           <div class="mut" style="font-size:.8rem;margin-bottom:.35rem">📥 Última recebida neste chip:
             {% if chip2.ultima %}<b style="color:var(--verde-claro)">{{ chip2.ultima }}</b>{% if chip2.sem_receber %}
-            <span style="color:var(--ambar)">({{ chip2.sem_receber }} — se o cliente está mandando mensagem, reconecte abaixo)</span>{% endif %}
+            <span style="color:var(--ambar)">({{ chip2.sem_receber }} — se o {{ voc.cliente }} está mandando mensagem, reconecte abaixo)</span>{% endif %}
             {% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
 
           <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap">
@@ -15573,7 +15573,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">Segundo chip</div>
         <div class="mut" style="font-size:.78rem;margin-bottom:.5rem">
           Conecta outro aparelho nesta mesma empresa. Conexão independente —
-          <b>não mexe na do chip 1</b> — e os leads caem no mesmo funil, com etiqueta
+          <b>não mexe na do chip 1</b> — e os {{ voc.leads }} caem no mesmo funil, com etiqueta
           no inbox.
         </div>
         <div style="display:flex;gap:.4rem;flex-wrap:wrap">
@@ -16475,7 +16475,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
   <div class="pagehead">
     <div>
       <h2 class="tt">📣 Campanhas</h2>
-      <div class="mut" style="font-size:.85rem">Prospecção fria multicanal · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div>
+      <div class="mut" style="font-size:.85rem">Prospecção fria multicanal · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> {{ voc.lead }}(s) com e-mail ou WhatsApp prontos pra abordar</div>
     </div>
     {% if gere_campanha %}<button class="hdrbtn" type="button" onclick="document.getElementById('ovlCriar').classList.add('on');document.getElementById('nomeCampanha').focus()">＋ Criar</button>{% endif %}
   </div>
@@ -16485,7 +16485,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
     <div class="cppstep"><div>📇</div><h5>Base</h5><p>captados</p><span class="arw">›</span></div>
     <div class="cppstep on"><div>📣</div><h5>Dispara</h5><p>💬 zap + ✉️ e-mail</p><span class="arw">›</span></div>
     <div class="cppstep"><div>💬</div><h5>Resposta → inbox</h5><p>agente assume</p><span class="arw">›</span></div>
-    <div class="cppstep"><div>🔥</div><h5>Vira lead</h5><p>entra no funil</p></div>
+    <div class="cppstep"><div>🔥</div><h5>Vira {{ voc.lead }}</h5><p>entra no funil</p></div>
   </div>
 
   <details class="guia">
@@ -16495,8 +16495,8 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
       <li><span class="gn">2</span><span class="gt"><b>Configurar</b> <span>— envios/dia, ligue o 💬 WhatsApp pro decisor e escolha o <b>material</b> (link, PDF, vídeo ou foto).</span></span></li>
       <li><span class="gn">3</span><span class="gt"><b>Público</b> <span>— filtre a base por segmento/cidade e adicione quem tem e-mail ou WhatsApp.</span></span></li>
       <li><span class="gn">4</span><span class="gt"><b>Sequência</b> <span>— monte os passos (<code>D+0</code>, <code>D+3</code>…) com 🤖 IA ou template.</span></span></li>
-      <li><span class="gn">5</span><span class="gt"><b>Prévia</b> <span>— confira como o e-mail chega ao lead antes de disparar.</span></span></li>
-      <li><span class="gn">6</span><span class="gt"><b>Ativar</b> <span>— dispara sozinho, <b>para</b> em quem responde e quem topa vira lead 🔥 no funil.</span></span></li>
+      <li><span class="gn">5</span><span class="gt"><b>Prévia</b> <span>— confira como o e-mail chega ao {{ voc.lead }} antes de disparar.</span></span></li>
+      <li><span class="gn">6</span><span class="gt"><b>Ativar</b> <span>— dispara sozinho, <b>para</b> em quem responde e quem topa vira {{ voc.lead }} 🔥 no funil.</span></span></li>
     </ol>
   </details>
 
@@ -16509,7 +16509,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
       <div class="gi"><div class="k">✉️ E-mails</div><div class="v free" data-t="tot_emails">{{ totais.emails }}</div><div class="f">grátis · não custa</div></div>
       <div class="gi"><div class="k">Teto total</div><div class="v" data-t="tot_teto">{{ totais.teto_fmt }}</div></div>
       <div class="gi"><div class="k">Perto do limite</div><div class="v warn" data-t="tot_perto">{{ totais.perto }}</div></div>
-      <div class="gi"><div class="k">Custo médio/lead</div><div class="v" data-t="tot_cpl">{{ totais.custo_lead_fmt }}</div></div>
+      <div class="gi"><div class="k">Custo médio/{{ voc.lead }}</div><div class="v" data-t="tot_cpl">{{ totais.custo_lead_fmt }}</div></div>
       <div class="gi abre" onclick="kpiAbre('sem_interesse',this)"><div class="k">🙅 Sem interesse agora <span class="lup">🔍</span></div><div class="v warn" data-t="tot_sem_interesse">{{ totais.sem_interesse }}</div><div class="f">clicaram "Agora não" no WhatsApp</div></div>
       <div class="gi abre" onclick="kpiAbre('quer_conhecer',this)"><div class="k">👋 Quero te conhecer <span class="lup">🔍</span></div><div class="v free" data-t="tot_quer_conhecer">{{ totais.quer_conhecer }}</div><div class="f">clicaram no WhatsApp</div></div>
       <div class="gi abre" onclick="kpiAbre('quer_material',this)"><div class="k">📎 Quero o material <span class="lup">🔍</span></div><div class="v free" data-t="tot_quer_material">{{ totais.quer_material }}</div><div class="f">clicaram no WhatsApp</div></div>
@@ -16524,7 +16524,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
     <div id="kpi-painel" class="kpi-painel"><div id="kpi-corpo"></div></div>
   </div>
   {% endif %}
-  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail ou WhatsApp ainda. Capte leads (Google Maps traz o telefone) pra começar.</div>{% endif %}
+  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum {{ voc.lead }} com e-mail ou WhatsApp ainda. Capte {{ voc.leads }} (Google Maps traz o telefone) pra começar.</div>{% endif %}
 
   <div style="display:flex;flex-direction:column;gap:.6rem;margin-top:1rem">
     {% for c in camps %}
@@ -16547,11 +16547,11 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
           {% if c.wa %}<span class="badge wa" title="WhatsApp">💬</span>{% endif %}
           <span class="cpill {{ c.status }}">{{ c.status_rot }}</span>
           {% if c.alerta == 'coral' %}<span class="calert coral" data-t="alerta">⛔ teto atingido</span>{% elif c.alerta == 'amar' %}<span class="calert amar" data-t="alerta">⚠ {{ c.pct }}% do teto</span>{% else %}<span class="calert amar" data-t="alerta" style="display:none"></span>{% endif %}
-          {% if gerencia %}<form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
+          {% if gerencia %}<form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os {{ voc.leads }} voltam pro funil.')">
             <button class="cpx" title="Excluir campanha">🗑</button>
           </form>{% endif %}
         </div>
-        <div class="subline"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }} · <b class="g" data-t="virou">{{ c.virou }}</b> virou lead 🔥 · limite <b>{{ c.limite }}</b>/dia{% if gerencia and c.responsavel %} · 👤 {{ c.responsavel }}{% endif %}</div>
+        <div class="subline"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }} · <b class="g" data-t="virou">{{ c.virou }}</b> virou {{ voc.lead }} 🔥 · limite <b>{{ c.limite }}</b>/dia{% if gerencia and c.responsavel %} · 👤 {{ c.responsavel }}{% endif %}</div>
         <div class="chan">
           <span class="cl">💬 WhatsApp</span>
           <span class="kv"><b data-t="wa_env">{{ c.wa_env }}</b> enviadas</span><span class="sep">·</span>
@@ -16810,7 +16810,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     <div style="min-width:0">
       <a class="voltar" href="/painel/prospeccao/campanhas">‹ Voltar para Campanhas</a>
       <h1><span class="nm">{{ camp.nome }}</span> <span class="cpill {{ camp.status }}">{{ camp.status_rot }}</span></h1>
-      <div class="sub"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite <b style="color:var(--txt)">{{ camp.limite }}</b>/dia · ✉️ e-mail{% if camp.wa_ativo %} + 💬 WhatsApp{% endif %}{% if responsavel_nome %} · 👤 <b style="color:var(--txt)">{{ responsavel_nome }}</b>{% endif %}</div>
+      <div class="sub"><b style="color:var(--txt)">{{ na_camp }}</b> {{ voc.lead }}(s) na campanha · limite <b style="color:var(--txt)">{{ camp.limite }}</b>/dia · ✉️ e-mail{% if camp.wa_ativo %} + 💬 WhatsApp{% endif %}{% if responsavel_nome %} · 👤 <b style="color:var(--txt)">{{ responsavel_nome }}</b>{% endif %}</div>
     </div>
     <div class="acts">
       {% if pode_atribuir %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/responsavel" style="margin:0;display:flex;align-items:center;gap:.35rem">
@@ -16820,7 +16820,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           {% for v in vendedores %}<option value="{{ v.id }}" {% if camp.responsavel_id==v.id %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
         </select>
       </form>{% endif %}
-      {% if camp.status != 'ativa' %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="ativa"><button class="pbtn" {% if not na_camp %}disabled title="Adicione leads antes de ativar"{% endif %}>▶ Ativar</button></form>
+      {% if camp.status != 'ativa' %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="ativa"><button class="pbtn" {% if not na_camp %}disabled title="Adicione {{ voc.leads }} antes de ativar"{% endif %}>▶ Ativar</button></form>
       {% else %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="pausada"><button class="pbtn ghost">❚❚ Pausar</button></form>{% endif %}
     </div>
   </div>
@@ -16848,7 +16848,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
       </button>
       <div class="secbody"><div class="bodyin"><div class="bodypad">
       <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" enctype="multipart/form-data">
-        <p class="desc">O básico: nome, ritmo de envio e o material que o lead recebe.</p>
+        <p class="desc">O básico: nome, ritmo de envio e o material que o {{ voc.lead }} recebe.</p>
         <div class="row">
           <div style="flex:1;min-width:180px"><label class="lbl">Nome</label><input class="fld" name="nome" value="{{ camp.nome }}" maxlength="120"></div>
           <div><label class="lbl">Envios/dia</label><input class="fld" name="limite_dia" value="{{ camp.limite }}" inputmode="numeric" style="width:90px"></div>
@@ -16868,7 +16868,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </div>
 
         <div style="margin-top:.75rem">
-          <label class="lbl">📎 Material <span style="color:var(--mut);font-weight:400">— o que o lead recebe ao clicar “✅ Tenho interesse”</span></label>
+          <label class="lbl">📎 Material <span style="color:var(--mut);font-weight:400">— o que o {{ voc.lead }} recebe ao clicar “✅ Tenho interesse”</span></label>
           <input type="hidden" name="material_tipo" id="mtipo" value="{{ mt }}">
           <div class="mtabs">
             <button type="button" class="mtab {% if mt=='link' %}on{% endif %}" onclick="mtab(this,'link')">🔗 Link</button>
@@ -16877,7 +16877,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             <button type="button" class="mtab {% if mt=='foto' %}on{% endif %}" onclick="mtab(this,'foto')">🖼 Foto</button>
           </div>
           <div class="mpane {% if mt=='link' %}on{% endif %}" data-m="link"><input class="fld" name="material_link" value="{% if mt=='link' %}{{ camp.material }}{% endif %}" placeholder="https://sua-apresentacao.com  ·  site, página, proposta…"></div>
-          <div class="mpane {% if mt=='video' %}on{% endif %}" data-m="video"><input class="fld" name="material_video" value="{% if mt=='video' %}{{ camp.material }}{% endif %}" placeholder="Cole o link do YouTube, Loom ou Google Drive"><div class="mhint">Vídeo entra por link — mais leve pro lead abrir do que um arquivo pesado.</div></div>
+          <div class="mpane {% if mt=='video' %}on{% endif %}" data-m="video"><input class="fld" name="material_video" value="{% if mt=='video' %}{{ camp.material }}{% endif %}" placeholder="Cole o link do YouTube, Loom ou Google Drive"><div class="mhint">Vídeo entra por link — mais leve pro {{ voc.lead }} abrir do que um arquivo pesado.</div></div>
           <div class="mpane {% if mt=='pdf' %}on{% endif %}" data-m="pdf">
             {% if mt=='pdf' and camp.material %}<div class="mfile">📄 <a href="{{ camp.material }}" target="_blank" rel="noopener" style="color:var(--verde-claro);text-decoration:none">material atual (PDF)</a><span class="mut" style="margin-left:auto;font-size:.74rem">enviar outro ↓</span></div>{% endif %}
             <label class="drop">📄 Escolher o PDF <b>(clique aqui)</b><div style="font-size:.72rem;margin-top:.2rem">até 10 MB</div><input type="file" name="material_pdf" accept="application/pdf" hidden onchange="mfile(this)"></label>
@@ -16904,7 +16904,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <label class="chk"><input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %}> <span>Disparar o convite por WhatsApp junto com o e-mail</span></label>
           <div><label class="lbl">WhatsApp/dia</label><input class="fld" name="limite_wa_dia" value="{{ camp.limite_wa }}" inputmode="numeric" style="width:90px"></div>
         </div>
-        <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (Credify pelo CNPJ, ⭐ número dele); sem decisor, usa o melhor número captado. Lead sem número recebe só o e-mail.</div>
+        <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (Credify pelo CNPJ, ⭐ número dele); sem decisor, usa o melhor número captado. {{ voc.lead|capitalize }} sem número recebe só o e-mail.</div>
         <label class="chk" style="margin-top:.5rem"><input type="checkbox" name="wa_mmlite" value="1" {% if camp.wa_mmlite %}checked{% endif %}> <span>⚡ Usar <b>MM Lite</b> (entrega otimizada de marketing)</span></label>
         <div class="mut" style="font-size:.74rem;margin-top:.2rem"><b>Mesmo preço</b> do Cloud API — a MM Lite só melhora entrega/leitura no disparo em massa. Só funciona no <b>número próprio (Cloud API)</b> e com a conta habilitada em MM Lite na Meta; se não estiver, deixe desligado.</div>
         <div style="display:flex;gap:.8rem;align-items:flex-end;flex-wrap:wrap;margin-top:.6rem">
@@ -16918,12 +16918,12 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <label class="chk"><input type="checkbox" name="reengajar_ativo" value="1" {% if camp.reengajar_ativo %}checked{% endif %}> <span>Reengajar quem não respondeu</span></label>
           <div><label class="lbl">após (dias)</label><input class="fld" name="reengajar_dias" value="{{ camp.reengajar_dias }}" inputmode="numeric" style="width:80px"></div>
         </div>
-        <div class="mut" style="font-size:.74rem;margin-top:.3rem">Quem recebeu a sequência e <b>não respondeu</b> em X dias leva <b>1 toque pelo outro canal</b>: WhatsApp (se ativo + número), senão um e-mail curto de reforço. Dispara <b>uma vez</b>, respeita o limite/dia e para quando o lead responde ou descadastra.</div>
+        <div class="mut" style="font-size:.74rem;margin-top:.3rem">Quem recebeu a sequência e <b>não respondeu</b> em X dias leva <b>1 toque pelo outro canal</b>: WhatsApp (se ativo + número), senão um e-mail curto de reforço. Dispara <b>uma vez</b>, respeita o limite/dia e para quando o {{ voc.lead }} responde ou descadastra.</div>
 
         <div class="foot">
           <button type="button" class="pbtn ghost sm" onclick="secToggle('s1')">Fechar</button>
-          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/reiniciar" formmethod="post" formnovalidate style="color:#d98a2b;border-color:#5c4a27" onclick="return confirm('Reiniciar a campanha do zero?\\n\\nTodos os leads voltam pra fila no passo 0 e o acompanhamento (aberturas, status, histórico de Desempenho) é zerado. As conversas do inbox são preservadas.\\n\\nA campanha fica pausada até você clicar em Ativar — aí o motor recomeça do 1º e-mail.')">🔄 Reiniciar</button>
-          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:var(--coral);border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
+          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/reiniciar" formmethod="post" formnovalidate style="color:#d98a2b;border-color:#5c4a27" onclick="return confirm('Reiniciar a campanha do zero?\\n\\nTodos os {{ voc.leads }} voltam pra fila no passo 0 e o acompanhamento (aberturas, status, histórico de Desempenho) é zerado. As conversas do inbox são preservadas.\\n\\nA campanha fica pausada até você clicar em Ativar — aí o motor recomeça do 1º e-mail.')">🔄 Reiniciar</button>
+          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:var(--coral);border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os {{ voc.leads }} voltam pro funil.')">🗑 Excluir</button>
           <button class="pbtn sm">Salvar configuração</button>
         </div>
       </form>
@@ -16943,7 +16943,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
       </button>
       <div class="secbody"><div class="bodyin"><div class="bodypad">
       <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia">
-        <p class="desc">Os e-mails da campanha (isto <b>não</b> é o template de WhatsApp da etapa 1). <b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por lead; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
+        <p class="desc">Os e-mails da campanha (isto <b>não</b> é o template de WhatsApp da etapa 1). <b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por {{ voc.lead }}; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem;padding:.5rem .6rem;border:1px solid var(--borda);border-radius:10px;background:var(--bg)">
           <label class="lbl" style="margin:0" title="Modelo da sequência de e-mail por nicho — não confundir com o template de WhatsApp">📋 Modelo de e-mail (por nicho):</label>
           <select class="fld" id="modelo-sel" style="width:auto">
@@ -16982,7 +16982,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <span class="idx">3</span><h3>Prévia</h3>
         <span class="chips">
           <span class="chip {% if passos %}on{% else %}warn{% endif %}">{% if passos %}✓{% else %}!{% endif %} sequência</span>
-          <span class="chip {% if na_camp %}on{% else %}warn{% endif %}">{% if na_camp %}✓{% else %}!{% endif %} <b>{{ na_camp }}</b> lead(s)</span>
+          <span class="chip {% if na_camp %}on{% else %}warn{% endif %}">{% if na_camp %}✓{% else %}!{% endif %} <b>{{ na_camp }}</b> {{ voc.lead }}(s)</span>
           <span class="chip {% if camp.material %}on{% else %}warn{% endif %}">{% if camp.material %}✓{% else %}!{% endif %} material</span>
         </span>
         <span class="caret">▾</span>
@@ -17000,11 +17000,11 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <div class="f">Sua empresa · descadastrar (link automático em cada envio).</div>
         </div>
         {% else %}
-        <p class="desc">Sem exemplo ainda — adicione um passo na Sequência e um lead na campanha pra ver a prévia.</p>
+        <p class="desc">Sem exemplo ainda — adicione um passo na Sequência e um {{ voc.lead }} na campanha pra ver a prévia.</p>
         {% endif %}
         <div style="margin-top:1rem">
           <div class="ck {% if passos %}good{% else %}miss{% endif %}"><span class="dot">{% if passos %}✓{% else %}!{% endif %}</span> Sequência com {{ passos|length }} passo(s)</div>
-          <div class="ck {% if na_camp %}good{% else %}miss{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} lead(s) na campanha{% else %}Sem leads — mande da <b>Base</b> (Jogar na campanha){% endif %}</div>
+          <div class="ck {% if na_camp %}good{% else %}miss{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} {{ voc.lead }}(s) na campanha{% else %}Sem {{ voc.leads }} — mande da <b>Base</b> (Jogar na campanha){% endif %}</div>
           <div class="ck {% if camp.material %}good{% else %}miss{% endif %}"><span class="dot">{% if camp.material %}✓{% else %}!{% endif %}</span> {% if camp.material %}Material configurado{% else %}Material não configurado{% endif %}</div>
         </div>
         <div class="foot">
@@ -17049,7 +17049,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             <div class="cpstat"><div class="n">{{ metr.wa_lidos }}</div><div class="l">Lidos 👀</div></div>
             <div class="cpstat"><div class="n">{{ metr.wa_taxa_leitura }}%</div><div class="l">Taxa leitura</div></div>
             <div class="cpstat{% if metr.wa_erros %} r{% endif %}"><div class="n">{{ metr.wa_erros }}</div><div class="l">Erros</div></div>
-            {% if metr.wa_reserva %}<div class="cpstat novo" title="Números com WhatsApp que a base já tem, em leads que pararam, e que ainda não foram tentados"><div class="n">{{ metr.wa_reserva }}</div><div class="l">Na reserva</div></div>{% endif %}
+            {% if metr.wa_reserva %}<div class="cpstat novo" title="Números com WhatsApp que a base já tem, em {{ voc.leads }} que pararam, e que ainda não foram tentados"><div class="n">{{ metr.wa_reserva }}</div><div class="l">Na reserva</div></div>{% endif %}
           </div>
         </div>
         {% if metr.wa_custo.tem %}
@@ -17059,13 +17059,13 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             <div class="cpstat"><div class="n">{{ metr.wa_custo.cobradas }}</div><div class="l">Cobradas</div></div>
             <div class="cpstat g"><div class="n">{{ metr.wa_custo.gratis }}</div><div class="l">Grátis</div></div>
             <div class="cpstat"><div class="n" style="font-size:1.15rem">{{ metr.wa_custo.total }}</div><div class="l">Custo total</div></div>
-            <div class="cpstat"><div class="n" style="font-size:1.15rem">{{ metr.wa_custo.por_lead }}</div><div class="l">Por lead</div></div>
+            <div class="cpstat"><div class="n" style="font-size:1.15rem">{{ metr.wa_custo.por_lead }}</div><div class="l">Por {{ voc.lead }}</div></div>
             <div class="cpstat"><div class="n" style="font-size:1.15rem">{{ metr.wa_custo.tarifa_mkt }}</div><div class="l">Marketing/msg</div></div>
           </div>
-          <div class="mut" style="font-size:.74rem;margin-top:.5rem">Só template é cobrado. Resposta do agente na janela de 24h e leads que entram por anúncio (FEP) saem grátis.</div>
+          <div class="mut" style="font-size:.74rem;margin-top:.5rem">Só template é cobrado. Resposta do agente na janela de 24h e {{ voc.leads }} que entram por anúncio (FEP) saem grátis.</div>
           <div class="mut" style="font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin-top:.9rem">🧮 Simular um disparo</div>
           <div style="display:flex;gap:.7rem;align-items:flex-end;flex-wrap:wrap;margin-top:.35rem">
-            <div><label class="lbl">Leads</label><input class="fld" id="sim-leads" value="10000" inputmode="numeric" style="width:120px" oninput="simCusto()"></div>
+            <div><label class="lbl">{{ voc.leads|capitalize }}</label><input class="fld" id="sim-leads" value="10000" inputmode="numeric" style="width:120px" oninput="simCusto()"></div>
             <div><label class="lbl">% via anúncio (grátis)</label><input class="fld" id="sim-fep" value="0" inputmode="numeric" style="width:120px" oninput="simCusto()"></div>
             <div style="flex:1;min-width:150px">
               <div class="mut" style="font-size:.72rem">Custo estimado/mês</div>
@@ -17088,13 +17088,13 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 
         {% if reserva.leads %}
         <div class="kpihead" style="margin-top:1.1rem">Números não tentados</div>
-        <div class="mut" style="font-size:.79rem;margin:.1rem 0 .5rem;max-width:64ch">Estes leads pararam no número que falhou, mas a base guarda outros com WhatsApp. O disparo tenta até <b>{{ tentativas_teto }}</b> números por lead — quem já passou disso só volta por aqui.</div>
+        <div class="mut" style="font-size:.79rem;margin:.1rem 0 .5rem;max-width:64ch">Estes {{ voc.leads }} pararam no número que falhou, mas a base guarda outros com WhatsApp. O disparo tenta até <b>{{ tentativas_teto }}</b> números por {{ voc.lead }} — quem já passou disso só volta por aqui.</div>
         <div class="resv">
           {% for l in reserva.leads %}
           <div class="resv-l" id="rv{{ l.aid }}">
             <div class="resv-h" onclick="rvAb('rv{{ l.aid }}')">
               <input class="rv-ck" type="checkbox" value="{{ l.aid }}"{% if l.travado %} data-travado="1"{% endif %} onclick="event.stopPropagation()" onchange="rvUpd()"{% if l.no_teto %} disabled title="Já usou as {{ tentativas_teto }} tentativas"{% endif %}>
-              <div class="resv-e"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.74rem">{% if l.tentados %}tentou {{ l.tentativas }}{% if l.tentativas == 1 %} número{% else %} números{% endif %}{% if l.cod %} · erro {{ l.cod }}{% endif %}{% if l.no_teto %} · <span style="color:var(--ambar)">teto atingido</span>{% endif %}{% else %}sem tentativa registrada{% endif %}{% if l.travado and not l.no_teto %} · <span style="color:var(--azul)" title="Você escolheu {{ l.travado }} ao jogar este lead na campanha. O disparo não tenta outros sozinho — colocar na fila libera os demais.">🔒 número travado</span>{% endif %}</div></div>
+              <div class="resv-e"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.74rem">{% if l.tentados %}tentou {{ l.tentativas }}{% if l.tentativas == 1 %} número{% else %} números{% endif %}{% if l.cod %} · erro {{ l.cod }}{% endif %}{% if l.no_teto %} · <span style="color:var(--ambar)">teto atingido</span>{% endif %}{% else %}sem tentativa registrada{% endif %}{% if l.travado and not l.no_teto %} · <span style="color:var(--azul)" title="Você escolheu {{ l.travado }} ao jogar este {{ voc.lead }} na campanha. O disparo não tenta outros sozinho — colocar na fila libera os demais.">🔒 número travado</span>{% endif %}</div></div>
               <span class="resv-n">{{ l.sobra }} <span>na reserva</span></span>
             </div>
             <div class="resv-b">
@@ -17105,7 +17105,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           {% endfor %}
         </div>
         <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.6rem">
-          <span id="rv-count" class="mut" style="font-size:.78rem">Marque os leads pra devolver pra fila de disparo</span>
+          <span id="rv-count" class="mut" style="font-size:.78rem">Marque os {{ voc.leads }} pra devolver pra fila de disparo</span>
           <span style="flex:1"></span>
           <button type="button" class="pbtn sm" id="rv-btn" onclick="rvFila({{ camp.id }})" disabled>↻ Colocar na fila</button>
         </div>
@@ -17113,9 +17113,9 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <div class="kpihead" style="margin-top:1.1rem">Contatos &amp; histórico</div>
         {% if leads %}
         <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.3rem">
-          <span id="cl-count" class="mut" style="font-size:.78rem">Marque os leads na tabela pra agir em lote (ex.: base sem riqueza de dados, sem interesse)</span>
+          <span id="cl-count" class="mut" style="font-size:.78rem">Marque os {{ voc.leads }} na tabela pra agir em lote (ex.: base sem riqueza de dados, sem interesse)</span>
           <span style="flex:1"></span>
-          <a class="pbtn novo sm" href="/painel/prospeccao/campanhas/{{ camp.id }}/exportar-cliques" title="Baixa um CSV com 1 linha por lead: abriu e-mail, clicou 'Tenho interesse', baixou material, leu no WhatsApp, clicou 'Agora não' e descadastrou">📥 Exportar cliques (CSV)</a>
+          <a class="pbtn novo sm" href="/painel/prospeccao/campanhas/{{ camp.id }}/exportar-cliques" title="Baixa um CSV com 1 linha por {{ voc.lead }}: abriu e-mail, clicou 'Tenho interesse', baixou material, leu no WhatsApp, clicou 'Agora não' e descadastrou">📥 Exportar cliques (CSV)</a>
           <button type="button" class="pbtn ghost sm" id="cl-rem-btn" onclick="clRemSelecionados({{ camp.id }})" disabled>🗑 Remover selecionados</button>
         </div>
         {% endif %}
@@ -17130,8 +17130,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
                 <td class="mut" style="white-space:nowrap">D{{ l.passo }}{% if l.abriu %} · <span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% endif %}</td>
                 <td class="mut" style="white-space:nowrap">{% if l.fone %}{{ l.fone }}{% if l.wa_rot %}<div style="font-size:.76rem">{{ l.wa_rot }}</div>{% endif %}{% else %}<span>{{ l.wa_rot or '—' }}</span>{% endif %}{% if l.wa_erro %}<div class="wa-why" title="{{ l.wa_erro|e }}">{{ l.wa_erro|e }}</div>{% endif %}</td>
                 <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
-                <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
-              {% else %}<tr><td colspan="7" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
+                <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o {{ voc.lead }} volta pra Base)">✕</button></td></tr>
+              {% else %}<tr><td colspan="7" class="mut" style="text-align:center;padding:1.6rem">Nenhum {{ voc.lead }} ainda — mande da <b>Base</b> (marque os {{ voc.leads }} → “Jogar na campanha”).</td></tr>{% endfor %}
             </tbody>
           </table>
         </div>
@@ -17292,7 +17292,7 @@ _env.loader.mapping["prospeccao_comunicacao"] = _COMUNICACAO_TPL
 _KPI_LISTA_TPL = """
 {% if not itens %}<div class="kv-vazio">Ninguém ainda neste sinal.</div>{% else %}
 <div class="kv-top">
-  <span class="mut">{{ itens|length }} lead{{ 's' if itens|length != 1 }}</span>
+  <span class="mut">{{ itens|length }} {{ voc.lead }}{{ 's' if itens|length != 1 }}</span>
   {% set testes = itens|selectattr('eh_teste')|list|length %}
   {% if testes %}<span class="kv-flag t">🧪 {{ testes }} teste{{ 's' if testes != 1 }} da casa</span>{% endif %}
   {% set mudos = itens|rejectattr('resp_humana')|list|length %}
@@ -17314,7 +17314,7 @@ _KPI_LISTA_TPL = """
   <td class="kv-nw"><span class="kv-tmp {{ l.temperatura|e }}">{{ l.temperatura|e or '—' }}</span></td>
   <td class="kv-nw">👤 {{ l.vendedor|e }}</td>
   <td class="kv-det">
-    {% if l.msgs_lead %}{{ l.msgs_lead }} msg{{ 's' if l.msgs_lead != 1 }} do lead ·
+    {% if l.msgs_lead %}{{ l.msgs_lead }} msg{{ 's' if l.msgs_lead != 1 }} do {{ voc.lead }} ·
       {% if l.resp_humana %}{{ l.resp_humana }} resposta{{ 's' if l.resp_humana != 1 }} humana{% else %}<b class="kv-alerta">nenhuma resposta humana</b>{% endif %}{% endif %}
     {% if l.trecho %}<div class="kv-sub">“{{ l.trecho|e }}”</div>{% endif %}</td>
   <td class="kv-nw">
@@ -17431,7 +17431,7 @@ _RADAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
   </div>
   {% else %}
-  <div class="rvazio">Nada aqui. {% if balde %}Tente outro balde ou limpe o filtro.{% else %}Quando um lead reagir a uma campanha, ele aparece nesta lista.{% endif %}</div>
+  <div class="rvazio">Nada aqui. {% if balde %}Tente outro balde ou limpe o filtro.{% else %}Quando um {{ voc.lead }} reagir a uma campanha, ele aparece nesta lista.{% endif %}</div>
   {% endfor %}
 </div>
 <script>
@@ -17484,7 +17484,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:200px">
       <h2 class="tt">Régua do funil</h2>
-      <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}as etapas, o que traz o lead pra cada uma, e quanto tempo ela aguenta</div>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}as etapas, o que traz o {{ voc.lead }} pra cada uma, e quanto tempo ela aguenta</div>
     </div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
@@ -17611,19 +17611,19 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <option value="observando" {% if cfg.temperatura_modo == 'observando' %}selected{% endif %}>em ensaio — calcula e mostra, não grava</option>
           <option value="ligado" {% if cfg.temperatura_modo == 'ligado' %}selected{% endif %}>ligada — grava, com histórico</option>
         </select>
-        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente = o cliente
+        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente = o {{ voc.cliente }}
           falou há pouco. Frio = não respondeu às tentativas, ou sumiu.
-          <b>Hoje todo lead é carimbado quente ao entrar no funil e nada esfria.</b>
+          <b>Hoje todo {{ voc.lead }} é carimbado quente ao entrar no funil e nada esfria.</b>
           Comece pelo ensaio.</p>
       </div>
       <div>
-        <label class="lbl lblp">Horas desde a fala do cliente que ainda é quente
+        <label class="lbl lblp">Horas desde a fala do {{ voc.cliente }} que ainda é quente
           <span class="rg-proc {% if 'temp_quente_h' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_quente_h' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
         <input class="fld" name="temp_quente_h" value="{{ cfg.temp_quente_h if 'temp_quente_h' in escolhidas_tpl else '' }}"
                placeholder="{{ padrao_tpl.temp_quente_h or 48 }}" inputmode="numeric">
       </div>
       <div>
-        <label class="lbl lblp">Dias sem o cliente falar até esfriar
+        <label class="lbl lblp">Dias sem o {{ voc.cliente }} falar até esfriar
           <span class="rg-proc {% if 'temp_morno_dias' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_morno_dias' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
         <input class="fld" name="temp_morno_dias" value="{{ cfg.temp_morno_dias if 'temp_morno_dias' in escolhidas_tpl else '' }}"
                placeholder="{{ padrao_tpl.temp_morno_dias or 7 }}" inputmode="numeric">
@@ -17645,7 +17645,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <b>Muda o que a equipe vê primeiro de manhã.</b></p>
       </div>
       <div>
-        <label class="lbl lblp">Teto de leads cobrados por vendedor / dia
+        <label class="lbl lblp">Teto de {{ voc.leads }} cobrados por vendedor / dia
           <span class="rg-proc {% if not fup.teto.herda %}seu{% endif %}">{% if fup.teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
         <input class="fld" name="fu_teto_dia" value="{{ fup.teto.v }}" placeholder="{{ fup.teto.ph }}">
       </div>
@@ -17681,7 +17681,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                style="width:auto;margin:.2rem 0 0;accent-color:var(--verde);flex:0 0 auto">
         <span style="flex:1;min-width:0">
           <span style="font-size:.86rem">{{ it.texto }}</span>
-          {% if it.leads %}<span class="mut" style="font-size:.74rem"> · {{ it.leads }} lead{% if it.leads != 1 %}s{% endif %}</span>{% endif %}
+          {% if it.leads %}<span class="mut" style="font-size:.74rem"> · {{ it.leads }} {{ voc.lead }}{% if it.leads != 1 %}s{% endif %}</span>{% endif %}
           {% if it.nota %}<br><span class="mut" style="font-size:.74rem">{{ it.nota }}</span>{% endif %}
         </span>
       </label>
@@ -17804,7 +17804,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             criar o compromisso na Agenda
           </label>
           <span>·</span>
-          <span>se o cliente voltar a falar daqui, leva para</span>
+          <span>se o {{ voc.cliente }} voltar a falar daqui, leva para</span>
           <select class="rg-uni" name="reativa_para">
             <option value="">— não reativa —</option>
             {% for d in etapas if d.chave != e.chave %}
@@ -17834,7 +17834,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
        dela: liga, desliga, renomeia, reordena e acrescenta. A CHAVE nunca muda —
        é ela que está gravada em todo lead já perdido. -->
   <div class="fsec" style="margin-top:1.1rem">
-    <div class="sh"><b>Por que perdemos</b><span class="mut" style="font-size:.76rem">a lista que o vendedor escolhe ao encerrar um lead · cada linha salva sozinha</span></div>
+    <div class="sh"><b>Por que perdemos</b><span class="mut" style="font-size:.76rem">a lista que o vendedor escolhe ao encerrar um {{ voc.lead }} · cada linha salva sozinha</span></div>
     {# O MODELO DO RAMO, PROS MOTIVOS (14/09/2026). As etapas tinham isto desde
        11/09; esta lista não tinha nada, então quem trocou de ramo — ou abriu a tela
        antes de escolher o ramo — ficava com a lista errada e sem caminho de volta.
@@ -17932,7 +17932,7 @@ _RITMO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <div class="egrid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-top:1.1rem">
     <div class="rt-tile"><div class="v">{{ d.mensagens }}</div>
-      <div class="l">mensagens de clientes</div>
+      <div class="l">mensagens de {{ voc.clientes }}</div>
       <div class="d">~{{ (d.mensagens / dias)|round(0, 'floor')|int }} por dia</div></div>
     <div class="rt-tile" style="border-color:var(--coral-borda)">
       <div class="v" style="color:var(--coral)">{{ d.mudas }}</div>
@@ -17990,7 +17990,7 @@ _RITMO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
 
   <div class="fsec" style="margin-top:.9rem">
-    <div class="sh"><b>Quanto tempo um lead fica em cada etapa</b>
+    <div class="sh"><b>Quanto tempo um {{ voc.lead }} fica em cada etapa</b>
       {% if not d.etapas %}<span style="font-size:.76rem;color:var(--ambar)">ainda não dá pra saber</span>{% endif %}</div>
     {% if not d.etapas %}
     <div style="background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:11px;padding:.85rem .95rem;margin-top:.5rem">
@@ -18040,7 +18040,7 @@ _DESAFIO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div style="flex:1;min-width:260px">
       <h2 class="tt">Desafio: IA × equipe · {{ d.mes_rotulo }}</h2>
       <div class="mut" style="font-size:.84rem;margin-top:.25rem;line-height:1.55;max-width:78ch">
-        As mesmas medidas pra todos, por lead recebido no mês. A 1ª resposta conta a da IA e a
+        As mesmas medidas pra todos, por {{ voc.lead }} recebido no mês. A 1ª resposta conta a da IA e a
         de gente — é justamente o que se mede aqui.</div>
     </div>
     <a class="pbtn ghost" href="/painel/prospeccao/comunicacao?aba=agente">📱 Regras por número</a>
@@ -18051,21 +18051,21 @@ _DESAFIO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {% endif %}
   {% if d.ia %}{% set a = d.ia %}
   <div class="ds-kpis">
-    <div class="ds-k"><div class="v">{{ a.leads }}</div><div class="l">Leads da IA no mês</div><div class="m">que entraram pela regra do número</div></div>
+    <div class="ds-k"><div class="v">{{ a.leads }}</div><div class="l">{{ voc.leads|capitalize }} da IA no mês</div><div class="m">que entraram pela regra do número</div></div>
     <div class="ds-k"><div class="v">{{ ('%.1f' % a.resp_mediana_min).replace('.', ',') ~ ' min' if a.resp_mediana_min is not none else '—' }}</div><div class="l">1ª resposta da IA (mediana)</div><div class="m">meta: menos de {{ d.meta_min }} min</div></div>
-    <div class="ds-k"><div class="v">{{ a.visitas }}{% if a.visitas_pct is not none %} <span style="font-size:.9rem">· {{ a.visitas_pct }}%</span>{% endif %}</div><div class="l">Visitas marcadas</div><div class="m">meta do time: {{ d.meta_visita_pct }}% dos leads</div></div>
-    <div class="ds-k"><div class="v">{{ brl(d.custo_centavos) if d.custo_centavos is not none else '—' }}</div><div class="l">Gasto da IA no mês</div><div class="m">leads do mês: {{ ('por lead ' ~ brl(d.custo_por_lead)) if d.custo_por_lead is not none else 'por lead —' }} · {{ ('por contrato ' ~ brl(d.custo_por_contrato)) if d.custo_por_contrato is not none else 'por contrato —' }}</div></div>
+    <div class="ds-k"><div class="v">{{ a.visitas }}{% if a.visitas_pct is not none %} <span style="font-size:.9rem">· {{ a.visitas_pct }}%</span>{% endif %}</div><div class="l">Visitas marcadas</div><div class="m">meta do time: {{ d.meta_visita_pct }}% dos {{ voc.leads }}</div></div>
+    <div class="ds-k"><div class="v">{{ brl(d.custo_centavos) if d.custo_centavos is not none else '—' }}</div><div class="l">Gasto da IA no mês</div><div class="m">{{ voc.leads }} do mês: {{ ('por lead ' ~ brl(d.custo_por_lead)) if d.custo_por_lead is not none else 'por lead —' }} · {{ ('por contrato ' ~ brl(d.custo_por_contrato)) if d.custo_por_contrato is not none else 'por contrato —' }}</div></div>
   </div>
   {% endif %}
   <div class="ds-wrap" style="margin-top:1rem"><table class="ds-tab">
     <thead><tr><th>{{ d.mes_rotulo }}</th>{% for c in d.colunas %}<th class="{{ 'ia' if c.ia }}">{{ c.nome }}{% if c.ia %} · IA{% endif %}</th>{% endfor %}<th>Meta</th></tr></thead>
     <tbody>
-      <tr><td>Leads novos</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.leads }}</td>{% endfor %}<td class="meta"></td></tr>
+      <tr><td>{{ voc.leads|capitalize }} novos</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.leads }}</td>{% endfor %}<td class="meta"></td></tr>
       <tr><td>1ª resposta (mediana)</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ ('%.1f' % c.resp_mediana_min).replace('.', ',') ~ ' min' if c.resp_mediana_min is not none else '—' }}</td>{% endfor %}<td class="meta">&lt; {{ d.meta_min }} min</td></tr>
       <tr><td>Respondidos em até 5 min</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ (c.resp_5min_pct ~ '%') if c.resp_5min_pct is not none else '—' }}</td>{% endfor %}<td class="meta">95%</td></tr>
       <tr><td>Qualificados (data e convidados)</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.qualif }}</td>{% endfor %}<td class="meta"></td></tr>
-      <tr><td>Visitas agendadas</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.visitas }}</td>{% endfor %}<td class="meta">{{ d.meta_visita_pct }}% dos leads</td></tr>
-      <tr><td>Leads com orçamento</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.orcamentos }}</td>{% endfor %}<td class="meta"></td></tr>
+      <tr><td>Visitas agendadas</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.visitas }}</td>{% endfor %}<td class="meta">{{ d.meta_visita_pct }}% dos {{ voc.leads }}</td></tr>
+      <tr><td>{{ voc.leads|capitalize }} com orçamento</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.orcamentos }}</td>{% endfor %}<td class="meta"></td></tr>
       <tr><td>Contratos assinados</td>{% for c in d.colunas %}<td class="{{ 'ia' if c.ia }}">{{ c.contratos }}</td>{% endfor %}<td class="meta"></td></tr>
     </tbody></table></div>
   <div class="egrid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:1rem">
@@ -18076,7 +18076,7 @@ _DESAFIO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% else %}<div class="mut" style="font-size:.82rem;margin-top:.4rem">Nenhum aviso neste mês.</div>{% endfor %}
     </div>
     <div class="cx-card"><b>Onde a IA tende a ganhar</b>
-      <div class="mut" style="font-size:.84rem;margin-top:.4rem;line-height:1.55">{% if d.fora.leads_pct is not none %}Fora do horário comercial (seg–sáb, 8h–18h), a equipe responde em <b style="color:var(--txt)">{{ dur(d.fora.mediana_min) if d.fora.mediana_min is not none else '—' }}</b> (mediana) e <b style="color:var(--txt)">{{ d.fora.em5_pct if d.fora.em5_pct is not none else 0 }}%</b> em até 5 minutos. São <b style="color:var(--txt)">{{ d.fora.leads_pct }}%</b> dos leads novos da equipe.{% else %}Sem leads da equipe neste mês.{% endif %}</div>
+      <div class="mut" style="font-size:.84rem;margin-top:.4rem;line-height:1.55">{% if d.fora.leads_pct is not none %}Fora do horário comercial (seg–sáb, 8h–18h), a equipe responde em <b style="color:var(--txt)">{{ dur(d.fora.mediana_min) if d.fora.mediana_min is not none else '—' }}</b> (mediana) e <b style="color:var(--txt)">{{ d.fora.em5_pct if d.fora.em5_pct is not none else 0 }}%</b> em até 5 minutos. São <b style="color:var(--txt)">{{ d.fora.leads_pct }}%</b> dos {{ voc.leads }} novos da equipe.{% else %}Sem {{ voc.leads }} da equipe neste mês.{% endif %}</div>
     </div>
     <div class="cx-card"><b>Leitura com cuidado</b>
       <div class="mut" style="font-size:.84rem;margin-top:.4rem;line-height:1.55">O tráfego da campanha do número da IA não é o mesmo do chip principal. A comparação indica; pra uma comparação limpa, metade da campanha teria de ir pra equipe.</div>

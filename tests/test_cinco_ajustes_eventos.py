@@ -126,7 +126,8 @@ def _bloco_alerta_calado() -> str:
 
 def _render_alerta(**cfg) -> str:
     from jinja2 import Template
-    return Template(_bloco_alerta_calado()).render(dist_cfg=cfg).strip()
+    from finance.raio_x_perfil import VOC_PESSOA_PADRAO
+    return Template(_bloco_alerta_calado()).render(dist_cfg=cfg, voc=VOC_PESSOA_PADRAO).strip()
 
 
 def test_distribuindo_e_calado_a_tela_denuncia():

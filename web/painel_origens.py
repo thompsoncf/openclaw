@@ -210,7 +210,7 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
 {% macro linha_porque(x, id) -%}
   <tr class="og-det" id="{{ id }}" hidden><td colspan="10"><div class="og-grade">
     <div><div class="t">Por que perdemos</div>{% if x.perdemos %}{{ barras(x.perdemos) }}{% else %}<div class="og-mini">Nenhum perdido ainda.</div>{% endif %}</div>
-    <div><div class="t">Quem não era cliente</div>{% if x.quem %}{{ barras(x.quem) }}{% else %}<div class="og-mini">{% if x.nao_cliente %}Ainda sem leitura do que queriam.{% else %}Nenhum.{% endif %}</div>{% endif %}</div>
+    <div><div class="t">Quem não era {{ voc.cliente }}</div>{% if x.quem %}{{ barras(x.quem) }}{% else %}<div class="og-mini">{% if x.nao_cliente %}Ainda sem leitura do que queriam.{% else %}Nenhum.{% endif %}</div>{% endif %}</div>
     <div><div class="t">O que pedem</div><div class="og-mini">{{ (x.pedem or 'Ninguém disse ainda.')|e }}</div></div>
     <div><div class="t">Quando chegam</div><div class="og-mini">Manhã <b>{{ x.turnos.manha }}</b> · tarde <b>{{ x.turnos.tarde }}</b><br>
       Noite <b>{{ x.turnos.noite }}</b> · madrugada <b>{{ x.turnos.madrugada }}</b><br>
@@ -259,7 +259,7 @@ document.addEventListener('click', function (ev) {
   <div class="og-cx"><span class="r">total da casa</span>
     <span class="v">{{ d.resumo.total }}</span>
     <div class="n">no período</div></div>
-  <div class="og-cx"><span class="r">não era cliente</span>
+  <div class="og-cx"><span class="r">não era {{ voc.cliente }}</span>
     <span class="v">{{ nao_cliente_anuncio }}</span>
     <div class="n">{% if d.resumo.com_codigo %}{{ pct(nao_cliente_anuncio, d.resumo.com_codigo) }}% dos de anúncio{% else %}dos de anúncio{% endif %}</div></div>
   {# o faturamento aqui é só o das linhas COM código — o convidado pode vê-lo #}
@@ -308,7 +308,7 @@ document.addEventListener('click', function (ev) {
     <thead><tr>
       <th>Origem</th><th>Conversas</th><th>Atendidas</th><th>1ª resposta</th>
       <th>{{ d.compromisso|capitalize }}s</th><th>Compareceu</th><th>Vendas</th><th>Faturamento</th>
-      <th>Não era cliente</th><th>Fora do horário</th>
+      <th>Não era {{ voc.cliente }}</th><th>Fora do horário</th>
     </tr></thead>
     <tbody>
       {% for l in d.linhas %}{% set x = det.get(l.codigo) %}
@@ -351,7 +351,7 @@ document.addEventListener('click', function (ev) {
 <div class="og-aviso ambar">
   <b>{{ d.cobertura.sem_desfecho }} de {{ d.cobertura.ja_passou }}
   {{ d.compromisso }}s que já aconteceram estão sem resposta</b> — ninguém marcou se
-  o cliente apareceu. Enquanto isso, a taxa de comparecimento acima sai de uma
+  o {{ voc.cliente }} apareceu. Enquanto isso, a taxa de comparecimento acima sai de uma
   amostra menor do que parece. O vendedor responde pelo Cockpit, no bloco
   “Precisa de resposta”.
 </div>

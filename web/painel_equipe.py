@@ -466,7 +466,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     <div class="ph-tt">O que cada papel acessa <span class="mut" style="font-weight:400">— escolha sabendo o que está liberando</span></div>
     <div class="ph-row">
       <span class="ph-nome vend">Vendedor</span>
-      <span class="ph-desc">Prospecção e vendas: trabalha <b>os leads dele</b> (funil e campanhas atribuídas). <b>Não</b> vê o financeiro nem gerencia a equipe.</span>
+      <span class="ph-desc">Prospecção e vendas: trabalha <b>os {{ voc.leads }} dele</b> (funil e campanhas atribuídas). <b>Não</b> vê o financeiro nem gerencia a equipe.</span>
     </div>
     <div class="ph-row">
       <span class="ph-nome gest">Gestor</span>
@@ -530,12 +530,12 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
         {% endif %}
         {% if not m.pendente and m.papel != 'dono' %}
         <form method="post" action="/painel/equipe/senha-temp" style="margin:0"
-              onsubmit="return confirm('Criar uma senha provisória para “{{ m.nome or m.email }}”?\\n\\nA senha atual dela para de valer na hora. O acesso e a fila de leads continuam como estão.')">
+              onsubmit="return confirm('Criar uma senha provisória para “{{ m.nome or m.email }}”?\\n\\nA senha atual dela para de valer na hora. O acesso e a fila de {{ voc.leads }} continuam como estão.')">
           <input type="hidden" name="membro_id" value="{{ m.id }}">
-          <button title="Destravar o acesso sem tirar a pessoa do ar — ela continua ativa e na fila de leads">🔑 Senha provisória</button></form>
+          <button title="Destravar o acesso sem tirar a pessoa do ar — ela continua ativa e na fila de {{ voc.leads }}">🔑 Senha provisória</button></form>
         {% endif %}
         <form method="post" action="/painel/equipe/reconvite" style="margin:0"
-              onsubmit="return confirm('Gerar link novo para “{{ m.nome or m.email }}”?\\n\\nAtenção: ela fica DESATIVADA até abrir o link — e sai da fila de leads enquanto isso. Só pra destravar a senha, use “Senha provisória”.')">
+              onsubmit="return confirm('Gerar link novo para “{{ m.nome or m.email }}”?\\n\\nAtenção: ela fica DESATIVADA até abrir o link — e sai da fila de {{ voc.leads }} enquanto isso. Só pra destravar a senha, use “Senha provisória”.')">
           <input type="hidden" name="membro_id" value="{{ m.id }}">
           <button title="Gerar e reenviar o link de convite (desativa até a pessoa aceitar)">↻ Novo link</button></form>
         {% if m.papel in ('vendedor','gestor','dono') and not m.pendente %}
@@ -562,7 +562,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
   {% if raio_x_perfil and raio_x_perfil.aplica %}
   <div class="papeis" style="margin-top:1.4rem">
     <div class="ph-tt">🔎 Raio-X de segunda <span class="mut" style="font-weight:400">— o placar da semana no grupo dos vendedores</span></div>
-    <div class="mut" style="font-size:.82rem;line-height:1.5">Toda segunda às 8h o Zaq manda no grupo uma linha por vendedor (leads novos, 1ª resposta, propostas enviadas e em rascunho, quantos clientes esperando), a linha da empresa e a confiança do dado. O mesmo Raio-X está no app de cada um, na aba Raio-X.</div>
+    <div class="mut" style="font-size:.82rem;line-height:1.5">Toda segunda às 8h o Zaq manda no grupo uma linha por vendedor ({{ voc.leads }} novos, 1ª resposta, propostas enviadas e em rascunho, quantos {{ voc.clientes }} esperando), a linha da empresa e a confiança do dado. O mesmo Raio-X está no app de cada um, na aba Raio-X.</div>
     {% if raiox and raiox.grupo_jid %}
     <div style="margin-top:.6rem;font-size:.84rem">Hoje: <b>{{ raiox.grupo_nome or raiox.grupo_jid }}</b>
       {% if raiox.ativo %}<span class="mtag on">ligado</span>{% else %}<span class="mtag off">desligado</span>{% endif %}

@@ -89,7 +89,8 @@ def _precos_escondidos(c, conta_id: int, *, todos: bool = False) -> set[str] | N
         return None if todos else set()
 
 
-def _linha_catalogo(s, preco_escondido: bool = False, *, aproximado: bool = False) -> str:
+def _linha_catalogo(s, preco_escondido: bool = False, *, aproximado: bool = False,
+                    eventos: bool = True) -> str:
     """Uma linha do catálogo do jeito que a IA deve LER — e, por tabela, falar.
 
     O catálogo nasceu pra serviço recorrente (setup + mensalidade), e a linha era
@@ -112,8 +113,9 @@ def _linha_catalogo(s, preco_escondido: bool = False, *, aproximado: bool = Fals
     mensal = s.get("mensal_centavos") or 0
     if preco_escondido and aproximado:
         # a regra por número: o dono ainda não liberou este valor pra IA
+        passo = "convide pra visita" if eventos else "convide pra uma reunião"
         return (f"- {s['nome']} (slug {s['slug']}): valor NÃO liberado — não diga nem "
-                "estime; convide pra visita e diga que a equipe manda o orçamento conferido")
+                f"estime; {passo} e diga que a equipe manda o orçamento conferido")
     if preco_escondido:
         return (f"- {s['nome']} (slug {s['slug']}): valor sob consulta "
                 "(a recepção informa — não diga nem estime o preço)")
@@ -307,7 +309,7 @@ def _conhecimento(c, conta_id):
     return instr, "\n\n".join(faqs)
 
 
-def _add_bot_msg(c, conversa_id, canal, texto, sid=None):
+def _add_bot_msg(c, conversa_id, canal, texto, sid=None, status=None):
     """Grava o que o agente mandou.
 
     O ECO CHEGA ANTES, às vezes. No QR, a mensagem que o agente manda volta pelo
@@ -316,11 +318,20 @@ def _add_bot_msg(c, conversa_id, canal, texto, sid=None):
     único (conversa_id, provider_sid) e a transação caía. Agora a linha é do bot
     de qualquer jeito: sem isto a regra por número leria a resposta da própria IA
     como "alguém respondeu pelo celular" e pausaria a IA na primeira mensagem."""
-    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
-                 values (%s,%s,'out','bot',%s,%s)
-                 on conflict (conversa_id, provider_sid) where provider_sid is not null
-                 do update set autor='bot'""",
-              (conversa_id, canal, (texto or "")[:8000], sid or None))
+    if status:
+        # só o recado de fora do horário da regra leva marca (chip_regra.STATUS_FORA)
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto,
+                                            provider_sid, status)
+                     values (%s,%s,'out','bot',%s,%s,%s)
+                     on conflict (conversa_id, provider_sid) where provider_sid is not null
+                     do update set autor='bot', status=excluded.status""",
+                  (conversa_id, canal, (texto or "")[:8000], sid or None, status))
+    else:
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
+                     values (%s,%s,'out','bot',%s,%s)
+                     on conflict (conversa_id, provider_sid) where provider_sid is not null
+                     do update set autor='bot'""",
+                  (conversa_id, canal, (texto or "")[:8000], sid or None))
     c.execute("update conversas set ultima_msg_em=now() where id=%s", (conversa_id,))
 
 
@@ -358,12 +369,42 @@ def atender(pool, conta_id: int, conversa_id: int) -> None:
     except Exception as e:  # noqa: BLE001
         _log.info("agente.atender falhou conta=%s conversa=%s: %s: %s",
                   conta_id, conversa_id, type(e).__name__, e)
+        _socorro_da_regra(pool, conta_id, conversa_id, f"{type(e).__name__}")
+
+
+def _socorro_da_regra(pool, conta_id: int, conversa_id: int, porque: str) -> None:
+    """A IA DA REGRA NÃO CONSEGUIU RESPONDER: chama gente.
+
+    Na regra por número o lead nasce da IA — ninguém da equipe recebe o "lead novo
+    pra você" nem o "Retornar contato". Se a IA cai (a IA de fora fora do ar, JSON
+    torto, conta sem config), sem isto o cliente ficaria sem resposta e ninguém
+    saberia. Vai como 'pessoa' pra quem cuida da agenda; o `avisar` não repete o
+    mesmo assunto em 6h. Nunca levanta."""
+    try:
+        from finance import chip_regra as _cr
+        with pool.connection() as c:
+            r = _cr.regra_da_conversa(c, conta_id, conversa_id)
+            if not (r and r.get("ia_ligada")):
+                return
+            p = c.execute("""select cv.prospeccao_id, coalesce(p.empresa, cv.contato_ref, '')
+                               from conversas cv left join prospeccao p
+                                    on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
+                              where cv.id=%s and cv.conta_id=%s""",
+                          (conversa_id, conta_id)).fetchone()
+            c.commit()
+        _cr.avisar(pool, conta_id, r, "pessoa", prospeccao_id=p[0] if p else None,
+                   conversa_id=conversa_id, lead=p[1] if p else "",
+                   resumo=f"A IA não conseguiu responder ({porque}). Responda o cliente por ela.")
+    except Exception:  # noqa: BLE001
+        _log.warning("agente: socorro da regra falhou conta=%s conversa=%s",
+                     conta_id, conversa_id, exc_info=True)
 
 
 def _atender(pool, conta_id, conversa_id):
     with pool.connection() as c:
         cfg = _cfg(c, conta_id)
         if not cfg:
+            _socorro_da_regra(pool, conta_id, conversa_id, "a empresa não tem o agente configurado")
             return
         conv = c.execute(
             """select cv.agente_ativo, cv.prospeccao_id, cv.contato_ref, p.empresa,
@@ -391,7 +432,8 @@ def _atender(pool, conta_id, conversa_id):
             _canal = conv[9] or "whatsapp"
             _dest = conv[2] if _canal in ("messenger", "instagram") else (conv[4] or conv[5] or conv[2])
             segue = _regra_antes(c, conta_id, conversa_id, regra,
-                                 lambda texto: _enviar(c, conta_id, conversa_id, _canal, _dest, texto))
+                                 lambda texto, status=None: _enviar(c, conta_id, conversa_id,
+                                                                   _canal, _dest, texto, status))
             if not segue:
                 return False
             _visto = _cla.ultimo_do_paciente(c, conta_id, conversa_id)
@@ -431,7 +473,8 @@ def _atender(pool, conta_id, conversa_id):
         escondidos = _precos_escondidos(c, conta_id, todos=bool(regra))
         cat_txt = "\n".join(
             _linha_catalogo(s, escondidos is None or s["slug"] in escondidos,
-                            aproximado=bool(regra)) for s in catalogo) \
+                            aproximado=bool(regra), eventos=_perfil == "eventos")
+            for s in catalogo) \
             or "(sem catálogo)"
         # A CLÍNICA TEM O AGENTE DELA (fase 3b, finance/clinica_agente.py): preço,
         # horário livre de verdade, marcar e passar pra recepção. Desvia AQUI, antes
@@ -528,16 +571,19 @@ def _atender(pool, conta_id, conversa_id):
         pedir = (
             f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{visita_txt}{seguros_txt}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
-            '{"acao":"responder|orcamento|visita","resposta":"texto pra mandar ao cliente",'
-            '"visita":{"data":"AAAA-MM-DD","hora":"HH:MM"},'
+            + ('{"acao":"responder","resposta":"texto pra mandar ao cliente",' if regra else
+               '{"acao":"responder|orcamento|visita","resposta":"texto pra mandar ao cliente",')
+            + '"visita":{"data":"AAAA-MM-DD","hora":"HH:MM"},'
             '"servicos":[{"slug":"...","qtd":1}],"temperatura":"frio|morno|quente",'
             '"evento":{"data":"AAAA-MM-DD","convidados":0,"inicio":"","fim":"","tipo":""}'
             + (',"avisar_equipe":{"motivo":"","resumo":""}' if regra else "") + '}\n'
-            "- acao=orcamento só quando o cliente ACEITOU receber um orçamento (você "
-            "ofereceu antes e ele disse que sim) E você já sabe a data, o horário de "
-            "início e quantos convidados. Pergunta de preço não é pedido de orçamento: "
-            "responda o valor e ofereça montar. Liste em servicos os slugs do catálogo.\n"
-            "- qtd é a QUANTIDADE que o cliente pediu, não 1 por padrão: 6 horas de "
+            # na regra (etapa 1) a IA não manda orçamento: sem o convite a montar um
+            + ("" if regra else
+               "- acao=orcamento só quando o cliente ACEITOU receber um orçamento (você "
+               "ofereceu antes e ele disse que sim) E você já sabe a data, o horário de "
+               "início e quantos convidados. Pergunta de preço não é pedido de orçamento: "
+               "responda o valor e ofereça montar. Liste em servicos os slugs do catálogo.\n")
+            + "- qtd é a QUANTIDADE que o cliente pediu, não 1 por padrão: 6 horas de "
             "festa num pacote de 4 são 2 horas extras, qtd=2. O preço que ele vai ler "
             "é qtd × valor do item.\n"
             "- evento: repita o que o CLIENTE disse (data, quantos convidados, que "
@@ -664,8 +710,15 @@ def _regra_antes(c, conta_id: int, conversa_id: int, regra: dict, enviar) -> boo
         idade = float(r[0]) if r and r[0] is not None else _RAJADA_S
         if idade >= _RAJADA_S:
             break
-        time.sleep(_RAJADA_S - idade)
+        # teto: o horário da mensagem pode vir do provedor alguns minutos "no futuro"
+        # (`_wa_recebido_em` aceita até 5 min), e aí a espera viraria minutos
+        time.sleep(max(0.0, min(float(_RAJADA_S), _RAJADA_S - idade)))
     if not _cla.tentar_travar(c, conversa_id):
+        return False
+    # alguém apertou "Assumir" (ou desligou a IA) enquanto ela esperava a rajada?
+    st = c.execute("select coalesce(agente_ativo,false), coalesce(status,'') from conversas "
+                   "where id=%s and conta_id=%s", (conversa_id, conta_id)).fetchone()
+    if not st or not st[0] or st[1] == "pendente":
         return False
     if _cr.pausar_se_humano(c, conta_id, conversa_id, regra):
         c.commit()
@@ -674,7 +727,7 @@ def _regra_antes(c, conta_id: int, conversa_id: int, regra: dict, enviar) -> boo
         return False
     if not _cr.ia_pode_falar(regra):
         if not _cr.ja_mandou_fora(c, conversa_id, regra):
-            enviar(_cr.texto_fora(regra))
+            enviar(_cr.texto_fora(regra), _cr.STATUS_FORA)
         return False
     return True
 
@@ -761,11 +814,12 @@ def _nota_gemeo(c, conta_id, conv) -> str:
             "com a equipe e NÃO feche nada por conta própria.")
 
 
-def _enviar(c, conta_id, conversa_id, canal, destino, texto):
+def _enviar(c, conta_id, conversa_id, canal, destino, texto, status=None):
     if not texto:
         return
     res = _mandar(c, conta_id, canal, destino, texto, conversa_id)
-    _add_bot_msg(c, conversa_id, canal, texto, res.get("sid") if res.get("ok") else None)
+    _add_bot_msg(c, conversa_id, canal, texto, res.get("sid") if res.get("ok") else None,
+                 status=status)
     c.commit()
 
 

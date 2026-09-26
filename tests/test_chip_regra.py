@@ -186,15 +186,29 @@ def test_regra_da_conversa_so_vale_pro_lead_do_dono(pool, equipe):
     """O lead que era do Pedro antes da regra continua do Pedro: a IA não entra."""
     with pool.connection() as c:
         _regra(c, equipe["ZAQ"])
+        r = cr.regra(c, EMPRESA, CHIP2)
         convs = {}
         for quem in ("ZAQ", "PEDRO"):
-            lead = c.execute("insert into prospeccao (conta_id, vendedor_id) values (%s,%s) "
-                             "returning id", (EMPRESA, equipe[quem])).fetchone()[0]
+            lead = c.execute("insert into prospeccao (conta_id) values (%s) returning id",
+                             (EMPRESA,)).fetchone()[0]
             convs[quem] = c.execute("insert into conversas (conta_id, prospeccao_id, chip_id) "
                                     "values (%s,%s,%s) returning id",
                                     (EMPRESA, lead, CHIP2)).fetchone()[0]
+            cr.atribuir(c, EMPRESA, lead, convs[quem], r)
+        # o gestor moveu o segundo pro Pedro depois: a IA sai
+        c.execute("update prospeccao set vendedor_id=%s where id=(select prospeccao_id from "
+                  "conversas where id=%s)", (equipe["PEDRO"], convs["PEDRO"]))
         assert cr.regra_da_conversa(c, EMPRESA, convs["ZAQ"])
         assert cr.regra_da_conversa(c, EMPRESA, convs["PEDRO"]) is None
+
+
+def test_lead_antigo_do_dono_da_regra_segue_o_atendimento_de_sempre(pool, equipe):
+    """O dono da regra pode ter leads de antes no mesmo chip (ou ganhar um que o
+    gestor moveu): esses não viram conversa da IA — só o que a regra DEU."""
+    with pool.connection() as c:
+        _regra(c, equipe["ZAQ"])
+        conv = _conversa(c, equipe, da_regra=False)
+        assert cr.regra_da_conversa(c, EMPRESA, conv) is None
 
 
 def test_dono_do_gemeo(pool, equipe):
@@ -336,18 +350,22 @@ def test_recado_de_fora_usa_a_hora_de_abertura():
 
 # ══════════════════════════════════════════════ a conversa: pausa, rajada, fora do horário
 
-def _conversa(c, equipe):
+def _conversa(c, equipe, *, da_regra=True):
     lead = c.execute("insert into prospeccao (conta_id, vendedor_id) values (%s,%s) returning id",
                      (EMPRESA, equipe["ZAQ"])).fetchone()[0]
+    if da_regra:
+        c.execute("insert into chip_regra_leads (prospeccao_id, conta_id, chip_id, membro_id) "
+                  "values (%s,%s,%s,%s)", (lead, EMPRESA, CHIP2, equipe["ZAQ"]))
     return c.execute("insert into conversas (conta_id, prospeccao_id, chip_id, agente_ativo) "
                      "values (%s,%s,%s,true) returning id", (EMPRESA, lead, CHIP2)).fetchone()[0]
 
 
-def _msg(c, conv, autor, texto, *, seg_atras=0, sid=None, membro=None):
+def _msg(c, conv, autor, texto, *, seg_atras=0, sid=None, membro=None, status=None):
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid,
-                                        membro_id, criado_em)
-                 values (%s,'whatsapp',%s,%s,%s,%s,%s, now() - %s * interval '1 second')""",
-              (conv, "in" if autor == "lead" else "out", autor, texto, sid, membro, seg_atras))
+                                        membro_id, status, criado_em)
+                 values (%s,'whatsapp',%s,%s,%s,%s,%s,%s, now() - %s * interval '1 second')""",
+              (conv, "in" if autor == "lead" else "out", autor, texto, sid, membro, status,
+               seg_atras))
 
 
 def test_quem_responde_pelo_celular_pausa_a_ia(pool, equipe):
@@ -421,7 +439,7 @@ def test_recado_de_fora_do_horario_sai_uma_vez_e_a_ia_responde_na_abertura(pool,
         conv = _conversa(c, equipe)
         _msg(c, conv, "lead", "oi", seg_atras=60)
         assert not cr.ja_mandou_fora(c, conv, r)
-        _msg(c, conv, "bot", cr.texto_fora(r), seg_atras=50)
+        _msg(c, conv, "bot", cr.texto_fora(r), seg_atras=50, status=cr.STATUS_FORA)
         assert cr.ja_mandou_fora(c, conv, r)
         # o recado não é resposta: quando a IA abre, a conversa ainda espera por ela
         assert cr.tem_o_que_responder(c, conv, r)
@@ -436,7 +454,7 @@ def test_fora_do_horario_ninguem_e_acordado(pool, equipe):
         _regra(c, equipe["ZAQ"], ia_horario="proprio", ia_dias=fechado)
         r = cr.regra(c, EMPRESA, CHIP2)
         conv = _conversa(c, equipe)
-        _msg(c, conv, "bot", cr.texto_fora(r))
+        _msg(c, conv, "bot", cr.texto_fora(r), status=cr.STATUS_FORA)
         c.commit()
         assert cr.pendentes_da_abertura(c, EMPRESA) == []
 
@@ -642,3 +660,108 @@ def test_lead_do_pedro_no_chip_segue_o_agente_de_sempre(pool, equipe, agente):
     ag.atender(pool, EMPRESA, conv)
     assert agente["enviados"] == []
     assert "COMO VOCÊ ATENDE ESTE NÚMERO" not in agente["prompts"][0][1]
+
+
+# ══════════════════════════════════════════════ o que a revisão de 26/09 achou
+
+def test_quem_escreveu_de_novo_de_noite_tambem_e_respondido_na_abertura(pool, equipe):
+    """"oi" às 23h → recado; "quanto custa?" às 23h05 → a IA fica quieta (recado já
+    foi). Na abertura, a última fala é do cliente, e mesmo assim ele espera a IA."""
+    with pool.connection() as c:
+        _regra(c, equipe["ZAQ"], ia_horario="proprio", ia_dias=list(range(7)),
+               ia_hora_ini=0, ia_hora_fim=24)
+        r = cr.regra(c, EMPRESA, CHIP2)
+        conv = _conversa(c, equipe)
+        _msg(c, conv, "lead", "oi", seg_atras=600)
+        _msg(c, conv, "bot", cr.texto_fora(r), seg_atras=590, status=cr.STATUS_FORA)
+        _msg(c, conv, "lead", "quanto custa?", seg_atras=300)
+        c.commit()
+        assert cr.pendentes_da_abertura(c, EMPRESA) == [conv]
+        # depois que a IA respondeu, ninguém é acordado de novo
+        _msg(c, conv, "bot", "O pacote sai a partir de…")
+        c.commit()
+        assert cr.pendentes_da_abertura(c, EMPRESA) == []
+
+
+def test_recado_reescrito_nao_esquece_quem_estava_esperando(pool, equipe):
+    """A marca do recado é o status, não o texto: o dono pode reescrevê-lo com
+    conversas esperando."""
+    with pool.connection() as c:
+        _regra(c, equipe["ZAQ"], ia_horario="proprio", ia_dias=list(range(7)),
+               ia_hora_ini=0, ia_hora_fim=24)
+        conv = _conversa(c, equipe)
+        _msg(c, conv, "lead", "oi", seg_atras=60)
+        _msg(c, conv, "bot", "texto antigo do recado", status=cr.STATUS_FORA)
+        c.execute("update chip_regra set ia_fora_texto='recado novo'")
+        c.commit()
+        r = cr.regra(c, EMPRESA, CHIP2)
+        assert cr.ja_mandou_fora(c, conv, r) and cr.tem_o_que_responder(c, conv, r)
+        assert cr.pendentes_da_abertura(c, EMPRESA) == [conv]
+
+
+def test_a_ia_caiu_e_alguem_e_chamado(pool, equipe, agente, monkeypatch):
+    """Sem isto o lead da IA ficaria sem resposta e sem ninguém saber: na regra
+    ninguém recebe o "lead novo pra você" nem o "Retornar contato"."""
+    from core import brain as _brain
+
+    class _Quebrada:
+        def chamar(self, **k):
+            raise RuntimeError("fora do ar")
+    monkeypatch.setattr(_brain, "Brain", _Quebrada)
+    conv = _conversa_da_ia(pool, equipe)
+    ag.atender(pool, EMPRESA, conv)
+    assert agente["enviados"] == []
+    assert [m for m, _ in agente["avisos"]] == ["pessoa"]
+    assert "RuntimeError" in agente["avisos"][0][1]
+
+
+def test_conta_sem_config_do_agente_tambem_chama_alguem(pool, equipe, agente):
+    with pool.connection() as c:
+        c.execute("delete from agente_config")
+        c.commit()
+    conv = _conversa_da_ia(pool, equipe)
+    ag.atender(pool, EMPRESA, conv)
+    assert [m for m, _ in agente["avisos"]] == ["pessoa"]
+
+
+def test_assumir_durante_a_espera_cala_a_ia(pool, equipe, agente, monkeypatch):
+    """O "Assumir" sem mensagem nenhuma: a IA lê a conversa de novo depois da trava."""
+    conv = _conversa_da_ia(pool, equipe)
+    import time as _t
+
+    def _assume(_s):
+        with pool.connection() as c2:
+            c2.execute("update conversas set status='pendente', agente_ativo=false where id=%s",
+                       (conv,))
+            c2.commit()
+    monkeypatch.setattr(ag, "_RAJADA_S", 60)       # a mensagem tem 30s: vai esperar
+    monkeypatch.setattr(_t, "sleep", _assume)
+    ag.atender(pool, EMPRESA, conv)
+    assert agente["enviados"] == [] and agente["prompts"] == []
+
+
+def test_espera_tem_teto_mesmo_com_horario_no_futuro(pool, equipe, agente, monkeypatch):
+    """O horário do provedor pode vir minutos "no futuro": a espera não passa do teto."""
+    import time as _t
+    esperas = []
+    monkeypatch.setattr(ag, "_RAJADA_S", 6)
+    monkeypatch.setattr(_t, "sleep", lambda s: esperas.append(s))
+    conv = _conversa_da_ia(pool, equipe)
+    with pool.connection() as c:
+        _msg(c, conv, "lead", "do futuro", seg_atras=-240)
+        c.commit()
+    ag.atender(pool, EMPRESA, conv)
+    assert esperas and max(esperas) <= 6
+
+
+def test_preco_escondido_fala_reuniao_pra_quem_nao_vende_festa():
+    s = {"nome": "Consultoria", "slug": "c", "setup_centavos": 100000}
+    assert "reunião" in ag._linha_catalogo(s, True, aproximado=True, eventos=False)
+    assert "visita" not in ag._linha_catalogo(s, True, aproximado=True, eventos=False)
+
+
+def test_a_ia_da_regra_nem_ve_a_opcao_de_orcamento(pool, equipe, agente):
+    conv = _conversa_da_ia(pool, equipe)
+    ag.atender(pool, EMPRESA, conv)
+    pedir = agente["prompts"][0][1]
+    assert "orcamento|visita" not in pedir and "acao=orcamento" not in pedir

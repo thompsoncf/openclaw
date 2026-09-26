@@ -39,7 +39,7 @@ A IA ATENDENDO SÓ NAQUELE NÚMERO
 - Horário: 24 horas ou um horário próprio (dias e horas). Fora do horário, o cliente recebe um recado, e a IA responde quando abrir.
 - Ela se apresenta do jeito que você escrever (ex.: "Sou a assistente Zaq, da sua empresa").
 - Preço: a IA só cita o valor dos itens que você liberar no catálogo ("A IA pode dizer este preço", em Serviços › Catálogo), sempre como valor de referência. Orçamento formal ela ainda não manda.
-- Quando precisa de alguém (visita, agenda, desconto, sinal, reclamação), ela avisa quem você escolheu na regra, por push, e-mail e WhatsApp, e continua a conversa.
+- Quando precisa de alguém (agenda, desconto, fechamento, reclamação), ela avisa quem você escolheu na regra, por push, e-mail e WhatsApp, e continua a conversa. Se ela não conseguir responder, avisa também.
 - Se alguém da equipe responder a conversa, pelo celular ou pelo painel, a IA sai daquela conversa na hora, para o cliente não ouvir duas vozes.$txt$,
  timestamptz '2026-09-27 00:10:00+00')
 on conflict (chave) do nothing;

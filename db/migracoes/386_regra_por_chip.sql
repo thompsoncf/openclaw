@@ -64,6 +64,19 @@ create table if not exists public.ia_avisos (
 );
 create index if not exists ia_avisos_conta_idx on public.ia_avisos (conta_id, criado_em desc);
 
+-- Os leads que a REGRA deu ao dono dela, um por linha. É o que diz "esta conversa é
+-- da IA": o dono da regra pode ter leads antigos no mesmo chip (ou ganhar um que o
+-- gestor moveu pra ele), e esses seguem o atendimento de sempre. Tabela à parte, e
+-- não coluna em `conversas`, pra não pedir trava em tabela viva.
+create table if not exists public.chip_regra_leads (
+  prospeccao_id   bigint primary key,
+  conta_id        bigint not null references public.contas(id) on delete restrict,
+  chip_id         bigint not null,
+  membro_id       bigint,
+  criado_em       timestamptz not null default now()
+);
+
 -- rollback:
+--   drop table if exists public.chip_regra_leads;
 --   drop table if exists public.ia_avisos;
 --   drop table if exists public.chip_regra;

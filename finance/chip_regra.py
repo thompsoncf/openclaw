@@ -49,6 +49,11 @@ _CHAVES = ("id", "conta_id", "chip_id", "ativa", "membro_id", "ia_ligada", "ia_h
            "ia_dias", "ia_hora_ini", "ia_hora_fim", "ia_fora_texto", "ia_apresentacao",
            "aviso_agenda_membro_id", "aviso_dono_membro_id", "vale_desde")
 
+#: A marca, em `mensagens.status`, do recado de fora do horário. Pela marca e não pelo
+#: texto: o dono pode reescrever o recado com conversas esperando, e o texto antigo
+#: deixaria de casar — elas nunca seriam respondidas.
+STATUS_FORA = "ia_fora"
+
 #: O texto de fábrica quando a IA está fora do horário próprio. Entra na LEITURA,
 #: não na coluna: melhorar o texto alcança quem nunca editou.
 FORA_PADRAO = ("Oi! Recebi sua mensagem 😊 Nosso atendimento volta às {hora}h, "
@@ -83,13 +88,17 @@ def regra_da_conversa(c, conta_id: int, conversa_id: int) -> dict | None:
     IA não mexe nela."""
     try:
         with c.transaction():
-            cv = c.execute("""select cv.chip_id, p.vendedor_id
+            cv = c.execute("""select cv.chip_id, p.vendedor_id,
+                                     exists (select 1 from chip_regra_leads l
+                                              where l.prospeccao_id = p.id and l.conta_id = cv.conta_id)
                                 from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                                where cv.id=%s and cv.conta_id=%s""",
                            (conversa_id, conta_id)).fetchone()
     except Exception:  # noqa: BLE001
         return None
-    if not cv:
+    # só o lead que a REGRA deu (chip_regra_leads): o lead antigo do mesmo dono, ou um
+    # que o gestor moveu pra ele, segue o atendimento de sempre
+    if not cv or not cv[2]:
         return None
     r = regra(c, conta_id, cv[0])
     if not r or not r["membro_id"] or cv[1] != r["membro_id"]:
@@ -181,6 +190,9 @@ def atribuir(c, conta_id: int, prospeccao_id: int, conversa_id: int | None, r: d
                   (mid, prospeccao_id, conta_id)).rowcount
     if not n:
         return None
+    c.execute("""insert into chip_regra_leads (prospeccao_id, conta_id, chip_id, membro_id)
+                 values (%s,%s,%s,%s) on conflict (prospeccao_id) do nothing""",
+              (prospeccao_id, conta_id, r["chip_id"], mid))
     if conversa_id:
         c.execute("""update conversas set responsavel_membro_id=%s,
                             agente_ativo = case when %s and status <> 'pendente'
@@ -234,18 +246,19 @@ def tem_o_que_responder(c, conversa_id: int, r: dict) -> bool:
     a volta que responde lê todas, e as outras não podem responder de novo. O
     recado de fora do horário não conta como resposta: quando a IA abre, ela
     responde o que ficou (ver `pendentes_da_abertura`)."""
-    u = c.execute("""select autor, coalesce(texto,'') from mensagens where conversa_id=%s
+    u = c.execute("""select autor, coalesce(texto,''), coalesce(status,'') from mensagens
+                      where conversa_id=%s
                       order by criado_em desc, id desc limit 1""", (conversa_id,)).fetchone()
     if not u:
         return False
-    return u[0] == "lead" or (u[0] == "bot" and u[1] == texto_fora(r))
+    return u[0] == "lead" or (u[0] == "bot" and u[2] == STATUS_FORA)
 
 
 def ja_mandou_fora(c, conversa_id: int, r: dict) -> bool:
     """O recado de fora do horário sai uma vez por noite, não uma por mensagem."""
-    x = c.execute("""select 1 from mensagens where conversa_id=%s and autor='bot' and texto=%s
+    x = c.execute("""select 1 from mensagens where conversa_id=%s and autor='bot' and status=%s
                       and criado_em > now() - interval '12 hours' limit 1""",
-                  (conversa_id, texto_fora(r))).fetchone()
+                  (conversa_id, STATUS_FORA)).fetchone()
     return bool(x)
 
 
@@ -270,10 +283,20 @@ def pendentes_da_abertura(c, conta_id: int, limite: int = 5) -> list[int]:
                           and p.vendedor_id=%s and cv.agente_ativo
                           and cv.status <> 'pendente'
                           and cv.ultima_msg_em > now() - interval '3 days'
-                          and (select m.texto from mensagens m where m.conversa_id=cv.id
-                                order by m.criado_em desc, m.id desc limit 1) = %s
+                          and exists (select 1 from chip_regra_leads l where l.prospeccao_id = p.id)
+                          -- recebeu o recado de fora do horário…
+                          and exists (select 1 from mensagens f where f.conversa_id=cv.id
+                                         and f.autor='bot' and f.status=%s
+                                         and f.criado_em > now() - interval '24 hours')
+                          -- …e ninguém respondeu depois: a última fala é o recado ou o
+                          -- cliente (quem escreveu de novo durante a noite também espera)
+                          and (select case when m.autor='lead' then true
+                                           else m.autor='bot' and m.status=%s end
+                                 from mensagens m where m.conversa_id=cv.id
+                                order by m.criado_em desc, m.id desc limit 1)
                         order by cv.ultima_msg_em limit %s""",
-                    (conta_id, r["chip_id"], r["membro_id"], texto_fora(r), limite)).fetchall()]
+                    (conta_id, r["chip_id"], r["membro_id"], STATUS_FORA, STATUS_FORA,
+                     limite)).fetchall()]
             return saida[:limite]
     except Exception:  # noqa: BLE001
         return []

@@ -6202,6 +6202,14 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
         # `nova` corta a reentrega: o wa-qr manda a mesma mensagem de novo quando a
         # conexão oscila, e sem isto o cliente recebia uma resposta por entrega.
         atender = nova and _agente_atende(c, conv_id, agente_on)
+        # A IA DA REGRA ABRIU? Quem escreveu fora do horário próprio recebeu o recado
+        # e ficou esperando; não há relógio que acorde a IA na abertura, então a
+        # primeira mensagem que entra na empresa acorda as que ficaram (chip_regra).
+        # Na MESMA conexão (savepoint próprio): nada de segunda conexão por mensagem.
+        abertas = []
+        if nova:
+            from finance import chip_regra as _cr
+            abertas = [x for x in _cr.pendentes_da_abertura(c, empresa_id) if x != conv_id]
         c.commit()
     log.info("webhook_wa_qr: chip=%s empresa=%s conv_id=%s gravado ✓ (mestre=%s nova=%s atende=%s)",
              chip_id, empresa_id, conv_id, agente_on, nova, atender)
@@ -6218,19 +6226,9 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
     if atender:
         from finance import agente as _ag
         background_tasks.add_task(_ag.atender, get_pool(), empresa_id, conv_id)
-    if nova:
-        # A IA DA REGRA ABRIU? Quem escreveu fora do horário próprio recebeu o recado
-        # e ficou esperando; não há relógio que acorde a IA na abertura, então a
-        # primeira mensagem que entra na empresa acorda as que ficaram (chip_regra).
-        try:
-            from finance import chip_regra as _cr
-            with pool.connection() as c2:
-                abertas = [x for x in _cr.pendentes_da_abertura(c2, empresa_id) if x != conv_id]
-        except Exception:  # noqa: BLE001
-            abertas = []
-        for _cid in abertas:
-            from finance import agente as _ag
-            background_tasks.add_task(_ag.atender, get_pool(), empresa_id, _cid)
+    for _cid in abertas:
+        from finance import agente as _ag
+        background_tasks.add_task(_ag.atender, get_pool(), empresa_id, _cid)
     return Response("ok", media_type="text/plain")
 
 

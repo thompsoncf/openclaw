@@ -67,6 +67,51 @@ _BASE = "/cockpit"
 _log = _logging.getLogger("cockpit.novidades")
 _PAPEIS_OK = ("vendedor", "gestor", "dono")
 
+# O NOME DE QUEM COMPRA, na tela (regra 6): "cliente"/"lead", ou "paciente" na
+# clínica (finance/raio_x_perfil.vocabulario_pessoa). O app monta HTML em Python, sem
+# o `_render` do portal; por isso a conta liga o vocabulário ao entrar (`_sessao`,
+# `_gerencia`) e o texto pergunta por `_p("lead")`. O JS da página lê `window.VOC`.
+import contextvars as _cv
+import time as _time
+from finance.raio_x_perfil import VOC_PESSOA_PADRAO as _VOC_PADRAO
+
+_VOC = _cv.ContextVar("cockpit_voc", default=_VOC_PADRAO)
+_VOC_CACHE: dict = {}          # conta -> (vocab, quando): o nicho não muda a cada clique
+
+
+def _p(chave: str) -> str:
+    return _VOC.get().get(chave, chave)
+
+
+def _P(chave: str) -> str:
+    w = _p(chave)
+    return w[:1].upper() + w[1:]
+
+
+def _ligar_voc(conta_id) -> None:
+    if not conta_id:
+        return
+    agora = _time.monotonic()
+    c = _VOC_CACHE.get(conta_id)
+    if not c or agora - c[1] > 300:
+        try:
+            from finance import raio_x_perfil as _rxp
+            voc = _rxp.perfil_da_conta(get_pool(), conta_id)["vocab"]
+        except Exception:  # noqa: BLE001 — o nome de quem compra não derruba a tela
+            voc = _VOC_PADRAO
+        c = (voc, agora)
+        _VOC_CACHE[conta_id] = c
+    _VOC.set(c[0])
+
+
+def _voc_js() -> str:
+    """O vocabulário pro JS da página: VOC.cliente, VOC.Cliente, VOC.leads…"""
+    d = {}
+    for k in ("cliente", "clientes", "lead", "leads"):
+        d[k] = _p(k)
+        d[k[:1].upper() + k[1:]] = _P(k)
+    return _json_mod.dumps(d, ensure_ascii=False)
+
 
 def esc(s) -> str:
     return _html.escape(str(s if s is not None else ""))
@@ -92,8 +137,12 @@ def _sessao(request: Request):
     cid = request.session.get("conta_id")
     papel = request.session.get("papel", "dono")
     if mid and cid and papel in _PAPEIS_OK:
+        _ligar_voc(cid)
         return cid, mid
-    return _sessao_do_lembrete(request)
+    r = _sessao_do_lembrete(request)
+    if r:
+        _ligar_voc(r[0])
+    return r
 
 
 def _sessao_do_lembrete(request: Request):
@@ -131,6 +180,7 @@ def _gerencia(request: Request):
         papel = request.session.get("papel", "dono")
         if not cid or papel not in ("dono", "gestor"):
             return None
+    _ligar_voc(cid)
     return cid, request.session.get("membro_id")
 
 
@@ -1590,7 +1640,7 @@ def _page(title: str, corpo: str) -> HTMLResponse:
         # `ZAQ_VERSAO` importa MAIS aqui que no painel: isto é um app instalado
         # no telefone, que fica dias aberto na mesma aba. É o lugar onde "a aba
         # é de antes do deploy" deixa de ser hipótese.
-        f"<script>window.ZAQ_VERSAO={_json_mod.dumps(_versao.VERSAO or '')};</script>"
+        f"<script>window.ZAQ_VERSAO={_json_mod.dumps(_versao.VERSAO or '')};window.VOC={_voc_js()};</script>"
         f'<script src="{_ZAP_URL}" defer></script>'
         "</head><body>" + _ICONES + _ABERTURA_HTML +
         f"<div class=wrap><div class=glow></div>{_ZPROG}{corpo}</div>"
@@ -2575,13 +2625,13 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         # varreu a carteira aberta inteira, sem mês e sem pílula.
         cartoes.append(f"<div class=vazio><div class=big>◎</div>"
                        f"<b>Ninguém com “{esc(termo)}”</b>"
-                       f"Procurei por nome e por número nos {cont['total']} leads abertos "
-                       f"seus — em todos os meses. Se é lead de um colega, ou já ganho/"
+                       f"Procurei por nome e por número nos {cont['total']} {_p('leads')} abertos "
+                       f"seus — em todos os meses. Se é {_p('lead')} de um colega, ou já ganho/"
                        f"perdido, ele não está nesta fila.</div>")
     elif not cartoes and recorte:
         rot = "com proposta" if recorte == "prop" else "com data"
         cartoes.append(f"<div class=vazio><div class=big>◎</div>"
-                       f"<b>Nenhum lead {esc(rot)}</b>"
+                       f"<b>Nenhum {_p('lead')} {esc(rot)}</b>"
                        "Toque num mês pra voltar pra fila inteira.</div>")
     elif not cartoes and leads and not por_conversa:
         # tem lead, mas nenhum no período: diz isso, em vez de "fila zerada".
@@ -2590,7 +2640,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
                        "Toque em outro mês ou numa pílula de fora pra trazer.</div>")
     lista = "".join(cartoes) or (
         "<div class=vazio><div class=big>◎</div><b>Fila zerada</b>"
-        "Nenhum lead aberto agora. Quando cair um novo no rodízio, você é avisado.</div>")
+        "Nenhum " + _p('lead') + " aberto agora. Quando cair um novo no rodízio, você é avisado.</div>")
     dica = ("<div class=dica-swipe>Arraste um card pra esquerda pra assumir, devolver "
             "ou marcar ganho.</div>") if cartoes else ""
 
@@ -2600,7 +2650,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     from finance import webpush
     vapid = webpush.chave_publica()
     pushcard = ("<div class=pushcard id=pushcard><b>Ative as notificações</b>"
-                "<p>Receba o aviso no celular assim que um lead cair pra você — "
+                "<p>Receba o aviso no celular assim que um " + _p('lead') + " cair pra você — "
                 "mesmo com o app fechado.</p>"
                 "<button class=go id=pushbtn type=button>Ativar notificações</button></div>"
                 ) if vapid else ""
@@ -2644,7 +2694,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         # que ele acabou de fazer.
         return JSONResponse({"ok": True, "sig": sig, "sub": sub, "foco": foco,
                              "lista": pushcard + lista + dica + volta, "abas": abas})
-    corpo = (_hdr("Meus leads", sub, inicial=_ini(nome_vend), direita=_selo(conta_id))
+    corpo = (_hdr("Meus " + _p('leads'), sub, inicial=_ini(nome_vend), direita=_selo(conta_id))
              + _flash(request)
              + _faixa_novidade(novidades, conta_id=conta_id, membro_id=membro_id)
              # o repasse vem DEPOIS da novidade e antes do foco: é sobre um lead
@@ -2662,7 +2712,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              + _selo_js()
              + _sinal_js(sig)
              + _badge_js(total_pend))
-    return _page("Meus leads", corpo)
+    return _page("Meus " + _p('leads'), corpo)
 
 
 def _badge_js(total: int) -> str:
@@ -2864,7 +2914,7 @@ _JS_DESFECHO = """<script>
             a.textContent = 'Remarcar visita';
             box.appendChild(a);
           } else {
-            cartao.querySelector('.pend-q').textContent = 'Marcado: o cliente apareceu.';
+            cartao.querySelector('.pend-q').textContent = 'Marcado: o '+VOC.cliente+' apareceu.';
             box.innerHTML = '';
             // some sozinho — o vendedor ja respondeu, e cartao respondido em cima
             // da tela vira ruido no dia seguinte.
@@ -2988,7 +3038,7 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
     if not eventos:
         vazio = {"reservado": "Nenhuma data reservada pra frente.",
                  "pre": "Nenhuma data segurada no momento.",
-                 "tudo": "Marque uma visita pelo lead, ou toque no + pra criar um compromisso."}
+                 "tudo": "Marque uma visita pelo " + _p('lead') + ", ou toque no + pra criar um compromisso."}
         miolo = ("<div class=vazio><div class=big>◷</div><b>Nada na agenda</b>"
                  + esc(vazio[estado]) + "</div>")
     else:
@@ -3077,11 +3127,11 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
                       "🔁 Remarcar</a>")
         if v["lead_id"]:
             apoio += (f"<a class=pb2 href='{_BASE}/lead/{v['lead_id']}'>"
-                      "👤 Abrir o lead</a>")
+                      "👤 Abrir o " + _p('lead') + "</a>")
         return (
             "<div class=pend>"
             f"<div class=pend-top><b>{esc(v['titulo'])}</b><span>{quando}</span></div>"
-            "<div class=pend-q>O cliente apareceu?</div>"
+            "<div class=pend-q>O " + _p('cliente') + " apareceu?</div>"
             f"<div class=pend-bts data-ev='{v['id']}'>"
             "<button type=button class='pb sim' data-d='realizado'>✅ Apareceu</button>"
             "<button type=button class='pb nao' data-d='nao_realizado'>❌ Não apareceu</button>"
@@ -3147,11 +3197,11 @@ def cockpit_agenda_novo_tela(request: Request):
                      for cid, nome, etapa in cards)
     # a dica segue o nicho (§6): na festa só a VISITA conta no Raio-X — o card diz de quem é
     from finance import visita as _vis
-    dica_card = (("Ligada a um card, a visita conta pro vendedor do cliente no Raio-X. "
+    dica_card = (("Ligada a um card, a visita conta pro vendedor do " + _p('cliente') + " no Raio-X. "
                   if _vis.vende_festa(get_pool(), conta_id)
-                  else "Ligado a um card, o compromisso conta pro vendedor do cliente no Raio-X. ")
+                  else "Ligado a um card, o compromisso conta pro vendedor do " + _p('cliente') + " no Raio-X. ")
                  if cards else "")
-    campo_card = ("<label class=fic-c><span>De qual cliente (card do funil)</span>"
+    campo_card = ("<label class=fic-c><span>De qual " + _p('cliente') + " (card do funil)</span>"
                   "<select name=prospeccao_id><option value=''>— nenhum —</option>"
                   + opcoes + "</select></label>") if cards else ""
     corpo = (_hdr("Novo compromisso", "entra na agenda de todos", voltar=f"{_BASE}/agenda")
@@ -3169,7 +3219,7 @@ def cockpit_agenda_novo_tela(request: Request):
                "<input name=local autocomplete=off placeholder='Endereço ou link'></label>"
              + campo_card
              + "</div><div class=fonte>Aparece pra equipe inteira, com o seu nome. " + dica_card
-             + "Visita de lead também pode ser marcada pelo próprio lead — ali ela já sai "
+             + "Visita de " + _p('lead') + " também pode ser marcada pelo próprio " + _p('lead') + " — ali ela já sai "
                "ligada na ficha.</div></div></div>"
              + "<div class=rodape-b><button class=btn type=submit>Marcar</button></div>"
              + "</form>")
@@ -3271,7 +3321,7 @@ def cockpit_remarcar_tela(request: Request, ev_id: int):
     else:
         # sem número não há o que prometer. Uma caixinha marcada que não manda nada é
         # pior que caixinha nenhuma: o vendedor sai achando que o cliente foi avisado.
-        aviso = ("<div class=fonte>Esse lead não tem WhatsApp cadastrado — vou remarcar, "
+        aviso = ("<div class=fonte>Esse " + _p('lead') + " não tem WhatsApp cadastrado — vou remarcar, "
                  "mas o aviso você dá na mão.</div>")
 
     corpo = (_hdr("Remarcar visita", voltar=f"{_BASE}/agenda")
@@ -3324,7 +3374,7 @@ def cockpit_remarcar(request: Request, ev_id: int, data: str = Form(""),
     if r.get("avisado"):
         msg += f" — {r['quem']} foi avisado"
     elif r.get("tinha_numero"):
-        msg += " — mas o aviso não saiu, fale com o cliente"
+        msg += " — mas o aviso não saiu, fale com o " + _p('cliente')
 
     from finance import agenda as _ag
     from datetime import datetime as _dt
@@ -3442,28 +3492,28 @@ def _bloco_dinheiro(r: dict) -> str:
                f"<div class=l>Recebido</div><div class=d>{r['n_vendas']} pagamento(s) no período</div></div>"
              + (f"<div class=kpi><div class=v>{esc(_brl(r['fechado_centavos']))}</div>"
                 f"<div class=l>Contratos assinados</div><div class=d>{r['ganhos']} contrato(s)"
-                + (f" · {r['sem_lead']} sem lead" if r.get("sem_lead") else "") + "</div></div>"
+                + (f" · {r['sem_lead']} sem {_p('lead')}" if r.get("sem_lead") else "") + "</div></div>"
                 if r.get("por_contrato") else
                 f"<div class=kpi><div class=v>{esc(_brl(r['fechado_centavos']))}</div>"
                 f"<div class=l>No funil</div><div class=d>{r['ganhos']} ganho(s) · previsão</div></div>")
              + "</div>"
-             + "<div class=fonte><b>Comissão sai do recebido</b> — quando o cliente paga, seja "
+             + "<div class=fonte><b>Comissão sai do recebido</b> — quando o " + _p('cliente') + " paga, seja "
                "no caixa ou na baixa do título. É a mesma conta do relatório do dono, então os "
                "dois números batem.<br>"
              + ("Os <b>contratos assinados</b> são os seus no período, pelo valor da assinatura "
                 "— contando os que você fez direto pelo orçamento. Entram na comissão quando o "
-                "cliente paga.</div>"
+                + _p('cliente') + " paga.</div>"
                 if r.get("por_contrato") else
-                "O <b>funil</b> é o valor que você estimou nos leads que "
+                "O <b>funil</b> é o valor que você estimou nos " + _p('leads') + " que "
                 "marcou como ganho: serve pra você acompanhar o que vem, e não entra na comissão "
                 "enquanto o contrato não for fechado e pago.</div>")
              + "<div class=eyebrow>Seu ritmo</div>"
              + "<div class=kpis>"
              + f"<div class=kpi><div class=v>{esc(r['conversao'])}</div><div class=l>Conversão</div>"
                f"<div class=d>{r.get('ganhos', 0)} {'contrato(s)' if r.get('por_contrato') else 'fechado(s)'}"
-               f" de {r.get('recebidos', 0)} leads recebidos</div></div>"
+               f" de {r.get('recebidos', 0)} {_p('leads')} recebidos</div></div>"
              + f"<div class=kpi><div class=v>{r['fila']}</div><div class=l>Na fila</div>"
-               "<div class=d>leads abertos com você</div></div>"
+               "<div class=d>" + _p('leads') + " abertos com você</div></div>"
              + f"<div class=kpi><div class=v>{esc(r['resp'])}</div><div class=l>Resposta</div>"
                "<div class=d>média de 30 dias</div></div>"
              + pos + "</div>")
@@ -3479,7 +3529,7 @@ def _rx_sua_semana(s: dict, rot: str, perfil: dict | None = None) -> str:
     vende_data = bool((perfil or {}).get("vocab", {}).get("data", True))
     n5, n = s["primeira_em_5"], s["primeira_n"]
     primeira = _rx.fmt_min(s["primeira_min"])
-    nota1 = (f"meta {_rx.META_PRIMEIRA_MIN} min · {n5} de {n} no alvo" if n else "nenhum lead novo no período")
+    nota1 = (f"meta {_rx.META_PRIMEIRA_MIN} min · {n5} de {n} no alvo" if n else "nenhum " + _p('lead') + " novo no período")
     pct1 = (100 * n5 / n) if n else 0
     env, rasc = s["propostas_enviadas"], s["rascunhos"]
     nota2 = (f"{rasc} em rascunho há {s['rascunho_dias']} dia(s)" if rasc else "nenhum rascunho parado")
@@ -3492,7 +3542,7 @@ def _rx_sua_semana(s: dict, rot: str, perfil: dict | None = None) -> str:
     pct4 = 100 if nc else (50 if s["sem_assinar"] else 0)
     html = (f"<div class=rx-ey><span>Sua semana · {esc(rot)}</span><span>meta · você</span></div>"
             "<div class=rx-metas>"
-            + _rx_meta(_rx.cor("primeira", s), primeira, "1ª resposta ao lead novo", nota1, pct1)
+            + _rx_meta(_rx.cor("primeira", s), primeira, "1ª resposta ao " + _p('lead') + " novo", nota1, pct1)
             + _rx_meta(_rx.cor("propostas", s), f"{env}" + (f" / {env + rasc}" if rasc else ""), "propostas enviadas", nota2, pct2)
             + _rx_meta(_rx.cor("toques", s), str(s["toques"]), "toques de retorno", nota3, pct3)
             + _rx_meta(_rx.cor("contratos", s), str(nc), "contrato(s) assinado(s)", nota4, pct4)
@@ -3505,12 +3555,12 @@ def _rx_sua_semana(s: dict, rot: str, perfil: dict | None = None) -> str:
                      f"1ª resposta {'melhorou' if a < b else 'piorou'} {_rx.fmt_min(abs(a - b))}",
                      f"{_rx.fmt_min(b)} → {_rx.fmt_min(a)}"))
     if s["leads"] and vende_data:
-        comp.append(("amb", f"{s['leads']} lead(s) novo(s) · {s['leads_com_data']} já com data",
+        comp.append(("amb", f"{s['leads']} {_p('lead')}(s) novo(s) · {s['leads_com_data']} já com data",
                      f"{s['leads_sem_tipo']} ainda sem tipo de festa" if s["leads_sem_tipo"] else "todos com tipo de festa"))
     elif s["leads"]:
         # perfil recorrente: o segmento (do CNPJ) no lugar da data e do tipo de festa
         tops = " · ".join(f"{x['n']} {x['rotulo'].lower()}" for x in (s.get("segmentos") or [])[:2])
-        comp.append(("amb", f"{s['leads']} lead(s) novo(s)" + (f" · {tops}" if tops else ""),
+        comp.append(("amb", f"{s['leads']} {_p('lead')}(s) novo(s)" + (f" · {tops}" if tops else ""),
                      f"{s['leads_sem_segmento']} ainda sem segmento" if s.get("leads_sem_segmento") else "todos com segmento"))
     if s["paradas_1a"]:
         comp.append(("ruim", f"Parou na 1ª tentativa: {s['paradas_1a']} conversa(s)", "Meta: nenhuma. O 2º toque está na fila abaixo."))
@@ -3540,7 +3590,7 @@ def _rx_responda_hoje(h: dict, perfil: dict | None = None) -> str:
                  f"<div class=mid><div class=emp>{esc(i['nome'])}</div><div class=por>{esc(i['detalhe'])}</div></div>"
                  f"<span class=acao>{esc(i['acao'])}</span></a>")
     if h["sem_urgencia"]:
-        html += f"<div class=rx-dobra><span>Sem urgência hoje · {h['sem_urgencia']} lead(s)</span><span>na Fila</span></div>"
+        html += f"<div class=rx-dobra><span>Sem urgência hoje · {h['sem_urgencia']} {_p('lead')}(s)</span><span>na Fila</span></div>"
     return html
 
 
@@ -3553,7 +3603,7 @@ def _rx_fechamentos(f: dict) -> str:
                 + (f" · {esc(x['festa'])}" if x.get("festa") else "") + f"</span><small>{_rx._reais(x['valor_centavos'])}</small></div>"
                 f"<p>{esc(x['detalhe'])}</p>" + (f"<span class=bt>{esc(bt)}</span>" if bt else "") + "</a>")
     blocos = [("Assinou 🎉", "ok", f["assinou"], None), ("Disse sim, falta assinar", "amb", f["falta_assinar"], "acao"),
-              ("Proposta esperando o cliente", "amb", f["esperando"], "acao"), ("Rascunho que não saiu", "ruim", f["rascunhos"], "acao")]
+              ("Proposta esperando o " + _p('cliente'), "amb", f["esperando"], "acao"), ("Rascunho que não saiu", "ruim", f["rascunhos"], "acao")]
     vazio = True
     for titulo, cls, lista, bt in blocos:
         if not lista:
@@ -3996,9 +4046,9 @@ _ORC_JS = r"""
     var wa=j.zap?'<a class=btn href="'+esc(j.zap)+'" target=_blank rel=noopener>Mandar no WhatsApp</a>':'';
     var classeEnviar=j.zap?'btn ghost':'btn';
     $("pronto").innerHTML='<div class=pronto><div class=big>✓</div><h3>Proposta pronta</h3>'
-      +'<p>Mande o link pro cliente — ele abre, vê com a marca da empresa e aprova online.</p>'
+      +'<p>Mande o link pro '+VOC.cliente+' — ele abre, vê com a marca da empresa e aprova online.</p>'
       +wa
-      +'<button class="'+classeEnviar+'" style="margin-top:.5rem" id=naconversa>Enviar na conversa do lead</button>'
+      +'<button class="'+classeEnviar+'" style="margin-top:.5rem" id=naconversa>Enviar na conversa do '+VOC.lead+'</button>'
       +'<div class=copiar><input value="'+esc(j.link)+'" readonly onclick="this.select()">'
       +'<button type=button id=copiar>Copiar</button></div>'
       +'<a class="btn ghost" style="margin-top:.9rem" href="'+O.base+'/lead/'+O.leadId+'">Voltar pro lead</a></div>';
@@ -4009,9 +4059,9 @@ _ORC_JS = r"""
       var b=this;b.disabled=true;b.textContent="Enviando…";
       zapFetch(O.base+"/lead/"+O.leadId+"/orcamento/enviar",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify({link:j.link})}).then(function(x){if(!x){toast("Falha de conexão");b.disabled=false;
-          b.textContent="Enviar na conversa do lead";return;}
+          b.textContent="Enviar na conversa do "+VOC.lead+"";return;}
           toast(x&&x.ok?"Enviado na conversa":(x&&x.erro)||"Não consegui enviar agora");
-          b.disabled=false;b.textContent="Enviar na conversa do lead";});};
+          b.disabled=false;b.textContent="Enviar na conversa do "+VOC.lead+"";});};
   }
   // exposto pro teste de paridade rodar a MESMA conta que a tela roda
   window.__orc={conta:conta,itens:itens,sel:sel,avulsos:avulsos,dFim:dFim,
@@ -4249,13 +4299,13 @@ _VISITA_JS = r"""
   };
   function pronto(j){
     $("build").style.display="none";$("rodape").style.display="none";
-    var avisado=j.avisado?'<div class=ok>Confirmação e convite enviados pro cliente</div>':'';
+    var avisado=j.avisado?'<div class=ok>Confirmação e convite enviados pro '+VOC.cliente+'</div>':'';
     var wa=j.zap?'<a class="btn ghost" style="margin-top:.5rem" href="'+j.zap
-      +'" target=_blank rel=noopener>Reenviar pro cliente no WhatsApp</a>':'';
+      +'" target=_blank rel=noopener>Reenviar pro '+VOC.cliente+' no WhatsApp</a>':'';
     $("pronto").innerHTML='<div class=pronto><div class=big>✓</div><h3>Visita agendada</h3>'
       +'<div class=evcard><div class=q>'+esc(j.quando)+'</div>'
       +'<div class=l>'+esc(j.empresa)+'</div><div class=l>'+esc(j.local)+'</div>'
-      +'<div class=o>Visitante: '+esc(V.quem)+' · o lead foi pra Qualificado</div></div>'
+      +'<div class=o>Visitante: '+esc(V.quem)+' · o '+VOC.lead+' foi pra Qualificado</div></div>'
       +'<div class=ok>Entrou na sua agenda</div>'+avisado
       +'<a class="btn ghost" href="'+esc(j.ics_url)+'" target=_blank rel=noopener>Baixar o convite (.ics)</a>'
       +wa
@@ -4293,7 +4343,7 @@ def cockpit_visita_marcar(request: Request, lead_id: int):
         dt = hoje + timedelta(days=i)
         lab = "Hoje" if i == 0 else "Amanhã" if i == 1 else f"{_DIA_SEM[dt.weekday()]} {dt.day}"
         dias.append({"iso": dt.isoformat(), "lab": lab})
-    quem = d.get("contato") or d.get("empresa") or "o cliente"
+    quem = d.get("contato") or d.get("empresa") or "o " + _p('cliente')
     dados = _json.dumps({"leadId": lead_id, "dias": dias, "horas": _HORAS,
                          "nome": esp["nome"], "quem": quem, "base": _BASE},
                         ensure_ascii=False).replace("</", "<\\/")
@@ -4317,7 +4367,7 @@ def cockpit_visita_marcar(request: Request, lead_id: int):
                "<div class=fonte>Vem do cadastro da empresa — edite se a visita for em outra unidade.</div></div>"
              + "<div class=secao><div class=rot>Lembrete pra você</div>"
                "<div class=escolhas id=lembr></div></div>"
-             + "<div class=secao><div class=linha-tgl><div class=t>Avisar o cliente no WhatsApp"
+             + "<div class=secao><div class=linha-tgl><div class=t>Avisar o " + _p('cliente') + " no WhatsApp"
                "<small>confirmação e convite pro calendário dele</small></div>"
                "<div class=tgl id=avisar>Ligado</div></div>"
                "<div class=msg-previa id=previa></div></div>"
@@ -4375,7 +4425,7 @@ def cockpit_ia_orcamento(request: Request, orc_id: int):
               "<button class='btn ghost' id=iaoDescartar type=button>Descartar</button>")
     corpo = (_hdr("Orçamento da IA", d["quem"], voltar=_BASE)
              + "<div class=toast id=toast></div><div class=scroll>"
-             + f"<div class=secao><div class=rot>Cliente</div><div class=local>"
+             + f"<div class=secao><div class=rot>{_P('cliente')}</div><div class=local>"
                f"<div class=nome>{esc(d['quem'])}</div><div class=end>{festa or 'sem dados da festa'}</div></div></div>"
              + f"<div class=secao><div class=rot>O que a IA montou · nº {esc(str(d['numero'] or ''))}</div>"
                f"<div class=ficha>{linhas}"
@@ -4384,8 +4434,8 @@ def cockpit_ia_orcamento(request: Request, orc_id: int):
                   if d["sinal_centavos"] else "")
                + "</div></div>"
              + f"<div class=secao><a href='/proposta/{esc(d['token'])}' target=_blank rel=noopener>"
-               "Ver a proposta como o cliente vai ver</a></div>"
-             + "<div class=fonte>Conferir e mandar: o link vai pro cliente pelo mesmo número "
+               "Ver a proposta como o " + _p('cliente') + " vai ver</a></div>"
+             + "<div class=fonte>Conferir e mandar: o link vai pro " + _p('cliente') + " pelo mesmo número "
                "da conversa. Depois que ele aprovar, a data fica segurada por 72h esperando o sinal.</div>"
              + "</div>"
              + f"<div class=rodape-b>{botoes}</div>"
@@ -4398,7 +4448,7 @@ def cockpit_ia_orcamento(request: Request, orc_id: int):
                "t(acao==='mandar'?'Mandado ✓':'Descartado');setTimeout(function(){location.reload();},900);});}"
                "var m=document.getElementById('iaoMandar'),d=document.getElementById('iaoDescartar');"
                "if(m)m.onclick=function(){vai('mandar',m);};"
-               "if(d)d.onclick=function(){if(confirm('Descartar este orçamento? O cliente não recebe nada.'))vai('descartar',d);};"
+               "if(d)d.onclick=function(){if(confirm('Descartar este orçamento? O " + _p('cliente') + " não recebe nada.'))vai('descartar',d);};"
                "})();</script>")
     return _page(f"Orçamento da IA — {d['quem']}", corpo)
 
@@ -4515,7 +4565,7 @@ _CEP_JS = """<script>(function(){
 def _select_origem(atual: str | None) -> str:
     from finance.raio_x_dono import ORIGENS
     ops = "".join(f"<option value='{esc(k)}'{' selected' if atual == k else ''}>{esc(r)}</option>" for k, r in ORIGENS)
-    return ("<label class=fic-c><span>De onde veio o cliente</span><select name=origem_cliente>"
+    return ("<label class=fic-c><span>De onde veio o " + _p('cliente') + "</span><select name=origem_cliente>"
             f"<option value=''>{'—' if not atual else 'não mudar'}</option>{ops}</select></label>")
 
 
@@ -4562,7 +4612,7 @@ def _bloco_quem_atendeu(conta_id: int, lead_id: int) -> str:
     return ("<div class=secao><h3 class=qja-t>Quem já atendeu</h3>"
             f"<ul class=qja>{linhas}</ul>"
             "<div class=fonte>Serve pra vocês se entenderem sem precisar perguntar "
-            "pro dono quem falou primeiro com este cliente.</div></div>")
+            "pro dono quem falou primeiro com este " + _p('cliente') + ".</div></div>")
 
 
 @router.get("/cockpit/lead/{lead_id}/ficha", response_class=HTMLResponse)
@@ -4672,7 +4722,7 @@ def cockpit_lead_novo_tela(request: Request):
     sess = _sessao(request)
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
-    corpo = (_hdr("Novo lead", "entra na sua fila", voltar=_BASE)
+    corpo = (_hdr("Novo " + _p('lead'), "entra na sua fila", voltar=_BASE)
              + _flash(request)
              + f"<form class=telaform method=post action='{_BASE}/lead/novo'>"
              + "<div class=scroll><div class=secao><div class='fic'>"
@@ -4682,12 +4732,12 @@ def cockpit_lead_novo_tela(request: Request):
              + "<label class=fic-c><span>WhatsApp</span>"
                "<input name=whatsapp required type=tel inputmode=tel autocomplete=off"
                " placeholder='DDD + número'></label>"
-             + "</div><div class=fonte>Já tem esse número na base? A gente abre o lead "
+             + "</div><div class=fonte>Já tem esse número na base? A gente abre o " + _p('lead') + " "
                "que existe em vez de criar outro — conversa partida em duas fichas é pior "
-               "que lead repetido.</div></div></div>"
+               "que " + _p('lead') + " repetido.</div></div></div>"
              + "<div class=rodape-b><button class=btn type=submit>Criar e abrir</button></div>"
              + "</form>")
-    return _page("Novo lead", corpo)
+    return _page("Novo " + _p('lead'), corpo)
 
 
 @router.post("/cockpit/lead/novo")
@@ -4703,8 +4753,8 @@ def cockpit_lead_novo(request: Request, nome: str = Form(""), whatsapp: str = Fo
     # `existia` não é erro — é o caso normal de quem não sabe de cor quem já está na
     # base. Diz o que aconteceu e abre o lead certo, em vez de deixar a pessoa achando
     # que criou um novo.
-    request.session["ck_ok"] = ("Esse número já era um lead — abrindo ele."
-                                if r.get("existia") else "Lead criado ✓")
+    request.session["ck_ok"] = ("Esse número já era um " + _p('lead') + " — abrindo ele."
+                                if r.get("existia") else _P('lead') + " criado ✓")
     return RedirectResponse(f"{_BASE}/lead/{r['lead_id']}", status_code=303)
 
 
@@ -4775,7 +4825,7 @@ def cockpit_orcamentos(request: Request, s: str = "", v: str = ""):
     else:
         miolo = ("<div class=vazio><div class=big>◻</div><b>Nenhuma proposta aqui</b>"
                  + ("Ninguém do time montou proposta com esse filtro." if gestao
-                    else "Abra um lead e toque em <b>Orçamento</b> — ela aparece aqui pra você mandar.")
+                    else "Abra um " + _p('lead') + " e toque em <b>Orçamento</b> — ela aparece aqui pra você mandar.")
                  + "</div>")
 
     if gestao:
@@ -4785,7 +4835,7 @@ def cockpit_orcamentos(request: Request, s: str = "", v: str = ""):
                  + f"<div class=scroll>{miolo}</div>" + _abas_dono("orcamentos"))
     else:
         corpo = (
-                   _hdr("Minhas propostas", "manda pro cliente por aqui",
+                   _hdr("Minhas propostas", "manda pro " + _p('cliente') + " por aqui",
                         inicial=_ini(ck.nome_do_vendedor(pool, conta_id, sess[1])))
                  + _flash(request) + filtros
                  + f"<div class=scroll>{miolo}</div>"
@@ -4834,7 +4884,7 @@ def cockpit_orcamento(request: Request, orc_id: int):
         else:
             # sem e-mail o botão não some sem explicação: some dizendo o que falta,
             # senão o vendedor fica olhando pra uma tela que mudou e não sabe por quê
-            envio.append("<div class=dica style='margin:0 0 .5rem'>Esse cliente não tem "
+            envio.append("<div class=dica style='margin:0 0 .5rem'>Esse " + _p('cliente') + " não tem "
                          "e-mail cadastrado — dá pra mandar na conversa ou copiar o link.</div>")
     if o["zap"]:
         envio.append(f"<a class='btn ghost' style='margin-top:.5rem' href='{esc(o['zap'])}' "
@@ -4842,10 +4892,10 @@ def cockpit_orcamento(request: Request, orc_id: int):
     if o["lead_id"] and not gestao:
         envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/enviar'>"
                      "<button class='btn ghost' style='margin-top:.5rem' type=submit>"
-                     "Enviar na conversa do lead</button></form>")
+                     "Enviar na conversa do " + _p('lead') + "</button></form>")
     if o["link"]:
         envio.append(f"<a class='btn ghost' style='margin-top:.5rem' href='{esc(o['link'])}' "
-                     f"target=_blank rel=noopener>Abrir a proposta como o cliente vê</a>")
+                     f"target=_blank rel=noopener>Abrir a proposta como o {_p('cliente')} vê</a>")
         # o fetch anota que a proposta saiu por aqui — é o que faz o card do funil
         # andar sozinho. `keepalive` porque quem copia troca de app em seguida, e o
         # `catch` é mudo de propósito: o link JÁ está na área de transferência, e um
@@ -4933,11 +4983,11 @@ def cockpit_orcamento(request: Request, orc_id: int):
     aprovada = ""
     if o["aprovada_em"]:
         aprovada = ("<div class=bloco><div class='card' style='border-color:#1e4a3a;"
-                    "background:rgba(37,211,102,.08)'><b style='color:var(--neon)'>Cliente aprovou</b>"
+                    "background:rgba(37,211,102,.08)'><b style='color:var(--neon)'>" + _P('cliente') + " aprovou</b>"
                     f"<div class=mut style='font-size:.8rem'>{esc(o['aprovada_por'])}"
                     f" · {esc(_data(o['aprovada_em']))}</div></div></div>")
 
-    ficha = [("Cliente", o["cliente"]), ("Empresa", o["empresa"]), ("CNPJ", o["cnpj"]),
+    ficha = [(_P('cliente'), o["cliente"]), ("Empresa", o["empresa"]), ("CNPJ", o["cnpj"]),
              ("WhatsApp", o["whatsapp"]), ("E-mail", o["email"]),
              ("Quem fez", o["vendedor"] if gestao else ""), ("Criada em", _data(o["criado_em"]))]
     ficha_html = "".join(f"<div class=ficha-l><span>{esc(k)}</span><b>{esc(v)}</b></div>"
@@ -4983,7 +5033,7 @@ def cockpit_orcamento(request: Request, orc_id: int):
             ctr_html = (
                 "<div class=eyebrow>Contrato</div><div class=bloco>"
                 f"<div class=card style='font-size:.84rem;color:var(--text-dim)'>"
-                f"Contrato{esc(_num)} · {_estado}<br>O cliente lê e assina pelo link, "
+                f"Contrato{esc(_num)} · {_estado}<br>O {_p('cliente')} lê e assina pelo link, "
                 "do celular dele.</div>"
                 + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/conversa'>"
                    f"<button class=btn type=submit>{esc(_rot)}</button></form>"
@@ -5004,7 +5054,7 @@ def cockpit_orcamento(request: Request, orc_id: int):
                 f"{esc(_brl(o['mensal_centavos']))}/mês</div>" if o["mensal_centavos"] else "")
              + "</div></div>"
              + aprovada + ctr_html
-             + (f"<div class=eyebrow>Mandar pro cliente</div><div class=bloco>{''.join(envio)}</div>"
+             + (f"<div class=eyebrow>Mandar pro {_p('cliente')}</div><div class=bloco>{''.join(envio)}</div>"
                 if envio else "")
              + mover + sinal
              # PAGAMENTOS fica logo abaixo do sinal, e não no fim: é a pergunta
@@ -5015,7 +5065,7 @@ def cockpit_orcamento(request: Request, orc_id: int):
              + fechar + editar
              + (f"<div class=eyebrow>O que entra</div><div class=bloco><div class=card>{itens}</div></div>"
                 if itens else "")
-             + (f"<div class=eyebrow>Cliente</div><div class=bloco><div class=card>{ficha_html}</div></div>"
+             + (f"<div class=eyebrow>{_P('cliente')}</div><div class=bloco><div class=card>{ficha_html}</div></div>"
                 if ficha_html else "")
              + "</div>"
              + (_abas_dono("orcamentos") if gestao
@@ -5260,7 +5310,7 @@ def cockpit_orcamento_enviar(request: Request, orc_id: int):
     conta_id, membro_id = sess
     o = ck.orcamento(get_pool(), conta_id, orc_id, membro_id=membro_id)
     if not o or not o["lead_id"] or not o["link"]:
-        request.session["ck_err"] = "Essa proposta não está ligada a um lead com conversa."
+        request.session["ck_err"] = "Essa proposta não está ligada a um " + _p('lead') + " com conversa."
         return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
     r = ck.enviar_proposta_conversa(get_pool(), conta_id, membro_id, o["lead_id"], o["link"])
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
@@ -5301,7 +5351,7 @@ def cockpit_contrato_conversa(request: Request, orc_id: int):
     conta_id, membro_id = sess
     o = ck.orcamento(get_pool(), conta_id, orc_id, membro_id=membro_id)
     if not o or not o.get("lead_id"):
-        request.session["ck_err"] = "Essa proposta não está ligada a um lead com conversa."
+        request.session["ck_err"] = "Essa proposta não está ligada a um " + _p('lead') + " com conversa."
         return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
     r = ck.enviar_contrato_conversa(get_pool(), conta_id, membro_id, o["lead_id"], orc_id)
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
@@ -5379,8 +5429,8 @@ def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLRes
              + (f" · {esc(p['whatsapp'])}" if p["whatsapp"] else "") + "</div></div></div></div>"
              + _bloco_novidades(novidades)
              + "<div class=eyebrow>Preferências</div><div class=bloco>"
-             + tgl("Notificações push", "avisar quando cair um lead", p["push_ativo"], f"{_BASE}/perfil/push")
-             + tgl("Receber no rodízio", "desligue pra pausar leads novos", not p["pausado"], f"{_BASE}/perfil/rodizio")
+             + tgl("Notificações push", "avisar quando cair um " + _p('lead'), p["push_ativo"], f"{_BASE}/perfil/push")
+             + tgl("Receber no rodízio", "desligue pra pausar " + _p('leads') + " novos", not p["pausado"], f"{_BASE}/perfil/rodizio")
              + "</div>"
              # o login do vendedor agora cai no Cockpit; sem esta porta ele não
              # chegaria no painel a não ser digitando a URL. /painel resolve
@@ -5397,7 +5447,7 @@ def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
     marca = _marca_conta(conta_id)
     # o dono titular não é membro da equipe, então não tem fila própria — só o
     # gestor (que também vende) tem caixa pra abrir
-    minha_caixa = (f"<a class='btn ghost' href='{_BASE}?meus=1'>Ver a minha caixa de leads</a>"
+    minha_caixa = (f"<a class='btn ghost' href='{_BASE}?meus=1'>Ver a minha caixa de {_p('leads')}</a>"
                    if membro_id else "")
     corpo = (
                # o mesmo topo das outras telas de gestão (ver _hdr_dono): sem o
@@ -5673,9 +5723,9 @@ _IA_JS = r"""<script>
     else if(d&&d.mudou&&R&&!gerando)h+="<div class=iafaixa>A conversa mudou depois deste resumo. Toque em ↻ Atualizar.</div>";
     if(falha)h+="<div class=iaerro>"+esc(falha)+"</div>";
     if(gerando)h+=carregando();
-    else if(d&&!d.tem_conversa)h+="<div class=iadica>Este lead ainda não trocou mensagem, então não há conversa pra resumir.</div>";
+    else if(d&&!d.tem_conversa)h+="<div class=iadica>Este "+VOC.lead+" ainda não trocou mensagem, então não há conversa pra resumir.</div>";
     else if(R){
-      if(R.quer)h+="<div class=iabl><div class=iarot>✨ O que o cliente quer</div>"+esc(R.quer)+"</div>";
+      if(R.quer)h+="<div class=iabl><div class=iarot>✨ O que o "+VOC.cliente+" quer</div>"+esc(R.quer)+"</div>";
       if((R.em_que_pe||[]).length)h+="<div class=iabl><div class=iarot>✨ Em que pé está</div>"+lista(R.em_que_pe)+"</div>";
       if((R.pode_travar||[]).length)h+="<div class=iabl><div class=iarot>✨ O que pode travar</div>"+lista(R.pode_travar)+"</div>";
       if(R.proximo_passo)h+="<div class=iapasso>"+esc(R.proximo_passo)+"</div>";
@@ -5683,7 +5733,7 @@ _IA_JS = r"""<script>
       if(R.mensagem)h+="<div class=iabl><div class=iarot>✨ Mensagem sugerida · dá pra editar</div>"
         +"<textarea class=iacaixa id=iamsg aria-label='Mensagem sugerida'>"+esc(R.mensagem)+"</textarea></div>";
       if(!caixa)h+="<div class=iadica>O agente está atendendo. Assuma a conversa pra usar a resposta.</div>";
-      h+="<div class=iadica>A IA leu só a conversa e o card deste lead. Nada é enviado sozinho.</div>";
+      h+="<div class=iadica>A IA leu só a conversa e o card deste "+VOC.lead+". Nada é enviado sozinho.</div>";
     }
     corpo.innerHTML=h;
     var p="";
@@ -6396,7 +6446,7 @@ def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
         if not st["tomada"]:
             if dia in esperando:
                 return (f"<div class='le ok'><span>🟢 <b>A data {dia:%d/%m} abriu.</b> "
-                        "Avise o cliente antes que ele feche em outro lugar.</span></div>")
+                        "Avise o " + _p('cliente') + " antes que ele feche em outro lugar.</span></div>")
             return ""
         livres = _le.datas_livres_perto(get_pool(), conta_id, dia)
         chips = "".join(
@@ -6754,7 +6804,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            ".then(function(d){if(!d)return;"
            "if(d&&d.ok){cx.outerHTML=acao==='confirmar'"
            "?'<div class=vp><div class=vp-tt>\\u2705 Visita confirmada</div>"
-           "<div class=vp-q>O cliente j\\u00e1 recebeu o aviso.</div></div>':'';return;}"
+           "<div class=vp-q>O " + _p('cliente') + " j\\u00e1 recebeu o aviso.</div></div>':'';return;}"
            "cx.querySelectorAll('button').forEach(function(b){b.disabled=false;});"
            "alert((d&&d.erro)||'N\\u00e3o consegui agora.');})"
            ".catch(function(){"
@@ -6924,7 +6974,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                      "style='margin-top:.45rem'>"
                      f"<input type=hidden name=para value='{int(_pra)}'>"
                      "<input type=hidden name=motivo value='Já vinha atendendo este número'>"
-                     f"<button class='btn amb' type=submit>Passar este lead pra "
+                     f"<button class='btn amb' type=submit>Passar este {_p('lead')} pra "
                      f"{esc(_nome.split()[0].title())}</button></form>")
         dupla = (f"<div class='{cls}'>{rot}{esc(av['texto'])}"
                  f" O histórico dela não aparece aqui.{link}{passa}</div>")
@@ -6949,7 +6999,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     if d.get("evento_pista"):
         from finance import evento_lead as _evl
         from urllib.parse import quote as _quote
-        pista = (f"<div class='aviso pista'>💬 O cliente <b>{esc(d['evento_pista'])}</b> na conversa. "
+        pista = (f"<div class='aviso pista'>💬 O {_p('cliente')} <b>{esc(d['evento_pista'])}</b> na conversa. "
                  "Confirmar a data?<span class=bts>"
                  f"<a class='bt ok' href='{_BASE}/lead/{lead_id}/ficha'>Abrir a ficha</a>"
                  f"<a class=bt href='{_BASE}/lead/{lead_id}?texto={_quote(_evl.PERGUNTA_DATA)}'>Perguntar o dia</a>"
@@ -7016,17 +7066,17 @@ def _lead_gestor(request: Request, conta_id: int, lead_id: int, saida_wa: bool =
         reatribuir = ""
 
     corpo = (
-               _hdr(d.get("empresa") or "Lead", sub, voltar=f"{_BASE}/equipe/leads")
+               _hdr(d.get("empresa") or _P('lead'), sub, voltar=f"{_BASE}/equipe/leads")
              + _flash(request)
              + "<div class=scroll>"
              + f"<div class=bloco style='margin-top:.9rem'><div class=grade>{atalhos}</div></div>"
-             + f"<div class=eyebrow>O lead</div><div class=bloco><div class=card>{ficha}</div></div>"
+             + f"<div class=eyebrow>O {_p('lead')}</div><div class=bloco><div class=card>{ficha}</div></div>"
              + reatribuir
              + (f"<div class=bloco><div class=card style='font-size:.84rem;color:var(--text-dim)'>"
                 f"<b style='color:var(--text)'>Observações</b><br>{esc(d['obs'])}</div></div>"
                 if d.get("obs") else "")
              + "</div>" + _abas_dono("leads"))
-    return _page(d.get("empresa") or "Lead", corpo)
+    return _page(d.get("empresa") or _P('lead'), corpo)
 
 
 # ================================================================== GESTOR
@@ -7108,7 +7158,7 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
            if f["valor"] else "")
         + "</span>"
         # contrato fechado direto pelo orçamento, sem cartão no quadro (24/09/2026)
-        + (f"<small class=sl>inclui {f['sem_lead']} contrato(s) feito(s) sem lead"
+        + (f"<small class=sl>inclui {f['sem_lead']} contrato(s) feito(s) sem {_p('lead')}"
            + (" (" + esc(", ".join(f["sem_lead_nomes"])) + ")" if f.get("sem_lead_nomes") else "")
            + "</small>" if f.get("sem_lead") else "")
         + "</div>"
@@ -7126,12 +7176,12 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
                           for x in mv["dias"])
         n = len(mv["dias"])
         blocos += (
-            "<div class=eyebrow>Leads por dia</div>"
+            "<div class=eyebrow>" + _P('leads') + " por dia</div>"
             f"<div class=bloco><div class=card>"
             f"<div class=dias style='grid-template-columns:repeat({n},1fr)'>{barras}</div>"
             f"<div class=rotd style='grid-template-columns:repeat({n},1fr)'>{rotulos}</div>"
             "<div class=linhas>"
-            f"<div><span>{n} dias</span><b>{mv['total']} leads · {mv['media']} por dia</b></div>"
+            f"<div><span>{n} dias</span><b>{mv['total']} {_p('leads')} · {mv['media']} por dia</b></div>"
             f"<div><span>1ª resposta (mediana)</span><b>{esc(_vendas.duracao_curta(mv['resposta_min']))}</b></div>"
             f"<div><span>Nunca respondidos</span><b>{mv['sem_resposta']}</b></div>"
             "</div></div></div>")
@@ -7140,7 +7190,7 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
             t = qc["turnos"]
             alerta = ""
             if qc["fora"] and qc["espera_fora_min"] is not None:
-                alerta = (f"<div class=alerta><b>{qc['fora']} leads ({qc['fora_pct']}%)</b> chegaram fora do "
+                alerta = (f"<div class=alerta><b>{qc['fora']} {_p('leads')} ({qc['fora_pct']}%)</b> chegaram fora do "
                           f"expediente e esperaram <b>{esc(_vendas.duracao_curta(qc['espera_fora_min']))}</b> "
                           "pela 1ª resposta."
                           + (f" Dentro do horário: <b>{esc(_vendas.duracao_curta(qc['espera_dentro_min']))}</b>."
@@ -7164,7 +7214,7 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
                 it["href"] = _href_perdidos(it["chave"], periodo, de, ate)
             nota = ""
             if pq["nao_cliente"]:
-                nota = (f"<div class=alerta><b>{pq['nao_cliente']} de {pq['total']}</b> não eram clientes: "
+                nota = (f"<div class=alerta><b>{pq['nao_cliente']} de {pq['total']}</b> não eram {_p('clientes')}: "
                         "vaga, fornecedor, doação, ou pedido de algo que a casa não vende.</div>")
             lidos = (f" <span class=lidos>💬 {pq['lidos']} lido{'s' if pq['lidos'] != 1 else ''} das conversas</span>"
                      if pq["lidos"] else "")
@@ -7184,8 +7234,8 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
                   else "<div class=l>Fechado no período</div>")
                + f"<div class=d>{k['ganhos']} {'contrato(s)' if k.get('por_contrato') else 'negócio(s)'}"
                f" · {conv} de conversão"
-               + (f" ({k['ganhos']} de {k['novos']} leads)" if k["novos"] else "") + "</div></div>"
-             + f"<div class=kpi><div class=v>{k['novos']}</div><div class=l>Leads novos</div>"
+               + (f" ({k['ganhos']} de {k['novos']} {_p('leads')})" if k["novos"] else "") + "</div></div>"
+             + f"<div class=kpi><div class=v>{k['novos']}</div><div class=l>{_P('leads')} novos</div>"
                "<div class=d>no período</div></div>"
              # "Em atendimento" dizia 423 na Prime — a carteira aberta inteira, com
              # lead que ninguém encosta há semanas dentro. O número é útil; a
@@ -7253,7 +7303,7 @@ def _bloco_da_visita(pool, conta_id: int, periodo: str, de, ate) -> str:
                   + _chips(dv["sem_card"]) + "</div>")
     resumo = (f"{len(dv['em_jogo'])} com orçamento e sem contrato · "
               f"<b>{esc(_brl(dv['em_jogo_valor']))} em jogo</b>" if dv["em_jogo"]
-              else "Ver os clientes de cada degrau")
+              else "Ver os " + _p('clientes') + " de cada degrau")
     return ("<div class=eyebrow>Da " + esc(comp) + " ao contrato</div>"
             + "<div class='kpis dv'>"
             + _st(comps.capitalize(), dv["visitas"], f"{dv['marcadas']} marcada(s){pct}")
@@ -7314,7 +7364,7 @@ def cockpit_anuncios(request: Request):
         _log.warning("anúncios: leitura falhou na conta %s", conta_id, exc_info=True)
         d, det = None, {}
     base = f"{_BASE}/anuncios"
-    topo = (_hdr_dono(conta_id, "Anúncios", "de qual anúncio veio cada lead")
+    topo = (_hdr_dono(conta_id, "Anúncios", "de qual anúncio veio cada " + _p('lead'))
             + "<div class=scroll>" + _seg_periodo(base, periodo, de, ate)
             + (_painel_periodo(de, ate, base) if abrir else ""))
     if d is None:
@@ -7328,7 +7378,7 @@ def cockpit_anuncios(request: Request):
         "<div class=n>conversas de anúncio</div></div>"
         f"<div class=fx><div class=r>sem código</div><div class=v>{d['resumo']['sem_codigo']}</div>"
         "<div class=n>orgânico e afins</div></div>"
-        f"<div class=fx><div class=r>não era cliente</div><div class=v>{nao_cli}</div>"
+        f"<div class=fx><div class=r>não era {_p('cliente')}</div><div class=v>{nao_cli}</div>"
         f"<div class=n>{(str(round(100 * nao_cli / com)) + '% ') if com else ''}dos de anúncio</div></div>"
         f"<div class=fx><div class=r>faturamento</div><div class=v>{esc(cd._reais_cheio(d['faturamento_centavos']))}</div>"
         "<div class=n>de anúncio</div></div></div>")
@@ -7341,7 +7391,7 @@ def cockpit_anuncios(request: Request):
             "<div class=abre>"
             "<div class=t>Por que perdemos</div>"
             + (_barras_h(perd) if perd else "<div class=mini>Nenhum perdido ainda.</div>")
-            + "<div class=t>Quem não era cliente</div>"
+            + "<div class=t>Quem não era " + _p('cliente') + "</div>"
             + (_barras_h(x["quem"]) if x["quem"] else
                f"<div class=mini>{'Ainda sem leitura do que queriam.' if x['nao_cliente'] else 'Nenhum.'}</div>")
             + f"<div class=t>O que pedem</div><div class=mini>{esc(x['pedem'] or 'Ninguém disse ainda.')}</div>"
@@ -7355,9 +7405,9 @@ def cockpit_anuncios(request: Request):
         nc = x["nao_cliente"]
         # vermelho a partir de 10%: na Prime, 1 a 23/09, a casa ficou em 2% dos leads
         cls_nc = "an-chip ruim" if nc and x["nao_cliente_pct"] >= 10 else "an-chip"
-        txt_nc = ("nenhum não-cliente" if not nc else
-                  f"1 não era cliente · {x['nao_cliente_pct']}%" if nc == 1 else
-                  f"{nc} não eram clientes · {x['nao_cliente_pct']}%")
+        txt_nc = ("nenhum não-" + _p('cliente') if not nc else
+                  f"1 não era {_p('cliente')} · {x['nao_cliente_pct']}%" if nc == 1 else
+                  f"{nc} não eram {_p('clientes')} · {x['nao_cliente_pct']}%")
         cls_f = "an-chip am" if x["fora_pct"] >= 30 else "an-chip"
         return (f"<div class=an-chips><span class='{cls_nc}'>{esc(txt_nc)}</span>"
                 f"<span class='{cls_f}'>{x['fora_pct']}% fora do horário</span></div>")
@@ -7386,7 +7436,7 @@ def cockpit_anuncios(request: Request):
             + (_abre(x, None) if x else "") + "</details>")
     vazio = ""
     if not com:
-        vazio = ("<div class=vazio-ad><b>Nenhum lead chegou com código de anúncio neste período.</b><br>"
+        vazio = ("<div class=vazio-ad><b>Nenhum " + _p('lead') + " chegou com código de anúncio neste período.</b><br>"
                  "O código vai na mensagem pronta do anúncio, entre colchetes e com cerquilha: "
                  "<code>Olá! Quero saber sobre o espaço. [#CAS-01]</code>. Um por criativo; "
                  "o app descobre os novos sozinho. Enquanto isso, o <b>sem código</b> abaixo mostra "
@@ -7421,7 +7471,7 @@ def cockpit_perdidos(request: Request, motivo: str = "", codigo: str | None = No
         return RedirectResponse(volta, status_code=303)
     de_onde = ("" if cod is None else (" · sem código" if cod == "" else f" · anúncio {cod}"))
     rot_per = f"{lst['de']:%d/%m} a {lst['ate']:%d/%m}"
-    partes = [f"<div class=pd-tit>{esc(lst['rotulo'])} · {lst['total']} lead{'s' if lst['total'] != 1 else ''}"
+    partes = [f"<div class=pd-tit>{esc(lst['rotulo'])} · {lst['total']} {_p('lead')}{'s' if lst['total'] != 1 else ''}"
               f"<small>perdidos de {rot_per}{esc(de_onde)}</small></div>"]
     dt = lst["datas"]
     if dt:
@@ -7444,7 +7494,7 @@ def cockpit_perdidos(request: Request, motivo: str = "", codigo: str | None = No
         linhas = "".join(f"<div><span>{esc(r)}</span><b>{n}</b></div>" for r, n in lst["quem"] + lst["parou"])
         partes.append("<div class=eyebrow>Resumo 💬 das conversas</div>"
                       f"<div class=bloco><div class=card><div class=linhas style='margin-top:0'>{linhas}</div></div></div>")
-    partes.append("<div class=eyebrow>Os leads</div>")
+    partes.append("<div class=eyebrow>Os " + _p('leads') + "</div>")
     aqui = str(request.url.path) + ("?" + str(request.url.query) if request.url.query else "")
     opcoes = "".join(f"<option value='{esc(ch)}'>{esc(rot)}</option>" for ch, rot in lst["opcoes"])
     for i in lst["itens"]:
@@ -7468,7 +7518,7 @@ def cockpit_perdidos(request: Request, motivo: str = "", codigo: str | None = No
               f"<a class=conv href='{_BASE}/lead/{i['id']}'>Abrir conversa ›</a></div>"
             + corrigir + "</div>")
     if not lst["itens"]:
-        partes.append("<div class=vazio-ad>Nenhum lead perdido por esse motivo no período.</div>")
+        partes.append("<div class=vazio-ad>Nenhum " + _p('lead') + " perdido por esse motivo no período.</div>")
     corpo = (_hdr_dono(conta_id, "Por que perdemos", lst["rotulo"], voltar=volta)
              + "<div class=scroll>" + _flash(request) + "".join(partes) + "<div style='height:1rem'></div></div>"
              + _abas_dono("visao" if cod is None else "anuncios"))
@@ -7513,7 +7563,7 @@ def cockpit_placar(request: Request):
                 f"<div class=rs>{esc(v['rs'])}</div>"
                 # quantos contratos, e quantos deles sem lead (24/09/2026)
                 + (f"<div class=ct>{v['ganhos']} contrato(s)"
-                   + (f"<br>+{v['sem_lead']} sem lead" if v.get("sem_lead") else "") + "</div>"
+                   + (f"<br>+{v['sem_lead']} sem {_p('lead')}" if v.get("sem_lead") else "") + "</div>"
                    if v.get("por_contrato") else "")
                 + f"<div class=base>{idx + 1}º</div></a>")
         podio = "<div class=podio>" + "".join(blocos) + "</div>"
@@ -7527,7 +7577,7 @@ def cockpit_placar(request: Request):
         f"<span>{v['fila']} na carteira</span><span>{v.get('perdidos', 0)} perdido(s) no mês</span>"
         f"<span>{esc(v['resp'])}</span>"
         + ("<span class=pausado>pausado</span>" if v["pausado"] else "")
-        + (f"<span>+{v['sem_lead']} contrato(s) sem lead</span>" if v.get("sem_lead") else "")
+        + (f"<span>+{v['sem_lead']} contrato(s) sem {_p('lead')}</span>" if v.get("sem_lead") else "")
         + f"</div></div><div class=rt><span class=g>{esc(v['rs'])}</span>"
           # conversão = fechados ÷ leads recebidos (24/09/2026); o "de N" diz a base
           f"<small>{v['ganhos']} {'contrato(s)' if v.get('por_contrato') else 'fechado(s)'}"
@@ -7619,14 +7669,14 @@ def cockpit_leads(request: Request, vend: str = "", etapa: str = "", temp: str =
         + ("<span class='chip ia'>IA</span>" if l["ia"] else "<span class='chip voce'>vend.</span>")
         + f"</span><span class=snip>{esc(l['vendedor'])} · {esc(_rot_etapa(_rots, l['status']))}"
           "</span></span></a>" for l in lista)
-    miolo = (f"<div class=fonte style='margin-top:.7rem'>{len(lista)} lead(s)</div>" + linhas) if lista else \
-        ("<div class=vazio><div class=big>◌</div><b>Nenhum lead com esses filtros</b>"
+    miolo = (f"<div class=fonte style='margin-top:.7rem'>{len(lista)} {_p('lead')}(s)</div>" + linhas) if lista else \
+        ("<div class=vazio><div class=big>◌</div><b>Nenhum " + _p('lead') + " com esses filtros</b>"
          "Tente afrouxar a busca.</div>")
 
     corpo = (
-               _hdr_dono(g[0], "Leads da equipe", "todos os leads abertos")
+               _hdr_dono(g[0], _P('leads') + " da equipe", "todos os " + _p('leads') + " abertos")
              + filtros + f"<div class=scroll>{miolo}</div>" + _abas_dono("leads"))
-    return _page("Leads da equipe", corpo)
+    return _page(_P('leads') + " da equipe", corpo)
 
 
 @router.get("/cockpit/equipe/vendedor/{membro_id}", response_class=HTMLResponse)
@@ -7657,11 +7707,11 @@ def cockpit_vendedor(request: Request, membro_id: int):
              + "<div class=scroll><div class=kpis style='margin-top:.9rem'>"
              + f"<div class='kpi hero'><div class=v>{esc(v['rs'])}</div><div class=l>Fechado no mês</div>"
                f"<div class=d>{v['ganhos']} {'contrato(s) assinado(s)' if v.get('por_contrato') else 'negócio(s)'}"
-               + (f" · {v['sem_lead']} sem lead" if v.get("sem_lead") else "") + "</div></div>"
+               + (f" · {v['sem_lead']} sem {_p('lead')}" if v.get("sem_lead") else "") + "</div></div>"
              + f"<div class=kpi><div class=v>{esc(v['conversao'])}</div><div class=l>Conversão</div>"
-               f"<div class=d>{v['ganhos']} fechado(s) de {v.get('recebidos', 0)} leads recebidos</div></div>"
+               f"<div class=d>{v['ganhos']} fechado(s) de {v.get('recebidos', 0)} {_p('leads')} recebidos</div></div>"
              + f"<div class=kpi><div class=v>{v['fila']}</div><div class=l>Na fila</div>"
-               "<div class=d>leads abertos com ele</div></div>"
+               "<div class=d>" + _p('leads') + " abertos com ele</div></div>"
              + f"<div class=kpi><div class=v>{esc(v['resp'])}</div><div class=l>Resposta</div>"
                "<div class=d>média de 30 dias</div></div></div>"
              # "O mês dele" (24/09/2026): o que a conversão sozinha não mostra — com a
@@ -7669,14 +7719,14 @@ def cockpit_vendedor(request: Request, membro_id: int):
              # fecha o ciclo (perde) e quanto deixa em aberto
              + "<div class=eyebrow>O mês dele</div>"
              + "<div class=bloco><div class=card><div class=linhas style='margin-top:0'>"
-               f"<div><span>Leads recebidos</span><b>{v.get('recebidos', 0)}</b></div>"
+               f"<div><span>{_P('leads')} recebidos</span><b>{v.get('recebidos', 0)}</b></div>"
                f"<div><span>Fechados</span><b>{v['ganhos']}</b></div>"
                f"<div><span>Perdidos</span><b>{v.get('perdidos', 0)}</b></div>"
                f"<div><span>Dos {v.get('recebidos', 0)} recebidos, ainda em aberto</span>"
                f"<b class=amb>{v.get('abertos_recebidos', 0)}</b></div></div></div></div>"
              + f"<div class=bloco>{pausar}</div>"
-             + "<div class=eyebrow>Leads abertos com ele</div>"
-             + (leads or "<div class=fonte>Nenhum lead aberto.</div>")
+             + "<div class=eyebrow>" + _P('leads') + " abertos com ele</div>"
+             + (leads or "<div class=fonte>Nenhum " + _p('lead') + " aberto.</div>")
              + "</div>" + _abas_dono("placar"))
     return _page(v["nome"], corpo)
 
@@ -7690,11 +7740,11 @@ def cockpit_vendedor(request: Request, membro_id: int):
 # misturados com frases prontas. Sem esta tabela o vendedor lia "escopo" na tela —
 # era o que acontecia antes. Frase que já vem pronta passa direto.
 _RECADO = {
-    "escopo": "Esse lead não é seu.",
+    "escopo": "Esse {lead} não é seu.",
     "vazio": "Escreva alguma coisa antes de enviar.",
     "tipo": "Não entendi se é ganho ou perdido.",
     "etapa_invalida": "Essa etapa não existe no funil.",
-    "use_fechar": "Pra encerrar o lead use Ganho ou Perdido.",
+    "use_fechar": "Pra encerrar o {lead} use Ganho ou Perdido.",
     "login": "Sua sessão expirou — entre de novo.",
     # as duas recusas de `funil_perda.validar`. Sem elas o vendedor lia a CHAVE crua
     # ("motivo_obrigatorio") na barra de recado — e era o único retorno que ele tinha
@@ -7707,10 +7757,10 @@ _RECADO = {
                     "ou marque como Perdido.",
     "motivo_invalido": "Esse motivo não está na lista.",
     # as recusas do repasse (migração 267)
-    "sem_permissao": "Esse lead não é seu — quem passa é quem está atendendo.",
+    "sem_permissao": "Esse {lead} não é seu — quem passa é quem está atendendo.",
     "destino_invalido": "Essa pessoa não está mais na equipe.",
-    "ja_e_dele": "O lead já é dessa pessoa.",
-    "lead_invalido": "Esse lead não existe mais.",
+    "ja_e_dele": "O {lead} já é dessa pessoa.",
+    "lead_invalido": "Esse {lead} não existe mais.",
     "data_obrigatoria": "Diga o dia em que ele pediu para você chamar.",
     "sem_renovacao": "As renovações desta etapa acabaram. Mova pra Follow-up ou "
                      "marque como Perdido.",
@@ -7719,7 +7769,7 @@ _RECADO = {
 
 def _erro(r: dict) -> str:
     e = r.get("erro") or ""
-    return _RECADO.get(e, e or "Não deu certo.")
+    return _RECADO.get(e, e or "Não deu certo.").replace("{lead}", _p("lead"))
 
 
 def _agir(request: Request, lead_id: int, fn, destino: str):
@@ -7922,11 +7972,12 @@ def cockpit_lead_passar(request: Request, lead_id: int, para: str = Form(""),
     if r.get("ok"):
         nome = next((v["nome"] for v in rp.colegas(get_pool(), conta_id, None)
                      if v["id"] == int(para)), "")
-        request.session["ck_ok"] = f"Lead passado{' pra ' + nome if nome else ''} ✓"
+        request.session["ck_ok"] = f"{_P('lead')} passado{' pra ' + nome if nome else ''} ✓"
         # ele NÃO volta pro lead: o lead não é mais dele, e cair numa tela de
         # "não é seu" logo depois de passar seria o app dando um tapa na mão.
         return RedirectResponse(_BASE, status_code=303)
-    request.session["ck_err"] = _RECADO.get(r.get("erro", ""), "Não consegui passar o lead.")
+    request.session["ck_err"] = _RECADO.get(r.get("erro", ""),
+                                            "Não consegui passar o {lead}.").replace("{lead}", _p("lead"))
     return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
 
 
@@ -8565,7 +8616,7 @@ def cockpit_reatribuir(request: Request, lead_id: int = Form(...), para: str = F
     if para.strip().isdigit():
         r = cd.reatribuir(get_pool(), g[0], lead_id, int(para))
         request.session["ck_ok" if r.get("ok") else "ck_err"] = (
-            "Lead passado pro time ✓" if r.get("ok") else r.get("erro", "Não consegui reatribuir."))
+            _P('lead') + " passado pro time ✓" if r.get("ok") else r.get("erro", "Não consegui reatribuir."))
     return RedirectResponse(destino, status_code=303)
 
 

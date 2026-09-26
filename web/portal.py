@@ -589,7 +589,7 @@ function maisToggle(v){var sh=document.getElementById('mais-sheet'),bg=document.
     que ESTA aba carregou — o zapFetch compara com o carimbo `X-Zaq-Versao` que
     vem em toda resposta pra saber se o deploy aconteceu com ela aberta. -#}
 <style>{{ zap_css }}</style>
-<script>window.ZAQ_VERSAO={{ (versao_app or '')|tojson }};</script>
+<script>window.ZAQ_VERSAO={{ (versao_app or '')|tojson }};window.VOC={"cliente":{{ voc.cliente|tojson }},"Cliente":{{ voc.cliente|capitalize|tojson }},"clientes":{{ voc.clientes|tojson }},"Clientes":{{ voc.clientes|capitalize|tojson }},"lead":{{ voc.lead|tojson }},"Lead":{{ voc.lead|capitalize|tojson }},"leads":{{ voc.leads|tojson }},"Leads":{{ voc.leads|capitalize|tojson }}};</script>
 <script>{{ zap_js }}</script>
 {% block conteudo %}{% endblock %}
 <a href="https://wa.me/5586981885930?text={% if conta %}Oi%20Thompson%21%20Estou%20no%20Zaq%20%28conta%20%23{{ conta[0] }}%29%20e%20preciso%20de%20ajuda%20com%3A%20{% else %}Oi%20Thompson%21%20Estou%20no%20Zaq%20e%20preciso%20de%20ajuda%20com%3A%20{% endif %}"

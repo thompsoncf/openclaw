@@ -686,15 +686,23 @@ def ler_respostas(c, conta_id: int, agora: datetime) -> int:
         if not conv:
             continue
         from finance.clinica_agente import urgente
-        for texto, depois_de_outra in c.execute(
+        for texto, depois_de_outra, outro_pedido in c.execute(
                 """select m.texto,
                           exists (select 1 from mensagens o
                                    where o.conversa_id = m.conversa_id and o.direcao = 'out'
+                                     and o.criado_em > %s + interval '2 minutes' and o.criado_em < m.criado_em),
+                          exists (select 1 from mensagens o
+                                   where o.conversa_id = m.conversa_id and o.direcao = 'out'
+                                     and o.texto ilike '%%responda 1%%'
                                      and o.criado_em > %s + interval '2 minutes' and o.criado_em < m.criado_em)
                      from mensagens m join conversas cv on cv.id = m.conversa_id
                     where m.conversa_id=%s and cv.conta_id=%s and m.direcao='in' and m.criado_em > %s
-                    order by m.criado_em, m.id limit 20""", (enviada, conv, conta_id, enviada)).fetchall():
+                    order by m.criado_em, m.id limit 20""", (enviada, enviada, conv, conta_id, enviada)).fetchall():
             t = texto or ""
+            if outro_pedido:
+                # outra mensagem nossa pediu "responda 1" depois do lembrete (convite de
+                # vaga, plano de tratamento): daqui pra frente o número é dela
+                break
             if depois_de_outra and not _SO_NUMERO.match(t):
                 # a clínica já falou de outra coisa depois do lembrete: o "sim" daqui
                 # pra frente pode responder a ela, não à consulta. O "1"/"2" puro

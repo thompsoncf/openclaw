@@ -563,7 +563,8 @@ def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
         assert ca.evento(c, CLINICA, eid)["situacao"] == "atendimento"
     r = cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
                  data={"nova": "finalizado", "tratamento": "sim", "valor": "1.500,00"})
-    assert "aviso=situacao" in r.headers["location"]
+    # o médico propôs tratamento: a recepção vai direto montar o plano (fase 5)
+    assert r.headers["location"] == f"/painel/clinica/planos/novo?evento={eid}"
     with pool.connection() as c:
         assert _status(c, eid) == ("proposta", 150000)
 

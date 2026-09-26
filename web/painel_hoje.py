@@ -97,12 +97,14 @@ def painel_hoje(request: Request):
         repasses = cla.repasses_abertos(c, conta_id)
         from finance import clinica_vagas as cvg
         vagas_esperando = cvg.esperando(c, conta_id)
+        from finance import clinica_planos as cpl
+        planos = cpl.em_aberto(c, conta_id, agora)
         c.commit()      # fr.config semeia a linha da régua na 1ª vez
     for e in dados["esperando"]:
         e["fora"] = not fr.dentro_da_janela(e["em"], janela)
     q = request.query_params
     return _render("hoje.html", request, titulo="Hoje", cfg=cfg, gerencia=gerencia,
-                   d=dados, repasses=repasses, vagas_esperando=vagas_esperando, aviso=_AVISOS.get(q.get("aviso") or "", ""),
+                   d=dados, repasses=repasses, vagas_esperando=vagas_esperando, planos=planos, aviso=_AVISOS.get(q.get("aviso") or "", ""),
                    erro=request.session.pop("hoje_erro", ""),
                    rotulos=vac._ROTULO_TOQUE)
 
@@ -228,6 +230,17 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 
   {% if vagas_esperando %}
   <div class="hj-desligado" style="margin-top:1rem"><b>⚡ {{ vagas_esperando }} horário{% if vagas_esperando > 1 %}s{% endif %} liberado{% if vagas_esperando > 1 %}s{% endif %} por cancelamento</b> esperando você aprovar o convite. <a href="/painel/clinica/vagas">Abrir vagas liberadas</a></div>
+  {% endif %}
+
+  {% if planos.aprovar or planos.vencendo or planos.responderam %}
+  <div class="hj-sec"><h3>Planos de tratamento</h3>
+    <span class="ex">O Zaq cobra a decisão sozinho em D+1 e D+3. Aqui fica o que precisa de você.</span></div>
+  <div class="hj-lista">
+    {% if planos.aprovar and gerencia %}<div class="hj-card fora"><div class="cab"><a class="quem" href="/painel/clinica/planos">{{ planos.aprovar }} plano{% if planos.aprovar > 1 %}s{% endif %} com desconto acima do teto</a><span class="chip fora">esperando você aprovar</span></div></div>{% endif %}
+    {% for p in planos.responderam %}<div class="hj-card quente"><div class="cab"><a class="quem" href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a><span class="chip">respondeu depois do plano</span></div>
+      <div class="hj-acoes"><a class="abre" href="/painel/clinica/planos/{{ p.id }}">Abrir plano</a></div></div>{% endfor %}
+    {% for p in planos.vencendo if p not in planos.responderam %}<div class="hj-card fora"><div class="cab"><a class="quem" href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a><span class="chip fora">vence {{ p.validade_ate.strftime('%d/%m') }}</span></div></div>{% endfor %}
+  </div>
   {% endif %}
 
   {% if repasses %}

@@ -497,10 +497,13 @@ def resposta_da_vespera(c, conta_id: int, conversa_id: int, lead: int | None, fo
              where conta_id=%s and situacao='agendado' and status='ativo' and pede_remarcar_em is null
                and confirmacao_enviada_em is not null and inicio > %s
                and (%s or confirmacao_enviada_em >= coalesce(%s, confirmacao_enviada_em) - interval '2 minutes')
+               and not exists (select 1 from mensagens x where x.conversa_id = %s and x.direcao = 'out'
+                                  and x.texto ilike '%%responda 1%%'
+                                  and x.criado_em > confirmacao_enviada_em + interval '2 minutes')
                and (prospeccao_id = %s
                     or (length(%s) >= 8 and right(regexp_replace(coalesce(paciente_fone,''), '\D', '', 'g'), 8) = %s))
              order by inicio limit 1""",
-        (conta_id, agora, bool(ca._SO_NUMERO.match(t)), ultima_nossa, lead, dig, dig[-8:])).fetchone()
+        (conta_id, agora, bool(ca._SO_NUMERO.match(t)), ultima_nossa, conversa_id, lead, dig, dig[-8:])).fetchone()
     if not r:
         return None
     ca.ler_respostas(c, conta_id, agora)
@@ -839,6 +842,16 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
         _log.info("agente da clínica: resposta de vaga não tratada (conversa %s)", conversa_id, exc_info=True)
         if not tentar_travar(c, conversa_id):
             return                          # o rollback soltou a trava e outra volta pegou
+    # 3b) o "1"/"2"/"3" de um plano de tratamento (clinica_planos): aceita com a forma
+    from finance import clinica_planos as cpl
+    try:
+        if cpl.processar(pool, c, conta_id, agora, conversa_id=conversa_id, responder=enviar):
+            return
+    except Exception:  # noqa: BLE001 — sem a 373: segue a conversa
+        c.rollback()
+        _log.info("agente da clínica: resposta de plano não tratada (conversa %s)", conversa_id, exc_info=True)
+        if not tentar_travar(c, conversa_id):
+            return
     # 4) o "1"/"2" do lembrete: resposta pronta pelo que foi gravado, sem IA
     ack = resposta_da_vespera(c, conta_id, conversa_id, lead, fone, ultima, agora)
     if ack:

@@ -420,7 +420,9 @@ def painel_servicos(request: Request):
     # como separar. O vendedor não recebe o filtro — a lista dele já é só a dele,
     # e um seletor de um nome só é ruído.
     ve_todos = request.session.get("papel", "dono") != "vendedor"
+    from finance import chip_regra as _cr
     return _render("servicos", request, empresa_nome=conta[2],
+                   ia_preco=_cr.tem_mais_de_um_chip(pool, conta[0]),
                    tem_pj=True, vende_servico=True, servico_avulso=servico_avulso,
                    ve_todos=ve_todos,
                    pode_contrato=pode_contrato, tipo_padrao=tipo_padrao,
@@ -462,6 +464,9 @@ def painel_servicos_catalogo(request: Request):
         # `icone` é o que o vendedor fixou (pode ser vazio); `icone_svg` é o que
         # a tela desenha — já resolvido pelo nome/categoria quando não fixaram.
         "icone": s["icone"],
+        # "a IA pode dizer este preço" — o agente com regra por número (migração
+        # 386) só cita valor de item com esta chave ligada
+        "diz_preco": s["diz_preco"],
         "icone_svg": ics.svg(ics.escolher(s["nome"], s["categoria"], s["icone"],
                                           modo=modo), px=20),
     } for s in scat.listar(pool, conta[0])]
@@ -490,6 +495,7 @@ class ServicoIn(BaseModel):
     categoria: str = ""    # agrupa no orçamento de evento (subtotal por categoria)
     foto_url: str = ""     # legado: catálogo antigo que subiu foto
     icone: str = ""        # chave do ícone; vazio = deduzido do nome/categoria
+    diz_preco: bool | None = None  # "a IA pode dizer este preço"; None = não mexe
 
 
 @router.post("/painel/servicos/catalogo/salvar")
@@ -503,7 +509,7 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
                     mensal_centavos=dsc.centavos(dados.mensal),
                     custo_centavos=dsc.centavos(dados.custo),
                     categoria=dados.categoria, foto_url=dados.foto_url,
-                    icone=dados.icone)
+                    icone=dados.icone, diz_preco=dados.diz_preco)
     if not r.get("ok"):
         return JSONResponse({"erro": r.get("erro", "falha ao salvar")}, status_code=400)
     return JSONResponse(r)
@@ -3803,7 +3809,7 @@ _JS_CRU = r"""(function(){
         return;
       }
       var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
-      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo,categoria:s.categoria,icone:s.icone});}
+      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo,categoria:s.categoria,icone:s.icone,diz_preco:s.diz_preco});}
       else if(dl){var row3=dl.closest('.oc-browse-row'); var s2=CATALOGO.filter(function(x){return x.slug===row3.getAttribute('data-id');})[0]; if(s2&&confirm(txtInativar(s2.nome))){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s2.id})}).then(function(){carregarCatalogo(true);});}}
     });
   }
@@ -3819,7 +3825,7 @@ _JS_CRU = r"""(function(){
   // editar / excluir (delegação)
   document.getElementById('oc-mods').addEventListener('click',function(e){
     var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
-    if(ed){var r=ed.closest('.oc-mod'); var sc=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{}; abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo')),categoria:sc.categoria,icone:sc.icone});}
+    if(ed){var r=ed.closest('.oc-mod'); var sc=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{}; abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo')),categoria:sc.categoria,icone:sc.icone,diz_preco:sc.diz_preco});}
     else if(dl){var r2=dl.closest('.oc-mod'); if(confirm(txtInativar(r2.getAttribute('data-nome')))){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(r2.getAttribute('data-cid'),10)})}).then(function(){carregarCatalogo(true);});}}
   });
   // form de add/editar serviço do catálogo — PALETA DE ÍCONES (no lugar da foto)
@@ -3877,6 +3883,7 @@ _JS_CRU = r"""(function(){
     document.getElementById('svc-setup').value=dinTxt(s.setup||0);
     document.getElementById('svc-mensal').value=dinTxt(s.mensal||0);
     document.getElementById('svc-custo').value=dinTxt(s.custo||0);
+    var diz=document.getElementById('svc-diz'); if(diz)diz.checked=!!s.diz_preco;
     document.getElementById('svc-msg').textContent='';
     document.getElementById('oc-svc-form').style.display='block';
     document.getElementById('svc-nome').focus();
@@ -3889,7 +3896,7 @@ _JS_CRU = r"""(function(){
     var nome=document.getElementById('svc-nome').value.trim();
     if(!nome){document.getElementById('svc-msg').textContent='Informe o nome do serviço.';return;}
     var idv=document.getElementById('svc-id').value;
-    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo')),categoria:((document.getElementById('svc-cat')||{}).value)||'',icone:((document.getElementById('svc-icone')||{}).value||'').trim()};
+    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo')),categoria:((document.getElementById('svc-cat')||{}).value)||'',icone:((document.getElementById('svc-icone')||{}).value||'').trim(),diz_preco:(document.getElementById('svc-diz')?document.getElementById('svc-diz').checked:null)};
     var b=this; b.disabled=true;
     zapFetch('/painel/servicos/catalogo/salvar',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(res){if(!res){b.disabled=false;return;}b.disabled=false; if(!res.ok){document.getElementById('svc-msg').textContent=(res.d&&res.d.erro)||'Não consegui salvar.';return;} fecharForm(); carregarCatalogo(true);});
   });
@@ -5645,6 +5652,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
             <button id="svc-cancelar" class="oc-pill" type="button">Cancelar</button>
           </div>
         </div>
+        {# só onde existe a IA da regra por número (migração 386): a chave não muda
+           nada no agente geral, e mostrar um controle que não faz nada é mentir #}
+        {% if ia_preco %}<label style="display:flex; gap:.45rem; align-items:flex-start; font-size:.8rem; margin-top:.55rem; cursor:pointer"><input id="svc-diz" type="checkbox" style="margin-top:.15rem"> <span>A IA pode dizer este preço no WhatsApp <span class="mut">(desmarcado, ela não cita o valor: {{ 'convida para a visita' if servico_avulso else 'convida para uma reunião' }} e o orçamento sai conferido por alguém da equipe)</span></span></label>{% endif %}
         <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>
       </div>
 

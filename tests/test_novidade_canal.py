@@ -160,10 +160,14 @@ def test_os_cinco_portoes_de_nicho_continuam_iguais(pool, canal):
     que pergunta à CONTA, e mais nenhum pode aparecer desse lado sem alguém ver.
 
     Em 24/09/2026 alguém viu: `empresa` (migração 338) é o segundo portão de
-    conta — quem tem o módulo PJ, a mesma regra da rota /painel/empresa."""
+    conta — quem tem o módulo PJ, a mesma regra da rota /painel/empresa.
+
+    Em 26/09/2026, o terceiro: `mais_de_um_chip` (migração 387) — a empresa com
+    dois números, que é onde a regra por número existe."""
     assert {"todos", "produto", "servico", "eventos",
             "recorrente"} <= set(nv.PUBLICOS_NICHO)
-    assert set(nv.PUBLICOS) == set(nv.PUBLICOS_NICHO) | {"canal_proprio", "empresa"}
+    assert set(nv.PUBLICOS) == set(nv.PUBLICOS_NICHO) | {"canal_proprio", "empresa",
+                                                          "mais_de_um_chip"}
 
 
 def test_aviso_de_nicho_nao_passou_a_depender_do_canal(pool, canal):

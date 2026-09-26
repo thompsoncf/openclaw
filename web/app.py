@@ -451,6 +451,16 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — obras_lembrete falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # O lead perdido com data de volta ("limpo o nome até dezembro",
+                # migração 373) reabre no Follow-up quando o dia chega. Consulta pelo
+                # índice parcial: sem data marcada, não custa nada.
+                from finance import funil_perda as _fpv
+                n_volta = _fpv.voltar_os_vencidos(pool)
+                if n_volta:
+                    log.info("poller: ciclo #%d — %d lead(s) voltaram ao funil na data", ciclo, n_volta)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — voltar_os_vencidos falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 from finance import aprovacao_aviso as _ap
                 # A fila de liberação do dono só existe pra quem abre a tela de
                 # Empresa — e quem abre a tela todo dia é quem LANÇA, não quem

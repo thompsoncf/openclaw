@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import Environment
 
 from db.conexao import get_pool
+from finance import obra_empreita as oe
 from finance import obra_fotos as of
 from finance import obra_reforma as orf
 from finance import obra_venda as ov
@@ -192,6 +193,8 @@ def ficha(request: Request, obra_id: int):
                    margem=ob.margem(o, sit["venda"] if sit else None),
                    sou_dono=request.session.get("papel", "dono") == "dono",
                    fotos=_fotos_da_ficha(conta[0], o),
+                   empreita=_empreita_da_ficha(conta[0], o),
+                   lead=_lead_da_ficha(conta[0], o),
                    tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, modelos=orf.MODELOS,
                    status_doc=ov.STATUS_DOC, modalidades=ov.MODALIDADES,
                    situacoes=[(k, ov.ROTULO_SITUACAO[k]) for k in ov.SITUACOES],
@@ -406,7 +409,35 @@ def parcela_recebida(request: Request, obra_id: int, titulo_id: int):
     r = emp.dar_baixa_titulo(pool, conta[0], titulo_id)
     if not (r or {}).get("ok"):
         return _volta(f"/painel/obras/{obra_id}", (r or {}).get("erro") or "Não deu pra dar baixa.")
+    from finance import obra_lead as _ol
+    _ol.parcela_recebida(pool, conta[0], obra_id)
     return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
+
+
+def _lead_da_ficha(conta_id: int, o: dict) -> dict | None:
+    from finance import obra_lead as _ol
+    return _ol.lead_da_obra(get_pool(), conta_id, o["id"])
+
+
+def _empreita_da_ficha(conta_id: int, o: dict) -> dict:
+    """A mão de obra paga por etapa: o valor de cada etapa, os pagamentos juntos por
+    lançamento e os lançamentos de mão de obra que ainda não fecharam etapa nenhuma."""
+    sit = oe.situacao(get_pool(), conta_id, o)
+    nome = {e["id"]: e["nome"] for e in o["etapas"]}
+    por_lanc = {l["id"]: l for l in o["lancamentos"]}
+    grupos: dict = {}
+    for p in sit["pagamentos"]:
+        g = grupos.setdefault(p["lancamento_id"], {
+            "lancamento_id": p["lancamento_id"], "etapas": [], "valor": 0,
+            "data": (por_lanc.get(p["lancamento_id"]) or {}).get("data") or p["pago_em"],
+            "descricao": (por_lanc.get(p["lancamento_id"]) or {}).get("descricao") or "pagamento"})
+        g["etapas"].append(nome.get(p["etapa_id"], "?"))
+        g["valor"] += int(p["valor_centavos"])
+    usados = {p["lancamento_id"] for p in sit["pagamentos"]}
+    livres = [l for l in o["lancamentos"]
+              if l["tipo_custo"] == ob.MAO_DE_OBRA and l["id"] not in usados]
+    return {"sit": sit, "grupos": list(grupos.values()), "livres": livres,
+            "pago": {e["id"]: e["pago_centavos"] for e in sit["etapas"]}}
 
 
 def _fotos_da_ficha(conta_id: int, o: dict) -> dict:
@@ -464,6 +495,28 @@ def apagar_foto(request: Request, obra_id: int, foto_id: int):
         return redir
     of.apagar(get_pool(), conta[0], obra_id, foto_id)
     return RedirectResponse(f"/painel/obras/{obra_id}#fotos", status_code=303)
+
+
+@router.post("/painel/obras/{obra_id}/etapa-paga")
+def etapa_paga(request: Request, obra_id: int, lancamento_id: int = Form(...),
+               etapa: list[int] = Form([])):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        oe.pagar_etapas(get_pool(), conta[0], obra_id, list(etapa), lancamento_id=lancamento_id)
+    except ValueError as e:
+        return _volta(f"/painel/obras/{obra_id}", str(e))
+    return RedirectResponse(f"/painel/obras/{obra_id}#empreitada", status_code=303)
+
+
+@router.post("/painel/obras/{obra_id}/etapa-paga/{lancamento_id}/desfazer")
+def etapa_paga_desfazer(request: Request, obra_id: int, lancamento_id: int):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    oe.desfazer(get_pool(), conta[0], obra_id, lancamento_id)
+    return RedirectResponse(f"/painel/obras/{obra_id}#empreitada", status_code=303)
 
 
 @router.post("/painel/obras/pix")
@@ -668,7 +721,8 @@ _TPL_FICHA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="ob-topo" style="margin-top:.4rem"><div>
   <h2>{{ '🏠' if o.tipo == 'casa' else '🔨' }} {{ o.nome|e }}</h2>
   <div class="ob-sub">{{ o.rotulo_tipo }}{% if o.endereco %} · {{ o.endereco|e }}{% endif %}{% if o.area_m2 %} · {{ '%g'|format(o.area_m2) }} m²{% endif %}
-    · <span class="ob-pill {{ o.status }}">{{ o.rotulo_status }}</span></div></div></div>
+    · <span class="ob-pill {{ o.status }}">{{ o.rotulo_status }}</span>{% if lead %}
+    · lead: <a href="/painel/prospeccao/{{ lead.id }}">{{ lead.nome|e }}</a>{% endif %}</div></div></div>
 {% if erro %}<div class="ob-erro">{{ erro|e }}</div>{% endif %}
 
 <div class="ob-faixas">
@@ -782,7 +836,7 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
     <td class="ob-mut">{{ ('ao concluir ' ~ (orc.nome_etapa[p.etapa] or p.etapa)|lower) if p.etapa else 'na assinatura' }}</td>
     <td class="v">{{ brl(p.valor_centavos) }}</td></tr>
   {% if p.cobranca %}<tr><td colspan="3"><div class="ob-acoes">
-    <a class="ob-bt prim" target="_blank" rel="noopener" href="https://wa.me/?text={{ p.cobranca.mensagem|urlencode }}">Cobrar no WhatsApp</a>
+    <a class="ob-bt prim" target="_blank" rel="noopener" href="{{ p.cobranca.wa_url }}">Cobrar no WhatsApp</a>
     <form method="post" action="/painel/obras/{{ o.id }}/parcela/{{ p.titulo_id }}/recebi" style="margin:0"><button class="ob-bt">Recebi</button></form>
     <span class="ob-mut">{{ 'com o Pix da empresa' if p.cobranca.pix else 'sem Pix: cadastre a chave abaixo' }}</span></div></td></tr>{% endif %}{% endfor %}
   </table>
@@ -848,7 +902,7 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
 <div class="ob-bar" style="height:9px;margin-bottom:.6rem"><i style="width:{{ o.pct }}%"></i></div>
 <div class="ob-etapas">{% for e in o.etapas %}
   <div class="ob-et{{ ' feita' if e.concluida_em }}">
-    <span>{{ '✓' if e.concluida_em else '○' }} {{ e.nome|e }} <span class="ob-mut">· {{ '%g'|format(e.peso) }}%{% if e.concluida_em %} · {{ e.concluida_em.strftime('%d/%m') }}{% endif %}</span></span>
+    <span>{{ '✓' if e.concluida_em else '○' }} {{ e.nome|e }} <span class="ob-mut">· {{ '%g'|format(e.peso) }}%{% if e.concluida_em %} · {{ e.concluida_em.strftime('%d/%m') }}{% endif %}</span>{% if empreita.pago[e.id] %} <span class="ob-chip">{{ 'pago' if e.concluida_em else 'adiantado' }} {{ brl(empreita.pago[e.id]) }}</span>{% endif %}</span>
     <form method="post" action="/painel/obras/{{ o.id }}/etapa">
       <input type="hidden" name="etapa_id" value="{{ e.id }}"><input type="hidden" name="concluida" value="{{ '0' if e.concluida_em else '1' }}">
       <button class="ob-bt">{{ 'Desmarcar' if e.concluida_em else 'Concluída' }}</button></form>
@@ -869,6 +923,23 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
   <input name="legenda" placeholder="legenda (opcional)" style="flex:1 1 140px">
   <button class="ob-bt prim">Guardar a foto</button>
 </form>{% else %}<p class="ob-mut">O envio de foto pelo painel não está configurado nesta instalação.</p>{% endif %}
+
+<div class="ob-box" style="margin-top:.6rem" id="empreitada"><b>Mão de obra por etapa</b>
+  {% if empreita.sit.tem %}<div style="margin:.3rem 0">Pago por etapa: <b>{{ brl(empreita.sit.total_pago) }}</b></div>
+  {% if empreita.sit.pagas_nao_feitas %}<div class="ob-erro" style="margin:.3rem 0">Pago e ainda não feito (adiantamento): {{ empreita.sit.pagas_nao_feitas|join(', ')|lower|e }}</div>{% endif %}
+  {% if empreita.sit.feitas_nao_pagas %}<div class="ob-mut">Feito e ainda não pago: {{ empreita.sit.feitas_nao_pagas|join(', ')|lower|e }}</div>{% endif %}
+  <table class="ob-tab" style="margin-top:.4rem"><tr><th>Pagamento</th><th>Etapas</th><th style="text-align:right">Valor</th><th></th></tr>
+  {% for g in empreita.grupos %}<tr><td>{{ g.data.strftime('%d/%m') if g.data }} · {{ g.descricao|e }}</td><td class="ob-mut">{{ g.etapas|join(', ')|lower|e }}</td>
+    <td class="v">{{ brl(g.valor) }}</td>
+    <td><form method="post" action="/painel/obras/{{ o.id }}/etapa-paga/{{ g.lancamento_id }}/desfazer" style="margin:0"><button class="ob-bt" style="font-size:.7rem">desfazer</button></form></td></tr>{% endfor %}
+  </table>{% else %}<p class="ob-mut" style="margin:.3rem 0">Pagou o empreiteiro por etapa? Marque aqui qual pagamento fechou quais etapas — ou diga no WhatsApp: "paguei 10 mil pro empreiteiro, fundação e estrutura da {{ o.nome|e }}".</p>{% endif %}
+  {% if empreita.livres %}<form method="post" action="/painel/obras/{{ o.id }}/etapa-paga" style="margin-top:.5rem">
+    <label>Pagamento de mão de obra desta obra</label>
+    <select name="lancamento_id">{% for l in empreita.livres %}<option value="{{ l.id }}">{{ l.data.strftime('%d/%m') }} · {{ l.descricao|e }} · {{ brl(l.valor_centavos) }}</option>{% endfor %}</select>
+    <div style="display:flex;flex-wrap:wrap;gap:.3rem .9rem;margin:.4rem 0">{% for e in o.etapas %}<label style="display:inline-flex;gap:.3rem;align-items:center;margin:0"><input type="checkbox" name="etapa" value="{{ e.id }}" style="width:auto">{{ e.nome|e }}</label>{% endfor %}</div>
+    <button class="ob-bt prim">Marcar as etapas como pagas</button>
+  </form>{% endif %}
+</div>
 
 <details class="ob-box" style="margin-top:.6rem"><summary>Editar etapas e pesos</summary>
 <form method="post" action="/painel/obras/{{ o.id }}/etapas">

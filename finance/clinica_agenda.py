@@ -694,6 +694,7 @@ def ler_respostas(c, conta_id: int, agora: datetime) -> int:
                           exists (select 1 from mensagens o
                                    where o.conversa_id = m.conversa_id and o.direcao = 'out'
                                      and o.texto ilike '%%responda 1%%'
+                                     and o.texto not ilike '%%responda 1 para confirmar ou 2%%'
                                      and o.criado_em > %s + interval '2 minutes' and o.criado_em < m.criado_em)
                      from mensagens m join conversas cv on cv.id = m.conversa_id
                     where m.conversa_id=%s and cv.conta_id=%s and m.direcao='in' and m.criado_em > %s

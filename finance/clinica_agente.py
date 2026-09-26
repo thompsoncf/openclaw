@@ -499,6 +499,7 @@ def resposta_da_vespera(c, conta_id: int, conversa_id: int, lead: int | None, fo
                and (%s or confirmacao_enviada_em >= coalesce(%s, confirmacao_enviada_em) - interval '2 minutes')
                and not exists (select 1 from mensagens x where x.conversa_id = %s and x.direcao = 'out'
                                   and x.texto ilike '%%responda 1%%'
+                                  and x.texto not ilike '%%responda 1 para confirmar ou 2%%'
                                   and x.criado_em > confirmacao_enviada_em + interval '2 minutes')
                and (prospeccao_id = %s
                     or (length(%s) >= 8 and right(regexp_replace(coalesce(paciente_fone,''), '\D', '', 'g'), 8) = %s))
@@ -847,6 +848,8 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
     try:
         if cpl.processar(pool, c, conta_id, agora, conversa_id=conversa_id, responder=enviar):
             return
+        if cpl.ja_respondido(c, conta_id, conversa_id):
+            return                          # o poller aceitou por este número um instante antes
     except Exception:  # noqa: BLE001 — sem a 373: segue a conversa
         c.rollback()
         _log.info("agente da clínica: resposta de plano não tratada (conversa %s)", conversa_id, exc_info=True)

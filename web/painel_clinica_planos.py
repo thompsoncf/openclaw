@@ -182,7 +182,7 @@ def ver(request: Request, plano_id: int):
 
 
 @router.post(URL + "/{plano_id}/{acao}")
-def acao(request: Request, plano_id: int, acao: str, forma: str = Form("pix")):
+def acao(request: Request, plano_id: int, acao: str, forma: str = Form("pix"), visto: str = Form("")):
     conta, gerencia, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -195,9 +195,13 @@ def acao(request: Request, plano_id: int, acao: str, forma: str = Form("pix")):
         if acao == "aprovar":
             if not gerencia:
                 return _ir(request, volta, erro="Só o dono ou o gestor aprova desconto acima do teto.")
-            ok = cp.aprovar_desconto(c, conta_id, plano_id, membro)
+            ok = cp.aprovar_desconto(c, conta_id, plano_id, membro, visto)
             c.commit()
-            return _ir(request, volta, "aprovado" if ok else "")
+            return _ir(request, volta, "aprovado" if ok else "",
+                       "" if ok else "O plano mudou depois que você abriu a tela. Confira o desconto de novo.")
+        if acao == "titulos":
+            n = cp.gerar_titulos(get_pool(), conta_id, plano_id)
+            return _ir(request, volta, "aceito" if n else "", "" if n else "Não havia títulos a gerar.")
         if acao == "cancelar":
             cp.cancelar(c, conta_id, plano_id)
             c.commit()
@@ -320,13 +324,14 @@ _TPL_FORM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 
   {% if p %}
   <div class="pl-cx"><div class="pl-tot">
-    <div><span class="pl-mut">Total</span><b>{{ brl(p.total) }}</b>{% if p.desconto %}<span class="pl-mut">desconto de {{ p.desconto_pct|round(2) }}%</span>{% endif %}</div>
+    <div><span class="pl-mut">Total</span><b>{{ brl(p.total) }}</b>{% if p.desconto_efetivo %}<span class="pl-mut">desconto efetivo de {{ p.desconto_efetivo|round(1) }}% da tabela (no Pix)</span>{% endif %}</div>
     <div><span class="pl-mut">Pix à vista</span><b>{{ brl(p.pix) }}</b></div>
     <div><span class="pl-mut">Cartão</span><b>{{ p.parcelas }}× {{ brl(p.parcela) }}</b></div>
     {% if p.status == 'aceito' %}<div><span class="pl-mut">Aceito</span><b>{{ p.forma_d }}</b><span class="pl-mut">{{ p.aceito_em.strftime('%d/%m %H:%M') }} · {{ {'link':'pelo link','whatsapp':'no WhatsApp','recepcao':'na recepção'}[p.aceito_por] }}</span></div>{% endif %}
   </div>
   <div class="pl-acoes">
-    {% if p.status == 'aguardando_aprovacao' and gerencia %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/aprovar"><button>Aprovar desconto de {{ p.desconto_pct|round(2) }}%</button></form>{% endif %}
+    {% if p.status == 'aguardando_aprovacao' and gerencia %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/aprovar"><input type="hidden" name="visto" value="{{ p.versao }}"><button>Aprovar desconto (efetivo {{ p.desconto_efetivo|round(1) }}% da tabela)</button></form>{% endif %}
+    {% if p.status == 'aceito' and not p.titulos %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/titulos"><button class="sec">Gerar as contas a receber</button></form>{% endif %}
     {% if p.status == 'rascunho' %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/enviar"><button>Enviar no WhatsApp</button></form>{% endif %}
     {% if p.status == 'enviado' %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/aceito" style="display:flex;gap:.4rem;flex-wrap:wrap">
       <select name="forma" style="width:auto">{% for k, rot in FORMAS %}{% if k != 'parcelado' or p.parcelado %}<option value="{{ k }}">{{ rot }}</option>{% endif %}{% endfor %}</select>

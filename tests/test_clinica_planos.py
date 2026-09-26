@@ -142,10 +142,10 @@ def test_desconto_acima_do_teto_espera_o_dono(pool, zap):
         r = cp.enviar(c, CLINICA, pid, 51, AGORA)
         assert not r["ok"] and "aprovar" in r["erro"]
         assert zap.saiu == []
-        assert cp.aprovar_desconto(c, CLINICA, pid, 52)
+        assert cp.aprovar_desconto(c, CLINICA, pid, 52, cp.plano(c, CLINICA, pid)["versao"])
         c.commit()
         assert cp.plano(c, CLINICA, pid)["status"] == "rascunho"
-        pid2 = _plano(c, lead, desconto="8", pode=False)        # dentro do teto de 10%
+        pid2 = _plano(c, lead, desconto="2", pode=False)        # 2% + Pix 8% = 9,8% efetivo: dentro
         assert cp.plano(c, CLINICA, pid2)["status"] == "rascunho"
 
 
@@ -342,3 +342,97 @@ def test_so_gerencia_muda_o_teto(cli, pool):
     with pool.connection() as c:
         assert cp.config(c, CLINICA) == {"teto_desconto": 30.0, "pix_desconto": 5.0, "cartao_parcelas": 6,
                                          "validade_dias": 10, "cobranca": "off"}
+
+
+# ------------------------------------------------------------------ revisão do PR
+
+def test_teto_vale_pro_desconto_efetivo(pool, zap):
+    """Desconto 10% + Pix 50%, ou a sessão abaixo do preço de tabela: vai pro dono."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        tipos = {t["id"]: t for t in cc.listar_tipos(c, CLINICA)}
+        est = _tipo(c, "Procedimento estético")["id"]
+        for itens_raw, desc, pix in (([{"servico_id": est, "sessoes": 4, "valor": ""}], "10", "50"),
+                                     ([{"servico_id": est, "sessoes": 4, "valor": "100"}], "0", "0")):
+            itens, _e = cp.limpar_itens(itens_raw, tipos)
+            pid, _e = cp.salvar(c, CLINICA, lead=lead, evento_id=None, profissional_id=None, paciente="Lúcia",
+                                fone=FONE, itens=itens, desconto_pct=desc, pix_desconto_pct=pix,
+                                cartao_parcelas="4", parcelado=True, membro_id=51, pode_aprovar=False)
+            assert cp.plano(c, CLINICA, pid)["status"] == "aguardando_aprovacao"
+
+
+def test_aprovar_so_o_que_o_dono_viu(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        pid = _plano(c, lead, desconto="15", pode=False)
+        visto = cp.plano(c, CLINICA, pid)["versao"]
+        c.execute("update clinica_planos set desconto_pct=40, atualizado_em=now() + interval '1 second' where id=%s",
+                  (pid,))
+        c.commit()
+        assert not cp.aprovar_desconto(c, CLINICA, pid, 52, visto)
+        assert cp.aprovar_desconto(c, CLINICA, pid, 52, cp.plano(c, CLINICA, pid)["versao"])
+
+
+def test_whatsapp_fora_do_ar_volta_pra_rascunho(pool, zap, monkeypatch):
+    monkeypatch.setattr(agente, "_mandar", lambda *a, **k: {"ok": False, "erro": "fora"})
+    with pool.connection() as c:
+        lead, conv = _paciente(c)
+        pid = _plano(c, lead)
+        r = cp.enviar(c, CLINICA, pid, 51, AGORA)
+        assert not r["ok"] and "tente enviar de novo" in r["erro"]
+        assert cp.plano(c, CLINICA, pid)["status"] == "rascunho"
+        _diz(c, conv, "1")
+        assert cp.processar(pool, c, CLINICA, AGORA) == 0
+
+
+def test_numero_que_responde_a_recepcao_nao_e_do_plano(pool, zap):
+    """A recepção perguntou "em quantas vezes?" e o paciente disse "3"."""
+    with pool.connection() as c:
+        lead, conv = _paciente(c)
+        pid = _plano(c, lead)
+        cp.enviar(c, CLINICA, pid, 51, AGORA)
+        _diz(c, conv, "No cartão, em quantas vezes?", autor="humano")
+        _diz(c, conv, "3")
+        assert cp.processar(pool, c, CLINICA, AGORA) == 0
+        assert cp.plano(c, CLINICA, pid)["status"] == "enviado"
+
+
+def test_3_sem_a_opcao_oferecida_nao_vale(pool, zap):
+    with pool.connection() as c:
+        lead, conv = _paciente(c)
+        itens, _e = cp.limpar_itens([{"servico_id": _tipo(c, "Procedimento estético")["id"], "sessoes": 1,
+                                      "valor": ""}], {t["id"]: t for t in cc.listar_tipos(c, CLINICA)})
+        pid, _e = cp.salvar(c, CLINICA, lead=lead, evento_id=None, profissional_id=None, paciente="Lúcia",
+                            fone=FONE, itens=itens, desconto_pct="0", pix_desconto_pct="0", cartao_parcelas="1",
+                            parcelado=True, membro_id=51, pode_aprovar=True)
+        c.commit()
+        cp.enviar(c, CLINICA, pid, 51, AGORA)
+        _diz(c, conv, "3")
+        assert cp.processar(pool, c, CLINICA, AGORA) == 0
+
+
+def test_card_ganha_o_valor_do_plano_mesmo_ja_em_proposta(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        c.execute("update prospeccao set status='proposta', valor_estimado_centavos=150000 where id=%s", (lead,))
+        c.commit()
+        pid = _plano(c, lead)
+        cp.enviar(c, CLINICA, pid, 51, AGORA)
+        assert c.execute("select valor_estimado_centavos from prospeccao where id=%s", (lead,)).fetchone()[0] == 362000
+
+
+def test_gerar_titulos_que_faltaram(pool, zap, monkeypatch):
+    from finance import empresa
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        pid = _plano(c, lead)
+        cp.enviar(c, CLINICA, pid, 51, AGORA)
+        token = cp.plano(c, CLINICA, pid)["token"]
+    orig = empresa.criar_titulo
+    monkeypatch.setattr(empresa, "criar_titulo", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("caiu")))
+    assert cp.aceitar(pool, token, nome="Lúcia", forma="pix", agora=AGORA)
+    with pool.connection() as c:
+        assert cp.plano(c, CLINICA, pid)["titulos"] == []
+    monkeypatch.setattr(empresa, "criar_titulo", orig)
+    assert cp.gerar_titulos(pool, CLINICA, pid) == 1
+    assert cp.gerar_titulos(pool, CLINICA, pid) == 0              # nunca duplica

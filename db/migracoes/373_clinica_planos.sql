@@ -41,6 +41,9 @@ create table if not exists public.clinica_planos (
   token text unique,
   enviado_em timestamptz,
   mensagem_id bigint,
+  conversa_id bigint,                      -- a conversa por onde o plano saiu (o "1/2/3" é lido só nela)
+  ultima_msg_id bigint,                    -- a última mensagem do plano (o envio ou um lembrete): o
+                                           -- número só é resposta ao plano se vier logo depois dela
   visto_em timestamptz,                    -- a 1ª vez que o link foi aberto
   aceito_em timestamptz,
   aceito_forma text check (aceito_forma is null or aceito_forma in ('pix','cartao','parcelado')),

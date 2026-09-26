@@ -112,8 +112,15 @@ def calcular(itens: list[dict], desconto_pct: float, pix_pct: float, parcelas: i
     pix = total - round(total * float(pix_pct) / 100)
     n = max(1, int(parcelas))
     base = total // n
+    # a referência é o preço de TABELA: item do catálogo vale o preço do catálogo
+    # (baixar o valor por sessão é desconto); item avulso vale o que foi digitado
+    ref = sum(max(int(i.get("preco_catalogo_centavos") or 0), 0) * int(i["sessoes"])
+              if int(i.get("preco_catalogo_centavos") or 0) > 0
+              else int(i["valor_unit_centavos"]) * int(i["sessoes"]) for i in itens)
+    efetivo = round(100 * (1 - pix / ref), 2) if ref > 0 else 0.0
     return {"subtotal": subtotal, "desconto": desconto, "total": total, "pix": pix,
-            "parcelas": n, "parcela": base, "primeira": total - base * (n - 1)}
+            "parcelas": n, "parcela": base, "primeira": total - base * (n - 1),
+            "referencia": ref, "desconto_efetivo": max(0.0, efetivo)}
 
 
 def limpar_itens(brutos: list[dict], tipos: dict[int, dict]) -> tuple[list[dict], str | None]:
@@ -141,7 +148,8 @@ def limpar_itens(brutos: list[dict], tipos: dict[int, dict]) -> tuple[list[dict]
         if valor is None or valor <= 0:
             return [], f"Informe o valor de {nome} (por sessão)."
         itens.append({"servico_id": int(sid) if sid else None, "nome": nome[:80], "sessoes": sessoes,
-                      "valor_unit_centavos": int(valor)})
+                      "valor_unit_centavos": int(valor),
+                      "preco_catalogo_centavos": int(tipos[int(sid)]["preco_centavos"] or 0) if sid else 0})
     if not itens:
         return [], "Coloque pelo menos um procedimento."
     return itens, None
@@ -153,7 +161,8 @@ _COLS = """p.id, p.prospeccao_id, p.evento_id, p.profissional_id, p.paciente_nom
            p.subtotal_centavos, p.desconto_pct, p.total_centavos, p.pix_desconto_pct, p.cartao_parcelas,
            p.parcelado, p.validade_ate, p.status, p.token, p.enviado_em, p.visto_em, p.aceito_em,
            p.aceito_forma, p.aceito_nome, p.aceito_por, p.titulos, p.criado_em, p.desconto_aprovado_em,
-           p.conta_id, p.toque1_em, p.toque3_em"""
+           p.conta_id, p.toque1_em, p.toque3_em, p.conversa_id, p.ultima_msg_id, p.mensagem_id,
+           to_char(p.atualizado_em, 'YYYY-MM-DD"T"HH24:MI:SS.US')"""
 
 
 def _dict(c, r) -> dict:
@@ -169,6 +178,7 @@ def _dict(c, r) -> dict:
             "forma_d": FORMA_D.get(r[19] or "", ""), "aceito_nome": r[20], "aceito_por": r[21],
             "titulos": r[22] if isinstance(r[22], list) else json.loads(r[22] or "[]"), "criado_em": r[23],
             "desconto_aprovado_em": r[24], "conta_id": conta_id, "toque1_em": r[26], "toque3_em": r[27],
+            "conversa_id": r[28], "ultima_msg_id": r[29], "mensagem_id": r[30], "versao": r[31],
             **contas}
 
 
@@ -234,8 +244,12 @@ def salvar(c, conta_id: int, *, plano_id: int | None = None, lead: int | None, e
     if not paciente:
         return None, "Informe o nome do paciente."
     contas = calcular(itens, desc, pix, parc)
-    status = "aguardando_aprovacao" if (desc > cfg["teto_desconto"] and not pode_aprovar) else "rascunho"
-    aprov = (membro_id, datetime.now(timezone.utc)) if (desc > cfg["teto_desconto"] and pode_aprovar) else (None, None)
+    # O TETO É DO DESCONTO EFETIVO: o que o paciente paga no Pix contra o preço de
+    # tabela. Sem isso, "desconto 10% + Pix 50%" ou "Criolipólise a R$ 100 a sessão"
+    # passavam sem ninguém aprovar.
+    acima = contas["desconto_efetivo"] > cfg["teto_desconto"] + 0.005
+    status = "aguardando_aprovacao" if (acima and not pode_aprovar) else "rascunho"
+    aprov = (membro_id, datetime.now(timezone.utc)) if (acima and pode_aprovar) else (None, None)
     if plano_id:
         r = c.execute(
             """update clinica_planos set itens=%s, subtotal_centavos=%s, desconto_pct=%s, total_centavos=%s,
@@ -259,11 +273,14 @@ def salvar(c, conta_id: int, *, plano_id: int | None = None, lead: int | None, e
     return r[0], None
 
 
-def aprovar_desconto(c, conta_id: int, plano_id: int, membro_id: int | None) -> bool:
+def aprovar_desconto(c, conta_id: int, plano_id: int, membro_id: int | None, visto: str = "") -> bool:
+    """Aprova O QUE O DONO VIU: `visto` é o `atualizado_em` da tela. Se a recepção
+    mudou o plano no meio (15% virou 40%), não aprova — ele olha de novo."""
     r = c.execute("""update clinica_planos set status='rascunho', desconto_aprovado_por=%s,
                             desconto_aprovado_em=now(), atualizado_em=now()
-                      where id=%s and conta_id=%s and status='aguardando_aprovacao' returning id""",
-                  (membro_id, plano_id, conta_id)).fetchone()
+                      where id=%s and conta_id=%s and status='aguardando_aprovacao'
+                        and to_char(atualizado_em, 'YYYY-MM-DD"T"HH24:MI:SS.US') = %s returning id""",
+                  (membro_id, plano_id, conta_id, visto)).fetchone()
     return r is not None
 
 
@@ -325,7 +342,7 @@ def texto_envio(c, p: dict) -> str:
 
 
 def _conversa_e_destino(c, conta_id: int, p: dict) -> tuple[int | None, str]:
-    conv = ca._conversa(c, conta_id, {"lead": p["lead"], "fone": p["fone"]})
+    conv = p.get("conversa_id") or ca._conversa(c, conta_id, {"lead": p["lead"], "fone": p["fone"]})
     dig = ca._digitos(p["fone"])
     if len(dig) < 10 and conv:
         r = c.execute("select coalesce(contato_ref,'') from conversas where id=%s and conta_id=%s",
@@ -361,7 +378,12 @@ def _mover(c, conta_id: int, lead: int | None, destino: str, valor: int | None, 
     if not r:
         return
     pode = _ANTES if destino == "proposta" else _ANTES + ("proposta",)
-    if r[0] not in pode or r[0] == destino:
+    if r[0] == destino and valor:
+        # já está na etapa (o Finalizar pôs em Plano de tratamento): o valor é o do plano
+        c.execute("update prospeccao set valor_estimado_centavos=%s, atualizado_em=now() where id=%s and conta_id=%s",
+                  (valor, lead, conta_id))
+        return
+    if r[0] not in pode:
         return
     c.execute("""update prospeccao set status=%s, estagio='lead', atualizado_em=now(),
                         valor_estimado_centavos = coalesce(%s, valor_estimado_centavos)
@@ -386,9 +408,9 @@ def enviar(c, conta_id: int, plano_id: int, membro_id: int | None, agora: dateti
     token = p["token"] or secrets.token_urlsafe(16)
     validade = ca.hoje_br(agora) + timedelta(days=cfg["validade_dias"])
     r = c.execute("""update clinica_planos set status='enviado', token=%s, validade_ate=%s, enviado_em=%s,
-                            atualizado_em=now()
+                            conversa_id=%s, atualizado_em=now()
                       where id=%s and conta_id=%s and status='rascunho' returning id""",
-                  (token, validade, agora, plano_id, conta_id)).fetchone()
+                  (token, validade, agora, conv, plano_id, conta_id)).fetchone()
     if not r:
         c.rollback()
         return {"ok": False, "erro": "Esse plano já foi enviado."}
@@ -397,11 +419,17 @@ def enviar(c, conta_id: int, plano_id: int, membro_id: int | None, agora: dateti
     c.commit()                          # enviado ANTES do WhatsApp: nunca sai duas vezes
     res = _mandar(c, conta_id, conv, destino, texto_envio(c, p))
     if res.get("ok"):
-        c.execute("update clinica_planos set mensagem_id=%s where id=%s and conta_id=%s",
-                  (res.get("mensagem_id"), plano_id, conta_id))
+        c.execute("update clinica_planos set mensagem_id=%s, ultima_msg_id=%s where id=%s and conta_id=%s",
+                  (res.get("mensagem_id"), res.get("mensagem_id"), plano_id, conta_id))
+    else:
+        # NÃO SAIU: o plano volta pra rascunho. Um plano 'enviado' que o paciente nunca
+        # recebeu seria aceito pelo "1" de outra coisa e ganharia D+1 "conseguiu ver?"
+        c.execute("""update clinica_planos set status='rascunho', enviado_em=null, validade_ate=null,
+                            atualizado_em=now() where id=%s and conta_id=%s and status='enviado'""",
+                  (plano_id, conta_id))
     c.commit()
     return {"ok": bool(res.get("ok")), "link": link(p),
-            "erro": None if res.get("ok") else "O plano ficou pronto, mas a mensagem não saiu (WhatsApp)."}
+            "erro": None if res.get("ok") else "A mensagem não saiu (WhatsApp). O plano continua pronto: tente enviar de novo."}
 
 
 # ------------------------------------------------------------------ o aceite
@@ -477,11 +505,14 @@ def parcelas_do_aceite(p: dict, forma: str, hoje: date) -> list[tuple[str, int, 
 
 def _titulos(pool, p: dict, forma: str, agora: datetime) -> list[int]:
     from finance import empresa as _emp
+    # a ficha do cliente pelo TELEFONE (nome parecido não é a mesma pessoa: "Maria
+    # Silva" não é "Maria Silva Santos"); sem telefone único, cria uma ficha nova
     cliente_id = None
     try:
         from finance import clientes as _cli
-        cliente_id = _cli.achar_cliente_por_nome(pool, p["conta_id"], p["paciente"], papel="cliente") or \
-            _cli.criar_cliente(pool, p["conta_id"], p["paciente"])
+        achado = _cli.buscar_unico_por_telefone(pool, p["conta_id"], p["fone"]) if p["fone"] else None
+        cliente_id = achado["id"] if achado else _cli.criar_cliente(pool, p["conta_id"], p["paciente"],
+                                                                     telefone=p["fone"] or None)
     except Exception:  # noqa: BLE001 — sem a base de clientes, o título vai sem a ficha
         cliente_id = None
     ids = []
@@ -496,6 +527,21 @@ def _titulos(pool, p: dict, forma: str, agora: datetime) -> list[int]:
         except Exception:  # noqa: BLE001 — o aceite vale; o título a recepção lança se faltar
             _log.warning("planos: título não criado (plano %s)", p["id"], exc_info=True)
     return ids
+
+
+def gerar_titulos(pool, conta_id: int, plano_id: int) -> int:
+    """O plano foi aceito e os títulos não saíram (o banco caiu no meio): gera agora.
+    Só com a lista vazia — nunca duplica."""
+    with pool.connection() as c:
+        p = plano(c, conta_id, plano_id)
+    if not p or p["status"] != "aceito" or p["titulos"] or not p["aceito_forma"]:
+        return 0
+    ids = _titulos(pool, p, p["aceito_forma"], p["aceito_em"] or datetime.now(timezone.utc))
+    with pool.connection() as c:
+        c.execute("update clinica_planos set titulos=%s where id=%s and conta_id=%s and titulos = '[]'::jsonb",
+                  (json.dumps(ids), plano_id, conta_id))
+        c.commit()
+    return len(ids)
 
 
 def recusar(c, token: str) -> bool:
@@ -529,38 +575,43 @@ def _avisar(c, conta_id: int, p: dict, titulo: str, corpo: str) -> None:
 def processar(pool, c, conta_id: int, agora: datetime, conversa_id: int | None = None, responder=None) -> int:
     """"1", "2" ou "3" depois do plano = aceite com essa forma (Pix, cartão, parcelado).
 
-    Só o número puro, só enquanto o plano vale, e só se nenhuma outra mensagem nossa
-    pedindo "responda 1" (lembrete de consulta, convite de vaga) veio depois do plano
-    — aí o número é dela."""
+    Só vale o número puro que vem LOGO DEPOIS da última mensagem do plano (o envio ou
+    um lembrete dele), na conversa por onde o plano saiu: se a recepção perguntou
+    "no cartão, em quantas vezes?" e o paciente disse "3", ou se o lembrete da
+    consulta ("responda 1") veio no meio, o número não é do plano. Plano que não
+    saiu (sem mensagem) não é aceito por número nenhum. O "3" só quando a opção foi
+    oferecida. O poller pega a trava da conversa (a mesma do agente) e pula a que o
+    agente está atendendo: um número, uma resposta."""
+    from finance import clinica_agente as cla
     feitos = 0
-    extra = " and cv.id=%s" if conversa_id else ""
+    extra = " and p.conversa_id=%s" if conversa_id else ""
     try:
         with c.transaction():
             rows = c.execute(
-                """select p.id, p.token, cv.id, m.texto, p.parcelado, p.paciente_nome
+                """select p.id, p.token, p.conversa_id, m.texto, p.parcelado, p.paciente_nome, p.cartao_parcelas
                      from clinica_planos p
-                     join conversas cv on cv.conta_id = p.conta_id
-                          and (cv.prospeccao_id = p.prospeccao_id
-                               or right(regexp_replace(coalesce(cv.contato_ref,''), '\\D', '', 'g'), 8)
-                                  = right(regexp_replace(p.paciente_fone, '\\D', '', 'g'), 8))
-                     join mensagens m on m.conversa_id = cv.id and m.direcao = 'in' and m.criado_em > p.enviado_em
-                    where p.conta_id=%s and p.status='enviado' and p.validade_ate >= %s""" + extra + """
-                      and not exists (select 1 from mensagens x where x.conversa_id = cv.id and x.direcao = 'out'
-                                        and x.id <> coalesce(p.mensagem_id, 0) and x.texto ilike '%%responda 1%%'
-                                        and x.criado_em > p.enviado_em and x.criado_em < m.criado_em)
+                     join mensagens m on m.conversa_id = p.conversa_id and m.direcao = 'in'
+                          and m.id > p.ultima_msg_id
+                    where p.conta_id=%s and p.status='enviado' and p.validade_ate >= %s
+                      and p.mensagem_id is not null and p.ultima_msg_id is not null""" + extra + """
+                      and (select max(x.id) from mensagens x where x.conversa_id = m.conversa_id
+                              and x.direcao = 'out' and x.id < m.id) = p.ultima_msg_id
                     order by m.criado_em, m.id""",
                 (conta_id, ca.hoje_br(agora), conversa_id) if conversa_id else (conta_id, ca.hoje_br(agora))
             ).fetchall()
     except Exception:  # noqa: BLE001 — sem a 373
         return 0
-    for _pid, token, conv, texto, parcelado, paciente in rows:
+    for _pid, token, conv, texto, parcelado, paciente, parcelas in rows:
         m = _RE_RESPOSTA.match(texto or "")
         if not m:
             continue
         forma = _RESPOSTA[m.group(1)]
-        if forma == "parcelado" and not parcelado:
+        if forma == "parcelado" and (not parcelado or int(parcelas) <= 1):
             continue
         c.commit()                          # o aceite abre as conexões dele
+        if conversa_id is None and not cla.tentar_travar(c, conv):
+            c.rollback()
+            continue                        # o agente está nela; ele trata
         if aceitar(pool, token, nome=paciente, forma=forma, por="whatsapp", agora=agora):
             texto_ok = (f"Perfeito! Anotei: {FORMA_D[forma]}. A recepção te chama por aqui pra combinar o "
                         "pagamento e marcar a 1ª sessão 😊")
@@ -568,9 +619,26 @@ def processar(pool, c, conta_id: int, agora: datetime, conversa_id: int | None =
                 responder(texto_ok)
             else:
                 _mandar(c, conta_id, conv, _destino_da_conversa(c, conta_id, conv), texto_ok)
-                c.commit()
+            c.commit()
             feitos += 1
+        else:
+            c.commit()
     return feitos
+
+
+def ja_respondido(c, conta_id: int, conversa_id: int) -> bool:
+    """O poller já aceitou o plano por esta mensagem, um instante antes do agente: o
+    agente fica quieto em vez de responder o mesmo número com a IA."""
+    try:
+        with c.transaction():
+            return c.execute(
+                """select 1 from clinica_planos p
+                    where p.conta_id=%s and p.conversa_id=%s and p.aceito_por='whatsapp'
+                      and p.aceito_em >= (select max(m.criado_em) from mensagens m
+                                           where m.conversa_id = p.conversa_id and m.direcao = 'in')
+                    limit 1""", (conta_id, conversa_id)).fetchone() is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _destino_da_conversa(c, conta_id: int, conv: int) -> str:
@@ -656,8 +724,11 @@ def cobrar(pool, c, conta_id: int, agora: datetime) -> dict:
                          "returning id", (agora, p["id"], conta_id)).fetchone():
             continue
         c.commit()
-        if _mandar(c, conta_id, conv, destino, texto_toque(p, n)).get("ok"):
+        res = _mandar(c, conta_id, conv, destino, texto_toque(p, n))
+        if res.get("ok"):
             out["toques"] += 1
+            c.execute("update clinica_planos set ultima_msg_id=%s where id=%s and conta_id=%s",
+                      (res.get("mensagem_id"), p["id"], conta_id))
         c.commit()
     return out
 

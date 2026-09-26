@@ -335,9 +335,15 @@ def candidatos(c, conta_id: int, v: dict, agora: datetime) -> tuple[list[dict], 
                        (v["origem_evento_id"], conta_id)).fetchone() if v.get("origem_evento_id") else None
     tipos_cache: dict = {}
     ordem = {g: i for i, (g, _d) in enumerate(GRUPOS)}
+    # o assinante com prioridade na fila (fase 7b) vem antes, na mesma ordem entre si
+    from finance import clinica_assinaturas as cas
+    prior = cas.prioritarios(c, conta_id)
     sinais = sorted(_sinais(c, conta_id, agora, v["profissional_id"], v["inicio"]),
-                    key=lambda s: (ordem[s["grupo"]], s["grupo"] == "retorno", -s["quando"].timestamp()
-                                   if s["grupo"] != "retorno" else s["quando"].timestamp()))
+                    key=lambda s: (s["lead"] not in prior, ordem[s["grupo"]], s["grupo"] == "retorno",
+                                   -s["quando"].timestamp() if s["grupo"] != "retorno" else s["quando"].timestamp()))
+    for s in sinais:
+        if s["lead"] in prior:
+            s["porque"] = f"{s['porque']} · assinante"
     for s in sinais:
         if s["conversa_id"] in vistos:
             continue
@@ -402,7 +408,7 @@ def candidatos(c, conta_id: int, v: dict, agora: datetime) -> tuple[list[dict], 
             item = {**item, "grupo": "vem", "grupo_d": GRUPO_D["vem"],
                     "porque": f"já vem nesse dia às {ca.hora_txt(mesmo_dia[0][1])} · {item['porque']}"}
         chamar.append({**item, "servico_id": tipo["id"], "tipo": tipo["nome"]})
-    chamar.sort(key=lambda x: ordem[x["grupo"]])
+    chamar.sort(key=lambda x: (x["lead"] not in prior, ordem[x["grupo"]]))
     return chamar, fora
 
 

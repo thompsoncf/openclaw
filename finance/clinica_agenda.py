@@ -507,10 +507,19 @@ def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: s
     card_pela_agenda(c, conta_id, evento_id, nova, tratamento=tratamento,
                      valor_centavos=valor_centavos, membro_id=membro_id)
     if nova == "finalizado":
+        from finance import clinica_assinaturas as cas
         from finance import clinica_pacotes as ckp
+        coberto = False
         try:
             with c.transaction():
-                ckp.ao_finalizar(c, conta_id, evento_id, retorno_dias)
+                # a sessão inclusa na assinatura (fase 7b) não baixa do pacote
+                coberto = cas.ao_finalizar(c, conta_id, evento_id)
+        except Exception:  # noqa: BLE001
+            _log.warning("agenda da clínica: benefício da assinatura não gravado (evento %s)", evento_id,
+                         exc_info=True)
+        try:
+            with c.transaction():
+                ckp.ao_finalizar(c, conta_id, evento_id, retorno_dias, baixa=not coberto)
         except Exception:  # noqa: BLE001 — finalizar não pode cair por isso; mas deixa rastro
             _log.warning("agenda da clínica: pacote/retorno não gravado (evento %s)", evento_id, exc_info=True)
     return None

@@ -142,7 +142,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="pk-pag">
   <div class="pk-topo"><div><h2>Pacotes e retornos</h2>
     <div class="sub">As sessões vendidas no plano de tratamento viram saldo; cada atendimento finalizado baixa uma. Retorno pedido pelo médico vira prazo, e o Zaq chama o paciente antes.</div></div>
-    <div class="pk-acoes"><a href="/painel/clinica/agenda">‹ Agenda</a><a href="/painel/clinica/planos">Planos</a></div></div>
+    <div class="pk-acoes"><a href="/painel/clinica/agenda">‹ Agenda</a><a href="/painel/clinica/planos">Planos</a><a href="/painel/clinica/assinaturas">Assinaturas</a></div></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
   <div class="pk-kpi">

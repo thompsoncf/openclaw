@@ -150,8 +150,18 @@ def numeros(c, conta_id: int, ini: date, fim: date, agora: datetime | None = Non
     do_pacote = {r[0] for r in _t(c, """select u.evento_id from clinica_pacote_consumos u
                                           join eventos_agenda e on e.id = u.evento_id and e.conta_id = u.conta_id
                                          where u.conta_id=%s and e.inicio >= %s and e.inicio < %s""", (conta_id, a, b))}
+    # a sessão inclusa na assinatura também não: o dinheiro é a mensalidade
+    da_assinatura = {r[0] for r in _t(c, """select u.evento_id from clinica_assinatura_usos u
+                                              join eventos_agenda e on e.id = u.evento_id and e.conta_id = u.conta_id
+                                             where u.conta_id=%s and e.inicio >= %s and e.inicio < %s""",
+                                      (conta_id, a, b))}
     receita_avulsa = sum(int((tipos.get(r[2]) or {}).get("preco_centavos") or 0)
-                         for r in finalizados if r[0] not in do_pacote)
+                         for r in finalizados if r[0] not in do_pacote and r[0] not in da_assinatura)
+    mensalidades = sum(int(r[0]) for r in _t(c, """select valor_centavos from clinica_assinatura_mensalidades
+                                                     where conta_id=%s and competencia >= %s and competencia < %s""",
+                                             (conta_id, ini, fim)))
+    assinantes = _t(c, "select preco_centavos from clinica_assinantes where conta_id=%s and estado='ativa'",
+                    (conta_id,))
 
     # ---- plano de tratamento
     planos = _t(c, """select status, total_centavos, aceito_forma, pix_desconto_pct, enviado_em, aceito_em
@@ -184,7 +194,7 @@ def numeros(c, conta_id: int, ini: date, fim: date, agora: datetime | None = Non
                       where v.conta_id=%s and v.inicio >= %s and v.inicio < %s""", (conta_id, a, b))
 
     atend = len(finalizados)
-    receita = receita_avulsa + valor_aceito
+    receita = receita_avulsa + valor_aceito + mensalidades
     vazios = sum(o["vazios"] for o in ocup)
     origem = {"recepcao": 0, "ia": 0, "vaga": 0}
     for r in ags:
@@ -200,8 +210,9 @@ def numeros(c, conta_id: int, ini: date, fim: date, agora: datetime | None = Non
         "consulta_preco": int(consulta["preco_centavos"]) if consulta else None,
         "consulta_min": int(consulta["duracao_min"]) if consulta else None,
         "fora_h": round(sum(o["fora_h"] for o in ocup), 1), "passado": fim <= hoje,
-        "atendimentos": atend, "receita": receita, "ticket": receita // atend if atend else None,
-        "receita_avulsa": receita_avulsa, "valor_aceito": valor_aceito,
+        "atendimentos": atend, "receita": receita, "ticket": (receita_avulsa + valor_aceito) // atend if atend else None,
+        "receita_avulsa": receita_avulsa, "valor_aceito": valor_aceito, "mensalidades": mensalidades,
+        "assinantes": len(assinantes), "recorrente": sum(int(r[0]) for r in assinantes),
         "consultas": len(consultas_fin), "planos_enviados": len(enviados), "planos_aceitos": len(aceitos),
         "consulta_proposta_pct": _pct(len(enviados), len(consultas_fin)),
         "proposta_fechada_pct": _pct(len(aceitos), len(enviados)),

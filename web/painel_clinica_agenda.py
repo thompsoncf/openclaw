@@ -267,6 +267,11 @@ def ver_evento(request: Request, evento_id: int):
         hoje = ca.hoje_br(agora)
         pacote_feito = ckp.do_evento(c, conta_id, evento_id, hoje) if ev["situacao"] == "finalizado" else None
         pacote_vai = ckp.para_o_evento(c, conta_id, ev) if ev["situacao"] != "finalizado" else None
+        from finance import clinica_assinaturas as cas
+        assin_vai = cas.cobre(c, conta_id, ev) if ev["situacao"] != "finalizado" else None
+        assin_feito = cas.do_evento(c, conta_id, evento_id) if ev["situacao"] == "finalizado" else None
+        if assin_vai:
+            pacote_vai = None                      # a sessão do mês da assinatura cobre
         tipo_ev = next((t for t in cc.listar_tipos(c, conta_id, so_ativos=False) if t["id"] == ev["servico_id"]), None)
         volta_padrao = (tipo_ev or {}).get("volta_dias") or ""
         try:
@@ -278,7 +283,7 @@ def ver_evento(request: Request, evento_id: int):
         retorno = {"vence": r[0], "estado": r[1]} if r else None
         pac_cfg = ckp.config(c, conta_id)
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
-                   pacote_feito=pacote_feito, pacote_vai=pacote_vai, volta_padrao=volta_padrao, retorno=retorno,
+                   pacote_feito=pacote_feito, pacote_vai=pacote_vai, assin_vai=assin_vai, assin_feito=assin_feito, volta_padrao=volta_padrao, retorno=retorno,
                    pac_cfg=pac_cfg,
                    ev=ev, prof=prof, proximos=ca.PROXIMOS.get(ev["situacao"], ()), remarcar=remarcar,
                    conversa=conversa, quando=f"{ca.dia_txt(ev['inicio'])} {ev['hora']}–{ev['fim_txt']}",
@@ -547,6 +552,9 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     {% if 'finalizado' in proximos %}
     <form class="ag-form" method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao" style="margin-top:.7rem">
       <input type="hidden" name="nova" value="finalizado">
+      {% if assin_vai %}
+      <div class="inteira"><span class="mut">Assinante {{ assin_vai.plano }}: finalizar usa a sessão inclusa do mês ({{ assin_vai.usadas + 1 }} de {{ assin_vai.sessoes }}); o pacote não baixa.</span></div>
+      {% endif %}
       {% if pacote_vai %}
       <div class="inteira"><span class="mut">Sessão do pacote: finalizar baixa 1 do saldo ({{ pacote_vai.nome }}, sessão {{ pacote_vai.usadas + 1 }} de {{ pacote_vai.total }}).</span></div>
       {% else %}

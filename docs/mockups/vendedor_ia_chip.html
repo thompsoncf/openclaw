@@ -182,6 +182,7 @@ tbody tr:last-child td{border-bottom:0}
 .q2 p{margin:0;color:var(--dim);font-size:.85rem}
 .rec{font-size:.84rem;color:var(--neon-2)}
 .rec::before{content:"Recomendo: ";color:var(--faint)}
+.rec.ok2::before{content:"No sistema: ";color:var(--faint)}
 .ab{border:1px dashed var(--ambar-borda);color:var(--ambar-2)}
 @media (max-width:640px){
   .regra{grid-template-columns:1fr}
@@ -194,14 +195,14 @@ tbody tr:last-child td{border-bottom:0}
 <div class="wrap">
 
 <header class="head">
-  <span class="k">Mockup para aprovação · Prime Eventos · 26/09/2026</span>
+  <span class="k">Mockup · versão 2, com as decisões do dono · Prime Eventos · 26/09/2026</span>
   <h1>O zaq teste vira vendedor com IA, atendendo o chip CP Thiago</h1>
   <p>Todo contato <b>novo</b> que chegar no número do <b>CP Thiago</b> vai para o <b>zaq teste</b>, e a IA atende do primeiro "oi" até a visita marcada. Quando precisar de gente, ela chama a retaguarda humana. O chip principal (CP Zarb) segue com o rodízio de sempre, sem IA.</p>
   <div class="quem">
     <span class="pill">Prime Eventos · conta 34</span>
     <span class="pill ok">chip CP Thiago · conectado</span>
     <span class="pill ia">zaq teste · vendedor IA</span>
-    <span class="pill">retaguarda: Thiago e Manoel</span>
+    <span class="pill">retaguarda: Jacqueline</span>
   </div>
 </header>
 
@@ -274,10 +275,11 @@ tbody tr:last-child td{border-bottom:0}
         <div class="campos">
           <div class="cp"><label>Quem recebe</label><div class="sel"><span class="avia">IA</span> zaq teste · vendedor IA</div></div>
           <div class="cp"><label>IA atende</label><div class="sw"><span class="tg on"></span> ligada neste número</div></div>
-          <div class="cp"><label>Horário da IA</label><div class="seg"><span class="on">24 horas</span><span>Seg–sáb 8h–18h</span></div></div>
+          <div class="cp"><label>Horário da IA</label><div class="seg"><span class="on">24 horas</span><span>Horário próprio</span></div></div>
           <div class="cp"><label>Vale para</label><div class="sel">Contatos novos a partir de 29/09</div></div>
-          <div class="cp"><label>Retaguarda · seg–sáb 8h–18h</label><div class="sel">Thiago Pinheiro · WhatsApp e app</div></div>
-          <div class="cp"><label>Retaguarda · fora do horário</label><div class="sel">Manoel Soares · WhatsApp</div></div>
+          <div class="cp"><label>Retaguarda (quem a IA chama)</label><div class="sel">Jacqueline · WhatsApp e app</div></div>
+          <div class="cp"><label>Proposta formal pela IA</label><div class="sw"><span class="tg"></span> desligada no começo · liga depois dos primeiros testes</div></div>
+          <div class="cp full"><label>Horário próprio (quando não for 24 horas)</label><div class="seg"><span class="on">seg</span><span class="on">ter</span><span class="on">qua</span><span class="on">qui</span><span class="on">sex</span><span class="on">sáb</span><span>dom</span><span>das 8h às 22h</span><span>fora dele: responde "retorno às 8h"</span></div></div>
           <div class="alerta">Nos últimos 30 dias, <b>54% das mensagens enviadas por este número saíram do celular</b>. Com a regra ligada, quem responder pelo celular <b>pausa a IA naquela conversa</b>, para os dois não falarem com o cliente ao mesmo tempo.</div>
           <div class="rodape full"><span class="bt">Pausar a regra</span><span class="bt pri">Salvar regra</span></div>
         </div>
@@ -300,7 +302,7 @@ tbody tr:last-child td{border-bottom:0}
         <div class="ch"><div><div class="n">Larissa M.</div><div class="s">exemplo · CP Thiago · entrou 21:42 · lead do zaq teste</div></div><span class="selo">IA atendendo</span></div>
         <div class="msgs">
           <div class="b">Oi! Vi o anúncio, queria saber o valor do espaço pra um aniversário de 15 anos<span class="h">21:42</span></div>
-          <div class="b out">Oi, Larissa! Que bom falar com você 😊 Sou a assistente virtual da Prime Eventos. Pra eu te passar certinho: qual a data que vocês pensam e mais ou menos quantos convidados?<span class="h">21:42</span></div>
+          <div class="b out">Oi, Larissa! Que bom falar com você 😊 Sou a assistente Zaq, da Prime Eventos. Pra eu te passar certinho: qual a data que vocês pensam e mais ou menos quantos convidados?<span class="h">21:42</span></div>
           <div class="b">Março do ano que vem, dia 13. Uns 120<span class="h">21:44</span></div>
           <div class="b">é sábado</div>
           <div class="sis">2 mensagens seguidas → uma resposta só</div>
@@ -309,7 +311,7 @@ tbody tr:last-child td{border-bottom:0}
           <div class="b out">Perfeito! Vou pedir pra equipe confirmar o sábado 10h com você amanhã cedo 🙌<span class="h">21:46</span></div>
           <div class="chama">
             <span class="t">Chamando a retaguarda · visita aceita</span>
-            <p>Larissa aceitou <b>sábado 03/10, 10h</b>. A IA pausou nesta conversa até alguém responder. Fora do horário: avisado o <b>Manoel</b>; às 8h o aviso vai também para o <b>Thiago</b>.</p>
+            <p>Larissa aceitou <b>sábado 03/10, 10h</b>. A IA pausou nesta conversa até alguém responder. A <b>Jacqueline</b> foi avisada no WhatsApp e no app. O lead continua do zaq teste.</p>
             <div class="bts"><span class="bt pri">Confirmar visita</span><span class="bt">Assumir a conversa</span><span class="bt ia">Devolver à IA</span></div>
           </div>
         </div>
@@ -370,7 +372,7 @@ tbody tr:last-child td{border-bottom:0}
       <ul>
         <li>Confirmar data de festa ou visita.</li>
         <li>Dar preço que não está no catálogo, ou somar pacotes que são alternativas.</li>
-        <li>Mandar proposta formal, contrato ou cobrança de sinal.</li>
+        <li>Mandar contrato ou cobrança de sinal. <b>Proposta formal</b> fica desligada no começo e liga pela chave da regra, depois da análise dos primeiros testes.</li>
         <li>Prometer "vou passar pra equipe" sem que o aviso tenha saído.</li>
         <li>Responder enquanto um humano está na conversa.</li>
       </ul>
@@ -385,14 +387,14 @@ tbody tr:last-child td{border-bottom:0}
     <p>Mesmas medidas para todos, por lead recebido. Os números da equipe são reais (conta 34, últimos 30 dias); a coluna da IA começa vazia e enche com a campanha.</p>
   </header>
   <div class="kpis">
-    <div class="kpi ia"><span class="l">Leads da campanha</span><span class="v">—</span><span class="s">desde 29/09</span></div>
+    <div class="kpi ia"><span class="l">Leads da campanha</span><span class="v">—</span><span class="s">ciclo de setembro · fecha a cada mês</span></div>
     <div class="kpi ia"><span class="l">1ª resposta da IA</span><span class="v">—</span><span class="s">meta: menos de 1 min</span></div>
     <div class="kpi ia"><span class="l">Visitas marcadas</span><span class="v">—</span><span class="s">meta do time: 8% dos leads</span></div>
     <div class="kpi ia"><span class="l">Custo da IA</span><span class="v">—</span><span class="s">por lead e por contrato</span></div>
   </div>
   <div class="tabw">
     <table>
-      <thead><tr><th>Últimos 30 dias</th><th class="ia">zaq teste · IA</th><th>Jacqueline</th><th>Pedro</th><th>Thiago</th><th>Meta</th></tr></thead>
+      <thead><tr><th>Mês (ciclo do desafio)</th><th class="ia">zaq teste · IA</th><th>Jacqueline</th><th>Pedro</th><th>Thiago</th><th>Meta</th></tr></thead>
       <tbody>
         <tr><td>Leads novos</td><td class="ia">—</td><td>112</td><td>93</td><td>97</td><td></td></tr>
         <tr><td>1ª resposta (mediana)</td><td class="ia">—</td><td>40 min</td><td>69 min</td><td>82 min</td><td class="alvo">&lt; 1 min</td></tr>
@@ -441,24 +443,24 @@ tbody tr:last-child td{border-bottom:0}
     <div class="ps"><b>Áudio e memória</b><p>Responder depois da transcrição do áudio (hoje 7% das mensagens de cliente são áudio), e dar à IA o resumo da conversa longa, não só as 12 últimas mensagens.</p></div>
     <div class="ps"><b>Painel do desafio e custo</b><p>A tela 3, com o custo da IA gravado por conversa.</p></div>
   </div>
-  <p class="nota"><i>!</i><span>Antes de ligar, sem código: a base de conhecimento da Prime <b>se contradiz</b>. As instruções dizem "nunca feche valor exato", mas a IA está autorizada a mandar orçamento formal; e uma resposta pronta oferece horário de visita que a IA não pode marcar. A pergunta 4 abaixo resolve isso.</span></p>
+  <p class="nota"><i>!</i><span>Antes de ligar, sem código: a base de conhecimento da Prime <b>se contradiz</b>. As instruções dizem "nunca feche valor exato", mas a IA está autorizada a mandar orçamento formal; e uma resposta pronta oferece horário de visita que a IA não pode marcar. A decisão 4 abaixo resolve isso: no começo a IA dá a faixa "a partir de" e convida para a visita.</span></p>
 </section>
 
 <section class="sec">
   <header>
-    <span class="k">Para aprovar</span>
-    <h2>As decisões que são suas</h2>
-    <p>Cada uma já vem com a minha recomendação. Se aprovar "assim", sigo todas elas.</p>
+    <span class="k">Decidido em 26/09</span>
+    <h2>As decisões do dono</h2>
+    <p>O que foi respondido, e como fica no sistema.</p>
   </header>
   <div class="dec">
-    <div class="q2"><span class="qn">01</span><h3>O anúncio novo aponta só para o CP Thiago?</h3><p>A regra depende disso. Se o número estiver também na bio, no cartão ou em outro anúncio, esses contatos também vão para a IA.</p><span class="rec">sim, só este anúncio usa o número, e ninguém responde pelo celular dele (se responder, a IA pausa).</span></div>
-    <div class="q2"><span class="qn">02</span><h3>A IA atende quem?</h3><p>Só contatos novos, ou também quem voltar a escrever nas 35 conversas antigas do chip.</p><span class="rec">só contatos novos a partir da data de início.</span></div>
-    <div class="q2"><span class="qn">03</span><h3>Horário da IA</h3><p>32% dos leads chegam fora do horário comercial, quando a equipe leva quase 5 horas para responder.</p><span class="rec">IA responde 24 horas; visita só é oferecida de segunda a sábado, das 8h às 18h.</span></div>
-    <div class="q2"><span class="qn">04</span><h3>Preço: faixa ou proposta formal?</h3><p>As instruções da Prime dizem que o valor fechado sai da visita.</p><span class="rec">faixa "a partir de" do catálogo e convite para a visita; a IA não manda proposta formal.</span></div>
-    <div class="q2"><span class="qn">05</span><h3>Quem é a retaguarda?</h3><p>Quem recebe o chamado da IA e confirma a visita.</p><span class="rec">Thiago de segunda a sábado, das 8h às 18h; Manoel fora disso. Preciso do WhatsApp de cada um para o aviso.</span></div>
-    <div class="q2"><span class="qn">06</span><h3>Como a IA se apresenta?</h3><p>Com nome próprio ou como assistente.</p><span class="rec ab">assistente virtual da Prime Eventos. Se quiser um nome, qual?</span></div>
-    <div class="q2"><span class="qn">07</span><h3>De quem é o lead depois que a visita é confirmada?</h3><p>Isso decide a comissão e quem fecha o contrato.</p><span class="rec">fica com o zaq teste até a visita; quem confirma a visita vira o dono do lead a partir dali.</span></div>
-    <div class="q2"><span class="qn">08</span><h3>Quanto tempo dura o desafio, e o que é sucesso?</h3><p>Critério para ligar de vez ou desligar.</p><span class="rec">30 dias ou 100 leads, o que vier primeiro; sucesso é 1ª resposta abaixo de 1 minuto, visita marcada em pelo menos 8% dos leads e nenhuma promessa sem lastro.</span></div>
+    <div class="q2"><span class="qn">01</span><h3>O anúncio novo aponta só para o CP Thiago</h3><p>No começo. Se alguém responder pelo celular do chip, a IA pausa naquela conversa.</p><span class="rec ok2">regra por número, só no CP Thiago.</span></div>
+    <div class="q2"><span class="qn">02</span><h3>A IA atende só contatos novos</h3><p>A partir da data em que a regra for ligada. Os 14 leads que já estão no chip continuam com os donos de hoje.</p><span class="rec ok2">campo "Vale para" na regra.</span></div>
+    <div class="q2"><span class="qn">03</span><h3>24 horas no começo, com horário configurável</h3><p>A regra ganha "Horário próprio": dias da semana, faixa de horas e o que a IA diz fora dele. A visita é sempre oferecida de segunda a sábado, das 8h às 18h.</p><span class="rec ok2">começa em 24 horas.</span></div>
+    <div class="q2"><span class="qn">04</span><h3>Proposta formal: sim, depois dos primeiros testes</h3><p>No começo a IA dá a faixa "a partir de" do catálogo e convida para a visita. A proposta formal fica numa chave da regra, desligada, para ligar depois da análise.</p><span class="rec ok2">chave "Proposta formal pela IA", desligada.</span></div>
+    <div class="q2"><span class="qn">05</span><h3>A retaguarda é a Jacqueline</h3><p>Ela toma conta do espaço: recebe os chamados da IA (visita aceita, desconto, data ocupada, pedido de pessoa) e confirma as visitas. Ela já tem WhatsApp e aviso no app cadastrados.</p><span class="rec ok2">retaguarda: Jacqueline, em todo horário.</span></div>
+    <div class="q2"><span class="qn">06</span><h3>"Sou a assistente Zaq, da Prime Eventos"</h3><p>É como a IA se apresenta na primeira mensagem, para soar como alguém da equipe de vendas.</p><span class="rec ok2">vai no texto de abertura da IA.</span></div>
+    <div class="q2"><span class="qn">07</span><h3>Tudo conta para o zaq teste</h3><p>O lead continua dele mesmo depois que a Jacqueline confirma a visita ou fecha o contrato, para medir o resultado da IA. A divisão com a equipe fica para depois.</p><span class="rec ok2">o chamado não troca o dono do lead.</span></div>
+    <div class="q2"><span class="qn">08</span><h3>O desafio fecha a cada mês</h3><p>O painel mostra o mês corrente e os anteriores, com a IA ao lado da equipe, sem data para acabar.</p><span class="rec ok2">painel por mês, no horário de Brasília.</span></div>
   </div>
 </section>
 

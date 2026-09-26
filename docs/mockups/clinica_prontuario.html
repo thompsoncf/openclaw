@@ -199,7 +199,14 @@ code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5
 <h2><span class="n">08</span>O histórico que está no Amigo (P5)</h2>
 <p class="sub">O prontuário antigo não pode sumir quando a clínica deixar o Amigo</p>
 <div class="perigo"><b>Antes de cancelar o Amigo, o histórico tem que estar salvo.</b> A lei manda guardar o prontuário por 20 anos a partir do último registro. Se a assinatura do Amigo acabar antes de exportar, a clínica perde a história clínica dos pacientes e fica irregular.</div>
-<p>Como o Amigo exporta os prontuários está sendo lido no próprio Amigo (só leitura). O plano: trazer o histórico de cada paciente para dentro do prontuário no Zaq como <b>"histórico do Amigo"</b>, somente leitura, com a data original de cada registro, ao lado dos atendimentos novos.</p>
+<p><b>O que o Amigo tem (lido em 26/09/2026, só leitura, sem abrir prontuário de paciente):</b> a tela de "Ações especiais" só <b>importa</b> (pacientes, prontuários, resultados de exame, agenda, usuários). <b>Não existe botão de exportar prontuário</b>. A API do Amigo também não tem prontuário (tem agenda, pacientes e atendimentos).</p>
+<div class="tw"><table>
+<tr><th>Caminho</th><th>Como</th><th>Quando usar</th></tr>
+<tr><td><b>1. Pedido formal ao Amigo</b> <span class="rec">(recomendado)</span></td><td>a clínica, dona dos dados, pede por escrito a exportação completa: prontuários, anexos, fotos e documentos, num formato aberto (planilha ou JSON e os arquivos). É direito da clínica (LGPD, portabilidade) e costuma estar no contrato para o cancelamento</td><td>já, antes de marcar a data de cancelar</td></tr>
+<tr><td>2. PDF por paciente</td><td>imprimir o prontuário de cada paciente em PDF, pela tela do Amigo, e anexar no Zaq</td><td>se o Amigo demorar; para os pacientes com retorno marcado primeiro</td></tr>
+<tr><td>3. Manter o Amigo só para consulta</td><td>plano mínimo, sem uso no dia a dia, até a exportação chegar</td><td>ponte, nunca como destino</td></tr>
+</table></div>
+<p>O que chegar vira <b>"histórico do Amigo"</b> dentro do prontuário de cada paciente no Zaq: somente leitura, com a data original de cada registro, ao lado dos atendimentos novos.</p>
 
 <h2><span class="n">09</span>Segurança e LGPD</h2>
 <div class="tw"><table>
@@ -237,10 +244,10 @@ code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5
 <div class="nota"><b>Por que o histórico do Amigo não é o último.</b> Ele define quando a clínica pode cancelar o Amigo. Se a virada da agenda for antes, o Amigo fica pago só para consulta até a importação terminar.</div>
 
 <h2><span class="n">12</span>O que depende de resposta</h2>
-<div class="q"><div class="qt">A. Quais profissionais escrevem no prontuário, e qual o conselho de cada um?</div><div class="qo">Dr. Manoel (CRM), Juliana (CREFITO), Brenda e Cristiane (função a confirmar). Todos precisam de login próprio para assinar.</div></div>
+<div class="q"><div class="qt">A. Quais profissionais escrevem no prontuário, e qual o conselho de cada um?</div><div class="qo">No Amigo são 4 profissionais de saúde com usuário: Dr. Manoel, Juliana, Brenda e Cristiane (o CIMLAB é laboratório). Falta o conselho e o número de cada um (CRM, CREFITO…). Todos precisam de login próprio no Zaq para assinar.</div></div>
 <div class="q"><div class="qt">B. Qual certificado cada um tem?</div><div class="qo">Arquivo (A1) ou nuvem/cartão (A3), e de qual provedor. O desenho atende os dois; a integração com nuvem é por provedor. <span class="rec">Sugestão: começar pelo do Dr. Manoel.</span></div></div>
 <div class="q"><div class="qt">C. O dono da clínica é profissional de saúde?</div><div class="qo">Se não for, ele não lê o conteúdo clínico, só o registro de acesso (seção 01).</div></div>
-<div class="q"><div class="qt">D. A clínica tem modelos próprios?</div><div class="qo">De evolução, de receita, de termo de consentimento, de orientação pós-procedimento. Se tiver no Amigo, eles vêm junto.</div></div>
+<div class="q"><div class="qt">D. A clínica tem modelos próprios?</div><div class="qo">No Amigo há só uma anamnese de fisioterapia (5 campos) e três modelos de atestado (atestado médico, declaração de acompanhante, declaração de comparecimento). Não há modelo de receita, de pedido de exame nem prontuário personalizado. Os três atestados e a anamnese vêm para o Zaq; o modelo de dermatologia da seção 03 é novo e precisa do olhar do Dr. Manoel. Termos de consentimento: a clínica usa o SignBox do Amigo? Se usa, os termos vêm junto.</div></div>
 <div class="q"><div class="qt">E. Dados fiscais para a nota</div><div class="qo">CNPJ, inscrição municipal, regime tributário, código do serviço, alíquota do ISS e o certificado da empresa (e-CNPJ). Com o contador.</div></div>
 <div class="q"><div class="qt">F. Confirmação jurídica</div><div class="qo">A seção 10, com o advogado ou o CRM-MA, antes de a clínica largar o papel ou o Amigo.</div></div>
 

@@ -47,6 +47,10 @@ def pool():
                        add column uf text, add column origem_detalhe text;
                      alter table conversas add column agente_ativo boolean default true;
                      alter table mensagens add column midia_tipo text;
+                     -- o índice da migração 159: o `_add_bot_msg` faz upsert nele (o
+                     -- eco do próprio envio pode chegar antes, ver finance/agente.py)
+                     create unique index if not exists idx_mensagens_sid_conversa
+                       on mensagens (conversa_id, provider_sid) where provider_sid is not null;
                      create table agente_config (conta_id bigint primary key, ativo boolean default true,
                        limiar_confianca int, horario text default '24h', tom text default 'informal',
                        max_trocas int, escalar_para text, pode_responder boolean default true,

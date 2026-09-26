@@ -4354,6 +4354,17 @@ async def comunicacao_distribuicao(request: Request):
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
+def _salvar_regra_chip(conta_id: int, chip_id: int, dados: dict) -> dict:
+    from finance import chip_regra as _cr
+    with get_pool().connection() as c:
+        r = _cr.salvar(c, conta_id, chip_id, dados)
+        if r.get("ok"):
+            c.commit()
+        else:
+            c.rollback()
+    return r
+
+
 @router.post("/painel/prospeccao/comunicacao/regra-chip")
 async def comunicacao_regra_chip(request: Request):
     """Salva a regra de UM chip (finance/chip_regra.py). Só dono/gestor.
@@ -4372,20 +4383,14 @@ async def comunicacao_regra_chip(request: Request):
         chip_id = int(f.get("chip_id") or 0)
     except (TypeError, ValueError):
         chip_id = 0
-    dados = {"ativa": sim("ativa"), "membro_id": f.get("membro_id"),
+    # o async só lê o formulário; o banco vai pra threadpool (test_event_loop_nao_trava)
+    r = await run_in_threadpool(_salvar_regra_chip, ctx["conta_id"], chip_id, {"ativa": sim("ativa"), "membro_id": f.get("membro_id"),
              "ia_ligada": sim("ia_ligada"), "ia_horario": f.get("ia_horario"),
              "ia_dias": f.getlist("ia_dias"), "ia_hora_ini": f.get("ia_hora_ini"),
              "ia_hora_fim": f.get("ia_hora_fim"), "ia_fora_texto": f.get("ia_fora_texto"),
              "ia_apresentacao": f.get("ia_apresentacao"),
              "aviso_agenda_membro_id": f.get("aviso_agenda_membro_id"),
-             "aviso_dono_membro_id": f.get("aviso_dono_membro_id")}
-    from finance import chip_regra as _cr
-    with get_pool().connection() as c:
-        r = _cr.salvar(c, ctx["conta_id"], chip_id, dados)
-        if r.get("ok"):
-            c.commit()
-        else:
-            c.rollback()
+             "aviso_dono_membro_id": f.get("aviso_dono_membro_id")})
     request.session["prosp_aviso"] = ("Regra do número salva ✓" if r.get("ok")
                                       else r.get("erro") or "Não consegui salvar a regra.")
     return RedirectResponse(_AG_DESTINO, status_code=303)

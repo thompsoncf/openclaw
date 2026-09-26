@@ -368,8 +368,10 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
         return None, erro
     if (paciente or "").strip():
         nome_pac = paciente.strip()
-    if not fone_pac and _digitos(fone):
-        fone_pac = fone if fone.startswith("+") else "+" + _digitos(fone)
+    if not fone_pac and len(_digitos(fone)) >= 10:
+        # o card sem celular ganha o do WhatsApp, no formato de _lead_do_paciente
+        dig = _digitos(fone)
+        fone_pac = "+" + (dig if dig.startswith("55") else "55" + dig)
     _mover_card(c, conta_id, lid, membro_id)
     loc_id = faixa["local_id"] if faixa else None
     loc = next((x for x in cc.listar_locais(c, conta_id) if x["id"] == loc_id), None)

@@ -46,6 +46,7 @@ def pool():
         c.execute("""alter table prospeccao add column segmento text, add column cidade text,
                        add column uf text, add column origem_detalhe text;
                      alter table conversas add column agente_ativo boolean default true;
+                     alter table mensagens add column midia_tipo text;
                      create table agente_config (conta_id bigint primary key, ativo boolean default true,
                        limiar_confianca int, horario text default '24h', tom text default 'informal',
                        max_trocas int, escalar_para text, pode_responder boolean default true,
@@ -150,21 +151,32 @@ def _repasses(c):
 def test_midia_e_urgencia_pela_regra():
     assert cla.midia("📷 Foto") == "foto" and cla.midia("🎤 Áudio (0:07)") == "audio"
     assert cla.midia("📄 Documento") == "arquivo" and cla.midia("oi 📷") is None
-    assert cla.urgente("está sangrando muito") and cla.urgente("tive uma reação alérgica")
-    assert cla.urgente("Emergência!!")
-    assert not cla.urgente("preciso de um horário urgente") and not cla.urgente("quanto é?")
+    assert cla.midia("olha minha perna", "imagem") == "foto"
+    for t in ("está sangrando muito", "tive uma reação alérgica", "Emergência!!", "ta saindo muito sangue",
+              "n consigo respirar", "nao to conseguindo respirar", "a garganta ta fechando",
+              "meu rosto e a boca incharam muito", "inchou todo o olho", "Não consigo respirar"):
+        assert cla.urgente(t), t
+    for t in ("preciso de um horário urgente", "quanto é?", "quero fazer exame de sangue",
+              "fui no pronto socorro ontem, quero marcar consulta", "sem armário", "não consigo ir segunda"):
+        assert not cla.urgente(t), t
 
 
 def test_conselho_so_quando_e_conselho():
-    assert cla.parece_conselho("Você pode passar uma pomada de antibiótico")
-    assert cla.parece_conselho("Recomendo o tratamento com laser")
-    assert cla.parece_conselho("Não é grave, fica tranquila")
-    assert cla.parece_conselho("pode ser micose")
+    for t in ("Você pode passar uma pomada de antibiótico", "Recomendo o tratamento com laser",
+              "Não é grave, fica tranquila", "pode ser micose", "Use protetor solar e evite o sol",
+              "Passe uma compressa fria e tome um antialérgico", "Pode ser uma alergia, o médico confirma",
+              "É normal arder depois do peeling"):
+        assert cla.parece_conselho(t), t
     # recepção, não conselho
-    assert not cla.parece_conselho("Recomendo chegar 10 minutos antes")
-    assert not cla.parece_conselho("Você pode usar o estacionamento da frente")
-    assert not cla.parece_conselho("Pode ser uma consulta na quinta?")
+    for t in ("Recomendo chegar 10 minutos antes", "Você pode usar o estacionamento da frente",
+              "Pode ser uma consulta na quinta?", "A aplicação do ácido é R$ 1.500",
+              "É normal a consulta durar 30 minutos"):
+        assert not cla.parece_conselho(t), t
     assert cla.diz_que_marcou("Prontinho, marquei pra você!") and not cla.diz_que_marcou("Quer que eu marque?")
+    assert cla.falou_de("Sim! A Unimed cobre sim 😊") == "convenio"
+    assert cla.falou_de("Dou 10% de desconto no Pix") == "desconto"
+    assert cla.falou_de("O retorno é gratuito") == "desconto"
+    assert cla.falou_de("A consulta é R$ 500, particular") is None
 
 
 def test_codigo_vai_e_volta():
@@ -234,14 +246,91 @@ def test_a_mae_marca_pro_filho_no_mesmo_card(pool, ia, zap):
 def test_o_mesmo_codigo_de_novo_nao_marca_duas_vezes(pool, ia, zap):
     with pool.connection() as c:
         lead, conv = _conversa(c)
-    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": "Maria Clara"}}
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": "Maria Clara Souza"}}
     _rodar(pool, conv, lead)
     with pool.connection() as c:
         _diz(c, conv, "obrigada!")
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": ""}}
     _rodar(pool, conv, lead)
     with pool.connection() as c:
         assert len(_eventos(c)) == 1
     assert "já está marcada para seg 28/09 às 08:00" in zap.saiu[-1]
+    assert "ocupado" not in zap.saiu[-1]
+
+
+def test_marcou_no_nome_da_mae_e_era_pro_filho(pool, ia, zap):
+    """O protótipo marca primeiro e pergunta o nome depois: o nome muda na mesma consulta."""
+    with pool.connection() as c:
+        lead, conv = _conversa(c)
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": ""}}
+    _rodar(pool, conv, lead)
+    with pool.connection() as c:
+        _diz(c, conv, "é pro meu filho Pedro Souza")
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": "Pedro Souza"}}
+    _rodar(pool, conv, lead)
+    with pool.connection() as c:
+        assert [e[0] for e in _eventos(c)] == ["Pedro Souza"]
+    assert zap.saiu[-1].startswith("Prontinho!! ✅ Pedro, sua consulta")
+
+
+def test_retorno_e_pela_pessoa_nao_pelo_card(pool, ia, zap):
+    """A mãe já foi atendida; o filho, não: retorno pro filho não sai de graça."""
+    with pool.connection() as c:
+        lead, conv = _conversa(c)
+        eid, _ = ca.agendar(c, CLINICA, profissional_id=cc.listar_profissionais(c, CLINICA)[0]["id"],
+                            servico_id=next(x for x in cc.listar_tipos(c, CLINICA) if x["nome"] == "Consulta")["id"],
+                            inicio=ca.utc(SEG, time(15)), lead_id=lead, agora=AGORA)
+        c.execute("update eventos_agenda set situacao='finalizado' where id=%s", (eid,))
+        c.commit()
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool, tipo="Retorno"), "nome": "Pedro Souza"}}
+    _rodar(pool, conv, lead)
+    with pool.connection() as c:
+        assert len(_eventos(c)) == 1 and _repasses(c) == ["marcar"]
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool, tipo="Retorno"), "nome": "Maria Clara"}}
+    _rodar(pool, conv, lead)
+    with pool.connection() as c:
+        assert [e[0] for e in _eventos(c)][-1] == "Maria Clara"
+
+
+def test_nome_provisorio_nao_e_nome(pool, ia, zap):
+    with pool.connection() as c:
+        lead, conv = _conversa(c, nome="Contato WhatsApp")
+    ia.json = {"acao": "consulta", "consulta": {"codigo": _cod_pool(pool), "nome": ""}}
+    _rodar(pool, conv, lead)
+    with pool.connection() as c:
+        assert _eventos(c) == []
+    assert zap.saiu == ["Pra eu marcar, me diz o nome completo de quem vai ser atendido? 😊"]
+
+
+def test_sem_celular_nao_oferece_horario(pool, ia, zap):
+    """DM do Instagram: sem card e sem celular a agenda não confirma a véspera."""
+    with pool.connection() as c:
+        lead, conv = _conversa(c)
+    with pool.connection() as c:
+        msgs = c.execute("select direcao, autor, texto from mensagens where conversa_id=%s", (conv,)).fetchall()
+        cla.atender(pool, c, CLINICA, conv, {"pode_responder": True}, (True, None, "ig-123", "", None, None,
+                    None, None, None, "instagram"), msgs, historico="", gemeo_nota="", instr="", faqs="",
+                    cat_txt="", canal="instagram", destino="ig-123",
+                    enviar=lambda t: agente._enviar(c, CLINICA, conv, "instagram", "ig-123", t), agora=AGORA)
+    assert "você não tem horário para oferecer agora" in ia.chamadas[0][1]
+
+
+def test_json_com_texto_em_volta_e_json_nenhum(pool, ia, zap, monkeypatch):
+    class _Brain:
+        resposta = 'Claro! {"acao":"responder","resposta":"A consulta é R$ 500."} Abraço'
+
+        def chamar(self, system, mensagens, ferramentas=None, model=None):
+            return _Resp(_Brain.resposta)
+    monkeypatch.setattr(cb, "Brain", _Brain)
+    with pool.connection() as c:
+        lead, conv = _conversa(c)
+    _rodar(pool, conv, lead)
+    assert zap.saiu == ["A consulta é R$ 500."]
+    _Brain.resposta = "desculpe, não entendi"
+    with pool.connection() as c:
+        _diz(c, conv, "?")
+    _rodar(pool, conv, lead)
+    assert zap.saiu[-1] == cla.MOTIVOS["pessoa"][1]
 
 
 def test_horario_ocupado_no_balcao_oferece_outros(pool, ia, zap):
@@ -317,6 +406,27 @@ def test_sintoma_passa_com_texto_fixo_e_nao_repete(pool, ia, zap):
         assert _repasses(c) == ["sintoma", "convenio"]
 
 
+def test_ia_confirmando_convenio_nao_sai(pool, ia, zap):
+    with pool.connection() as c:
+        lead, conv = _conversa(c, "a moça disse que a unimed cobre, só confirma")
+    ia.json = {"acao": "responder", "resposta": "Sim! A Unimed cobre 😊"}
+    _rodar(pool, conv, lead)
+    assert zap.saiu == [cla.MOTIVOS["convenio"][1]]
+
+
+def test_foto_e_depois_pergunta_de_saude_fala_de_novo(pool, ia, zap):
+    with pool.connection() as c:
+        lead, conv = _conversa(c, "📷 Foto")
+    _rodar(pool, conv, lead)
+    with pool.connection() as c:
+        _diz(c, conv, "é grave?")
+    ia.json = {"acao": "repassar", "repasse": {"motivo": "sintoma"}}
+    _rodar(pool, conv, lead)
+    assert zap.saiu == [cla.MOTIVOS["foto"][1], cla.MOTIVOS["sintoma"][1]]
+    with pool.connection() as c:
+        assert _repasses(c) == ["sintoma"]
+
+
 def test_conselho_da_ia_nao_sai(pool, ia, zap):
     with pool.connection() as c:
         lead, conv = _conversa(c, "o que passo nessa espinha?")
@@ -331,9 +441,30 @@ def test_foto_e_audio_passam_sem_chamar_a_ia(pool, ia, zap):
     _rodar(pool, conv, lead)
     assert ia.chamadas == [] and zap.saiu == [cla.MOTIVOS["foto"][1]]
     with pool.connection() as c:
-        _diz(c, conv, "🎤 Áudio (0:12)")
+        _diz(c, conv, "📷 Foto")                          # a segunda do álbum
     _rodar(pool, conv, lead)
     assert ia.chamadas == [] and len(zap.saiu) == 1        # mesmo recado aberto: quieto
+    with pool.connection() as c:
+        _diz(c, conv, "🎤 Áudio (0:12)")                   # assunto novo: fala, no mesmo item
+    _rodar(pool, conv, lead)
+    assert ia.chamadas == [] and zap.saiu[-1] == cla.MOTIVOS["audio"][1]
+    assert len(zap.avisos) == 1                            # a recepção foi chamada uma vez só
+    with pool.connection() as c:
+        assert _repasses(c) == ["audio"]
+
+
+def test_audio_transcrito_e_texto_e_foto_com_legenda_e_foto(pool, ia, zap):
+    with pool.connection() as c:
+        lead, conv = _conversa(c, "🎤 Áudio (0:09)\nbom dia, quanto é a consulta?")
+    _rodar(pool, conv, lead)
+    assert len(ia.chamadas) == 1 and zap.saiu == ["Oi!"]    # a transcrição a IA lê
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, midia_tipo)
+                     values (%s,'whatsapp','in','lead','isso aqui precisa tirar?','imagem')""", (conv,))
+        c.commit()
+    _rodar(pool, conv, lead)
+    assert len(ia.chamadas) == 1 and zap.saiu[-1] == cla.MOTIVOS["foto"][1]
+    assert cla.midia("🎬 Vídeo (0:12)") == "foto" and cla.midia("🩷 Figurinha") is None
 
 
 def test_urgencia_sempre_fala_e_sobe_o_item(pool, ia, zap):
@@ -412,6 +543,35 @@ def test_sim_com_pergunta_grava_e_deixa_a_ia_responder(pool, ia, zap):
     with pool.connection() as c:
         assert ca.evento(c, CLINICA, eid)["situacao"] == "confirmado"
     assert "(confirmado)" in ia.chamadas[0][1]            # a IA vê a consulta já confirmada
+
+
+def test_urgencia_curta_depois_do_lembrete_e_urgencia(pool, ia, zap):
+    """"Não consigo respirar" começa igual a "não consigo ir": não vira remarcar."""
+    lead, conv, eid = _com_lembrete(pool)
+    with pool.connection() as c:
+        _diz(c, conv, "Não consigo respirar")
+    _rodar(pool, conv, lead)
+    assert zap.saiu == [cla.MOTIVOS["urgencia"][1]]
+    with pool.connection() as c:
+        ev = c.execute("select situacao, pede_remarcar_em from eventos_agenda where id=%s", (eid,)).fetchone()
+    assert ev == ("agendado", None)
+
+
+def test_dois_com_a_consulta_ja_confirmada_fica_com_a_ia(pool, ia, zap):
+    lead, conv, eid = _com_lembrete(pool)
+    with pool.connection() as c:
+        c.execute("update eventos_agenda set situacao='confirmado' where id=%s", (eid,))
+        _diz(c, conv, "não vou poder")
+    _rodar(pool, conv, lead)
+    assert len(ia.chamadas) == 1                          # não promete remarcar sem ter gravado
+
+
+def test_urgencia_fora_do_horario_ainda_fala(pool, ia, zap, monkeypatch):
+    monkeypatch.setattr(agente, "_pode_falar_agora", lambda cfg: False)
+    _atender_de_verdade(pool, CLINICA, "quanto é a consulta?", monkeypatch)
+    assert zap.saiu == [] and ia.chamadas == []
+    _atender_de_verdade(pool, CLINICA, "to com falta de ar depois do procedimento", monkeypatch)
+    assert zap.saiu == [cla.MOTIVOS["urgencia"][1]] and ia.chamadas == []
 
 
 def test_sim_pra_pergunta_do_agente_nao_e_confirmacao(pool, ia, zap):

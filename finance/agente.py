@@ -345,7 +345,20 @@ def _atender(pool, conta_id, conversa_id):
                 where cv.id=%s and cv.conta_id=%s""", (conversa_id, conta_id)).fetchone()
         if not conv or not conv[0]:      # conversa não existe, humano assumiu, ou desligada
             return
+        _slug_n = c.execute("""select coalesce(n.slug,'') from contas ct
+                                 left join nichos n on n.id = ct.nicho_id
+                                where ct.id=%s""", (conta_id,)).fetchone()
+        _perfil = _rxp.perfil_por_nicho(_slug_n[0] if _slug_n else "")
         if not _pode_falar_agora(cfg):
+            if _perfil == "clinica":
+                # fora do horário o agente da clínica fica quieto, MENOS na urgência
+                # (pronto-socorro/192 e o item vermelho na tela Hoje não esperam)
+                from finance import clinica_agente as _cla
+                _canal = conv[9] or "whatsapp"
+                _dest = conv[2] if _canal in ("messenger", "instagram") else (conv[4] or conv[5] or conv[2])
+                _cla.so_urgencia(pool, c, conta_id, conversa_id, conv[1],
+                                 lambda texto: _enviar(c, conta_id, conversa_id, _canal, _dest, texto))
+                c.commit()
             return
         # histórico das últimas mensagens (contexto pro Brain)
         msgs = c.execute(
@@ -365,10 +378,6 @@ def _atender(pool, conta_id, conversa_id):
         escondidos = _precos_escondidos(c, conta_id)
         cat_txt = "\n".join(_linha_catalogo(s, s["slug"] in escondidos) for s in catalogo) \
             or "(sem catálogo)"
-        _slug_n = c.execute("""select coalesce(n.slug,'') from contas ct
-                                 left join nichos n on n.id = ct.nicho_id
-                                where ct.id=%s""", (conta_id,)).fetchone()
-        _perfil = _rxp.perfil_por_nicho(_slug_n[0] if _slug_n else "")
         # A CLÍNICA TEM O AGENTE DELA (fase 3b, finance/clinica_agente.py): preço,
         # horário livre de verdade, marcar e passar pra recepção. Desvia AQUI, antes
         # de tudo que é de festa (visita ao espaço, orçamento, evento no lead); o

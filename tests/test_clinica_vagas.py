@@ -567,3 +567,22 @@ def test_voltar_a_chamar_nao_manda_no_dia_em_que_recebeu_a_vaga(pool, zap):
                                                 "hoje": vac._inicio_do_dia(datetime.now(timezone.utc))}).fetchall()}
     assert gente["rita"][1] not in livres           # Rita recebeu a vaga hoje
     assert gente["ze"][1] in livres                 # Zé não recebeu nada
+
+
+def test_recebeu_hoje_e_por_numero_nao_por_conversa(pool, zap):
+    """Dois chips, duas conversas, a mesma pessoa: quem recebeu a vaga numa conversa
+    não recebe outra automática pela outra no mesmo dia."""
+    with pool.connection() as c:
+        gente, vid = _cenario(c)
+        _aprovar(c, vid)
+        outra = c.execute("""insert into conversas (conta_id, canal, contato_ref, contato_nome)
+                             values (%s,'whatsapp','(99) 91111-0002','Rita') returning id""",
+                          (CLINICA,)).fetchone()[0]           # o número da Rita, pelo outro chip
+        estranho = c.execute("""insert into conversas (conta_id, canal, contato_ref, contato_nome)
+                                values (%s,'whatsapp','+5599922223333','Outro') returning id""",
+                             (CLINICA,)).fetchone()[0]
+        c.commit()
+        hoje = ca.utc(ca.hoje_br(datetime.now(timezone.utc)), time(0))
+        assert cvg._recebeu_hoje(c, CLINICA, gente["rita"][1], hoje)
+        assert cvg._recebeu_hoje(c, CLINICA, outra, hoje)
+        assert not cvg._recebeu_hoje(c, CLINICA, estranho, hoje)

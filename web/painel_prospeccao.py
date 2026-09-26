@@ -717,7 +717,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     _entrou_q = (entrou or "").strip()
     if _entrou_q == "tudo" or _evl.mes_valido(_entrou_q):
         sess["funil_entrou"] = _entrou_q
-    filtro_entrou = sess.get("funil_entrou") or _evl.periodo_atual(_agora().date())
+    filtro_entrou = sess.get("funil_entrou") or _evl.periodo_atual()
     if fora is not None:
         sess["funil_fora"] = ",".join(x for x in (fora or "").split(",") if x in ("esperando", "festa30"))
     fora_on = [x for x in (sess.get("funil_fora") or "").split(",") if x]
@@ -1001,7 +1001,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             except Exception:  # noqa: BLE001
                 por_ler = 0
     colunas = {e["chave"]: [] for e in etapas}
-    hoje = _agora().date()
+    hoje = _evl.hoje_brt()      # o dia de Brasília: das 21h em diante o UTC já é amanhã
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
     # os cards dos OUTROS vendedores (gerência com um vendedor escolhido): não vão

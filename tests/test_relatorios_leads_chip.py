@@ -38,7 +38,8 @@ create table contas (id bigserial primary key, nome text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table canais_config (id bigserial primary key, conta_id bigint, canal text,
   identificador text, rotulo text);
-create table orcamentos (id bigserial primary key, conta_id bigint, numero int);
+create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
+  status text not null default 'rascunho');
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   orcamento_id bigint, ultimo_contato_em timestamptz, origem text, vendedor_id bigint,
   criado_em timestamptz not null default now());
@@ -99,7 +100,7 @@ def _lead(pool, conta, *, nome="Jamile", chip_id=None, membro=None,
     with pool.connection() as c:
         oid = None
         if orcamento is not None:
-            oid = c.execute("insert into orcamentos (conta_id, numero) values (%s,%s) "
+            oid = c.execute("insert into orcamentos (conta_id, numero, status) values (%s,%s,'enviado') "
                             "returning id", (conta, orcamento)).fetchone()[0]
         pid = c.execute(
             """insert into prospeccao (conta_id, empresa, orcamento_id, ultimo_contato_em,
@@ -341,7 +342,7 @@ def _sem_conversa(pool, conta, nome, origem, *, orcamento=None):
     with pool.connection() as c:
         oid = None
         if orcamento is not None:
-            oid = c.execute("insert into orcamentos (conta_id, numero) values (%s,%s) "
+            oid = c.execute("insert into orcamentos (conta_id, numero, status) values (%s,%s,'enviado') "
                             "returning id", (conta, orcamento)).fetchone()[0]
         c.execute("insert into prospeccao (conta_id, empresa, origem, orcamento_id) "
                   "values (%s,%s,%s,%s)", (conta, nome, origem, oid))
@@ -407,7 +408,7 @@ def test_conversao_sai_da_janela_e_nao_das_linhas_exibidas(pool, cen):
     """A tabela corta em 300 e a conta 34 já tem 305 leads. Lida de `len(linhas)`, a
     conversão passaria a mentir por truncagem justo quando a base cresce."""
     with pool.connection() as c:
-        oid = c.execute("insert into orcamentos (conta_id, numero) values (%s,7) "
+        oid = c.execute("insert into orcamentos (conta_id, numero, status) values (%s,7,'enviado') "
                         "returning id", (cen["conta"],)).fetchone()[0]
         c.execute("""insert into prospeccao (conta_id, empresa, origem, orcamento_id, criado_em)
                      select %s, 'L'||g, 'manual_vendedor',
@@ -632,3 +633,21 @@ def test_template_mantem_periodo_generico_onde_nao_ha_rotulo():
     """A mutação óbvia — trocar o rótulo pra todo mundo — morre aqui."""
     for nome, html in _render(_LEADS_FAKE, "leads_chip").items():
         assert "período: Este mês" in html, f"{nome}: o rótulo padrão sumiu"
+
+
+def test_orcamento_em_rascunho_nao_conta_como_conversao(pool, cen):
+    """Rascunho nunca chegou ao cliente. Contado, virava a "conversão" de quem abre
+    proposta e não manda: na Prime (26/09/2026) os 4 orçamentos de setembro do Pedro
+    eram rascunho, e ele aparecia com 5,3% contra 2,5% de quem enviou."""
+    _lead(pool, cen["conta"], nome="Mandou", entrou_min=0, resp_min=5, orcamento=31)
+    pid = _lead(pool, cen["conta"], nome="Nao mandou", entrou_min=0, resp_min=5,
+                orcamento=32)
+    with pool.connection() as c:
+        c.execute("""update orcamentos set status='rascunho'
+                      where id=(select orcamento_id from prospeccao where id=%s)""", (pid,))
+        c.commit()
+    d = _rel(pool, cen["conta"])
+    assert _metrica(d, "Viraram orçamento") == "1 de 2 · 50%"
+    linha = next(l for l in d["linhas"] if l["lead"] == "Nao mandou")
+    assert linha["orcamento"] == "nº 32 (rascunho)", (
+        "o número segue na linha, mas a linha diz por que ele não entrou na conta")

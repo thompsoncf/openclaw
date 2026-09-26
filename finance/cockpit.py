@@ -1054,10 +1054,20 @@ def perfil(pool, conta_id: int, membro_id: int) -> dict:
             "select count(*) from prospeccao where conta_id=%s and vendedor_id=%s "
             "and coalesce(estagio,'lead')='lead' and " + _ABERTO_T,
             (conta_id, membro_id)).fetchone()[0]
-        ganhos = c.execute(
-            "select count(*) from prospeccao where conta_id=%s and vendedor_id=%s "
-            "and " + _FECHADO_T + " and atualizado_em >= date_trunc('month', now())",
-            (conta_id, membro_id)).fetchone()[0]
+        # GANHOS DO MÊS pela régua do placar do dono (`cockpit_dono.placar`): conta
+        # com contrato conta o CONTRATO ASSINADO no mês de Brasília; sem contrato,
+        # o dia em que o lead ENTROU no fechamento. Era `atualizado_em` — a última
+        # edição do lead —, e em 26/09/2026 o Pedro, da Prime, via 3 ganhos no mês
+        # tendo assinado 2: o terceiro era de agosto, editado em setembro.
+        from finance import cockpit_dono as _cd
+        ini, fim = _cd._range("mes")
+        if _cd._usa_contrato(c, conta_id):
+            ganhos = _cd._contratos_por_vendedor(c, conta_id, ini, fim).get(membro_id, (0,))[0]
+        else:
+            ganhos = c.execute(
+                "select count(*) from prospeccao p where p.conta_id=%s and p.vendedor_id=%s "
+                "and p.status in " + _fr.sql_fechadas("p") + " and " + _cd._FECHOU_EM + ">=%s "
+                "and " + _cd._FECHOU_EM + "<%s", (conta_id, membro_id, ini, fim)).fetchone()[0]
         atend = c.execute(
             "select count(distinct cv.prospeccao_id) from conversas cv "
             "where cv.conta_id=%s and cv.responsavel_membro_id=%s", (conta_id, membro_id)).fetchone()[0]

@@ -721,6 +721,26 @@ def _contrato_tag(numero, status, enviado_em, assinado_em) -> tuple[str, str]:
 
 _VALOR_ORC = "coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0)"
 
+#: O DIA DE TERESINA, não o do banco. `x::date` corta no dia do servidor (UTC), e o
+#: lead que chega entre 21h e meia-noite caía no dia seguinte — no último dia do mês,
+#: no mês seguinte. As abas Contratos e Funil e o Raio-X já cortavam em Brasília; a
+#: aba Leads, a de Orçamentos e a Agenda cortavam em UTC (conferido em 26/09/2026:
+#: 297 × 294 leads na mesma janela). Uma expressão só, pra ninguém voltar ao `::date`.
+_DIA_BRT = "({} at time zone 'America/Sao_Paulo')::date"
+
+#: O STATUS QUE O ORÇAMENTO TEM DE FATO. A venda se perde no LEAD (o vendedor marca
+#: Perdido no funil, a esteira fecha o parado), e ninguém volta no orçamento pra
+#: marcá-lo — então `orcamentos.status='perdido'` quase nunca existe, e a métrica
+#: "Perdidos" desta aba ficava em 0 pra sempre (na Prime, 26/09/2026, com 67 leads
+#: perdidos). Orçamento em aberto cujo(s) lead(s) foram TODOS perdidos conta como
+#: perdido; fechado segue fechado, mesmo que alguém tenha perdido o card depois.
+_ORC_STATUS = """(case when o.status not in ('fechado', 'perdido')
+          and exists (select 1 from prospeccao px where px.orcamento_id = o.id
+                         and px.conta_id = o.conta_id and px.status = 'perdido')
+          and not exists (select 1 from prospeccao px where px.orcamento_id = o.id
+                         and px.conta_id = o.conta_id and px.status <> 'perdido')
+     then 'perdido' else o.status end)"""
+
 
 def _vendedores_da_conta(pool, conta_id: int) -> list[tuple[int, str]]:
     with pool.connection() as c:
@@ -752,7 +772,7 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     where = ["o.conta_id=%s"]
     params: list = [conta_id]
     if periodo != "todos":
-        where.append("o.criado_em::date >= %s and o.criado_em::date <= %s")
+        where.append(_DIA_BRT.format("o.criado_em") + " >= %s and " + _DIA_BRT.format("o.criado_em") + " <= %s")
         params += [ini, fim]
     if vendedor_sel:
         where.append("o.criado_por = %s")
@@ -764,8 +784,8 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
 
     with pool.connection() as c:
         por_status = c.execute(
-            f"select o.status, count(*), sum({_VALOR_ORC}) from orcamentos o "
-            f"where {base_sql} group by o.status", params).fetchall()
+            f"select {_ORC_STATUS}, count(*), sum({_VALOR_ORC}) from orcamentos o "
+            f"where {base_sql} group by 1", params).fetchall()
 
     def _grupo(quais):
         n = sum(int(r[1]) for r in por_status if r[0] in quais)
@@ -779,13 +799,13 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     where2, params2 = list(where), list(params)
     quais = ORC_STATUS_FILTROS.get(status_sel)
     if quais:
-        where2.append("o.status = any(%s)")
+        where2.append(_ORC_STATUS + " = any(%s)")
         params2.append(quais)
     where2_sql = " and ".join(where2)
 
     with pool.connection() as c:
         rows = c.execute(
-            f"""select o.numero, o.cliente, o.empresa, o.status, o.criado_em,
+            f"""select o.numero, o.cliente, o.empresa, {_ORC_STATUS}, o.criado_em,
                        o.aprovada_em,
                        -- criado_por guarda o id do membro OU a palavra 'dono' (quem
                        -- abriu a conta, sem vendedor específico — mesma leitura de
@@ -1171,7 +1191,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     where = ["e.conta_id=%s"]
     params: list = [conta_id]
     if periodo != "todos":
-        where.append("e.inicio::date >= %s and e.inicio::date <= %s")
+        where.append(_DIA_BRT.format("e.inicio") + " >= %s and " + _DIA_BRT.format("e.inicio") + " <= %s")
         params += [ini, fim]
     e_vis = _e_visita(_vis.vende_festa(pool, conta_id))
     # DE QUEM É A LINHA: a VISITA é do dono do card (sem card, de quem marcou); a
@@ -1550,7 +1570,7 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
     onde.append("(l.lead_id is not null or coalesce(p.origem,'') <> all(%s))")
     params.append(list(ORIGENS_GARIMPO))
     if periodo != "todos":
-        onde.append("p.criado_em::date >= %s and p.criado_em::date <= %s")
+        onde.append(_DIA_BRT.format("p.criado_em") + " >= %s and " + _DIA_BRT.format("p.criado_em") + " <= %s")
         params += [ini, fim]
     if chip_sel:
         # Escolher um chip é perguntar "quem entrou POR ELE": quem não veio de
@@ -1599,7 +1619,12 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
            -- passariam a mentir por truncagem justo quando a base cresce. Janela
            -- roda antes do LIMIT.
            count(*) over () as n_total,
-           count(o.numero) over () as n_orc
+           -- RASCUNHO NÃO É ORÇAMENTO: nunca chegou ao cliente. Contado, era a
+           -- "conversão" de quem abre proposta e não manda — na Prime (26/09/2026)
+           -- os 4 orçamentos de setembro do Pedro eram rascunho, e a conversão
+           -- dele aparecia o dobro da de quem enviou.
+           count(o.numero) filter (where o.status <> 'rascunho') over () as n_orc,
+           o.status
       from prospeccao p
       left join por_lead l on l.lead_id = p.id
       left join membros mb on mb.id = coalesce(l.memb, p.vendedor_id)
@@ -1646,7 +1671,7 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
             "msgs": int(r[5] or 0),
             "vendedor": r[7],
             "ultima": ultima,
-            "orcamento": f"nº {r[8]}" if r[8] else "—",
+            "orcamento": (f"nº {r[8]}" + (" (rascunho)" if r[13] == "rascunho" else "")) if r[8] else "—",
         })
 
     med = vendas.mediana(esperas)
@@ -1791,14 +1816,27 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
         sql_leads = ("select count(distinct cv.prospeccao_id) from conversas cv "
                      "where cv.conta_id=%s and cv.prospeccao_id is not null")
         if periodo != "todos":
-            sql_leads += " and cv.criado_em::date >= %s and cv.criado_em::date <= %s"
+            sql_leads += (" and " + _DIA_BRT.format("cv.criado_em") + " >= %s and "
+                          + _DIA_BRT.format("cv.criado_em") + " <= %s")
             p2 += [ini, fim]
         n_leads = c.execute(sql_leads, p2).fetchone()[0] or 0
-        n_sinal = c.execute(
-            "select count(*) from orcamentos where conta_id=%s and sinal_pago_em is not null",
-            (conta_id,)).fetchone()[0] or 0
-        n_orc = c.execute("select count(*) from orcamentos where conta_id=%s",
-                          (conta_id,)).fetchone()[0] or 0
+        # "VIRARAM SINAL PAGO" é dos orçamentos feitos NO PERÍODO e, com vendedor
+        # escolhido, dos DELE (quem fez o orçamento, a régua da aba Orçamentos). Antes
+        # contava a conta inteira desde sempre: "4 de 230" aparecia igual pra qualquer
+        # mês e qualquer vendedor, e a linha não servia pra comparar ninguém.
+        # Rascunho fica de fora: não chegou ao cliente, não tinha como virar sinal.
+        onde_o, p3 = "o.conta_id=%s and o.status <> 'rascunho'", [conta_id]
+        if periodo != "todos":
+            onde_o += (" and " + _DIA_BRT.format("o.criado_em") + " >= %s and "
+                       + _DIA_BRT.format("o.criado_em") + " <= %s")
+            p3 += [ini, fim]
+        if vendedor_sel:
+            onde_o += " and o.criado_por = %s"
+            p3.append(str(vendedor_sel))
+        n_orc, n_sinal = c.execute(
+            "select count(*), count(*) filter (where o.sinal_pago_em is not null) "
+            "from orcamentos o where " + onde_o, p3).fetchone()
+        n_orc, n_sinal = int(n_orc or 0), int(n_sinal or 0)
 
     linhas, esperas = [], []
     n_agendadas = n_ligadas = n_passou = n_respondidas = n_apareceu = 0

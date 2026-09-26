@@ -10,7 +10,11 @@ Nada aqui toca banco: é data pura, e é por isso que dá pra testar sem Postgre
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+#: Brasília (Teresina não tem horário de verão). O mesmo fuso de `finance.agenda.BRT`,
+#: repetido aqui pra este módulo não importar a agenda.
+_BRT = timezone(timedelta(hours=-3))
 
 #: as pílulas do histórico. "Período específico" NÃO entra aqui, e não é
 #: esquecimento: as abas de Relatórios chamam `intervalo(periodo)` sem `de`/`ate`,
@@ -79,7 +83,9 @@ def intervalo(periodo: str, de=None, ate=None,
     no mês corrente — filtro quebrado não pode virar tela vazia sem explicação.
     Invertidas (de > ate), são trocadas: é engano de digitação, não pedido.
     """
-    hoje = date.today()
+    # o HOJE de Brasília, não o do servidor (UTC): das 21h à meia-noite o servidor
+    # já está no dia seguinte, e no último dia do mês "Este mês" virava o mês que vem
+    hoje = datetime.now(_BRT).date()
     if periodo == "personalizado":
         d, a = dia(de), dia(ate)
         if d and a:

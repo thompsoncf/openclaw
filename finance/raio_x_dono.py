@@ -512,7 +512,12 @@ def _perdas(c, conta_id, w, wv, ini, fim, motivos=MOTIVOS_TODOS) -> dict:
     rows = c.execute(f"""
         select coalesce(p.perda_motivo, ''), count(*)
           from prospeccao p
-         where p.conta_id = %s and p.status = 'perdido' and p.atualizado_em >= %s and p.atualizado_em < %s{w}
+         where p.conta_id = %s and p.status = 'perdido'
+           -- a DATA DA PERDA (235); a última edição só na falta dela — editar um
+           -- perdido antigo não pode trazê-lo pro mês de hoje (cockpit_dono._PERDEU_EM).
+           -- `to_jsonb` lê a coluna sem exigi-la, como em finance.visita
+           and coalesce((to_jsonb(p) ->> 'perda_em')::timestamptz, p.atualizado_em) >= %s
+           and coalesce((to_jsonb(p) ->> 'perda_em')::timestamptz, p.atualizado_em) < %s{w}
          group by 1""", [conta_id, ini, fim, *wv]).fetchall()
     cont = {k: int(n) for k, n in rows}
     itens = [{"chave": k, "rotulo": r, "n": cont.get(k, 0)} for k, r in motivos]

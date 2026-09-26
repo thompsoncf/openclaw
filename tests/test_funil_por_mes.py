@@ -584,3 +584,32 @@ def test_com_um_mes_escolhido_os_sem_data_separam_por_semana(monkeypatch, pool, 
     col = _coluna(_html(monkeypatch, pool, entrou=""), "contatado")
     assert col.count("Sem data · semana de ") >= 1
     assert "entrou em" not in col
+
+
+# ------------------------------------------------ o mês é o de Brasília (26/09/2026)
+
+def test_lead_das_22h_do_ultimo_dia_fica_no_mes_dele():
+    """`criado_em` vem em UTC. O lead que chega às 22h de 30/09 em Teresina é
+    01/10 01h no servidor, e `.date()` o jogava no quadro de outubro."""
+    from datetime import datetime as _dt, timezone as _tz
+    from finance import evento_lead as evl
+    card = {"criado_em": _dt(2026, 10, 1, 1, 0, tzinfo=_tz.utc)}
+    assert evl.no_periodo(card, "2026-09")
+    assert not evl.no_periodo(card, "2026-10")
+    itens = evl.meses_entrada([card], hoje=_dt(2026, 9, 30).date())
+    assert next(i for i in itens if i["chave"] == "2026-09")["n"] == 1
+
+
+def test_o_hoje_dos_periodos_e_o_de_brasilia(monkeypatch):
+    """Das 21h à meia-noite o servidor já está no dia seguinte: no último dia do mês,
+    "Este mês" dos Relatórios virava o mês que vem, vazio."""
+    from datetime import date as _d, datetime as _dt, timezone as _tz
+    from finance import periodo as per
+
+    class _Relogio(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return _dt(2026, 10, 1, 1, 30, tzinfo=_tz.utc).astimezone(tz)
+
+    monkeypatch.setattr(per, "datetime", _Relogio)
+    assert per.intervalo("mes") == (_d(2026, 9, 1), _d(2026, 9, 30))

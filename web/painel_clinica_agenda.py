@@ -262,12 +262,19 @@ def ver_evento(request: Request, evento_id: int):
 
 
 @router.post("/painel/clinica/agenda/evento/{evento_id}/situacao")
-def evento_situacao(request: Request, evento_id: int, nova: str = Form("")):
+def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
+                    tratamento: str = Form(""), valor: str = Form("")):
     conta, _g, redir = _acesso(request)
     if redir is not None:
         return redir
+    from finance.clinica_config import centavos
+    valor_c = centavos(valor) if valor.strip() else None
+    if valor.strip() and valor_c is None:
+        return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}",
+                   erro="Valor inválido. Use o formato 1.500,00.")
     with get_pool().connection() as c:
-        erro = ca.mudar_situacao(c, conta[0], evento_id, nova)
+        erro = ca.mudar_situacao(c, conta[0], evento_id, nova, tratamento=(tratamento or None),
+                                 valor_centavos=valor_c, membro_id=request.session.get("membro_id"))
         (c.rollback if erro else c.commit)()
     return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", "" if erro else "situacao", erro or "")
 
@@ -279,7 +286,7 @@ def evento_remarcar(request: Request, evento_id: int, inicio: str = Form("")):
         return redir
     quando = _instante(inicio)
     with get_pool().connection() as c:
-        erro = ca.remarcar(c, conta[0], evento_id, quando) if quando else "Escolha o novo horário."
+        erro = ca.remarcar(c, conta[0], evento_id, quando, membro_id=request.session.get("membro_id"))             if quando else "Escolha o novo horário."
         (c.rollback if erro else c.commit)()
     return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", "" if erro else "remarcado", erro or "")
 
@@ -502,9 +509,20 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       {% if ev.pede_remarcar_em %} · <b>pediu para remarcar</b>{% endif %}
       {% if ev.confirmado_em %} · confirmou{% elif ev.confirmacao_enviada_em %} · lembrete da véspera enviado{% endif %}</div>
     <div class="mut" style="margin-top:.3rem">{% if ev.fone %}Celular {{ ev.fone }}{% endif %}{% if ev.origem %} · veio por {{ ev.origem }}{% endif %}{% if ev.observacao %} · {{ ev.observacao }}{% endif %}</div>
-    {% if proximos %}<div class="ag-acoes">{% for s in proximos %}
-      <form method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao"><input type="hidden" name="nova" value="{{ s }}"><button class="{% if s in ('faltou','cancelou') %}sec{% endif %}">{{ {'agendado':'Reabrir','confirmado':'Confirmar','presente':'Chegou','atendimento':'Entrou no atendimento','finalizado':'Finalizar','faltou':'Faltou','cancelou':'Cancelar'}[s] }}</button></form>
-    {% endfor %}</div>{% endif %}
+    {% if proximos %}<div class="ag-acoes">{% for s in proximos if s != 'finalizado' %}
+      <form method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao"><input type="hidden" name="nova" value="{{ s }}"><button class="{% if s in ('faltou','cancelou') %}sec{% endif %}">{{ {'agendado':'Reabrir','confirmado':'Confirmar','presente':'Chegou','atendimento':'Entrou no atendimento','faltou':'Faltou','cancelou':'Cancelar'}[s] }}</button></form>
+    {% endfor %}</div>
+    {% if 'finalizado' in proximos %}
+    <form class="ag-form" method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao" style="margin-top:.7rem">
+      <input type="hidden" name="nova" value="finalizado">
+      <div class="inteira"><span class="mut">O médico propôs tratamento? (o card do paciente anda no funil com a resposta)</span>
+        <div class="ag-ops" style="margin-top:.3rem">
+          <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'Fechado' }}</label>
+          <label><input type="radio" name="tratamento" value="sim" required> Sim — Plano de tratamento</label></div></div>
+      <label>Valor proposto (se souber)<input name="valor" inputmode="decimal" placeholder="1.500,00"></label>
+      <div class="ag-acoes inteira"><button>Finalizar</button></div>
+    </form>
+    {% endif %}{% endif %}
   </div>
 
   {% if remarcar %}

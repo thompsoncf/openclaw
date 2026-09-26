@@ -743,13 +743,24 @@ def cancelar_evento(pool, conta_id: int, evento_id: int) -> bool:
     """Cancela um compromisso — inclusive uma data só PRÉ-RESERVADA, que é o
     caminho de desistir da reserva antes do sinal."""
     with pool.connection() as c:
-        cur = c.execute(
+        r = c.execute(
             "update eventos_agenda set status='cancelado' "
-            "where id=%s and conta_id=%s and status = any(%s)",
+            "where id=%s and conta_id=%s and status = any(%s) "
+            "returning (to_jsonb(eventos_agenda) ->> 'situacao')",
             (evento_id, conta_id, list(_ATIVO_OU_PRE)),
-        )
+        ).fetchone()
+        if r and r[0] is not None:
+            # consulta da clínica (360) cancelada por fora da agenda da clínica: o
+            # card anda igual (Consulta agendada → Follow-up). Cancelar é o pedido;
+            # mover o card é bônus e não pode derrubar o cancelamento.
+            from finance import clinica_agenda as _ca
+            try:
+                with c.transaction():
+                    _ca.card_pela_agenda(c, conta_id, evento_id, "cancelou")
+            except Exception:  # noqa: BLE001
+                _log.info("cancelar_evento: card da clínica não andou (evento %s)", evento_id, exc_info=True)
         c.commit()
-        return cur.rowcount > 0
+        return r is not None
 
 
 #: Por que um compromisso NÃO pode ser apagado. A chave é o que a tela mostra;

@@ -458,6 +458,24 @@ def test_a_mao_do_vendedor_manda(pool):
         assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "novo"
 
 
+def test_a_recepcao_da_clinica_tambem_e_mao_humana(pool):
+    """TRAVA 3 com o movimento 'agenda' (clinica_agenda.card_pela_agenda): a
+    recepção marcou Faltou e o card voltou pra trás. A consulta continua 'ativa'
+    na agenda, e sem a trava o gatilho "compromisso" desfazia a falta no ciclo
+    seguinte."""
+    with pool.connection() as c:
+        lead = _lead(c, status="contatado")
+        c.execute("insert into eventos_agenda (conta_id, prospeccao_id, inicio, criado_em) values (%s,%s,%s,%s)",
+                  (CONTA, lead, AGORA - timedelta(days=1), AGORA - timedelta(days=3)))
+        fr.registrar_movimento(c, CONTA, lead, "qualificado", "contatado", "agenda", membro_id=1)
+        c.execute("update funil_movimentos set criado_em=%s where prospeccao_id=%s", (AGORA, lead))
+        _ligar(c, "qualificado")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 0
+        c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"
+
+
 def test_evento_novo_depois_do_movimento_manual_volta_a_valer(pool):
     """A trava 3 respeita a decisão do vendedor, mas não congela o lead pra sempre:
     fato NOVO depois da mão dele volta a mover."""

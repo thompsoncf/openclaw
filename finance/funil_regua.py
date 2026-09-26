@@ -230,6 +230,11 @@ def registrar_movimento(c, conta_id: int, lead_id: int, de: str | None, para: st
 def _ultimos_manuais(c, ids: list[int]) -> dict:
     """O último movimento MANUAL de cada lead, numa consulta só (TRAVA 3).
 
+    'agenda' conta como mão humana: é a recepção quem marca Faltou ou Finalizou
+    na agenda da clínica (`clinica_agenda.card_pela_agenda`). Sem isso, a consulta
+    que faltou (continua 'ativo') refazia o gatilho "compromisso" e devolvia o
+    card de Follow-up pra Consulta agendada no ciclo seguinte.
+
     Era `_ultimo_manual` por lead, dentro do laço: 7,4 MILHÕES de execuções em 100
     dias (medido em pg_stat_statements, 19/09/2026). Cada uma é rápida; o custo é a
     ida e volta ao banco vezes o número de leads, a cada 2 minutos, por conta — e
@@ -240,7 +245,7 @@ def _ultimos_manuais(c, ids: list[int]) -> dict:
         return {}
     linhas = c.execute(
         """select prospeccao_id, max(criado_em) from funil_movimentos
-            where motivo='manual' and prospeccao_id = any(%s)
+            where motivo in ('manual', 'agenda') and prospeccao_id = any(%s)
             group by prospeccao_id""", (list(ids),)).fetchall()
     return dict(linhas)
 

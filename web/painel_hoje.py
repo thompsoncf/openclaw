@@ -5,6 +5,9 @@ Festa, visita, convidados e orçamento não existem aqui; paciente, consulta e
 horário, sim.
 
 O QUE A TELA MOSTRA, de cima pra baixo:
+  0. O agente passou pra você — o que o agente do WhatsApp não resolve sozinho
+     (finance/clinica_agente.py): saúde, foto, áudio, convênio, desconto,
+     remarcar, urgência. Só aparece quando tem item.
   1. Esperando resposta — quem escreveu e não teve retorno (3 dias pra trás),
      marcando quem escreveu com a clínica fechada.
   2. Voltar a chamar hoje — quem recebeu o preço da consulta e está calado, com o
@@ -27,6 +30,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
+from finance import clinica_agente as cla
 from finance import funil_regua as fr
 from finance import raio_x_perfil as rxp
 from finance import voltar_a_chamar as vac
@@ -47,6 +51,7 @@ _AVISOS = {
     "salvo": "Configuração salva.",
     "hoje_ja": "Esse paciente já recebeu uma mensagem hoje. O próximo toque fica para amanhã.",
     "desligado": "Voltar a chamar está desligado: nada sai, nem clicando.",
+    "resolvido": "Pronto: saiu da lista.",
 }
 
 
@@ -89,12 +94,13 @@ def painel_hoje(request: Request):
             # já não aparece com a mensagem pronta
             vac.atualizar_estados(c, conta_id, agora, cfg)
         dados = vac.hoje(c, conta_id, agora, cfg)
+        repasses = cla.repasses_abertos(c, conta_id)
         c.commit()      # fr.config semeia a linha da régua na 1ª vez
     for e in dados["esperando"]:
         e["fora"] = not fr.dentro_da_janela(e["em"], janela)
     q = request.query_params
     return _render("hoje.html", request, titulo="Hoje", cfg=cfg, gerencia=gerencia,
-                   d=dados, aviso=_AVISOS.get(q.get("aviso") or "", ""),
+                   d=dados, repasses=repasses, aviso=_AVISOS.get(q.get("aviso") or "", ""),
                    erro=request.session.pop("hoje_erro", ""),
                    rotulos=vac._ROTULO_TOQUE)
 
@@ -122,6 +128,19 @@ def acao_no_toque(request: Request, toque_id: int, acao: str):
         vac.ja_marcou(pool, conta_id, toque_id, membro)
         return _ir(request, "marcou")
     return _ir(request)
+
+
+@router.post("/painel/hoje/repasse/{repasse_id}/resolvido")
+def repasse_resolvido(request: Request, repasse_id: int):
+    """"Resolvido" no item que o agente passou: some da lista. Responder a conversa
+    já tira sozinho; o botão é pra quando a recepção resolveu por telefone."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    with get_pool().connection() as c:
+        cla.resolver(c, conta[0], repasse_id, request.session.get("membro_id"))
+        c.commit()
+    return _ir(request, "resolvido")
 
 
 @router.post("/painel/hoje/config")
@@ -167,6 +186,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   border-radius:11px;padding:.6rem .8rem}
 .hj-card.quente{border-left-color:var(--verde)}
 .hj-card.fora{border-left-color:var(--amar)}
+.hj-card.urgente{border-left-color:#e5484d;background:#3a1d1d}
+.hj-card .chip.urgente{border-color:#6e2b2b;background:#3a1d1d;color:#f0b8b8;font-weight:700}
 .hj-card .cab{display:flex;gap:.45rem;align-items:baseline;flex-wrap:wrap}
 .hj-card .quem{font-weight:700;font-size:.95rem;color:var(--txt);text-decoration:none}
 .hj-card .meta{font-size:.78rem;color:var(--txt-mut)}
@@ -202,6 +223,24 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   </div>
   {% if aviso %}<div class="ok hj-aviso">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro hj-aviso">{{ erro }}</div>{% endif %}
+
+  {% if repasses %}
+  <div class="hj-sec"><h3>O agente passou pra você</h3><span class="qt">{{ repasses|length }}</span>
+    <span class="ex">Assuntos que o agente do WhatsApp não resolve sozinho: saúde, foto, áudio, convênio, desconto, remarcar. Some da lista quando alguém responde a conversa.</span></div>
+  <div class="hj-lista">
+  {% for r in repasses %}
+    <div class="hj-card {% if r.urgente %}urgente{% else %}quente{% endif %}">
+      <div class="cab"><a class="quem" href="/painel/prospeccao/comunicacao?abrir={{ r.conversa_id }}">{{ r.nome }}</a>
+        <span class="chip {% if r.urgente %}urgente{% endif %}">{{ r.rotulo }}</span>
+        <span class="meta">{{ r.quando }}</span></div>
+      <div class="hj-acoes">
+        <a class="abre" href="/painel/prospeccao/comunicacao?abrir={{ r.conversa_id }}">Abrir conversa</a>
+        <form method="post" action="/painel/hoje/repasse/{{ r.id }}/resolvido"><button class="sec">Resolvido</button></form>
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+  {% endif %}
 
   {% set p = d.placar %}
   <div class="hj-placar">

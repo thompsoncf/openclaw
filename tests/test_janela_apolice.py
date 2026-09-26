@@ -295,7 +295,9 @@ def test_o_agente_sabe_o_que_e_documento_numa_corretora():
     import pathlib
     ag = (pathlib.Path(__file__).resolve().parent.parent
           / "finance" / "agente.py").read_text(encoding="utf-8")
-    assert 'perfil_por_nicho(_slug_n[0] if _slug_n else "") == "seguros"' in ag
+    # o perfil é lido uma vez (26/09/2026, a clínica também desvia por ele)
+    assert '_perfil = _rxp.perfil_por_nicho(_slug_n[0] if _slug_n else "")' in ag
+    assert 'if _perfil == "seguros":' in ag
     assert "seguros_txt" in ag and "{seguros_txt}" in ag
     assert "NUNCA diga que leu" in ag
     assert "Nunca fale de festa" in ag

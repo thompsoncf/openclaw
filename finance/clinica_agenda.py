@@ -51,6 +51,8 @@ _SEMANA = {1: "seg", 2: "ter", 3: "qua", 4: "qui", 5: "sex", 6: "sáb", 7: "dom"
 # "10 horas" e "1 dúvida" não são "1". Pergunta ("posso ir às 15h?") não é resposta.
 _RE_SIM = re.compile(r"^\s*(1\s*[.!)✅👍]*\s*$|(sim|confirm\w*|confirmad[oa])\b)", re.I)
 _RE_REMARCAR = re.compile(r"^\s*(2\s*[.!)]*\s*$|2\s*[,.-]|(remarc\w*|n[ãa]o\s+(vou|posso|consigo))\b)", re.I)
+#: o "1"/"2" sozinho: resposta ao lembrete mesmo com outra mensagem nossa no meio
+_SO_NUMERO = re.compile(r"^\s*[12]\s*[.!)✅👍]*\s*$")
 _PALAVRA = {"consulta": "consulta", "retorno": "retorno", "sessao": "sessão"}
 
 
@@ -89,7 +91,7 @@ def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int
                   coalesce(e.paciente_nome, e.titulo), e.paciente_fone, e.servico_id,
                   s.nome, s.cor, s.categoria, e.clinica_local_id, e.encaixe, e.origem,
                   e.confirmacao_enviada_em, e.confirmado_em, e.pede_remarcar_em, e.prospeccao_id,
-                  coalesce(e.observacao_interna, '')
+                  coalesce(e.observacao_interna, ''), coalesce(e.marcado_por, '')
              from eventos_agenda e
              left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
             where e.conta_id = %s and e.situacao is not null
@@ -101,7 +103,8 @@ def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int
              "tipo": r[8] or "Atendimento", "cor": r[9] or cc.CORES[0], "categoria": r[10] or "",
              "local_id": r[11], "encaixe": r[12], "origem": r[13] or "",
              "confirmacao_enviada_em": r[14], "confirmado_em": r[15], "pede_remarcar_em": r[16],
-             "lead": r[17], "observacao": r[18], "hora": hora_txt(r[2]), "fim_txt": hora_txt(r[3]),
+             "lead": r[17], "observacao": r[18], "marcado_por": r[19],
+             "hora": hora_txt(r[2]), "fim_txt": hora_txt(r[3]),
              "sit_txt": SIT_D.get(r[4], r[4])} for r in rows]
 
 
@@ -324,8 +327,12 @@ def _faixa_do_horario(c, conta_id: int, profissional_id: int, inicio: datetime) 
 def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: datetime,
             lead_id: int | None = None, nome: str = "", fone: str = "", origem: str = "",
             observacao: str = "", encaixe: bool = False, membro_id: int | None = None,
-            agora: datetime | None = None) -> tuple[int | None, str | None]:
-    """Marca. Devolve (evento_id, None) ou (None, erro pra tela). Não faz commit."""
+            agora: datetime | None = None, paciente: str = "",
+            marcado_por: str = "recepcao") -> tuple[int | None, str | None]:
+    """Marca. Devolve (evento_id, None) ou (None, erro pra tela). Não faz commit.
+
+    `paciente` é quem vai ser atendido quando não é o dono do card (a mãe marca pro
+    filho pelo WhatsApp dela); `marcado_por` é 'recepcao' ou 'ia' (o agente, 3b)."""
     agora = agora or datetime.now(timezone.utc)
     prof = next((p for p in _profs_que_atendem(c, conta_id) if p["id"] == profissional_id), None)
     if not prof:
@@ -361,6 +368,12 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
     lid, nome_pac, fone_pac, erro = _lead_do_paciente(c, conta_id, lead_id, nome, fone)
     if erro:
         return None, erro
+    if (paciente or "").strip():
+        nome_pac = paciente.strip()
+    if not fone_pac and len(_digitos(fone)) >= 10:
+        # o card sem celular ganha o do WhatsApp, no formato de _lead_do_paciente
+        dig = _digitos(fone)
+        fone_pac = "+" + (dig if dig.startswith("55") else "55" + dig)
     _mover_card(c, conta_id, lid, membro_id)
     loc_id = faixa["local_id"] if faixa else None
     loc = next((x for x in cc.listar_locais(c, conta_id) if x["id"] == loc_id), None)
@@ -372,11 +385,12 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
              (conta_id, titulo, inicio, fim, local, tipo, prospeccao_id, profissional_id,
               servico_id, clinica_local_id, situacao, situacao_em, origem, paciente_nome, paciente_fone,
               encaixe, marcado_por, status, observacao_interna)
-           values (%s,%s,%s,%s,%s,'empresa',%s,%s,%s,%s,'agendado',now(),%s,%s,%s,%s,'recepcao','ativo',%s)
+           values (%s,%s,%s,%s,%s,'empresa',%s,%s,%s,%s,'agendado',now(),%s,%s,%s,%s,%s,'ativo',%s)
            returning id""",
         (conta_id, f"{nome_pac} · {palavra}"[:200], inicio, fim, loc["nome"] if loc else None,
          lid, profissional_id, servico_id, loc_id,
          origem if origem in ORIGENS else None, nome_pac[:120], fone_pac, bool(encaixe and not livre),
+         marcado_por if marcado_por in ("recepcao", "ia") else "recepcao",
          (observacao or "").strip()[:500] or None)).fetchone()[0]
     return eid, None
 
@@ -671,11 +685,25 @@ def ler_respostas(c, conta_id: int, agora: datetime) -> int:
         conv = _conversa(c, conta_id, {"lead": lead, "fone": fone})
         if not conv:
             continue
-        for (texto,) in c.execute(
-                """select m.texto from mensagens m join conversas cv on cv.id = m.conversa_id
+        from finance.clinica_agente import urgente
+        for texto, depois_de_outra in c.execute(
+                """select m.texto,
+                          exists (select 1 from mensagens o
+                                   where o.conversa_id = m.conversa_id and o.direcao = 'out'
+                                     and o.criado_em > %s + interval '2 minutes' and o.criado_em < m.criado_em)
+                     from mensagens m join conversas cv on cv.id = m.conversa_id
                     where m.conversa_id=%s and cv.conta_id=%s and m.direcao='in' and m.criado_em > %s
-                    order by m.criado_em, m.id limit 20""", (conv, conta_id, enviada)).fetchall():
+                    order by m.criado_em, m.id limit 20""", (enviada, conv, conta_id, enviada)).fetchall():
             t = texto or ""
+            if depois_de_outra and not _SO_NUMERO.match(t):
+                # a clínica já falou de outra coisa depois do lembrete: o "sim" daqui
+                # pra frente pode responder a ela, não à consulta. O "1"/"2" puro
+                # continua sendo resposta ao lembrete (o agente respondeu o "bom dia")
+                continue
+            if urgente(t):
+                # "não consigo respirar" começa igual a "não consigo ir": não é remarcar
+                # (o agente já passou a urgência pra recepção)
+                continue
             if _RE_SIM.search(t):
                 c.execute("""update eventos_agenda set situacao='confirmado', situacao_em=now(), confirmado_em=now()
                               where id=%s and conta_id=%s and situacao='agendado'""", (eid, conta_id))

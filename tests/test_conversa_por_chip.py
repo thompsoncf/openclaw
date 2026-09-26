@@ -434,5 +434,9 @@ def test_agente_recebe_o_aviso():
     import inspect
     from finance import agente
     fonte = inspect.getsource(agente._atender)
-    assert "_gemeos_de_outro_chip" in fonte
-    assert "gemeo_nota" in fonte and "{historico}{gemeo_nota}" in fonte
+    # o aviso virou função (26/09/2026) porque o agente da clínica também o usa
+    assert "_gemeos_de_outro_chip" in inspect.getsource(agente._nota_gemeo)
+    assert "gemeo_nota = _nota_gemeo(c, conta_id, conv)" in fonte and "{historico}{gemeo_nota}" in fonte
+    from finance import clinica_agente
+    assert "gemeo_nota=_nota_gemeo(c, conta_id, conv)" in fonte
+    assert "{historico}{gemeo_nota}" in inspect.getsource(clinica_agente.prompt)

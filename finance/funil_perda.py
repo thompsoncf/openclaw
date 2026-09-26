@@ -348,3 +348,104 @@ def reativar(c, conta_id: int, lead_id: int, membro_id: int | None = None) -> di
     except Exception:  # noqa: BLE001
         _log.warning("reativação do lead %s falhou", lead_id, exc_info=True)
         return {"reativado": False}
+
+
+# ------------------------------------------------------------------ volta na data (373)
+
+#: pra onde o lead perdido volta quando chega a data que ele deu: a mesma coluna
+#: que o funil usa pra "esfriou, precisa de outro contato"
+ETAPA_DA_VOLTA = "follow_up"
+MOTIVO_VOLTA = "voltou_na_data"
+
+
+def marcar_volta(c, conta_id: int, lead_id: int, dia) -> None:
+    """Guarda (ou limpa, com None) o dia em que o lead perdido volta pro funil —
+    "limpo o nome até dezembro". Savepoint: a coluna nasceu na 373, e salvar a
+    ficha do lead não pode depender dela."""
+    try:
+        with c.transaction():
+            c.execute("update prospeccao set perda_volta_em=%s where id=%s and conta_id=%s",
+                      (dia, lead_id, conta_id))
+    except Exception:  # noqa: BLE001
+        _log.warning("data de volta do lead %s não gravada", lead_id, exc_info=True)
+
+
+def volta_em(c, conta_id: int, lead_id: int):
+    """O dia guardado, ou None (inclusive sem a 373)."""
+    try:
+        with c.transaction():
+            r = c.execute("select perda_volta_em from prospeccao where id=%s and conta_id=%s",
+                          (lead_id, conta_id)).fetchone()
+        return r[0] if r else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def voltar_os_vencidos(pool, hoje=None) -> int:
+    """Os leads perdidos cuja data de volta chegou reabrem no Follow-up, com a
+    próxima ação marcada pra hoje (9h de Brasília) — é assim que aparecem na fila de
+    quem atende. O motivo e a data da perda ficam; a data de volta é zerada no
+    mesmo update que reabre, então rodar duas vezes (2 workers) não reabre duas.
+
+    Nunca levanta: roda no ticker de fundo. Devolve quantos voltaram."""
+    from datetime import date, time as _time
+    hoje = hoje or date.today()
+    try:
+        with pool.connection() as c:
+            if c.execute("""select 1 from information_schema.columns
+                             where table_name='prospeccao' and column_name='perda_volta_em'"""
+                         ).fetchone() is None:
+                return 0
+            vencidos = c.execute(
+                """select id, conta_id from prospeccao
+                    where status='perdido' and perda_volta_em is not null
+                      and perda_volta_em <= %s""", (hoje,)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        _log.info("voltar_os_vencidos: não deu pra listar: %s", e)
+        return 0
+    voltaram = 0
+    for lead_id, conta_id in vencidos:
+        try:
+            with pool.connection() as c:
+                tem_etapa = c.execute(
+                    "select 1 from funil_etapas where conta_id=%s and chave=%s",
+                    (conta_id, ETAPA_DA_VOLTA)).fetchone()
+                if not tem_etapa:
+                    continue
+                r = c.execute(
+                    """update prospeccao
+                          set status=%s, estagio='lead', perda_volta_em=null, atualizado_em=now()
+                        where id=%s and conta_id=%s and status='perdido'
+                          and perda_volta_em is not null
+                    returning perda_motivo""", (ETAPA_DA_VOLTA, lead_id, conta_id)).fetchone()
+                if not r:
+                    c.commit()
+                    continue
+                from finance import funil_regua as _fr
+                _fr.registrar_movimento(c, conta_id, lead_id, "perdido", ETAPA_DA_VOLTA,
+                                        MOTIVO_VOLTA, None)
+                rot = {m["chave"]: m["rotulo"] for m in motivos(c, conta_id, so_ativos=False)}
+                porque = rot.get(r[0] or "", r[0] or "")
+                acao = "Voltar a falar: chegou a data que ele deu" + (f" ({porque})" if porque else "")
+                try:
+                    with c.transaction():
+                        from finance import follow_up as _fu
+                        _fu.marcar(c, conta_id, lead_id,
+                                   datetime.combine(hoje, _time(12, 0), tzinfo=timezone.utc),
+                                   acao=acao[:200], motivo=acao[:200], automatico=True)
+                except Exception:  # noqa: BLE001 — sem o follow-up, o lead volta igual
+                    _log.info("follow-up do lead %s não marcado", lead_id, exc_info=True)
+                try:
+                    with c.transaction():
+                        c.execute("""insert into prospeccao_atividades
+                                        (prospeccao_id, membro_id, tipo, resultado, descricao)
+                                     values (%s, null, 'nota', 'retornar', %s)""",
+                                  (lead_id, f"Voltou ao funil: chegou a data que ele deu"
+                                            f"{' — ' + porque if porque else ''}."[:400]))
+                except Exception:  # noqa: BLE001 — timeline é best-effort
+                    pass
+                c.commit()
+                voltaram += 1
+        except Exception as e:  # noqa: BLE001
+            _log.info("voltar_os_vencidos: lead %s falhou: %s", lead_id, e)
+    return voltaram

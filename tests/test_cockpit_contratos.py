@@ -144,8 +144,8 @@ def test_placar_da_o_contrato_a_quem_fez_o_orcamento(pool, monkeypatch):
 
 
 def test_ganhos_do_perfil_do_vendedor_seguem_o_contrato_e_nao_a_edicao(pool, monkeypatch):
-    """"Ganhos do mês" no perfil do app contava lead ganho pela ÚLTIMA EDIÇÃO: na
-    Prime (26/09/2026) o Pedro via 3 no mês tendo assinado 2 — o terceiro era de
+    """"Ganhos do mês" de `perfil()` contava lead ganho pela ÚLTIMA EDIÇÃO: na
+    Prime (26/09/2026) daria 3 no mês pro Pedro, que assinou 2 — o terceiro era de
     agosto, editado em setembro. Agora é a régua do placar do dono."""
     from finance import cockpit as ck
     agora = datetime.now(cd._brt())

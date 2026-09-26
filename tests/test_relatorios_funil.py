@@ -30,6 +30,8 @@ create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
   sinal_pago_em timestamptz, status text not null default 'rascunho',
   criado_por text, criado_em timestamptz not null default now());
+create table orcamento_envios (id bigserial primary key, conta_id bigint,
+  orcamento_id bigint, ok boolean not null default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   whatsapp text, telefone text, criado_em timestamptz not null default now(),
   contato text, vendedor_id bigint);

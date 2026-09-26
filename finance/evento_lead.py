@@ -319,7 +319,7 @@ def _ordem_por_festa(card: dict, agora: datetime) -> tuple:
     faixa ela ocuparia o topo do grupo — a Prime tem lead aberto com data vencida,
     e o topo da coluna é justamente onde ele não pode estar.
     """
-    hoje = agora.date()
+    hoje = _dia_brt(agora)
     festa = card.get("evento_em")
     if isinstance(festa, datetime):
         festa = festa.date()
@@ -369,6 +369,7 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
     "Entrou na semana de 14/09" / "Entrou em ago" — a mesma chave, a mesma ordem."""
     agora = agora or datetime.now(timezone.utc)
     limite = agora - timedelta(days=PARADO_DIAS)
+    hoje = _dia_brt(agora)      # o dia e o mês de Brasília, como a pílula de entrada
     esperando: list = []
     evento: dict[str, list] = {}
     entrada: dict[str, list] = {}
@@ -377,14 +378,14 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
         # quem entrou pela pílula de fora (esperando resposta, festa em 30 dias)
         # entrou porque é urgente: nunca se esconde na dobra
         if (ultima_atividade(c, agora) < limite and not c.get("fora")
-                and not festa_em_30_dias(c, agora.date())):
+                and not festa_em_30_dias(c, hoje)):
             parados.append(c)
         elif esperando_resposta(c):
             esperando.append(c)
         elif c.get("evento_em"):
             evento.setdefault(mes_chave(c["evento_em"]), []).append(c)
         else:
-            base = (_aware(c.get("criado_em")) or agora).date()
+            base = _dia_brt(c.get("criado_em")) or hoje
             entrada.setdefault(_semana_chave(base) if por_semana else mes_chave(base), []).append(c)
     grupos = []
     if esperando:

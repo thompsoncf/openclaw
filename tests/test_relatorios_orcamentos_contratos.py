@@ -24,6 +24,7 @@ create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
   cliente text, empresa text, token text, setup_centavos bigint default 0,
   mensal_centavos bigint default 0, primeiro_ano_centavos bigint,
   status text default 'rascunho', criado_por text, aprovada_em timestamptz,
+  sinal_pago_em timestamptz,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table contratos (id bigserial primary key, conta_id bigint, numero int,
   orcamento_id bigint, status text default 'enviado', valor_centavos bigint,
@@ -556,3 +557,26 @@ def test_orcamento_de_lead_perdido_conta_como_perdido(pool, cen):
     assert status[1] == "Perdido" and status[3] == "Fechado"
     so_perdidos = rel._dados_orcamentos(pool, conta, "todos", "perdido", "", "")
     assert [l["numero"] for l in so_perdidos["linhas"]] == [1]
+
+
+def test_sinal_pago_ou_contrato_assinado_nunca_vira_perdido(pool, cen):
+    """O sinal é confirmado sem fechar o orçamento, e a esteira fecha o lead parado
+    sem olhar o orçamento. Dinheiro que entrou não é venda perdida."""
+    conta = cen["conta"]
+    with pool.connection() as c:
+        com_sinal = c.execute(
+            "insert into orcamentos (conta_id, numero, status, sinal_pago_em, primeiro_ano_centavos) "
+            "values (%s,1,'aprovada',now(),500000) returning id", (conta,)).fetchone()[0]
+        com_ct = c.execute(
+            "insert into orcamentos (conta_id, numero, status, primeiro_ano_centavos) "
+            "values (%s,2,'aprovada',500000) returning id", (conta,)).fetchone()[0]
+        c.execute("insert into contratos (conta_id, orcamento_id, status, assinado_em) "
+                  "values (%s,%s,'assinado',now())", (conta, com_ct))
+        for oid in (com_sinal, com_ct):
+            c.execute("insert into prospeccao (conta_id, orcamento_id, status) values (%s,%s,'perdido')",
+                      (conta, oid))
+        c.commit()
+    d = rel._dados_orcamentos(pool, conta, "todos", "", "", "")
+    met = dict(d["metricas"])
+    assert met["Perdidos"].startswith("0 ·"), met
+    assert {l["status"] for l in d["linhas"]} == {"Aprovada"}

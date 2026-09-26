@@ -592,7 +592,8 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
                  order by {ordem} limit %s""",
             (*args, limite),
         ).fetchall()
-    hoje = date.today()
+    from finance import relogio as _relogio
+    hoje = _relogio.hoje()      # "vencida" e "vence hoje" no dia de Brasília
     out = []
     for r in rows:
         venc = r[5]

@@ -40,6 +40,8 @@ create table canais_config (id bigserial primary key, conta_id bigint, canal tex
   identificador text, rotulo text);
 create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
   status text not null default 'rascunho');
+create table orcamento_envios (id bigserial primary key, conta_id bigint,
+  orcamento_id bigint, ok boolean not null default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   orcamento_id bigint, ultimo_contato_em timestamptz, origem text, vendedor_id bigint,
   criado_em timestamptz not null default now());
@@ -635,19 +637,28 @@ def test_template_mantem_periodo_generico_onde_nao_ha_rotulo():
         assert "período: Este mês" in html, f"{nome}: o rótulo padrão sumiu"
 
 
-def test_orcamento_em_rascunho_nao_conta_como_conversao(pool, cen):
-    """Rascunho nunca chegou ao cliente. Contado, virava a "conversão" de quem abre
-    proposta e não manda: na Prime (26/09/2026) os 4 orçamentos de setembro do Pedro
-    eram rascunho, e ele aparecia com 5,3% contra 2,5% de quem enviou."""
+def test_so_conta_o_orcamento_que_chegou_ao_cliente(pool, cen):
+    """Conversão é orçamento que CHEGOU ao cliente: status além de rascunho, ou um
+    envio que deu certo (a régua do gatilho do funil). Mandar pelo WhatsApp grava o
+    envio e não muda o status — na Prime (26/09/2026) 13 dos 16 "rascunhos" do
+    Pedro tinham ido pro cliente, e olhar só o status os chamaria de não enviados."""
     _lead(pool, cen["conta"], nome="Mandou", entrou_min=0, resp_min=5, orcamento=31)
-    pid = _lead(pool, cen["conta"], nome="Nao mandou", entrou_min=0, resp_min=5,
-                orcamento=32)
+    zap = _lead(pool, cen["conta"], nome="Mandou pelo zap", entrou_min=0, resp_min=5,
+                orcamento=33)
+    parado = _lead(pool, cen["conta"], nome="Nao mandou", entrou_min=0, resp_min=5,
+                   orcamento=32)
     with pool.connection() as c:
-        c.execute("""update orcamentos set status='rascunho'
-                      where id=(select orcamento_id from prospeccao where id=%s)""", (pid,))
+        for pid in (zap, parado):
+            c.execute("""update orcamentos set status='rascunho'
+                          where id=(select orcamento_id from prospeccao where id=%s)""", (pid,))
+        c.execute("""insert into orcamento_envios (conta_id, orcamento_id, ok)
+                     select conta_id, orcamento_id, true from prospeccao where id=%s""", (zap,))
+        c.execute("""insert into orcamento_envios (conta_id, orcamento_id, ok)
+                     select conta_id, orcamento_id, false from prospeccao where id=%s""", (parado,))
         c.commit()
     d = _rel(pool, cen["conta"])
-    assert _metrica(d, "Viraram orçamento") == "1 de 2 · 50%"
-    linha = next(l for l in d["linhas"] if l["lead"] == "Nao mandou")
-    assert linha["orcamento"] == "nº 32 (rascunho)", (
+    assert _metrica(d, "Viraram orçamento") == "2 de 3 · 67%"
+    por = {l["lead"]: l["orcamento"] for l in d["linhas"]}
+    assert por["Mandou pelo zap"] == "nº 33"
+    assert por["Nao mandou"] == "nº 32 (não enviado)", (
         "o número segue na linha, mas a linha diz por que ele não entrou na conta")

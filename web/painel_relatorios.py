@@ -49,6 +49,7 @@ _PERIODO_ROTULO = _per.ROTULO
 _dia = _per.dia
 _fim_do_mes = _per.fim_do_mes
 _intervalo = _per.intervalo
+from finance import relogio as _relogio  # noqa: E402 — o "hoje" de Brasília
 
 
 def periodos_da_aba(tipo: str) -> list[tuple[str, str]]:
@@ -286,7 +287,7 @@ def _dados_vendas(pool, conta_id, periodo):
 
     total = _soma(linhas, "valor_centavos")
     n = len(linhas)
-    hoje_str = _fmt(date.today())
+    hoje_str = _fmt(_relogio.hoje())      # o dia de Brasília, como o período
     vendido_hoje = _soma([r for r in linhas if r["data"] == hoje_str], "valor_centavos")
     dados = {
         "label": "Vendas", "mock": False,
@@ -372,7 +373,7 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
     "Fornecedores" nas 34 contas a pagar, "Serviços"/"Vendas" nas a receber. Uma
     coluna constante não informa; ocupa. (O campo continua no banco, no filtro e
     no que a aba Empresa mostra — o que saiu é a coluna desta tabela.)"""
-    hoje = date.today()
+    hoje = _relogio.hoje()
     tits = emp.listar_titulos(pool, conta_id, status="aberto", tipo=tipo, limite=300)
     candidatos = emp.pagamentos_candidatos(pool, conta_id, tits, tipo)
     verbo = "pago" if tipo == "pagar" else "recebido"
@@ -734,12 +735,29 @@ _DIA_BRT = "({} at time zone 'America/Sao_Paulo')::date"
 #: "Perdidos" desta aba ficava em 0 pra sempre (na Prime, 26/09/2026, com 67 leads
 #: perdidos). Orçamento em aberto cujo(s) lead(s) foram TODOS perdidos conta como
 #: perdido; fechado segue fechado, mesmo que alguém tenha perdido o card depois.
+#: Dinheiro que entrou (sinal pago) ou contrato assinado também não é venda
+#: perdida: o sinal é confirmado sem fechar o orçamento (`vendas.confirmar_sinal`),
+#: e a esteira não olha o orçamento antes de fechar o lead parado.
 _ORC_STATUS = """(case when o.status not in ('fechado', 'perdido')
           and exists (select 1 from prospeccao px where px.orcamento_id = o.id
                          and px.conta_id = o.conta_id and px.status = 'perdido')
           and not exists (select 1 from prospeccao px where px.orcamento_id = o.id
                          and px.conta_id = o.conta_id and px.status <> 'perdido')
+          and o.sinal_pago_em is null
+          and not exists (select 1 from contratos cx where cx.orcamento_id = o.id
+                         and cx.conta_id = o.conta_id and cx.substitui_id is null
+                         and cx.assinado_em is not null
+                         and cx.status in ('assinado', 'cumprido'))
      then 'perdido' else o.status end)"""
+
+#: O ORÇAMENTO CHEGOU AO CLIENTE? A régua do gatilho "orçamento enviado" do funil
+#: (`funil_regua._SQL_ORCAMENTO_ENVIADO`): status além de rascunho OU um envio que
+#: deu certo. Mandar pelo WhatsApp, e-mail ou link grava `orcamento_envios` e NÃO
+#: muda o status — na Prime (26/09/2026) 13 dos 16 "rascunhos" do Pedro tinham ido
+#: pro cliente. Olhar só o status chamaria de não enviado o que foi enviado.
+_ORC_CHEGOU = """(coalesce(o.status, 'rascunho') <> 'rascunho'
+          or exists (select 1 from orcamento_envios ex where ex.orcamento_id = o.id
+                        and ex.conta_id = o.conta_id and ex.ok))"""
 
 
 def _vendedores_da_conta(pool, conta_id: int) -> list[tuple[int, str]]:
@@ -1619,12 +1637,10 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
            -- passariam a mentir por truncagem justo quando a base cresce. Janela
            -- roda antes do LIMIT.
            count(*) over () as n_total,
-           -- RASCUNHO NÃO É ORÇAMENTO: nunca chegou ao cliente. Contado, era a
-           -- "conversão" de quem abre proposta e não manda — na Prime (26/09/2026)
-           -- os 4 orçamentos de setembro do Pedro eram rascunho, e a conversão
-           -- dele aparecia o dobro da de quem enviou.
-           count(o.numero) filter (where o.status <> 'rascunho') over () as n_orc,
-           o.status
+           -- SÓ O ORÇAMENTO QUE CHEGOU AO CLIENTE (ver _ORC_CHEGOU): o que ficou
+           -- aberto na tela do vendedor e nunca saiu não é conversão
+           count(o.numero) filter (where {_ORC_CHEGOU}) over () as n_orc,
+           (o.id is null or {_ORC_CHEGOU}) as chegou
       from prospeccao p
       left join por_lead l on l.lead_id = p.id
       left join membros mb on mb.id = coalesce(l.memb, p.vendedor_id)
@@ -1671,7 +1687,7 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
             "msgs": int(r[5] or 0),
             "vendedor": r[7],
             "ultima": ultima,
-            "orcamento": (f"nº {r[8]}" + (" (rascunho)" if r[13] == "rascunho" else "")) if r[8] else "—",
+            "orcamento": (f"nº {r[8]}" + ("" if r[13] else " (não enviado)")) if r[8] else "—",
         })
 
     med = vendas.mediana(esperas)
@@ -1824,8 +1840,8 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> di
         # escolhido, dos DELE (quem fez o orçamento, a régua da aba Orçamentos). Antes
         # contava a conta inteira desde sempre: "4 de 230" aparecia igual pra qualquer
         # mês e qualquer vendedor, e a linha não servia pra comparar ninguém.
-        # Rascunho fica de fora: não chegou ao cliente, não tinha como virar sinal.
-        onde_o, p3 = "o.conta_id=%s and o.status <> 'rascunho'", [conta_id]
+        # O que não chegou ao cliente fica de fora: não tinha como virar sinal.
+        onde_o, p3 = "o.conta_id=%s and " + _ORC_CHEGOU, [conta_id]
         if periodo != "todos":
             onde_o += (" and " + _DIA_BRT.format("o.criado_em") + " >= %s and "
                        + _DIA_BRT.format("o.criado_em") + " <= %s")

@@ -77,6 +77,8 @@ create table orcamentos (id bigserial primary key, conta_id bigint, criado_por t
   primeiro_ano_centavos bigint default 0, mensal_centavos bigint default 0, setup_centavos bigint default 0,
   itens jsonb, criado_em timestamptz default now(), aprovada_em timestamptz, aprovada_por text,
   sinal_pago_em timestamptz);
+create table orcamento_envios (id bigserial primary key, conta_id bigint,
+  orcamento_id bigint, ok boolean not null default true);
 -- ver o comentário gêmeo em tests/test_raio_x.py
 create table clientes (id bigserial primary key, conta_id bigint, nome text);
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint, substitui_id bigint,

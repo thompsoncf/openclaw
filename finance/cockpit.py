@@ -582,7 +582,7 @@ def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool =
     banco."""
     from finance import evento_lead as _evl
     agora = agora or _agora()
-    hoje = agora.date()
+    hoje = _evl._dia_brt(agora)     # o dia de Brasília, o mesmo das pílulas de mês
     fora_on = set(fora_on or ())
     busca = (busca or "").strip()
     ordem = ordem if ordem in ORDENS else ORDEM_PADRAO
@@ -598,7 +598,7 @@ def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool =
         l["festa30"] = _evl.festa_em_30_dias(l, hoje)
         l["no_periodo"] = True if sem_corte else _evl.no_periodo(l, entrou)
         l["fora"] = not l["no_periodo"]
-        ce = _evl._aware(l.get("criado_em"))
+        ce = _evl._dia_brt(l.get("criado_em"))
         l["entrou_rot"] = _evl._MESES[ce.month - 1] if ce else ""
         l["parado"] = _evl.parado(l, agora)
     fora_cont = {"suavez": sum(1 for l in leads if l["fora"] and l["vez"]),
@@ -1057,8 +1057,9 @@ def perfil(pool, conta_id: int, membro_id: int) -> dict:
         # GANHOS DO MÊS pela régua do placar do dono (`cockpit_dono.placar`): conta
         # com contrato conta o CONTRATO ASSINADO no mês de Brasília; sem contrato,
         # o dia em que o lead ENTROU no fechamento. Era `atualizado_em` — a última
-        # edição do lead —, e em 26/09/2026 o Pedro, da Prime, via 3 ganhos no mês
-        # tendo assinado 2: o terceiro era de agosto, editado em setembro.
+        # edição do lead —: na Prime (26/09/2026) daria 3 no mês pro Pedro, que
+        # assinou 2 (o terceiro era de agosto, editado em setembro). Nenhuma tela lê
+        # este número hoje; a régua é a mesma pra quem vier a ler.
         from finance import cockpit_dono as _cd
         ini, fim = _cd._range("mes")
         if _cd._usa_contrato(c, conta_id):

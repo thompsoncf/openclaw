@@ -613,3 +613,18 @@ def test_o_hoje_dos_periodos_e_o_de_brasilia(monkeypatch):
 
     monkeypatch.setattr(per, "datetime", _Relogio)
     assert per.intervalo("mes") == (_d(2026, 9, 1), _d(2026, 9, 30))
+
+
+def test_o_grupo_da_coluna_usa_o_mes_de_brasilia_como_a_pilula():
+    """A pílula e o cabeçalho do grupo precisam dizer o mesmo mês pro mesmo card."""
+    from datetime import datetime as _dt, timezone as _tz
+    from finance import evento_lead as evl
+    agora = _dt(2026, 10, 1, 2, 0, tzinfo=_tz.utc)          # 30/09 23h em Teresina
+    card = {"id": 1, "criado_em": _dt(2026, 10, 1, 1, 0, tzinfo=_tz.utc),
+            "ultima_msg_em": agora}
+    grupos = evl.agrupar([card], agora=agora)
+    assert [g["chave"] for g in grupos if g["tipo"] == "entrada"] == ["2026-09"]
+    semana = evl.agrupar([dict(card, criado_em=_dt(2026, 9, 28, 1, 0, tzinfo=_tz.utc))],
+                         agora=agora, por_semana=True)
+    assert [g["chave"] for g in semana if g["tipo"] == "entrada"] == ["2026-09-21"], (
+        "domingo 22h em Teresina ainda é a semana de 21/09")

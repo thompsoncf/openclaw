@@ -1117,7 +1117,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         cc["festa30"] = _evl.festa_em_30_dias(cc, hoje)
         cc["no_periodo"] = _evl.no_periodo(cc, filtro_entrou)
         cc["fora"] = not cc["no_periodo"]
-        _ce = _evl._aware(cc.get("criado_em"))
+        _ce = _evl._dia_brt(cc.get("criado_em"))
         cc["entrou_rot"] = _evl._MESES[_ce.month - 1] if _ce else ""
     fora_cont = {"esperando": sum(1 for cc in todos_cards if cc["fora"] and cc["esperando"] and cc["status"] != "perdido"),
                  "festa30": sum(1 for cc in todos_cards if cc["fora"] and cc["festa30"] and cc["status"] != "perdido")}

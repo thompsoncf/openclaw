@@ -418,6 +418,26 @@ def test_preco_no_vacuo_nao_e_negociacao(pool):
         assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"
 
 
+def test_historico_importado_depois_vale_a_data_e_nao_o_id(pool):
+    """O histórico antigo do WhatsApp importado depois ganha ids novos com datas
+    velhas: o "oi" de um mês antes do preço não é resposta a ele. E a resposta que
+    chegou quase junto do preço (o relógio fora de ordem por segundos) continua valendo."""
+    with pool.connection() as c:
+        lead = _lead(c, status="contatado")
+        _conversa_com(c, lead, ("out", "PACOTE EXPERIENCE R$ 6.840 à vista"))
+        conv = c.execute("select id from conversas where prospeccao_id=%s", (lead,)).fetchone()[0]
+        c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) values (%s,'in',%s,%s)",
+                  (conv, "oi, tudo bem?", AGORA - timedelta(days=30)))            # importada: id maior, data velha
+        _negociacao_por_valores(c); c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"
+        c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) values (%s,'in',%s,%s)",
+                  (conv, "dá pra parcelar?", AGORA - timedelta(seconds=20)))     # quase junto: vale o id
+        c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "proposta"
+
+
 def test_mil_conta_como_preco(pool):
     """'a partir de 5 mil' — a Juliana ficou de fora da primeira passada porque
     `\\b` não é borda de palavra no Postgres. `\\y` é."""

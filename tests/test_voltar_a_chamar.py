@@ -760,3 +760,27 @@ def test_excluir_o_card_nao_trava_e_guarda_o_historico(pool, sem_envio):
         c.execute("delete from prospeccao where id=%s", (lead,))
         c.commit()
         assert c.execute("""select count(*), count(prospeccao_id) from voltar_a_chamar_toques""").fetchone() == (4, 0)
+
+
+def test_lembrete_ou_vaga_da_clinica_hoje_segura_o_toque(pool, envios):
+    """O "1 por paciente por dia" soma as outras automáticas da clínica: quem recebeu
+    o lembrete da sessão (ou a vaga) hoje não recebe o toque, nem na tela nem sozinho."""
+    _modo(pool, CLINICA, "ligado")
+    _lead_id, conv = _paciente_recebe_preco(pool, fone="5586999990077", nome="Beatriz")
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    with pool.connection() as c:
+        c.execute("""create table clinica_lembretes (id bigserial primary key, conta_id bigint, conversa_id bigint,
+                                                      tipo text, ref_id bigint, enviado_em timestamptz,
+                                                      mensagem_id bigint, estado text default 'enviado')""")
+        c.execute("""insert into clinica_lembretes (conta_id, conversa_id, tipo, ref_id, enviado_em)
+                     values (%s,%s,'sessao',1,%s)""", (CLINICA, conv, _br(21, 11)))
+        c.commit()
+        assert vac.hoje(c, CLINICA, _br(21, 13, 5), vac.config(c, CLINICA))["voltar"] == []
+    vac.rodar(pool, agora=_br(21, 13, 5))
+    assert envios == []
+    # o lembrete que falhou (chip caído) não conta
+    with pool.connection() as c:
+        c.execute("update clinica_lembretes set estado='falhou'")
+        c.commit()
+    vac.rodar(pool, agora=_br(21, 13, 6))
+    assert len(envios) == 1

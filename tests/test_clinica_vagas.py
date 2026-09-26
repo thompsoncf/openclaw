@@ -552,3 +552,18 @@ def test_assinante_com_prioridade_passa_na_frente_de_todos_os_grupos(pool):
         chamar, _fora = cvg.candidatos(c, CLINICA, cvg.vaga(c, CLINICA, vid), AGORA)
     assert [p["nome"] for p in chamar] == ["Rui Retorno", "Paula Pedido", "Rita Preço"]
     assert chamar[0]["porque"].endswith(" · assinante")
+
+
+def test_voltar_a_chamar_nao_manda_no_dia_em_que_recebeu_a_vaga(pool, zap):
+    """O "1 automática por dia" dos dois lados: quem recebeu a vaga hoje sai da fila
+    do voltar a chamar (com a tabela de ofertas de verdade, da 369)."""
+    from finance import voltar_a_chamar as vac
+    with pool.connection() as c:
+        gente, vid = _cenario(c)
+        _aprovar(c, vid)
+        sql = ("select t.conversa_id from voltar_a_chamar_toques t where t.conta_id=%(conta)s and "
+               + vac._nao_mandado_hoje(c))
+        livres = {r[0] for r in c.execute(sql, {"conta": CLINICA,
+                                                "hoje": vac._inicio_do_dia(datetime.now(timezone.utc))}).fetchall()}
+    assert gente["rita"][1] not in livres           # Rita recebeu a vaga hoje
+    assert gente["ze"][1] in livres                 # Zé não recebeu nada

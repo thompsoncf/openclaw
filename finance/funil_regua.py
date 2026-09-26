@@ -312,19 +312,25 @@ _SQL_ORCAMENTO_ENVIADO = """
            and (o.status in ('enviado','aprovada','fechado') or e.primeiro is not null)"""
 
 # a primeira resposta do cliente DEPOIS da primeira mensagem nossa com preço. Compara
-# ids, não datas — mesmo motivo da bola na trava: duas mensagens quase simultâneas
-# chegam fora de ordem.
+# ids — duas mensagens quase simultâneas chegam fora de ordem no relógio (mesmo motivo
+# da bola na trava) — E a data, com 2 minutos de folga: o histórico importado depois
+# (conversa antiga do WhatsApp) ganha ids NOVOS com datas velhas, e o "oi" de um mês
+# antes do preço não é resposta a ele (o voltar a chamar já compara pela data, #843).
+# A data só TIRA o que o id dizia (nunca põe resposta nova): nenhum card de nenhuma
+# conta anda de uma vez no deploy por causa dela.
 # Tabela derivada, e não CTE: este SQL entra como ramo de um UNION dentro de
 # subconsulta em `negociacao_valores`, e `WITH` não pode aparecer ali.
 _SQL_RESPONDEU_PRECO = """
-        select pr.lead, min(m.criado_em) as quando
-          from (select cv.prospeccao_id as lead, min(m.id) as mid
+        select pr.lead, greatest(min(m.criado_em), max(pr.em)) as quando
+          from (select cv.prospeccao_id as lead, min(m.id) as mid,
+                       (array_agg(m.criado_em order by m.id))[1] as em
                   from mensagens m join conversas cv on cv.id = m.conversa_id
                  where cv.conta_id=%(conta)s and cv.prospeccao_id is not null
                    and m.direcao='out' and m.texto ~* '""" + RE_PRECO + """'
                  group by cv.prospeccao_id) pr
           join conversas cv on cv.prospeccao_id = pr.lead and cv.conta_id=%(conta)s
           join mensagens m on m.conversa_id = cv.id and m.direcao='in' and m.id > pr.mid
+                          and m.criado_em > pr.em - interval '2 minutes'
          group by pr.lead"""
 
 # O PREÇO NO VÁCUO também é um fato — só não é Negociação na Prime (ver acima). Na

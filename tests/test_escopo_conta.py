@@ -178,6 +178,8 @@ TABELAS: dict[str, tuple[str, ...]] = {
     "clinica_assinantes": ('conta_id',),
     "clinica_assinatura_mensalidades": ('conta_id',),
     "clinica_assinatura_usos": ('conta_id',),
+    "clinica_produto_lotes": ('conta_id',),       # 386: produto junto do atendimento
+    "clinica_produto_vendas": ('conta_id',),
 }
 
 # Só código de produção. tests/ monta cenário de propósito e scripts/ são

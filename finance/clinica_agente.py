@@ -326,7 +326,7 @@ def cardapio(c, conta_id: int, lead: int | None, agora: datetime) -> dict:
             if t["id"] not in p["tipos"]:
                 continue
             livres_ = [x for x in ca.livres(c, conta_id, p["id"], t["id"], hoje, DIAS, desde)
-                       if (p["id"], x["inicio"]) not in na_rua]
+                       if not cvg.encosta(na_rua, p["id"], x["inicio"], x["fim"])]
             for x in _escolher(livres_):
                 loc = locais.get(x["local_id"])
                 onde = ""
@@ -832,9 +832,13 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
         if cvg.processar(c, conta_id, agora, conversa_id=conversa_id,
                          responder=lambda _oferta, texto: enviar(texto)):
             return
+        if cvg.ja_respondida(c, conta_id, conversa_id):
+            return                          # o poller respondeu este "1" um instante antes
     except Exception:  # noqa: BLE001 — sem a 365, ou vaga com problema: segue a conversa
         c.rollback()
         _log.info("agente da clínica: resposta de vaga não tratada (conversa %s)", conversa_id, exc_info=True)
+        if not tentar_travar(c, conversa_id):
+            return                          # o rollback soltou a trava e outra volta pegou
     # 4) o "1"/"2" do lembrete: resposta pronta pelo que foi gravado, sem IA
     ack = resposta_da_vespera(c, conta_id, conversa_id, lead, fone, ultima, agora)
     if ack:

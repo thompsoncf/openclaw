@@ -56,7 +56,9 @@ MODOS = (("off", "Desligado: não procura vaga"),
          ("aprova", "A recepção aprova cada horário (recomendado no 1º mês)"),
          ("auto", "Automático: manda sozinho no horário de atendimento"))
 
-_RE_SIM = re.compile(r"^\s*(1|sim|quero|pode ser|pode|eu quero|fico|confirmo)\s*[.!)✅👍]*\s*$", re.I)
+#: "sim" com complemento curto ("Sim, quero!", "pode marcar", "1 sim"), sem pergunta e sem "não"/"mas"
+_RE_SIM = re.compile(r"^\s*(1|sim|quero|pode|fico|confirmo|ok|opa|claro|eu quero)\b"
+                     r"(?![^?]*\b(n[aã]o|mas|nem)\b)[^?]{0,30}$", re.I)
 _RE_NAO = re.compile(r"^\s*(2|n[aã]o|n[aã]o posso|n[aã]o d[aá]|n[aã]o quero)\s*[.!,]*\s*(obrigad[oa])?\s*[.!]*\s*$",
                      re.I)
 _RE_PARAR = re.compile(r"^\s*(parar?|pare|sair)\s*[.!]*\s*$", re.I)
@@ -96,7 +98,7 @@ def vaga(c, conta_id: int, vaga_id: int) -> dict | None:
     r = c.execute(
         """select v.id, v.profissional_id, v.inicio, v.fim, v.clinica_local_id, v.origem_evento_id,
                   v.estado, v.rodada, v.oferta_ate, v.aprovada_em, v.preenchida_evento_id, v.preenchida_em,
-                  coalesce(e.paciente_nome, ''), v.criado_em
+                  coalesce(e.paciente_nome, ''), v.criado_em, e.servico_id
              from clinica_vagas v
              left join eventos_agenda e on e.id = v.origem_evento_id and e.conta_id = v.conta_id
             where v.id=%s and v.conta_id=%s""", (vaga_id, conta_id)).fetchone()
@@ -110,7 +112,7 @@ def _vaga_dict(c, conta_id: int, r) -> dict:
     return {"id": r[0], "profissional_id": r[1], "prof": prof["nome"] if prof else "", "inicio": r[2],
             "fim": r[3], "local_id": r[4], "origem_evento_id": r[5], "estado": r[6], "rodada": r[7],
             "oferta_ate": r[8], "aprovada_em": r[9], "preenchida_evento_id": r[10], "preenchida_em": r[11],
-            "cancelou": r[12], "criado_em": r[13], "dur": dur,
+            "cancelou": r[12], "criado_em": r[13], "servico_origem": r[14], "dur": dur,
             "dia": ca.dia_txt(r[2]), "hora": ca.hora_txt(r[2]), "onde": ca._onde(c, conta_id, ev_fake)}
 
 
@@ -122,7 +124,7 @@ def listar(c, conta_id: int, agora: datetime) -> list[dict]:
             rows = c.execute(
                 """select v.id, v.profissional_id, v.inicio, v.fim, v.clinica_local_id, v.origem_evento_id,
                           v.estado, v.rodada, v.oferta_ate, v.aprovada_em, v.preenchida_evento_id,
-                          v.preenchida_em, coalesce(e.paciente_nome, ''), v.criado_em
+                          v.preenchida_em, coalesce(e.paciente_nome, ''), v.criado_em, e.servico_id
                      from clinica_vagas v
                      left join eventos_agenda e on e.id = v.origem_evento_id and e.conta_id = v.conta_id
                     where v.conta_id=%s
@@ -154,39 +156,67 @@ def esperando(c, conta_id: int) -> int:
         return 0
 
 
-def em_oferta(c, conta_id: int) -> set[tuple[int, datetime]]:
-    """(profissional, início) dos horários com convite na rua: o agente não oferece o
-    mesmo horário a outra pessoa ("ninguém promete o mesmo horário duas vezes")."""
+def em_oferta(c, conta_id: int) -> list[tuple[int, datetime, datetime]]:
+    """(profissional, início, fim) dos horários com convite na rua: o agente não
+    oferece a outra pessoa nada que encoste nele ("ninguém promete o mesmo horário
+    duas vezes") — nem o 14:30 de 30 min dentro de uma vaga de 14:00 às 15:00."""
     try:
         with c.transaction():
-            return {(r[0], r[1]) for r in c.execute(
-                "select profissional_id, inicio from clinica_vagas where conta_id=%s and estado='oferta'",
-                (conta_id,)).fetchall()}
+            return [(r[0], r[1], r[2]) for r in c.execute(
+                "select profissional_id, inicio, fim from clinica_vagas where conta_id=%s and estado='oferta'",
+                (conta_id,)).fetchall()]
     except Exception:  # noqa: BLE001
-        return set()
+        return []
+
+
+def encosta(na_rua, prof_id: int, inicio: datetime, fim: datetime) -> bool:
+    return any(p == prof_id and inicio < f and i < fim for p, i, f in na_rua)
 
 
 # ------------------------------------------------------------------ nascer, fechar
 
+def marcavel(c, conta_id: int, prof_id: int, servico_id: int | None, inicio: datetime, agora: datetime) -> bool:
+    """O horário está na grade, fora de bloqueio e no passo da agenda — o mesmo teste
+    de `clinica_agenda.agendar`. Encaixe cancelado, dia bloqueado (a médica ficou
+    doente e a recepção cancelou tudo) e horário quebrado não viram vaga: o convite
+    sairia, e o "1" ouviria "acabou de ser preenchida", que é mentira."""
+    if not servico_id:
+        return False
+    return any(x["inicio"] == inicio for x in
+               ca.livres(c, conta_id, prof_id, servico_id, ca.local(inicio).date(), 1, agora))
+
+
 def detectar(c, conta_id: int, agora: datetime) -> int:
-    """Consulta cancelada com pelo menos 1h de aviso, horário ainda livre → vaga."""
+    """Consulta cancelada com pelo menos 1h de aviso, horário ainda marcável → vaga.
+
+    O mesmo horário vira vaga DE NOVO quando outra consulta nele é cancelada depois
+    (quem ficou com a vaga desistiu, ou a recepção marcou e a pessoa cancelou)."""
     novas = 0
-    for eid, prof, ini, fim, loc in c.execute(
+    for eid, prof, ini, fim, loc, serv, vid, vestado, vorigem in c.execute(
             """select e.id, e.profissional_id, e.inicio, coalesce(e.fim, e.inicio + interval '30 minutes'),
-                      e.clinica_local_id
+                      e.clinica_local_id, e.servico_id, v.id, v.estado, v.origem_evento_id
                  from eventos_agenda e
+                 left join clinica_vagas v on v.conta_id = e.conta_id
+                      and v.profissional_id = e.profissional_id and v.inicio = e.inicio
                 where e.conta_id=%s and e.situacao is not null and e.profissional_id is not null
                   and (e.situacao = 'cancelou' or e.status = 'cancelado')
                   and e.inicio > %s and e.inicio < %s
-                  and not exists (select 1 from clinica_vagas v where v.conta_id = e.conta_id
-                                     and v.profissional_id = e.profissional_id and v.inicio = e.inicio)""",
+                  and (v.id is null or (v.estado not in ('aguardando','oferta') and v.origem_evento_id <> e.id
+                                        and v.atualizado_em < coalesce(e.situacao_em, now())))""",
             (conta_id, agora + AVISO_MIN, agora + timedelta(days=DIAS))).fetchall():
-        if ca.ocupados(c, conta_id, prof, ini, fim):
-            continue                        # já marcaram outra pessoa ali
-        r = c.execute("""insert into clinica_vagas (conta_id, profissional_id, inicio, fim, clinica_local_id,
-                                                     origem_evento_id)
-                         values (%s,%s,%s,%s,%s,%s) on conflict do nothing returning id""",
-                      (conta_id, prof, ini, fim, loc, eid)).fetchone()
+        if ca.ocupados(c, conta_id, prof, ini, fim) or not marcavel(c, conta_id, prof, serv, ini, agora):
+            continue                        # já marcaram outra pessoa ali, ou não é horário de agenda
+        if vid is None:
+            r = c.execute("""insert into clinica_vagas (conta_id, profissional_id, inicio, fim, clinica_local_id,
+                                                         origem_evento_id)
+                             values (%s,%s,%s,%s,%s,%s) on conflict do nothing returning id""",
+                          (conta_id, prof, ini, fim, loc, eid)).fetchone()
+        else:
+            r = c.execute("""update clinica_vagas set estado='aguardando', origem_evento_id=%s, fim=%s, rodada=0,
+                                    aprovada_em=null, aprovada_por=null, oferta_ate=null,
+                                    preenchida_evento_id=null, preenchida_em=null, atualizado_em=now()
+                              where id=%s and conta_id=%s and estado not in ('aguardando','oferta')
+                              returning id""", (eid, fim, vid, conta_id)).fetchone()
         novas += 1 if r else 0
     return novas
 
@@ -195,11 +225,17 @@ def _estado(c, conta_id: int, vaga_id: int, estado: str, **extra) -> None:
     sets = ", ".join(f"{k}=%s" for k in extra)
     c.execute(f"update clinica_vagas set estado=%s, atualizado_em=now(){', ' + sets if sets else ''} "
               "where id=%s and conta_id=%s", (estado, *extra.values(), vaga_id, conta_id))
+    if estado not in ("aguardando", "oferta"):
+        # vaga fechada: o convite que ainda estava na rua vence. Um "1" depois disso
+        # (que pode ser o "1" do lembrete da consulta dele) não é mais desta vaga
+        c.execute("""update clinica_vaga_ofertas set estado='expirou'
+                      where vaga_id=%s and conta_id=%s and estado='enviada'""", (vaga_id, conta_id))
 
 
 def fechar(c, conta_id: int, agora: datetime) -> None:
-    """Horário ocupado por fora → 'ocupada'; perto demais sem convite → 'balcao';
-    convite vencido perto demais → 'livre'."""
+    """Horário ocupado por fora → 'ocupada'; deixou de ser horário de agenda (um
+    bloqueio novo) → 'livre'; perto demais sem convite → 'balcao'; convite vencido
+    perto demais → 'livre'."""
     for v in [vaga(c, conta_id, r[0]) for r in c.execute(
             "select id from clinica_vagas where conta_id=%s and estado in ('aguardando','oferta')",
             (conta_id,)).fetchall()]:
@@ -207,6 +243,9 @@ def fechar(c, conta_id: int, agora: datetime) -> None:
             continue
         if ca.ocupados(c, conta_id, v["profissional_id"], v["inicio"], v["fim"]):
             _estado(c, conta_id, v["id"], "ocupada")
+        elif v["inicio"] > agora and not marcavel(c, conta_id, v["profissional_id"], v["servico_origem"],
+                                                   v["inicio"], agora):
+            _estado(c, conta_id, v["id"], "livre")
         elif v["inicio"] <= agora + AVISO_MIN:
             if v["estado"] == "aguardando":
                 _estado(c, conta_id, v["id"], "balcao")
@@ -291,6 +330,10 @@ def candidatos(c, conta_id: int, v: dict, agora: datetime) -> tuple[list[dict], 
     inicio_dia = ca.utc(ca.local(agora).date(), time(0))
     bloq = _bloqueados(c, conta_id)
     dia_ini = ca.utc(ca.local(v["inicio"]).date(), time(0))
+    # quem cancelou ESTE horário não é convidado pra ele
+    origem = c.execute("select prospeccao_id, coalesce(paciente_fone,'') from eventos_agenda where id=%s and conta_id=%s",
+                       (v["origem_evento_id"], conta_id)).fetchone() if v.get("origem_evento_id") else None
+    tipos_cache: dict = {}
     ordem = {g: i for i, (g, _d) in enumerate(GRUPOS)}
     sinais = sorted(_sinais(c, conta_id, agora, v["profissional_id"], v["inicio"]),
                     key=lambda s: (ordem[s["grupo"]], s["grupo"] == "retorno", -s["quando"].timestamp()
@@ -325,7 +368,12 @@ def candidatos(c, conta_id: int, v: dict, agora: datetime) -> tuple[list[dict], 
         if _n8(fone) in bloq:
             sai(bloq[_n8(fone)])
             continue
-        tipo = _tipo_para(c, conta_id, v["profissional_id"], s["categoria"], v["dur"])
+        if origem and ((origem[0] and origem[0] == lead) or (_n8(origem[1]) and _n8(origem[1]) == _n8(fone))):
+            sai("cancelou este horário")
+            continue
+        if s["categoria"] not in tipos_cache:
+            tipos_cache[s["categoria"]] = _tipo_para(c, conta_id, v["profissional_id"], s["categoria"], v["dur"])
+        tipo = tipos_cache[s["categoria"]]
         if not tipo:
             sai(f"{v['prof']} não tem {s['categoria']} que caiba em {v['dur']} min")
             continue
@@ -344,7 +392,7 @@ def candidatos(c, conta_id: int, v: dict, agora: datetime) -> tuple[list[dict], 
         if any(e[0] == v["profissional_id"] for e in mesmo_dia):
             sai(f"já tem horário com {v['prof']} nesse dia")
             continue
-        if evs and not mesmo_dia and s["grupo"] in ("pediu", "preco"):
+        if evs and not mesmo_dia:
             sai("já marcou consulta")
             continue
         if _recebeu_hoje(c, conta_id, s["conversa_id"], inicio_dia):
@@ -437,15 +485,38 @@ def _mandados_hoje(c, conta_id: int, agora: datetime) -> int:
 def rodada(c, conta_id: int, v: dict, n: int, agora: datetime, cfg: dict) -> int:
     """Manda a rodada `n` (1: 3 pessoas; 2: mais 5). Devolve quantas saíram. Cada
     convite é gravado e COMMITADO antes do WhatsApp: se cair no meio, a pessoa fica
-    sem convite, nunca com dois."""
+    sem convite, nunca com dois.
+
+    A RODADA É REIVINDICADA ANTES (compare-and-set no estado e no número da rodada):
+    o clique em "Aprovar" e o poller, ou dois ciclos do poller, nunca mandam a mesma
+    rodada duas vezes. E nunca fica uma vaga 'oferta' vencida parada: sem ninguém
+    pra chamar, ela fica livre na agenda (e o agente volta a oferecer o horário)."""
+    antes = ("aguardando", 0) if n == 1 else ("oferta", 1)
+    if not c.execute("""update clinica_vagas set estado='oferta', rodada=%s, oferta_ate=%s, atualizado_em=now()
+                         where id=%s and conta_id=%s and estado=%s and rodada=%s returning id""",
+                     (n, agora + VALIDADE, v["id"], conta_id, antes[0], antes[1])).fetchone():
+        c.rollback()
+        return 0
+    c.commit()
     chamar, _fora = candidatos(c, conta_id, v, agora)
     vagas_no_teto = max(0, cfg["teto_dia"] - _mandados_hoje(c, conta_id, agora))
-    escolhidos = chamar[:min(POR_RODADA[n], vagas_no_teto)]
-    if not escolhidos:
+    if n == 1 and chamar and not vagas_no_teto:
+        # o teto do dia acabou: a vaga volta a esperar (sai amanhã, se ainda der)
+        c.execute("""update clinica_vagas set estado='aguardando', rodada=0, oferta_ate=null, atualizado_em=now()
+                      where id=%s and conta_id=%s and estado='oferta' and rodada=1""", (v["id"], conta_id))
+        c.commit()
         return 0
-    _estado(c, conta_id, v["id"], "oferta", rodada=n, oferta_ate=agora + VALIDADE)
+    escolhidos = chamar[:min(POR_RODADA[n], vagas_no_teto)]
     saiu = 0
     for p in escolhidos:
+        # a vaga ainda está de pé? (um "1" atrasado da rodada anterior pode ter levado)
+        if (c.execute("select estado from clinica_vagas where id=%s and conta_id=%s",
+                      (v["id"], conta_id)).fetchone() or ("",))[0] != "oferta":
+            break
+        # convite novo vence o antigo desta pessoa: um "1" responde a UM convite
+        c.execute("""update clinica_vaga_ofertas set estado='expirou'
+                      where conta_id=%s and conversa_id=%s and vaga_id<>%s and estado in ('enviada','perdeu')""",
+                  (conta_id, p["conversa_id"], v["id"]))
         r = c.execute(
             """insert into clinica_vaga_ofertas (conta_id, vaga_id, conversa_id, prospeccao_id, nome, fone,
                                                  servico_id, grupo, porque, rodada, enviada_em)
@@ -465,7 +536,9 @@ def rodada(c, conta_id: int, v: dict, n: int, agora: datetime, cfg: dict) -> int
             c.execute("update clinica_vaga_ofertas set estado='falhou' where id=%s and conta_id=%s", (r[0], conta_id))
         c.commit()
     if not saiu:
-        _estado(c, conta_id, v["id"], "livre")
+        if c.execute("""select 1 from clinica_vagas where id=%s and conta_id=%s and estado='oferta' and rodada=%s""",
+                     (v["id"], conta_id, n)).fetchone():
+            _estado(c, conta_id, v["id"], "livre")
         c.commit()
     return saiu
 
@@ -505,63 +578,129 @@ def aprovar(c, conta_id: int, vaga_id: int, membro_id: int | None, agora: dateti
 
 
 def parar(c, conta_id: int, vaga_id: int) -> bool:
-    r = c.execute("""update clinica_vagas set estado='livre', atualizado_em=now()
-                      where id=%s and conta_id=%s and estado in ('aguardando','oferta') returning id""",
-                  (vaga_id, conta_id)).fetchone()
-    return r is not None
+    """"Parar e deixar livre": o horário fica livre na agenda e o convite na rua vence
+    (um "1" atrasado não marca mais)."""
+    r = c.execute("""select 1 from clinica_vagas where id=%s and conta_id=%s
+                      and estado in ('aguardando','oferta') for update""", (vaga_id, conta_id)).fetchone()
+    if not r:
+        return False
+    _estado(c, conta_id, vaga_id, "livre")
+    return True
 
 
 # ------------------------------------------------------------------ respostas
 
+#: quanto tempo depois do convite uma resposta ainda é dele (as duas rodadas cabem)
+JANELA_RESPOSTA = timedelta(minutes=60)
+
+
 def _respostas(c, conta_id: int, conversa_id: int | None, agora: datetime) -> list[tuple]:
     """(criado_em, oferta_id, texto) das respostas por ler, na ordem em que chegaram.
-    Só conta mensagem que veio DEPOIS do convite e sem outra mensagem nossa no meio
-    (aí o "sim" responde a ela) — o "1"/"2" puro vale mesmo assim."""
+
+    Cada mensagem responde a UM convite: o mais recente mandado antes dela (quem
+    recebeu convite na segunda e na terça responde à terça). Só vale até 1 hora
+    depois do convite. "sim"/"quero" só sem outra mensagem nossa no meio (aí o "sim"
+    responde a ela); o "1"/"2" puro vale mesmo assim — MENOS depois de um lembrete
+    de consulta ("Responda 1 para confirmar"): aí o "1" é do lembrete."""
     extra = " and o.conversa_id=%s" if conversa_id else ""
     rows = c.execute(
-        """select m.criado_em, o.id, m.texto,
-                  exists (select 1 from mensagens x where x.conversa_id = m.conversa_id and x.direcao = 'out'
-                            and x.id <> coalesce(o.mensagem_id, 0)
-                            and x.criado_em > o.enviada_em and x.criado_em < m.criado_em)
-             from clinica_vaga_ofertas o
-             join mensagens m on m.conversa_id = o.conversa_id and m.direcao = 'in' and m.criado_em > o.enviada_em
-            where o.conta_id=%s and o.estado in ('enviada','perdeu') and o.avisada_em is null
-              and o.enviada_em > %s - interval '2 days'""" + extra + """
-            order by m.criado_em, m.id""",
-        (conta_id, agora, conversa_id) if conversa_id else (conta_id, agora)).fetchall()
-    return [(r[0], r[1], r[2] or "") for r in rows if not r[3] or _RE_NUMERO.match(r[2] or "")]
+        """select * from (
+             select distinct on (m.id) m.criado_em, o.id, m.texto,
+                    exists (select 1 from mensagens x where x.conversa_id = m.conversa_id and x.direcao = 'out'
+                              and x.id <> coalesce(o.mensagem_id, 0)
+                              and x.criado_em > o.enviada_em and x.criado_em < m.criado_em) as outra,
+                    exists (select 1 from mensagens x where x.conversa_id = m.conversa_id and x.direcao = 'out'
+                              and x.id <> coalesce(o.mensagem_id, 0) and x.texto ilike '%%responda 1%%'
+                              and x.criado_em > o.enviada_em and x.criado_em < m.criado_em) as lembrete,
+                    o.estado, o.avisada_em, m.id as mid
+               from mensagens m
+               join clinica_vaga_ofertas o on o.conversa_id = m.conversa_id and o.conta_id = %s
+                    and o.enviada_em < m.criado_em and m.criado_em < o.enviada_em + %s
+              where m.direcao = 'in' and o.enviada_em > %s - interval '1 day'""" + extra + """
+              order by m.id, o.enviada_em desc, o.id desc) r
+            where r.estado in ('enviada','perdeu') and r.avisada_em is null
+            order by r.criado_em, r.mid""",
+        (conta_id, JANELA_RESPOSTA, agora, conversa_id) if conversa_id
+        else (conta_id, JANELA_RESPOSTA, agora)).fetchall()
+    return [(r[0], r[1], r[2] or "") for r in rows
+            if not r[4] and (not r[3] or _RE_NUMERO.match(r[2] or ""))]
+
+
+def _classificar(texto: str) -> str | None:
+    if _RE_PARAR.match(texto):
+        return "parar"
+    if _RE_SIM.match(texto):
+        return "sim"
+    if _RE_NAO.match(texto):
+        return "nao"
+    return None
 
 
 def processar(c, conta_id: int, agora: datetime, conversa_id: int | None = None, responder=None) -> int:
     """Lê "1", "2" e PARAR das ofertas, na ordem de chegada (a vaga é de quem
     respondeu primeiro). `responder(oferta, texto)` manda a resposta; sem ele, sai
-    direto pelo WhatsApp (poller). Devolve quantas respostas tratou."""
+    direto pelo WhatsApp (poller). Devolve quantas respostas tratou.
+
+    TRAVAS SEMPRE NA MESMA ORDEM — a vaga, depois o convite —, e só depois de saber
+    que a mensagem É uma resposta: dois "1" quase juntos esperam um pelo outro em vez
+    de se travarem. O poller pega a trava da CONVERSA (a mesma do agente) e pula a
+    que o agente está atendendo: um "1", uma resposta."""
+    from finance import clinica_agente as cla
     tratadas = 0
     for _quando, oferta_id, texto in _respostas(c, conta_id, conversa_id, agora):
+        tipo = _classificar(texto)
+        if not tipo:
+            continue                        # outra conversa: fica com o agente ou a recepção
+        base = c.execute("select vaga_id, conversa_id from clinica_vaga_ofertas where id=%s and conta_id=%s",
+                         (oferta_id, conta_id)).fetchone()
+        if not base:
+            continue
+        if conversa_id is None and not cla.tentar_travar(c, base[1]):
+            c.rollback()
+            continue                        # o agente está nela; ele trata
+        c.execute("select 1 from clinica_vagas where id=%s and conta_id=%s for update", (base[0], conta_id))
         o = c.execute(
-            """select o.id, o.vaga_id, o.conversa_id, o.prospeccao_id, o.nome, o.fone, o.servico_id, o.estado
+            """select o.id, o.vaga_id, o.conversa_id, o.prospeccao_id, o.nome, o.fone, o.servico_id, o.estado,
+                      o.avisada_em
                  from clinica_vaga_ofertas o where o.id=%s and o.conta_id=%s for update""",
             (oferta_id, conta_id)).fetchone()
-        if not o or o[7] not in ("enviada", "perdeu"):
+        if not o or o[7] not in ("enviada", "perdeu") or o[8] is not None:
+            c.commit()
             continue
         oferta = {"id": o[0], "vaga_id": o[1], "conversa_id": o[2], "lead": o[3], "nome": o[4],
                   "fone": o[5], "servico_id": o[6], "estado": o[7]}
-        if _RE_PARAR.match(texto):
+        if tipo == "parar":
             c.execute("update clinica_vaga_ofertas set estado='parar', respondida_em=%s, avisada_em=%s "
                       "where id=%s and conta_id=%s", (agora, agora, oferta_id, conta_id))
+            c.commit()
             _responder(c, conta_id, oferta, "Pronto! Não te mando mais avisos de vaga. Se precisar de horário, "
                        "é só chamar por aqui 😊", responder)
-        elif _RE_SIM.match(texto):
+        elif tipo == "sim":
             _quer(c, conta_id, oferta, agora, responder)
-        elif _RE_NAO.match(texto):
+        else:
             c.execute("update clinica_vaga_ofertas set estado='recusou', respondida_em=%s, avisada_em=%s "
                       "where id=%s and conta_id=%s", (agora, agora, oferta_id, conta_id))
+            c.commit()
             _responder(c, conta_id, oferta, "Sem problema! Qualquer coisa, é só chamar por aqui 😊", responder)
-        else:
-            continue                        # outra conversa: fica com o agente ou a recepção
         tratadas += 1
         c.commit()
     return tratadas
+
+
+def ja_respondida(c, conta_id: int, conversa_id: int) -> bool:
+    """A última mensagem do paciente já foi tratada como resposta de vaga (pelo
+    poller, um instante antes do agente): o agente fica quieto em vez de responder
+    o mesmo "1" de novo."""
+    try:
+        with c.transaction():
+            return c.execute(
+                """select 1 from clinica_vaga_ofertas o
+                    where o.conta_id=%s and o.conversa_id=%s and o.respondida_em is not null
+                      and o.respondida_em >= (select max(m.criado_em) from mensagens m
+                                               where m.conversa_id = o.conversa_id and m.direcao = 'in')
+                    limit 1""", (conta_id, conversa_id)).fetchone() is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _responder(c, conta_id: int, oferta: dict, texto: str, responder) -> None:
@@ -571,13 +710,23 @@ def _responder(c, conta_id: int, oferta: dict, texto: str, responder) -> None:
         _mandar(c, conta_id, oferta["conversa_id"], oferta["fone"], texto)
 
 
+_PREENCHIDA = ("Ah, essa vaga acabou de ser preenchida 🙏 Te aviso na próxima! Se quiser, é só me dizer um dia "
+               "e horário que eu vejo pra você.")
+_VENCEU = ("Esse convite já venceu 🙏 Se quiser um horário, é só me dizer o melhor dia que eu vejo pra você.")
+_SAIU = ("Esse horário não está mais disponível 🙏 Se quiser, é só me dizer o melhor dia que eu vejo outro "
+         "pra você.")
+
+
 def _quer(c, conta_id: int, oferta: dict, agora: datetime, responder) -> None:
-    """Respondeu "1": marca se a vaga ainda está de pé; senão, "acabou de ser preenchida"."""
-    v = c.execute("select estado from clinica_vagas where id=%s and conta_id=%s for update",
+    """Respondeu "1": marca se a vaga ainda está em oferta e o convite vale; senão,
+    diz a verdade — foi preenchida, o convite venceu, ou o horário saiu da agenda."""
+    v = c.execute("select estado, oferta_ate from clinica_vagas where id=%s and conta_id=%s",
                   (oferta["vaga_id"], conta_id)).fetchone()
     vv = vaga(c, conta_id, oferta["vaga_id"])
-    if (oferta["estado"] == "enviada" and v and v[0] in ("oferta", "livre", "aguardando")
-            and vv and vv["inicio"] > agora + timedelta(minutes=15)):
+    ativa = bool(v and v[0] == "oferta" and v[1] and agora <= v[1] + timedelta(minutes=5)
+                 and vv and vv["inicio"] > agora + timedelta(minutes=15))
+    texto = _PREENCHIDA if v and v[0] in ("preenchida", "ocupada") else _VENCEU
+    if oferta["estado"] == "enviada" and ativa:
         try:
             with c.transaction():
                 eid, erro = ca.agendar(c, conta_id, profissional_id=vv["profissional_id"],
@@ -590,11 +739,12 @@ def _quer(c, conta_id: int, oferta: dict, agora: datetime, responder) -> None:
             _log.info("vagas: não marcou a vaga %s (%s)", oferta["vaga_id"], e)
             eid = None
         if eid:
-            _estado(c, conta_id, oferta["vaga_id"], "preenchida", preenchida_evento_id=eid, preenchida_em=agora)
+            c.execute("""update clinica_vaga_ofertas set estado='perdeu'
+                          where vaga_id=%s and conta_id=%s and estado='enviada' and id<>%s""",
+                      (oferta["vaga_id"], conta_id, oferta["id"]))
             c.execute("update clinica_vaga_ofertas set estado='ganhou', respondida_em=%s, avisada_em=%s "
                       "where id=%s and conta_id=%s", (agora, agora, oferta["id"], conta_id))
-            c.execute("""update clinica_vaga_ofertas set estado='perdeu'
-                          where vaga_id=%s and conta_id=%s and estado='enviada'""", (oferta["vaga_id"], conta_id))
+            _estado(c, conta_id, oferta["vaga_id"], "preenchida", preenchida_evento_id=eid, preenchida_em=agora)
             _resolver_pedido(c, conta_id, oferta["conversa_id"])
             c.commit()
             ev = ca.evento(c, conta_id, eid)
@@ -602,12 +752,17 @@ def _quer(c, conta_id: int, oferta: dict, agora: datetime, responder) -> None:
                                                              ["confirmacao_modo"] == "ligado"), responder)
             _avisar_preenchida(c, conta_id, ev)
             return
-        if v and v[0] in ("oferta", "livre", "aguardando"):
+        # não marcou: ocupado por alguém (preenchida) ou o horário saiu da agenda
+        if ca.ocupados(c, conta_id, vv["profissional_id"], vv["inicio"], vv["fim"]):
             _estado(c, conta_id, oferta["vaga_id"], "ocupada")
+            texto = _PREENCHIDA
+        else:
+            _estado(c, conta_id, oferta["vaga_id"], "livre")
+            texto = _SAIU
     c.execute("update clinica_vaga_ofertas set estado='perdeu', respondida_em=%s, avisada_em=%s "
               "where id=%s and conta_id=%s", (agora, agora, oferta["id"], conta_id))
-    _responder(c, conta_id, oferta, "Ah, essa vaga acabou de ser preenchida 🙏 Te aviso na próxima! Se quiser, "
-               "é só me dizer um dia e horário que eu vejo pra você.", responder)
+    c.commit()
+    _responder(c, conta_id, oferta, texto, responder)
 
 
 def _resolver_pedido(c, conta_id: int, conversa_id: int) -> None:
@@ -648,6 +803,11 @@ def passar_conta(c, conta_id: int, agora: datetime) -> dict:
     c.commit()
     out["respostas"] = processar(c, conta_id, agora)
     fechar(c, conta_id, agora)
+    # a 2ª rodada vencida fecha mesmo com a clínica fechada: vaga 'oferta' parada
+    # esconde o horário do agente (ninguém que pede horário recebe ele)
+    for (vid,) in c.execute("""select id from clinica_vagas where conta_id=%s and estado='oferta'
+                                  and rodada=2 and oferta_ate <= %s""", (conta_id, agora)).fetchall():
+        _estado(c, conta_id, vid, "livre")
     c.commit()
     if not fr.dentro_da_janela(agora, janela):
         return out

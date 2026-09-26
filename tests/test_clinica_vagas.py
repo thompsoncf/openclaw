@@ -149,6 +149,14 @@ def _janela(c):
     return j
 
 
+def _aprovar(c, vid):
+    """Aprova e põe o convite no relógio de verdade: a resposta do paciente (gravada
+    com now()) só vale até 1 hora depois do convite."""
+    assert cvg.aprovar(c, CLINICA, vid, 51, AGORA, _janela(c)) == "mandada"
+    c.execute("update clinica_vaga_ofertas set enviada_em = now() - interval '1 minute'")
+    c.commit()
+
+
 # ------------------------------------------------------------------ nascer e quem cabe
 
 def test_cancelamento_vira_vaga_e_os_grupos_saem_em_ordem(pool):
@@ -213,7 +221,7 @@ def test_aprovar_manda_a_primeira_rodada_sem_procedimento(pool, zap):
 def test_quem_responde_1_primeiro_fica_com_a_vaga(pool, zap):
     with pool.connection() as c:
         gente, vid = _cenario(c)
-        cvg.aprovar(c, CLINICA, vid, 51, AGORA, _janela(c))
+        _aprovar(c, vid)
         _diz(c, gente["rita"][1], "1")
         _diz(c, gente["paula"][1], "1")
         _diz(c, gente["rui"][1], "2")
@@ -237,7 +245,7 @@ def test_quem_responde_1_primeiro_fica_com_a_vaga(pool, zap):
 def test_parar_nunca_mais_recebe_aviso_de_vaga(pool, zap):
     with pool.connection() as c:
         gente, vid = _cenario(c)
-        cvg.aprovar(c, CLINICA, vid, 51, AGORA, _janela(c))
+        _aprovar(c, vid)
         _diz(c, gente["paula"][1], "PARAR")
         cvg.processar(c, CLINICA, AGORA)
         assert zap.saiu[-1][1].startswith("Pronto! Não te mando mais avisos de vaga")
@@ -342,7 +350,7 @@ def test_o_1_pelo_agente_marca_na_hora(pool, zap):
     from finance import clinica_agente as cla
     with pool.connection() as c:
         gente, vid = _cenario(c)
-        cvg.aprovar(c, CLINICA, vid, 51, AGORA, _janela(c))
+        _aprovar(c, vid)
         lead, conv = gente["paula"]
         _diz(c, conv, "1")
         saiu = []
@@ -414,3 +422,115 @@ def test_so_gerencia_muda_o_modo(cli, pool):
     cli.post("/painel/clinica/vagas/config", data={"modo": "auto", "teto_dia": "10"})
     with pool.connection() as c:
         assert cvg.config(c, CLINICA) == {"modo": "auto", "teto_dia": 10}
+
+
+# ------------------------------------------------------------------ revisão do PR
+
+def test_1_do_lembrete_de_consulta_nao_e_da_vaga(pool, zap):
+    """O "1" que responde o lembrete da consulta dele não marca a vaga."""
+    with pool.connection() as c:
+        gente, vid = _cenario(c)
+        _aprovar(c, vid)
+        _diz(c, gente["rita"][1], "Oi, Rita! Amanhã você tem consulta às 10:00. Responda 1 para confirmar.",
+             autor="bot")
+        _diz(c, gente["rita"][1], "1")
+        assert cvg.processar(c, CLINICA, AGORA) == 0
+        assert cvg.vaga(c, CLINICA, vid)["estado"] == "oferta"
+
+
+def test_um_1_responde_a_um_convite_so(pool, zap):
+    """Convite na segunda (ninguém pegou) e na terça: o "1" é da terça."""
+    with pool.connection() as c:
+        gente, vid = _cenario(c)
+        _aprovar(c, vid)
+        cvg.parar(c, CLINICA, vid)                     # a 1ª ficou livre
+        c.commit()
+        _cancelada(c, h=10, nome="Outro", fone="99 97777-0400")
+        cvg.detectar(c, CLINICA, AGORA)
+        vid2 = c.execute("select id from clinica_vagas where id<>%s", (vid,)).fetchone()[0]
+        c.execute("update clinica_vaga_ofertas set enviada_em = %s", (AGORA - timedelta(days=1),))  # a 1ª é de ontem
+        c.commit()
+        assert cvg.aprovar(c, CLINICA, vid2, 51, AGORA + timedelta(hours=2), _janela(c)) == "mandada"
+        c.execute("update clinica_vaga_ofertas set enviada_em = now() where vaga_id=%s", (vid2,))
+        c.commit()
+        _diz(c, gente["paula"][1], "1")
+        assert cvg.processar(c, CLINICA, AGORA + timedelta(hours=2)) == 1
+        assert c.execute("select count(*) from eventos_agenda where marcado_por='vaga'").fetchone()[0] == 1
+        assert cvg.vaga(c, CLINICA, vid2)["estado"] == "preenchida"
+        assert cvg.vaga(c, CLINICA, vid)["estado"] == "livre"
+
+
+def test_vaga_parada_ou_fechada_nao_marca_com_1_atrasado(pool, zap):
+    with pool.connection() as c:
+        gente, vid = _cenario(c)
+        _aprovar(c, vid)
+        assert cvg.parar(c, CLINICA, vid)
+        c.commit()
+        assert c.execute("select count(*) from clinica_vaga_ofertas where estado='enviada'").fetchone()[0] == 0
+        _diz(c, gente["rita"][1], "1")
+        assert cvg.processar(c, CLINICA, AGORA) == 0
+        assert c.execute("select count(*) from eventos_agenda where marcado_por='vaga'").fetchone()[0] == 0
+
+
+def test_sem_ninguem_na_segunda_rodada_a_vaga_nao_fica_presa(pool, zap):
+    with pool.connection() as c:
+        _gente, vid = _cenario(c)                      # 3 cabem: todos vão na 1ª
+        _aprovar(c, vid)
+        cvg.passar_conta(c, CLINICA, AGORA + timedelta(minutes=21))
+        assert cvg.vaga(c, CLINICA, vid)["estado"] == "livre"
+        assert cvg.em_oferta(c, CLINICA) == []
+
+
+def test_rodada_so_sai_uma_vez(pool, zap):
+    with pool.connection() as c:
+        _gente, vid = _cenario(c)
+        v = cvg.vaga(c, CLINICA, vid)
+        assert cvg.rodada(c, CLINICA, v, 1, AGORA, cvg.config(c, CLINICA)) == 3
+        assert cvg.rodada(c, CLINICA, v, 1, AGORA, cvg.config(c, CLINICA)) == 0   # o clique e o poller juntos
+    assert len(zap.saiu) == 3
+
+
+def test_dia_bloqueado_nao_vira_vaga(pool, zap):
+    with pool.connection() as c:
+        _cancelada(c)
+        cc.salvar_bloqueio(c, CLINICA, profissional_id=_manoel(c), de=SEG, ate=SEG, inicio="", fim="",
+                           motivo="médica doente")
+        c.commit()
+        assert cvg.detectar(c, CLINICA, AGORA) == 0
+
+
+def test_quem_cancelou_nao_e_convidado_pro_proprio_horario(pool, zap):
+    with pool.connection() as c:
+        lead, conv = _retorno(c, "Rui Retorno", "+5599911110003")
+        eid, _ = ca.agendar(c, CLINICA, profissional_id=_manoel(c), servico_id=_tipo(c, "Retorno"),
+                            inicio=ca.utc(SEG, time(8)), lead_id=lead, agora=AGORA)
+        ca.mudar_situacao(c, CLINICA, eid, "cancelou")
+        cvg.detectar(c, CLINICA, AGORA)
+        vid = c.execute("select id from clinica_vagas").fetchone()[0]
+        chamar, fora = cvg.candidatos(c, CLINICA, cvg.vaga(c, CLINICA, vid), AGORA)
+    assert chamar == []
+    assert {p["nome"]: p["motivo"] for p in fora}["Rui Retorno"] == "cancelou este horário"
+
+
+def test_sim_quero_tambem_vale(pool, zap):
+    with pool.connection() as c:
+        gente, vid = _cenario(c)
+        _aprovar(c, vid)
+        _diz(c, gente["rui"][1], "Sim, quero!")
+        assert cvg.processar(c, CLINICA, AGORA) == 1
+        assert cvg.vaga(c, CLINICA, vid)["estado"] == "preenchida"
+
+
+def test_o_mesmo_horario_vira_vaga_de_novo(pool, zap):
+    """Quem ficou com a vaga desistiu: o horário volta a ser vaga."""
+    with pool.connection() as c:
+        gente, vid = _cenario(c)
+        _aprovar(c, vid)
+        _diz(c, gente["rita"][1], "1")
+        cvg.processar(c, CLINICA, AGORA)
+        ev = cvg.vaga(c, CLINICA, vid)["preenchida_evento_id"]
+        ca.mudar_situacao(c, CLINICA, ev, "cancelou")
+        c.commit()
+        assert cvg.detectar(c, CLINICA, AGORA) == 1
+        v = cvg.vaga(c, CLINICA, vid)
+        assert (v["estado"], v["origem_evento_id"]) == ("aguardando", ev)

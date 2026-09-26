@@ -186,7 +186,7 @@ def _acha_funcionario(pool, conta_id: int, nome: str):
 
 
 def construir_ferramentas_pj(pool, conta_id: int,
-                             membro_id: int | None = None) -> list[Ferramenta]:
+                             membro_id: int | None = None, livro=None) -> list[Ferramenta]:
     """Ferramentas de empresa, escopadas na conta (multi-tenant)."""
 
     def criar_titulo(e: dict) -> str:
@@ -535,11 +535,13 @@ def construir_ferramentas_pj(pool, conta_id: int,
     # nunca vaza pro outro). Numa clínica, "dividir_entre_obras" seria uma porta
     # aberta pra um erro que não tem como acontecer.
     if _nicho_da_conta(pool, conta_id) == "construcao":
-        ferramentas += construir_ferramentas_obras(pool, conta_id)
+        ferramentas += construir_ferramentas_obras(pool, conta_id, livro=livro,
+                                                   membro_id=membro_id)
     return ferramentas
 
 
-def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
+def construir_ferramentas_obras(pool, conta_id: int, livro=None,
+                                membro_id: int | None = None) -> list[Ferramenta]:
     """consultar_obra, dividir_entre_obras, por_na_obra, marcar_etapa e
     gastos_sem_obra — o dia do encarregado (docs/mockups/nicho_construcao.html,
     seção 07). Nenhuma cria obra: obra nasce no painel (decisão 1 do dono)."""
@@ -676,6 +678,32 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
                 "entre as linhas, sem mudar nada, e diga que quando o cliente pagar é só "
                 f"avisar que você dá baixa{aviso}:" + sep
                 + sep.join(cb["mensagem"] for cb in cbs) + "\n---")
+
+    def guardar_foto_da_obra(e: dict) -> str:
+        """A foto que NÃO é nota (telhado, parede, piso pronto): guarda na obra e na
+        etapa (finance/obra_fotos.py). A imagem é a da mensagem atual, que o webhook
+        deixou em `livro.midia_atual`."""
+        midia = getattr(livro, "midia_atual", None) if livro is not None else None
+        if not midia:
+            return ("Não chegou foto nesta mensagem. Peça pra ele mandar a foto de novo, "
+                    "junto com a obra e a etapa.")
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
+        from . import obra_fotos as of
+        try:
+            r = of.guardar(pool, conta_id, o["id"], midia[0], midia[1],
+                           etapa=(e.get("etapa") or "").strip() or None,
+                           legenda=(e.get("legenda") or "").strip(), origem="whatsapp",
+                           membro_id=membro_id)
+        except ValueError as err:
+            return str(err)
+        livro.midia_atual = None          # a mesma foto não entra duas vezes
+        n = of.contagem(pool, conta_id, o["id"])
+        onde = f"na etapa {r['etapa'].lower()}" if r["etapa"] else "sem etapa"
+        return (f"Foto guardada na {r['obra']}, {onde} ({n} foto{'s' if n != 1 else ''} "
+                "nessa obra). Ela aparece na ficha da obra, no painel. Se ele disse que a "
+                "etapa terminou, marque com marcar_etapa também.")
 
     def marcar_documento(e: dict) -> str:
         from . import obra_venda as ov
@@ -822,6 +850,20 @@ def construir_ferramentas_obras(pool, conta_id: int) -> list[Ferramenta]:
             parametros={"type": "object", "properties": {"obra": obra_s},
                         "required": ["obra"]},
             executar=cobrar_parcela,
+        ),
+        Ferramenta(
+            nome="guardar_foto_da_obra",
+            descricao=("Guarda a FOTO DA OBRA que veio nesta mensagem (telhado, parede, piso, "
+                       "obra pronta — foto que NÃO é nota nem comprovante) na obra e, se "
+                       "souber, na etapa. Não lança nada no caixa. Pergunte de qual obra se "
+                       "ele não disse."),
+            parametros={"type": "object",
+                        "properties": {"obra": obra_s,
+                                       "etapa": {"type": "string",
+                                                 "description": "a etapa como ele falou (ex: telhado); vazio = sem etapa"},
+                                       "legenda": {"type": "string"}},
+                        "required": ["obra"]},
+            executar=guardar_foto_da_obra,
         ),
         Ferramenta(
             nome="gastos_sem_obra",

@@ -299,7 +299,7 @@ def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
                 from .tools_pj import bloco_persona_pj, construir_ferramentas_pj
                 persona = persona + bloco_persona_pj(pool, conta_id, empresa_nome)
                 ferramentas = ferramentas + construir_ferramentas_pj(
-                    pool, conta_id, getattr(livro, "membro_id", None))
+                    pool, conta_id, getattr(livro, "membro_id", None), livro=livro)
         except Exception:
             pass  # qualquer erro no módulo PJ NÃO pode derrubar o agente PF
     # AGENDA própria do Zaq: disponível pra QUALQUER conta (PF e PJ).

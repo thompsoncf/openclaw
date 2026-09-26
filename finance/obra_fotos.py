@@ -47,7 +47,7 @@ def _etapa(obra: dict, etapa: str | None) -> str | None:
     ValueError se ela disse uma etapa que a obra não tem."""
     if not (etapa or "").strip():
         return None
-    e = _ob.achar_etapa(obra, etapa)
+    e = _ob._achar_etapa(obra["etapas"], etapa)
     if not e:
         nomes = ", ".join(x["nome"].lower() for x in obra["etapas"])
         raise ValueError(f"A {obra['nome']} não tem a etapa “{etapa}”. As etapas são: {nomes}.")

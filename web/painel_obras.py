@@ -25,11 +25,12 @@ import os
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import Environment
 
 from db.conexao import get_pool
+from finance import obra_fotos as of
 from finance import obra_reforma as orf
 from finance import obra_venda as ov
 from finance import obras as ob
@@ -190,6 +191,7 @@ def ficha(request: Request, obra_id: int):
                    rotulo_custo=ob.ROTULO_CUSTO, sit=sit, orc=orc,
                    margem=ob.margem(o, sit["venda"] if sit else None),
                    sou_dono=request.session.get("papel", "dono") == "dono",
+                   fotos=_fotos_da_ficha(conta[0], o),
                    tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, modelos=orf.MODELOS,
                    status_doc=ov.STATUS_DOC, modalidades=ov.MODALIDADES,
                    situacoes=[(k, ov.ROTULO_SITUACAO[k]) for k in ov.SITUACOES],
@@ -405,6 +407,63 @@ def parcela_recebida(request: Request, obra_id: int, titulo_id: int):
     if not (r or {}).get("ok"):
         return _volta(f"/painel/obras/{obra_id}", (r or {}).get("erro") or "Não deu pra dar baixa.")
     return RedirectResponse(f"/painel/obras/{obra_id}#orcamento", status_code=303)
+
+
+def _fotos_da_ficha(conta_id: int, o: dict) -> dict:
+    """As fotos da ficha por etapa. Sem a 369, a seção abre vazia."""
+    try:
+        fotos = of.listar(get_pool(), conta_id, o["id"])
+    except Exception:  # noqa: BLE001
+        fotos = []
+    try:
+        from finance.comprovantes import configurado
+        pode = configurado()
+    except Exception:  # noqa: BLE001
+        pode = False
+    return {"grupos": of.por_etapa(o, fotos), "n": len(fotos), "pode": pode}
+
+
+def _foto_resposta(f: dict) -> Response:
+    """Entrega a foto do bucket privado. Cache só no navegador de quem pediu."""
+    from finance.comprovantes import ler
+    try:
+        dados, ct = ler(f["caminho"])
+    except ValueError:
+        return Response(status_code=404)
+    return Response(content=dados, media_type=f["content_type"] or ct,
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/painel/obras/{obra_id}/foto/{foto_id}")
+def foto(request: Request, obra_id: int, foto_id: int):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    f = of.obter(get_pool(), conta[0], obra_id, foto_id)
+    return _foto_resposta(f) if f else Response(status_code=404)
+
+
+@router.post("/painel/obras/{obra_id}/fotos")
+def guardar_foto(request: Request, obra_id: int, foto: UploadFile = File(...),
+                 etapa: str = Form(""), legenda: str = Form("")):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        of.guardar(get_pool(), conta[0], obra_id, foto.file.read(), foto.content_type or "",
+                   etapa=etapa or None, legenda=legenda, origem="painel")
+    except ValueError as e:
+        return _volta(f"/painel/obras/{obra_id}", str(e))
+    return RedirectResponse(f"/painel/obras/{obra_id}#fotos", status_code=303)
+
+
+@router.post("/painel/obras/{obra_id}/foto/{foto_id}/apagar")
+def apagar_foto(request: Request, obra_id: int, foto_id: int):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    of.apagar(get_pool(), conta[0], obra_id, foto_id)
+    return RedirectResponse(f"/painel/obras/{obra_id}#fotos", status_code=303)
 
 
 @router.post("/painel/obras/pix")
@@ -795,6 +854,22 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
       <button class="ob-bt">{{ 'Desmarcar' if e.concluida_em else 'Concluída' }}</button></form>
   </div>{% endfor %}</div>
 
+<h3 class="ob-sec" id="fotos">Fotos da obra{% if fotos.n %} · {{ fotos.n }}{% endif %}</h3>
+{% if fotos.grupos %}{% for g in fotos.grupos %}<div class="ob-box"><b>{{ g.nome|e }}</b>
+  <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.4rem">{% for f in g.fotos %}
+    <div style="width:132px"><a href="/painel/obras/{{ o.id }}/foto/{{ f.id }}" target="_blank" rel="noopener">
+      <img src="/painel/obras/{{ o.id }}/foto/{{ f.id }}" alt="{{ f.legenda|e }}" loading="lazy" style="width:132px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--borda)"></a>
+      <div class="ob-mut" style="font-size:.7rem">{{ f.criado_em.strftime('%d/%m') }}{% if f.origem == 'whatsapp' %} · WhatsApp{% endif %}{% if f.legenda %} · {{ f.legenda|e }}{% endif %}</div>
+      <form method="post" action="/painel/obras/{{ o.id }}/foto/{{ f.id }}/apagar" onsubmit="return confirm('Apagar esta foto?')" style="margin:0"><button class="ob-bt" style="font-size:.7rem;padding:.1rem .4rem">apagar</button></form>
+    </div>{% endfor %}</div></div>{% endfor %}
+{% else %}<p class="ob-mut">Nenhuma foto ainda. No WhatsApp, mande a foto e diga a obra e a etapa ("terminou o telhado da {{ o.nome|e }}"){% if o.tipo == 'reforma' %} — no Reforma Casa Brasil, as fotos da obra pronta liberam os 10% finais do crédito do cliente{% endif %}.</p>{% endif %}
+{% if fotos.pode %}<form method="post" action="/painel/obras/{{ o.id }}/fotos" enctype="multipart/form-data" class="ob-acoes" style="margin:.4rem 0 .8rem">
+  <input type="file" name="foto" accept="image/*" required>
+  <select name="etapa"><option value="">sem etapa</option>{% for e in o.etapas %}<option value="{{ e.chave|e }}">{{ e.nome|e }}</option>{% endfor %}</select>
+  <input name="legenda" placeholder="legenda (opcional)" style="flex:1 1 140px">
+  <button class="ob-bt prim">Guardar a foto</button>
+</form>{% else %}<p class="ob-mut">O envio de foto pelo painel não está configurado nesta instalação.</p>{% endif %}
+
 <details class="ob-box" style="margin-top:.6rem"><summary>Editar etapas e pesos</summary>
 <form method="post" action="/painel/obras/{{ o.id }}/etapas">
   <p class="ob-mut">O peso é quanto a etapa vale no andamento da obra. A próxima obra do mesmo tipo começa com esta lista.</p>
@@ -864,9 +939,27 @@ def orcamento_publico(request: Request, token: str):
     if not orc:
         return HTMLResponse(_env_pub.from_string(_TPL_PUB_404).render(), status_code=404)
     q = request.query_params
+    fotos = []
+    if orc["status"] == "aceito":
+        try:
+            fotos = of.listar(get_pool(), orc["conta_id"], orc["obra_id"])
+        except Exception:  # noqa: BLE001 — sem a 369
+            fotos = []
     return HTMLResponse(_env_pub.from_string(_TPL_PUB).render(
-        o=orc, brl=_brl, tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES,
+        o=orc, brl=_brl, tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, fotos=fotos,
         erro=(q.get("erro") or "").strip(), acabou=(q.get("ok") or "").strip()))
+
+
+@router.get("/orcamento-obra/{token}/foto/{foto_id}")
+def foto_publica(token: str, foto_id: int):
+    """A foto da obra pro CLIENTE da reforma, pelo token do orçamento: só depois do
+    aceite, e só foto desta obra. É a casa dele, e no Reforma Casa Brasil é ele
+    quem manda as fotos da obra pronta à Caixa."""
+    orc = orf.por_token(get_pool(), token)
+    if not orc or orc["status"] != "aceito":
+        return Response(status_code=404)
+    f = of.obter(get_pool(), orc["conta_id"], orc["obra_id"], foto_id)
+    return _foto_resposta(f) if f else Response(status_code=404)
 
 
 @router.post("/orcamento-obra/{token}/aceitar")
@@ -943,6 +1036,10 @@ button{padding:.65rem 1.1rem;border-radius:9px;border:0;font-size:1rem;cursor:po
 <label>Pix copia e cola</label><input type="text" readonly value="{{ p.pix }}" onclick="this.select()">
 <button type="button" class="sim" style="margin-top:.5rem" onclick="var i=this.previousElementSibling;i.select();if(navigator.clipboard){navigator.clipboard.writeText(i.value)}else{document.execCommand('copy')}this.textContent='Copiado ✓'">Copiar o código</button>
 </div>{% endfor %}
+
+{% if fotos %}<div class="cx"><b>Fotos da obra</b>
+{% if o.modelo_pagamento == 'rcb' %}<p class="mut" style="margin:.3rem 0">No Reforma Casa Brasil, os 10% finais do seu crédito saem depois que você manda à Caixa as fotos da obra pronta. Toque numa foto pra abrir e salvar.</p>{% endif %}
+<div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.4rem">{% for f in fotos %}<a href="/orcamento-obra/{{ o.token }}/foto/{{ f.id }}" target="_blank" rel="noopener"><img src="/orcamento-obra/{{ o.token }}/foto/{{ f.id }}" alt="" loading="lazy" style="width:104px;height:78px;object-fit:cover;border-radius:8px"></a>{% endfor %}</div></div>{% endif %}
 
 <div class="cx">{% for t, txt in o.clausulas %}<p><b>{{ t }}.</b> {{ txt }}</p>{% endfor %}
 {% if o.validade_ate %}<p class="mut">Este orçamento vale até {{ o.validade_ate.strftime('%d/%m/%Y') }}.</p>{% endif %}</div>

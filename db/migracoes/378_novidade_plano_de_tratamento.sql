@@ -1,5 +1,5 @@
--- 374_novidade_plano_de_tratamento.sql
--- O aviso do plano de tratamento da clínica (finance/clinica_planos.py, 373),
+-- 378_novidade_plano_de_tratamento.sql
+-- O aviso do plano de tratamento da clínica (finance/clinica_planos.py, 377),
 -- seguindo a seção 5 do CLAUDE.md.
 --
 -- PÚBLICO `clinica`. PRA QUEM: dono, gestor e vendedor (a recepção monta e manda).

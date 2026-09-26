@@ -2,7 +2,7 @@
 aceite e a cobrança da decisão.
 
 Desenho aprovado: docs/mockups/clinica_planos_pacotes_assinatura.html, seções 03
-("o plano de tratamento") e 11 (passos 1 e 2). Tabela: 373. Telas:
+("o plano de tratamento") e 11 (passos 1 e 2). Tabela: 377. Telas:
 web/painel_clinica_planos.py (/painel/clinica/planos e a página pública /plano/{token}).
 
 COMO ANDA
@@ -57,7 +57,7 @@ def config(c, conta_id: int) -> dict:
             r = c.execute("""select planos_teto_desconto_pct, planos_pix_desconto_pct, planos_cartao_parcelas,
                                     planos_validade_dias, planos_cobranca
                                from clinica_agenda_config where conta_id=%s""", (conta_id,)).fetchone()
-    except Exception:  # noqa: BLE001 — migração 373 ainda não rodou
+    except Exception:  # noqa: BLE001 — migração 377 ainda não rodou
         return padrao
     if not r:
         return padrao
@@ -599,7 +599,7 @@ def processar(pool, c, conta_id: int, agora: datetime, conversa_id: int | None =
                     order by m.criado_em, m.id""",
                 (conta_id, ca.hoje_br(agora), conversa_id) if conversa_id else (conta_id, ca.hoje_br(agora))
             ).fetchall()
-    except Exception:  # noqa: BLE001 — sem a 373
+    except Exception:  # noqa: BLE001 — sem a 377
         return 0
     for _pid, token, conv, texto, parcelado, paciente, parcelas in rows:
         m = _RE_RESPOSTA.match(texto or "")
@@ -780,7 +780,7 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                     with c.transaction():
                         from finance.clinica_planos_publico import contas_com_plano_enviado
                         contas = contas_com_plano_enviado(c)
-                except Exception:  # noqa: BLE001 — sem a 373
+                except Exception:  # noqa: BLE001 — sem a 377
                     contas = []
                 for conta_id in contas:
                     try:

@@ -434,7 +434,7 @@ def _recebeu_hoje(c, conta_id: int, conversa_id: int, inicio_dia: datetime) -> b
                              and (toque1_em >= %s or toque3_em >= %s) limit 1""",
                          (conta_id, conversa_id, inicio_dia, inicio_dia)).fetchone():
                 return True                 # lembrete do plano de tratamento hoje
-    except Exception:  # noqa: BLE001 — sem a 373
+    except Exception:  # noqa: BLE001 — sem a 377
         pass
     try:
         with c.transaction():

@@ -850,7 +850,7 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
             return
         if cpl.ja_respondido(c, conta_id, conversa_id):
             return                          # o poller aceitou por este número um instante antes
-    except Exception:  # noqa: BLE001 — sem a 373: segue a conversa
+    except Exception:  # noqa: BLE001 — sem a 377: segue a conversa
         c.rollback()
         _log.info("agente da clínica: resposta de plano não tratada (conversa %s)", conversa_id, exc_info=True)
         if not tentar_travar(c, conversa_id):

@@ -167,6 +167,8 @@ TABELAS: dict[str, tuple[str, ...]] = {
     "clinica_grade": ('conta_id',),
     "clinica_bloqueios": ('conta_id',),
     "clinica_repasses": ('conta_id',),      # 363: o agente passou pra recepção
+    "clinica_vagas": ('conta_id',),         # 365: a vaga liberada
+    "clinica_vaga_ofertas": ('conta_id',),  # 365: quem foi chamado pra ela
 }
 
 # Só código de produção. tests/ monta cenário de propósito e scripts/ são

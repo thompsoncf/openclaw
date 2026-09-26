@@ -95,12 +95,14 @@ def painel_hoje(request: Request):
             vac.atualizar_estados(c, conta_id, agora, cfg)
         dados = vac.hoje(c, conta_id, agora, cfg)
         repasses = cla.repasses_abertos(c, conta_id)
+        from finance import clinica_vagas as cvg
+        vagas_esperando = cvg.esperando(c, conta_id)
         c.commit()      # fr.config semeia a linha da régua na 1ª vez
     for e in dados["esperando"]:
         e["fora"] = not fr.dentro_da_janela(e["em"], janela)
     q = request.query_params
     return _render("hoje.html", request, titulo="Hoje", cfg=cfg, gerencia=gerencia,
-                   d=dados, repasses=repasses, aviso=_AVISOS.get(q.get("aviso") or "", ""),
+                   d=dados, repasses=repasses, vagas_esperando=vagas_esperando, aviso=_AVISOS.get(q.get("aviso") or "", ""),
                    erro=request.session.pop("hoje_erro", ""),
                    rotulos=vac._ROTULO_TOQUE)
 
@@ -223,6 +225,10 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   </div>
   {% if aviso %}<div class="ok hj-aviso">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro hj-aviso">{{ erro }}</div>{% endif %}
+
+  {% if vagas_esperando %}
+  <div class="hj-desligado" style="margin-top:1rem"><b>⚡ {{ vagas_esperando }} horário{% if vagas_esperando > 1 %}s{% endif %} liberado{% if vagas_esperando > 1 %}s{% endif %} por cancelamento</b> esperando você aprovar o convite. <a href="/painel/clinica/vagas">Abrir vagas liberadas</a></div>
+  {% endif %}
 
   {% if repasses %}
   <div class="hj-sec"><h3>O agente passou pra você</h3><span class="qt">{{ repasses|length }}</span>

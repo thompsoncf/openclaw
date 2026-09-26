@@ -111,7 +111,16 @@ def tem_pix(pool, conta_id: int) -> bool:
 # ------------------------------------------------------------------ montar
 
 def _reais(centavos: int) -> str:
-    return "R$ " + f"{int(centavos or 0) // 100:,}".replace(",", ".")
+    """R$ 2.345 / R$ 2.345,67 — com os centavos quando há: é o valor que o Pix cobra."""
+    c = int(centavos or 0)
+    inteiro = f"{c // 100:,}".replace(",", ".")
+    return f"R$ {inteiro}" + (f",{c % 100:02d}" if c % 100 else "")
+
+
+def _pct(ocfg: dict) -> int:
+    """O sinal em %, com 0 valendo (sem sinal) — `or 30` transformaria 0 em 30."""
+    v = (ocfg or {}).get("sinal_pct")
+    return 30 if v is None else max(0, min(100, int(v)))
 
 
 def parcelas(total_centavos: int, evento: dict, ocfg: dict, hoje: date | None = None) -> list[dict]:
@@ -120,24 +129,31 @@ def parcelas(total_centavos: int, evento: dict, ocfg: dict, hoje: date | None = 
     antes da festa (ou no dia, se a festa é antes disso). Quem confere pode mudar."""
     from finance import vendas
     hoje = hoje or ag.agora_brt().date()
-    pct = max(0, min(100, int(ocfg.get("sinal_pct") or 30)))
-    sinal = round(int(total_centavos) * pct / 100)
+    sinal = round(int(total_centavos) * _pct(ocfg) / 100)
+    festa = ag.parse_data((evento or {}).get("data"))
+    # o sinal vence em 3 dias (nunca depois da festa); o saldo, 30 dias antes da festa
+    # — e nunca antes do sinal
+    venc_sinal = min(hoje + timedelta(days=3), festa) if festa else hoje + timedelta(days=3)
     out = []
     if sinal:
-        out.append({"obs": vendas.OBS_SINAL, "venc": (hoje + timedelta(days=3)).isoformat(),
+        out.append({"obs": vendas.OBS_SINAL, "venc": venc_sinal.isoformat(),
                     "forma": "Pix", "valor_centavos": sinal})
     saldo = int(total_centavos) - sinal
     if saldo > 0:
-        festa = ag.parse_data((evento or {}).get("data"))
-        venc = max(hoje, (festa - timedelta(days=30)) if festa else hoje + timedelta(days=30))
+        venc = (festa - timedelta(days=30)) if festa else hoje + timedelta(days=30)
+        venc = max(venc, venc_sinal if sinal else hoje)
+        if festa:
+            venc = min(venc, festa)
         out.append({"obs": "Saldo", "venc": venc.isoformat(), "forma": "Pix",
                     "valor_centavos": saldo})
     return out
 
 
 def condicoes(base: str, ocfg: dict) -> str:
-    return (f"{base} Validade: {int(ocfg.get('validade_dias') or 7)} dias. O sinal de "
-            f"{int(ocfg.get('sinal_pct') or 30)}% confirma a reserva da data; depois da "
+    validade = f"{base} Validade: {int(ocfg.get('validade_dias') or 7)} dias."
+    if not _pct(ocfg):
+        return validade
+    return (f"{validade} O sinal de {_pct(ocfg)}% confirma a reserva da data; depois da "
             f"aprovação a data fica segurada por {int(ocfg.get('reserva_h') or 72)} horas "
             "esperando o sinal.")
 
@@ -223,7 +239,27 @@ def mandar(pool, conta_id: int, membro_id: int, orc_id: int) -> dict:
         c.commit()
     if not pegou:
         return {"ok": False, "erro": "Este orçamento já foi conferido."}
+    try:
+        return _mandar_link(pool, conta_id, orc_id, pegou[0])
+    except Exception:  # noqa: BLE001 — nada saiu: volta pra fila, e o botão tenta de novo
+        _log.warning("ia_orcamento: mandar %s falhou", orc_id, exc_info=True)
+        _devolver(pool, orc_id)
+        return {"ok": False, "erro": "Não consegui mandar. Tente de novo."}
+
+
+def _devolver(pool, orc_id: int) -> None:
+    with pool.connection() as c:
+        c.execute("""update ia_orcamentos set estado='conferir', conferido_por=null,
+                            conferido_em=null where orcamento_id=%s""", (orc_id,))
+        c.commit()
+
+
+def _mandar_link(pool, conta_id: int, orc_id: int, conversa_id: int) -> dict:
+    from finance import agente
     d = pendente(pool, conta_id, orc_id)
+    if not d or not conversa_id:
+        _devolver(pool, orc_id)
+        return {"ok": False, "erro": "Não achei a conversa deste orçamento."}
     from finance.email_sender import _app_url
     link = f"{_app_url()}/proposta/{d['token']}"
     texto = ("Aqui está o seu orçamento 😊\n" + link
@@ -233,17 +269,17 @@ def mandar(pool, conta_id: int, membro_id: int, orc_id: int) -> dict:
         r = c.execute("""select coalesce(p.whatsapp, p.telefone, cv.contato_ref)
                            from conversas cv left join prospeccao p
                                 on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
-                          where cv.id=%s and cv.conta_id=%s""", (pegou[0], conta_id)).fetchone()
-        res = agente._mandar(c, conta_id, "whatsapp", r[0], texto, pegou[0]) if r else {"ok": False}
+                          where cv.id=%s and cv.conta_id=%s""", (conversa_id, conta_id)).fetchone()
+        res = (agente._mandar(c, conta_id, "whatsapp", r[0], texto, conversa_id)
+               if r and r[0] else {"ok": False})
         if not (res or {}).get("ok"):
-            c.execute("""update ia_orcamentos set estado='conferir', conferido_por=null,
-                                conferido_em=null where orcamento_id=%s""", (orc_id,))
-            c.commit()
+            c.rollback()
+            _devolver(pool, orc_id)
             return {"ok": False, "erro": "Não consegui mandar pelo WhatsApp. Tente de novo."}
         try:
-            agente._add_bot_msg(c, pegou[0], "whatsapp", texto, res.get("sid"))
+            agente._add_bot_msg(c, conversa_id, "whatsapp", texto, res.get("sid"))
             c.commit()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — saiu; só não ficou gravado na conversa
             c.rollback()
     try:
         from finance import proposta_email as _pe
@@ -276,7 +312,10 @@ def da_ia(pool, conta_id: int, orc_id: int) -> dict | None:
                      from ia_orcamentos i join conversas cv on cv.id = i.conversa_id
                      left join chip_regra cr on cr.conta_id = cv.conta_id
                       and cr.chip_id = coalesce(cv.chip_id, cv.conta_id)
-                    where i.orcamento_id=%s and i.conta_id=%s""", (orc_id, conta_id)).fetchone()
+                    where i.orcamento_id=%s and i.conta_id=%s
+                      -- só o que saiu pelo "Conferir e mandar": editado e mandado pela
+                      -- tela de sempre, ou descartado, é orçamento de vendedor
+                      and i.estado='enviado'""", (orc_id, conta_id)).fetchone()
     except Exception:  # noqa: BLE001
         return None
     if not r:
@@ -340,11 +379,17 @@ def bloquear(pool, conta_id: int, orc_id: int, cfg: dict, motivo: str, quando: d
             c.commit()
     except Exception:  # noqa: BLE001
         pass
+    dia = f"{quando.astimezone(ag.BRT):%d/%m}"
+    titulo, corpo = (
+        ("⚠️ Aprovado, mas a data já tem festa",
+         f"O cliente aprovou o orçamento da IA pra {dia}, e esse dia já tem festa ou data "
+         "segurada. A data NÃO foi segurada: decida e fale com o cliente.")
+        if motivo == "dia_com_festa" else
+        ("⚠️ Aprovado, mas a data não foi segurada",
+         f"O cliente aprovou o orçamento da IA pra {dia}, e não consegui segurar a data "
+         "agora. Confira a agenda e segure pela tela do orçamento."))
     for mid in {cfg.get("conferente_id"), cfg.get("dono_id")} - {None}:
-        _cr.notificar(pool, conta_id, mid, "⚠️ Aprovado, mas a data já tem festa",
-                      f"O cliente aprovou o orçamento da IA pra {quando.astimezone(ag.BRT):%d/%m}, "
-                      "e esse dia já tem festa ou data segurada. A data NÃO foi segurada: decida "
-                      "e fale com o cliente.", f"/cockpit/orcamentos/{orc_id}")
+        _cr.notificar(pool, conta_id, mid, titulo, corpo, f"/cockpit/orcamentos/{orc_id}")
 
 
 # ------------------------------------------------------------------ o comprovante
@@ -352,54 +397,86 @@ def bloquear(pool, conta_id: int, orc_id: int, cfg: dict, motivo: str, quando: d
 _MIDIA = ("📷", "📄", "🖼")
 
 
-def comprovante(pool, c, conta_id: int, lead_id: int, texto: str | None) -> str | None:
-    """Foto/documento do cliente com o orçamento da IA APROVADO e o sinal em aberto:
-    é o comprovante. Avisa o dono (uma vez) e devolve o texto pro cliente; None
-    quando não é o caso."""
-    t = (texto or "").strip()
-    if not t or not t.startswith(_MIDIA):
+def _ultima_e_midia(c, conversa_id: int | None, texto: str) -> bool:
+    """A última mensagem do cliente é uma foto ou documento? Pela coluna da mídia
+    (a foto com legenda também conta); banco sem a coluna, pelo marcador do texto."""
+    if conversa_id:
+        try:
+            with c.transaction():
+                r = c.execute("""select coalesce(midia_tipo,'') from mensagens
+                                  where conversa_id=%s and autor='lead'
+                                  order by criado_em desc, id desc limit 1""",
+                              (conversa_id,)).fetchone()
+            return bool(r and r[0] in ("imagem", "documento"))
+        except Exception:  # noqa: BLE001
+            pass
+    return (texto or "").strip().startswith(_MIDIA)
+
+
+def comprovante(pool, c, conta_id: int, lead_id: int, texto: str | None,
+                conversa_id: int | None = None) -> str | None:
+    """O COMPROVANTE do sinal: foto ou documento do cliente com o orçamento da IA
+    aprovado, a mensagem do sinal já enviada, a data ainda SEGURADA e o sinal em
+    aberto (e maior que zero). Avisa o dono e devolve o texto pro cliente — UMA vez:
+    depois disso, foto é foto (referência de decoração, print), e a IA responde.
+    None quando não é o caso."""
+    if not _ultima_e_midia(c, conversa_id, texto or ""):
         return None
     try:
         with c.transaction():
             r = c.execute(
-                """select i.orcamento_id, i.comprovante_em, cr.aviso_dono_membro_id,
-                          coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'O cliente'), o.numero
+                """select i.orcamento_id, cr.aviso_dono_membro_id,
+                          coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'O cliente'),
+                          o.numero, o.parcelas
                      from ia_orcamentos i join orcamentos o on o.id = i.orcamento_id
                      join conversas cv on cv.id = i.conversa_id
+                     join eventos_agenda e on e.id = o.evento_agenda_id
                      left join chip_regra cr on cr.conta_id = cv.conta_id
                       and cr.chip_id = coalesce(cv.chip_id, cv.conta_id)
                      left join prospeccao p on p.id = i.prospeccao_id and p.conta_id = i.conta_id
                     where i.conta_id=%s and i.prospeccao_id=%s and i.estado='enviado'
+                      and i.aprovado_msg_em is not null and i.comprovante_em is null
                       and o.aprovada_em is not null and o.sinal_pago_em is null
+                      and e.status='pre_reservado'
                     order by o.aprovada_em desc limit 1""", (conta_id, lead_id)).fetchone()
     except Exception:  # noqa: BLE001
         return None
-    if not r:
+    from finance import vendas
+    if not r or not vendas.valor_do_sinal(r[4]):
         return None
-    if not r[1]:
-        with pool.connection() as w:
-            w.execute("update ia_orcamentos set comprovante_em=now() where orcamento_id=%s", (r[0],))
-            w.commit()
-        if r[2]:
-            from finance import chip_regra as _cr
-            _cr.notificar(pool, conta_id, r[2], "💰 Comprovante do sinal chegou",
-                          f"{r[3]}, orçamento nº {r[4]}. Confira e toque em \"Sinal recebido\" "
-                          "pra firmar a data.", f"/cockpit/orcamentos/{r[0]}")
+    with pool.connection() as w:
+        pegou = w.execute("update ia_orcamentos set comprovante_em=now() where orcamento_id=%s "
+                          "and comprovante_em is null returning orcamento_id", (r[0],)).fetchone()
+        w.commit()
+    if not pegou:
+        return None
+    if r[1]:
+        from finance import chip_regra as _cr
+        _cr.notificar(pool, conta_id, r[1], "💰 Comprovante do sinal chegou",
+                      f"{r[2]}, orçamento nº {r[3]}. Confira e toque em \"Sinal recebido\" "
+                      "pra firmar a data.", f"/cockpit/orcamentos/{r[0]}")
     return ("Recebi, obrigada! 🙌 O comprovante já foi pra conferência — assim que o sinal "
             "for confirmado, eu te aviso que a data está garantida.")
 
 
 # ------------------------------------------------------------------ o relógio do sinal
 
-def _texto_aprovado(sinal: int, ate: datetime | None, pix_txt: str, bloqueio: str | None) -> str:
-    if bloqueio:
+def _texto_aprovado(sinal: int, ate: datetime | None, pix_txt: str, bloqueio: str | None,
+                    reservou: bool, dono: str = "") -> str:
+    if bloqueio or not reservou:
+        # a data NÃO foi segurada (dia com festa, sem hora de início, trava): não se
+        # promete reserva que não existe — a equipe confirma
         return ("Recebi a sua aprovação, obrigada! 🎉 Vou confirmar a disponibilidade da data "
                 "com a equipe e já te retorno.")
+    if not sinal:
+        return ("Aprovado, obrigada! 🎉 A sua data está reservada. Qualquer coisa, é só me "
+                "chamar aqui.")
     prazo_txt = f" até {ate.astimezone(ag.BRT):%d/%m às %Hh}" if ate else ""
+    quem = f"O {dono}" if dono else "A equipe"
     return (f"Aprovado, obrigada! 🎉 Pra garantir a data, o sinal é de {_reais(sinal)}"
             f" — a data fica segurada{prazo_txt}.\n"
             + (f"Pix copia e cola:\n{pix_txt}\n" if pix_txt
-               else "O Manoel te passa os dados do pagamento. ")
+               else f"{quem} te passa os dados do pagamento. ")
             + "Assim que pagar, me manda o comprovante aqui 😊")
 
 
@@ -459,8 +536,14 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                                   i.confirmada_msg_em, i.bloqueio, o.aprovada_em, o.sinal_pago_em,
                                   o.parcelas, e.status, e.pre_reserva_ate, o.evento_agenda_id,
                                   cr.aviso_agenda_membro_id,
-                                  coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'O cliente')
+                                  coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'O cliente'),
+                                  coalesce(cr.orc_reserva_h, 72), coalesce(md.nome, '')
                              from ia_orcamentos i
+                             left join membros md on md.id = (
+                               select cr2.aviso_dono_membro_id from chip_regra cr2
+                                join conversas cv2 on cv2.id = i.conversa_id
+                               where cr2.conta_id = cv2.conta_id
+                                 and cr2.chip_id = coalesce(cv2.chip_id, cv2.conta_id))
                              join orcamentos o on o.id = i.orcamento_id and o.conta_id = i.conta_id
                              join conversas cv on cv.id = i.conversa_id and cv.conta_id = i.conta_id
                              left join chip_regra cr on cr.conta_id = cv.conta_id
@@ -480,7 +563,7 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                 i = dict(zip(("id", "conta_id", "conversa_id", "aprovado_msg_em", "l24", "l48",
                               "liberada_msg_em", "confirmada_msg_em", "bloqueio", "aprovada_em",
                               "sinal_pago_em", "parcelas", "ev_status", "pre_ate", "ev_id",
-                              "agenda_id", "quem"), r))
+                              "agenda_id", "quem", "reserva_h", "dono"), r))
                 conta = i["conta_id"]
                 try:
                     sinal = vendas.valor_do_sinal(i["parcelas"])
@@ -497,12 +580,19 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                         if not i["ev_id"] and not i["bloqueio"] \
                                 and agora - i["aprovada_em"] < timedelta(minutes=10):
                             continue
+                        from finance.voltar_a_chamar import primeiro_nome
+                        dono = primeiro_nome(i["dono"]) if i["dono"] else ""
+                        dono = dono[:1].upper() + dono[1:].lower() if dono else ""
                         pix_txt = _pix(pool, conta, sinal, i["id"]) if sinal else ""
                         if _passo(pool, conta, i, "aprovado_msg_em",
-                                  _texto_aprovado(sinal, i["pre_ate"], pix_txt, i["bloqueio"])):
+                                  _texto_aprovado(sinal, i["pre_ate"], pix_txt, i["bloqueio"],
+                                                  bool(i["ev_id"]), dono)):
                             out["aprovados"] += 1
                         continue
-                    if i["ev_status"] == "cancelado" and not i["liberada_msg_em"]:
+                    # LIBERADA = a reserva VENCEU. O dono cancelar antes ("apareceu quem
+                    # paga hoje") ou cancelar à mão não é "o seu prazo acabou"
+                    if (i["ev_status"] == "cancelado" and not i["liberada_msg_em"]
+                            and i["pre_ate"] and i["pre_ate"] <= agora):
                         if _passo(pool, conta, i, "liberada_msg_em",
                                   "Oi! O prazo pra garantir a sua data acabou e ela foi liberada 😕 "
                                   "Se ainda quiser, me chama que eu vejo se continua livre."):
@@ -513,17 +603,19 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                                               f"{i['quem']}: a reserva de 72h venceu sem sinal.",
                                               f"/cockpit/orcamentos/{i['id']}")
                         continue
-                    if i["ev_status"] != "pre_reservado" or i["bloqueio"]:
+                    if i["ev_status"] != "pre_reservado" or i["bloqueio"] or not sinal:
                         continue
                     desde = agora - i["aprovada_em"]
                     ate = i["pre_ate"]
-                    if not i["l24"] and desde >= timedelta(hours=24):
+                    # os lembretes acompanham a reserva: com 72h, aos 24h e aos 48h
+                    terco = timedelta(hours=int(i["reserva_h"]) / 3)
+                    if not i["l24"] and desde >= terco:
                         if _passo(pool, conta, i, "lembrete_24_em",
                                   f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊 A sua "
                                   f"data está segurada até {ate.astimezone(ag.BRT):%d/%m às %Hh}."
                                   if ate else f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊"):
                             out["lembretes"] += 1
-                    elif i["l24"] and not i["l48"] and desde >= timedelta(hours=48):
+                    elif i["l24"] and not i["l48"] and desde >= 2 * terco:
                         if _passo(pool, conta, i, "lembrete_48_em",
                                   "Oi! Último lembrete: a reserva da sua data vence "
                                   + (f"{ate.astimezone(ag.BRT):%d/%m às %Hh}" if ate else "em breve")

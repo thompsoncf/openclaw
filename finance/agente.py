@@ -471,7 +471,7 @@ def _atender(pool, conta_id, conversa_id):
             # segurada 72h depois da aprovação, e o comprovante vai pro dono.
             ocfg = _iao.config(c, regra)
             _ult0 = next((t for (_d, a, t) in msgs if a == "lead"), "")
-            _txt_comp = _iao.comprovante(pool, c, conta_id, conv[1], _ult0)
+            _txt_comp = _iao.comprovante(pool, c, conta_id, conv[1], _ult0, conversa_id)
             if _txt_comp:
                 _c0 = conv[9] or "whatsapp"
                 _enviar(c, conta_id, conversa_id, _c0,
@@ -998,6 +998,16 @@ def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino
                *, ia: dict | None = None):
     """Monta o orçamento. `ia` (a config da regra por número, migração 392): NÃO manda
     — vai pra conferência de alguém da equipe, com sinal e validade (ia_orcamento)."""
+    if ia and conv[1]:
+        # UM ORÇAMENTO ESPERANDO CONFERÊNCIA POR VEZ: a IA devolveria acao=orcamento a
+        # cada "e aí?" do cliente, e cada um viraria um orçamento numerado e um aviso
+        ja = c.execute("""select 1 from ia_orcamentos where conta_id=%s and prospeccao_id=%s
+                            and estado='conferir' limit 1""", (conta_id, conv[1])).fetchone()
+        if ja:
+            return _enviar(c, conta_id, conversa_id, canal, destino,
+                           (resposta + "\n\n" if resposta else "")
+                           + "O seu orçamento já está com a equipe pra conferir — assim que "
+                             "sair, eu te mando o link 😊")
     slugs_ok = {s["slug"]: s for s in catalogo}
     escolhidos = _itens_escolhidos(d, slugs_ok)
     if not escolhidos:

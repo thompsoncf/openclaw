@@ -141,7 +141,8 @@ def _lead(pool, prime, nome="Larissa"):
     return lead, conv
 
 
-def _orcamento(pool, conv, lead, *, total=720000, aprovada=None, sinal_pago=None, festa="2027-03-13"):
+def _orcamento(pool, conv, lead, *, total=720000, aprovada=None, sinal_pago=None, festa="2027-03-13",
+               estado="conferir"):
     plano = iao.parcelas(total, {"data": festa}, {"sinal_pct": 30}, hoje=date(2026, 9, 26))
     with pool.connection() as c:
         oid = c.execute(
@@ -152,8 +153,8 @@ def _orcamento(pool, conv, lead, *, total=720000, aprovada=None, sinal_pago=None
             (EMPRESA, json.dumps([{"nome": "PACOTE PRIME", "qtd": 1, "setup": total / 100}]),
              json.dumps({"data": festa, "inicio": "20:00", "convidados": 90, "tipo": "15 anos"}),
              total, json.dumps(plano), aprovada, sinal_pago)).fetchone()[0]
-        c.execute("insert into ia_orcamentos (orcamento_id, conta_id, prospeccao_id, conversa_id) "
-                  "values (%s,%s,%s,%s)", (oid, EMPRESA, lead, conv))
+        c.execute("insert into ia_orcamentos (orcamento_id, conta_id, prospeccao_id, conversa_id, estado) "
+                  "values (%s,%s,%s,%s,%s)", (oid, EMPRESA, lead, conv, estado))
         c.commit()
     return oid
 
@@ -165,9 +166,9 @@ def test_o_plano_tem_o_sinal_que_o_sistema_reconhece_e_o_saldo_antes_da_festa():
     assert p[0]["obs"] == vendas.OBS_SINAL and p[0]["valor_centavos"] == 216000
     assert vendas.valor_do_sinal(p) == 216000
     assert p[1]["valor_centavos"] == 504000 and p[1]["venc"] == "2027-02-11"
-    # festa daqui a 10 dias: o saldo vence hoje, nunca no passado
+    # festa daqui a 10 dias: o saldo vence junto com o sinal, nunca antes nem no passado
     q = iao.parcelas(100000, {"data": "2026-10-06"}, {"sinal_pct": 30}, hoje=date(2026, 9, 26))
-    assert q[1]["venc"] == "2026-09-26"
+    assert q[1]["venc"] == "2026-09-29"
 
 
 def test_sem_a_chave_nao_ha_orcamento_pela_ia(pool, prime):
@@ -319,7 +320,7 @@ def _d(pool, oid):
 
 def test_orcamento_da_ia_segura_72h_e_o_do_vendedor_nao(pool, prime, reserva):
     lead, conv = _lead(pool, prime)
-    oid = _orcamento(pool, conv, lead)
+    oid = _orcamento(pool, conv, lead, estado="enviado")
     ev_id = reserva._reservar_na_agenda(_d(pool, oid), pool)
     with pool.connection() as c:
         ate, st = c.execute("select pre_reserva_ate, status from eventos_agenda where id=%s",
@@ -345,7 +346,7 @@ def test_dia_com_festa_nao_e_segurado_e_a_equipe_decide(pool, prime, reserva):
                   (EMPRESA, datetime(2027, 3, 13, 12, tzinfo=BRT)))
         c.commit()
     lead, conv = _lead(pool, prime)
-    oid = _orcamento(pool, conv, lead)
+    oid = _orcamento(pool, conv, lead, estado="enviado")
     assert reserva._reservar_na_agenda(_d(pool, oid), pool) is None
     with pool.connection() as c:
         assert c.execute("select bloqueio from ia_orcamentos").fetchone()[0] == "dia_com_festa"
@@ -433,16 +434,30 @@ def test_conversa_que_gente_assumiu_o_relogio_nao_fala(pool, prime, envios):
 
 # ══════════════════════════════════════════════ o comprovante
 
-def test_foto_depois_da_aprovacao_e_o_comprovante(pool, prime):
+def test_foto_depois_da_aprovacao_e_o_comprovante_uma_vez(pool, prime):
     oid, conv = _aprovado(pool, prime, ha=timedelta(hours=3))
     with pool.connection() as c:
         lead = c.execute("select prospeccao_id from conversas where id=%s", (conv,)).fetchone()[0]
+        # antes da mensagem do sinal sair, foto não é comprovante
+        assert iao.comprovante(pool, c, EMPRESA, lead, "📷 Foto") is None
+        c.execute("update ia_orcamentos set aprovado_msg_em=now()")
+        c.commit()
         assert iao.comprovante(pool, c, EMPRESA, lead, "oi") is None
         t = iao.comprovante(pool, c, EMPRESA, lead, "📷 Foto")
         assert t and "comprovante" in t
-        assert iao.comprovante(pool, c, EMPRESA, lead, "📄 Documento")      # responde de novo…
+        # a segunda foto é foto (referência de decoração, print): a IA responde
+        assert iao.comprovante(pool, c, EMPRESA, lead, "📄 Documento") is None
     manoel = [a for a in prime["avisos"] if a[0] == prime["ids"]["MANOEL"]]
-    assert len(manoel) == 1 and manoel[0][2] == f"/cockpit/orcamentos/{oid}"   # …avisa uma vez
+    assert len(manoel) == 1 and manoel[0][2] == f"/cockpit/orcamentos/{oid}"
+
+
+def test_foto_com_a_data_ja_liberada_nao_e_comprovante(pool, prime):
+    oid, conv = _aprovado(pool, prime, ha=timedelta(hours=80), status="cancelado")
+    with pool.connection() as c:
+        c.execute("update ia_orcamentos set aprovado_msg_em=now()")
+        c.commit()
+        lead = c.execute("select prospeccao_id from conversas where id=%s", (conv,)).fetchone()[0]
+        assert iao.comprovante(pool, c, EMPRESA, lead, "📷 Foto") is None
 
 
 def test_foto_com_sinal_ja_pago_nao_e_comprovante(pool, prime):
@@ -472,3 +487,93 @@ def test_o_cartao_da_conferencia_no_app(pool, prime, monkeypatch):
     # outro vendedor não vê
     monkeypatch.setattr(pc, "_sessao_e_papel", lambda req: (EMPRESA, prime["ids"]["PEDRO"], "vendedor"))
     assert pc.cockpit_ia_orcamento(SimpleNamespace(session={}), oid).status_code == 303
+
+
+
+# ══════════════════════════════════════════════ o que a revisão de 26/09 achou
+
+def test_sinal_zero_por_cento_e_zero():
+    p = iao.parcelas(100000, {"data": "2027-03-13"}, {"sinal_pct": 0}, hoje=date(2026, 9, 26))
+    assert vendas.valor_do_sinal(p) == 0 and p == [
+        {"obs": "Saldo", "venc": "2027-02-11", "forma": "Pix", "valor_centavos": 100000}]
+    assert "sinal" not in iao.condicoes("Base.", {"sinal_pct": 0, "validade_dias": 7})
+
+
+def test_festa_perto_o_saldo_nunca_vence_antes_do_sinal():
+    p = iao.parcelas(100000, {"data": "2026-10-10"}, {"sinal_pct": 30}, hoje=date(2026, 9, 26))
+    assert p[0]["venc"] == "2026-09-29" and p[1]["venc"] == "2026-09-29"
+
+
+def test_valor_com_centavos_e_o_que_o_pix_cobra():
+    assert iao._reais(234567) == "R$ 2.345,67" and iao._reais(234500) == "R$ 2.345"
+
+
+def test_o_dono_cancelou_antes_nao_e_prazo_acabou(pool, prime, envios):
+    _aprovado(pool, prime, ha=timedelta(hours=5), status="cancelado",
+              pre_ate=datetime.now(timezone.utc) + timedelta(hours=60))
+    with pool.connection() as c:
+        c.execute("update ia_orcamentos set aprovado_msg_em=now()")
+        c.commit()
+    assert iao.rodar(pool)["liberadas"] == 0 and envios == []
+
+
+def test_sem_reserva_nao_promete_data_segurada(pool, prime, envios):
+    lead, conv = _lead(pool, prime)
+    _orcamento(pool, conv, lead, aprovada=datetime.now(timezone.utc) - timedelta(minutes=15),
+               estado="enviado")
+    assert iao.rodar(pool)["aprovados"] == 1
+    assert envios[0].startswith("Recebi a sua aprovação") and "segurada" not in envios[0]
+
+
+def test_empresa_sem_dono_escolhido_nao_cita_nome(pool, prime, envios):
+    with pool.connection() as c:
+        c.execute("update chip_regra set aviso_dono_membro_id=null")
+        c.commit()
+    _aprovado(pool, prime, ha=timedelta(minutes=12))
+    iao.rodar(pool)
+    assert "A equipe te passa os dados" in envios[0] and "Manoel" not in envios[0]
+
+
+def test_editado_e_mandado_pela_tela_de_sempre_e_orcamento_de_vendedor(pool, prime, reserva):
+    lead, conv = _lead(pool, prime)
+    oid = _orcamento(pool, conv, lead)            # ficou em 'conferir'
+    ev = reserva._reservar_na_agenda(_d(pool, oid), pool)
+    with pool.connection() as c:
+        ate = c.execute("select pre_reserva_ate from eventos_agenda where id=%s", (ev,)).fetchone()[0]
+    assert ate - datetime.now(timezone.utc) > timedelta(days=30)
+
+
+def test_marcar_a_data_a_mao_nao_aplica_a_regra_da_ia(pool, prime, reserva):
+    with pool.connection() as c:
+        c.execute("""insert into eventos_agenda (conta_id, titulo, inicio, status, tipo_evento)
+                     values (%s,'Casamento',%s,'ativo','Casamento')""",
+                  (EMPRESA, datetime(2027, 3, 13, 12, tzinfo=BRT)))
+        c.commit()
+    lead, conv = _lead(pool, prime)
+    oid = _orcamento(pool, conv, lead, estado="enviado")
+    assert reserva._reservar_na_agenda(_d(pool, oid), pool, aprovacao=False)
+
+
+def test_mandar_sem_a_conversa_volta_pra_fila(pool, prime):
+    lead, conv = _lead(pool, prime)
+    oid = _orcamento(pool, conv, lead)
+    with pool.connection() as c:
+        c.execute("update ia_orcamentos set conversa_id=null")
+        c.commit()
+    assert not iao.mandar(pool, EMPRESA, prime["ids"]["JACQUELINE"], oid)["ok"]
+    assert iao.pendente(pool, EMPRESA, oid)["estado"] == "conferir"
+
+
+def test_um_orcamento_esperando_conferencia_por_vez(pool, prime, agente_ia):
+    lead, conv = _lead(pool, prime)
+    agente_ia["json"] = _PEDIDO
+    _fala(pool, conv, "quero o orçamento")
+    agente.atender(pool, EMPRESA, conv)
+    with pool.connection() as c:
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
+                     values (%s,'whatsapp','in','lead','e aí, saiu?')""", (conv,))
+        c.commit()
+    agente.atender(pool, EMPRESA, conv)
+    with pool.connection() as c:
+        assert c.execute("select count(*) from orcamentos").fetchone()[0] == 1
+    assert "já está com a equipe" in agente_ia["enviados"][-1][1]

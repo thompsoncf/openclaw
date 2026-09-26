@@ -1907,7 +1907,7 @@ def painel_servicos_marcar_data(request: Request, dados: MarcarDataIn):
     d = prop._carregar(token, pool=pool)
     if not d:
         return JSONResponse({"erro": "não consegui ler o orçamento"}, status_code=404)
-    novo_id = prop._reservar_na_agenda(d, pool=pool)
+    novo_id = prop._reservar_na_agenda(d, pool=pool, aprovacao=False)
     if not novo_id:
         # o motivo mais comum tem conserto, e dizer "falhou" mandaria o dono
         # procurar no escuro justamente o campo que a linha do funil já apontou.

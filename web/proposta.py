@@ -161,7 +161,7 @@ def _card_e_cliente(pool, conta_id: int, orcamento_id) -> tuple[int | None, int 
         return None, None
 
 
-def _reservar_na_agenda(d: dict, pool=None) -> int | None:
+def _reservar_na_agenda(d: dict, pool=None, *, aprovacao: bool = True) -> int | None:
     """Cliente aprovou o orçamento de EVENTO -> a data entra na agenda da empresa.
 
     COM SINAL a data entra como PRÉ-RESERVA, com prazo: é o que a própria proposta
@@ -198,8 +198,10 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
     # a trava do DIA, pra duas aprovações no mesmo segundo não segurarem a mesma data.
     # Dia que já tem festa não é segurado de novo: a equipe decide (ia_orcamento).
     # Orçamento de vendedor segue exatamente como era.
+    # `aprovacao=False` é o "marcar a data" manual do painel: ali quem decide é a
+    # pessoa, e a regra da IA (72h, dia com festa) não se aplica.
     from finance import ia_orcamento as _iao
-    ia = _iao.da_ia(pool, d["conta_id"], d["id"])
+    ia = _iao.da_ia(pool, d["conta_id"], d["id"]) if aprovacao else None
     if ia:
         with _iao.trava_do_dia(pool, d["conta_id"], inicio.astimezone(ag.BRT).date()) as pegou:
             if not pegou or _iao.festa_no_dia(pool, d["conta_id"], inicio):

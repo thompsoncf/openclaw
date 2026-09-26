@@ -1,0 +1,473 @@
+<title>Vendedor IA da Prime</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde). Tema único de propósito:
+   o painel não tem modo claro, e o mockup mostra a tela como ela vai ficar. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:80ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.quem{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+.pill{font-size:.72rem;border:1px solid var(--line-2);border-radius:999px;padding:.15rem .6rem;color:var(--dim);white-space:nowrap}
+.pill.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.pill.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.pill.warn{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:80ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:84ch}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota b{color:var(--text)}
+
+/* veredito */
+.ver{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.vc{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem 1rem;display:flex;flex-direction:column;gap:.45rem;font-size:.86rem}
+.vc h3{font-size:.98rem;display:flex;gap:.5rem;align-items:center}
+.vc p{margin:0;color:var(--dim)}
+.vc ul{margin:0;padding-left:1.05rem;color:var(--dim);display:flex;flex-direction:column;gap:.25rem}
+.vc li b{color:var(--text)}
+.vc.sim{border-color:var(--neon-borda)}
+.vc.nao{border-color:var(--coral-borda)}
+.st{font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;border-radius:4px;padding:.08rem .35rem}
+.st.ok{background:var(--neon);color:#062312}
+.st.no{background:var(--coral);color:#1b0707}
+
+/* palco: a tela do produto em tamanho real, rolando de lado no celular */
+.palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
+.tela{width:1040px;padding:22px;display:flex;gap:18px;align-items:flex-start}
+.painel{flex:1;display:flex;flex-direction:column;gap:14px}
+.tb{display:flex;align-items:center;gap:.6rem;font-size:.8rem;color:var(--dim)}
+.tb h3{font-size:1.05rem;color:var(--text)}
+.abas{display:flex;gap:4px;margin-left:auto}
+.aba{font-size:.76rem;border:1px solid var(--line-2);border-radius:8px;padding:.25rem .6rem;color:var(--dim)}
+.aba.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+
+/* regra por número */
+.regra{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:14px 16px;display:grid;grid-template-columns:230px 1fr;gap:14px 22px;font-size:.82rem}
+.regra.nova{border-color:var(--ia-borda);box-shadow:0 0 0 1px var(--ia-borda)}
+.num{display:flex;flex-direction:column;gap:.25rem}
+.num .n{font-family:var(--display);font-weight:600;font-size:1rem;display:flex;align-items:center;gap:.45rem}
+.num .t{font-family:var(--mono);font-size:.74rem;color:var(--dim)}
+.num .con{font-size:.72rem;color:var(--neon-2);display:flex;gap:.35rem;align-items:center}
+.num .con::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--neon)}
+.num .uso{font-size:.72rem;color:var(--faint)}
+.campos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px}
+.cp{display:flex;flex-direction:column;gap:.25rem}
+.cp label{font-size:.7rem;color:var(--faint);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.sel{border:1px solid var(--line-2);background:var(--bg);border-radius:8px;padding:.38rem .6rem;font-size:.8rem;color:var(--text);display:flex;align-items:center;gap:.45rem}
+.sel::after{content:"▾";margin-left:auto;color:var(--faint);font-size:.7rem}
+.sel .avia{width:18px;height:18px;border-radius:50%;background:var(--ia-fundo);border:1px solid var(--ia);color:var(--ia-2);font-size:.55rem;display:grid;place-items:center}
+.seg{display:flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
+.seg span{flex:1;text-align:center;padding:.34rem .4rem;font-size:.76rem;color:var(--dim)}
+.seg span.on{background:var(--neon-fundo);color:var(--neon-2)}
+.sw{display:flex;align-items:center;gap:.55rem;font-size:.8rem}
+.tg{width:36px;height:20px;border-radius:999px;background:var(--line-2);position:relative;flex:none}
+.tg::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dim)}
+.tg.on{background:var(--neon)}
+.tg.on::after{left:18px;background:#062312}
+.full{grid-column:1/-1}
+.alerta{grid-column:1/-1;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2);border-radius:8px;padding:.5rem .65rem;font-size:.76rem;line-height:1.45}
+.alerta b{color:#FFE2A6}
+.regra.velha .campos{opacity:.8}
+.rodape{display:flex;gap:.45rem;justify-content:flex-end}
+.bt{border:1px solid var(--line-2);background:var(--bg-2);border-radius:8px;padding:.38rem .75rem;font-size:.78rem;color:var(--text)}
+.bt.pri{background:var(--neon);border-color:var(--neon);color:#062312;font-weight:600}
+.bt.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+
+/* conversa */
+.conv{display:grid;grid-template-columns:1fr 330px;gap:18px;width:100%}
+.chatbox{border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.ch{padding:.7rem .9rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6rem}
+.ch .n{font-family:var(--display);font-weight:600}
+.ch .s{font-size:.72rem;color:var(--dim)}
+.selo{margin-left:auto;font-size:.7rem;border:1px solid var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2);border-radius:999px;padding:.15rem .6rem;display:flex;gap:.35rem;align-items:center}
+.selo::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ia)}
+.msgs{padding:14px;display:flex;flex-direction:column;gap:8px;font-size:.8rem}
+.b{max-width:74%;padding:.5rem .7rem;border-radius:12px;background:var(--surface-2);line-height:1.45}
+.b.out{align-self:flex-end;background:#1d1728;border:1px solid var(--ia-borda)}
+.b .h{display:block;font-size:.64rem;color:var(--faint);margin-top:.2rem;text-align:right}
+.b.out .h::before{content:"IA · ";color:var(--ia)}
+.sis{align-self:center;font-size:.7rem;color:var(--faint);font-family:var(--mono);letter-spacing:.03em}
+.chama{align-self:stretch;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;padding:.7rem .8rem;display:flex;flex-direction:column;gap:.45rem}
+.chama .t{font-size:.84rem;color:#FFE2A6;font-weight:600;display:flex;gap:.5rem;align-items:center}
+.chama .t::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--ambar);box-shadow:0 0 0 4px rgba(224,163,46,.18)}
+.chama p{margin:0;font-size:.78rem;color:var(--ambar-2)}
+.chama .bts{display:flex;gap:.4rem;flex-wrap:wrap}
+.lado{display:flex;flex-direction:column;gap:12px}
+.ficha{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem;display:flex;flex-direction:column;gap:.5rem;font-size:.8rem}
+.ficha h3{font-size:.92rem}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:.25rem .8rem}
+.kv span{color:var(--faint)}
+.kv b{font-weight:500}
+.kv .ia{color:var(--ia-2)}
+.chips{display:flex;flex-wrap:wrap;gap:.3rem}
+.chip{font-size:.68rem;border-radius:999px;padding:.1rem .5rem;border:1px solid var(--line-2);color:var(--dim)}
+.chip.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.chip.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.chip.warn{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+
+/* celular do Thiago */
+.fone{width:300px;border:1px solid var(--line-2);border-radius:28px;background:var(--bg);padding:9px;box-shadow:0 18px 44px rgba(0,0,0,.45)}
+.fone .in{border-radius:21px;background:var(--bg-2);padding:12px;display:flex;flex-direction:column;gap:8px;font-size:.76rem}
+.not{background:var(--surface-2);border:1px solid var(--line-2);border-radius:14px;padding:.55rem .65rem;display:flex;flex-direction:column;gap:.2rem}
+.not .ap{font-size:.62rem;color:var(--faint);font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.not b{font-size:.8rem}
+.not p{margin:0;color:var(--dim)}
+
+/* regras da IA */
+.tres{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.col3{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem 1rem;display:flex;flex-direction:column;gap:.5rem;font-size:.84rem}
+.col3 h3{font-size:.96rem}
+.col3 ul{margin:0;padding-left:1.05rem;color:var(--dim);display:flex;flex-direction:column;gap:.3rem}
+.col3 li b{color:var(--text)}
+.col3.a{border-top:3px solid var(--ia)}
+.col3.c{border-top:3px solid var(--ambar)}
+.col3.n{border-top:3px solid var(--coral)}
+
+/* desafio */
+.tabw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:.82rem}
+th,td{padding:.55rem .75rem;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-size:.7rem;color:var(--faint);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+thead th.ia{color:var(--ia-2)}
+td.ia{background:var(--ia-fundo);color:var(--ia-2)}
+td.alvo{color:var(--neon-2)}
+tbody tr:last-child td{border-bottom:0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.kpi{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.75rem .85rem;display:flex;flex-direction:column;gap:.2rem}
+.kpi .l{font-size:.7rem;color:var(--faint);font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.kpi .v{font-family:var(--display);font-size:1.45rem;font-weight:600;font-variant-numeric:tabular-nums}
+.kpi .s{font-size:.74rem;color:var(--dim)}
+.kpi.ia{border-color:var(--ia-borda)}
+.kpi.ia .v{color:var(--ia-2)}
+.esc{display:flex;flex-direction:column;gap:6px;font-size:.8rem}
+.er{display:grid;grid-template-columns:190px 1fr 40px;gap:.6rem;align-items:center}
+.er .bar{height:8px;border-radius:5px;background:var(--line)}
+.er .bar i{display:block;height:100%;border-radius:5px;background:var(--ambar)}
+.er .q{text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+
+/* construção */
+.passos{display:flex;flex-direction:column;gap:8px;counter-reset:p}
+.ps{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.65rem .85rem;display:grid;grid-template-columns:auto 1fr;gap:.15rem .75rem;font-size:.84rem}
+.ps::before{counter-increment:p;content:counter(p);grid-row:span 2;font-family:var(--mono);font-size:.75rem;color:var(--neon);padding-top:.1rem}
+.ps b{color:var(--text)}
+.ps p{margin:0;color:var(--dim);font-size:.8rem}
+
+/* perguntas */
+.dec{display:flex;flex-direction:column;gap:10px}
+.q2{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem}
+.q2 .qn{font-family:var(--mono);font-size:.75rem;color:var(--neon);grid-row:span 3;padding-top:.15rem}
+.q2 h3{font-size:.95rem}
+.q2 p{margin:0;color:var(--dim);font-size:.85rem}
+.rec{font-size:.84rem;color:var(--neon-2)}
+.rec::before{content:"Recomendo: ";color:var(--faint)}
+.ab{border:1px dashed var(--ambar-borda);color:var(--ambar-2)}
+@media (max-width:640px){
+  .regra{grid-template-columns:1fr}
+  .campos{grid-template-columns:1fr}
+  .er{grid-template-columns:120px 1fr 32px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="head">
+  <span class="k">Mockup para aprovação · Prime Eventos · 26/09/2026</span>
+  <h1>O zaq teste vira vendedor com IA, atendendo o chip CP Thiago</h1>
+  <p>Todo contato <b>novo</b> que chegar no número do <b>CP Thiago</b> vai para o <b>zaq teste</b>, e a IA atende do primeiro "oi" até a visita marcada. Quando precisar de gente, ela chama a retaguarda humana. O chip principal (CP Zarb) segue com o rodízio de sempre, sem IA.</p>
+  <div class="quem">
+    <span class="pill">Prime Eventos · conta 34</span>
+    <span class="pill ok">chip CP Thiago · conectado</span>
+    <span class="pill ia">zaq teste · vendedor IA</span>
+    <span class="pill">retaguarda: Thiago e Manoel</span>
+  </div>
+</header>
+
+<section class="sec">
+  <header>
+    <span class="k">A resposta</span>
+    <h2>Dá pra fazer, pelo número, não pelo anúncio. E a IA ainda não está pronta</h2>
+  </header>
+  <div class="ver">
+    <div class="vc sim">
+      <h3><span class="st ok">dá</span> Separar pelo número do chip</h3>
+      <p>O número por onde a mensagem entrou é gravado pelo servidor em toda mensagem, e o cliente não consegue mudar. Se o anúncio novo apontar só para o CP Thiago, tudo que entrar ali é da campanha.</p>
+      <ul>
+        <li>Hoje o CP Thiago está quase parado: <b>4 conversas novas em 30 dias</b>.</li>
+        <li>Nada muda na conexão do chip. A regra mexe só em quem recebe o lead e em quem responde.</li>
+      </ul>
+    </div>
+    <div class="vc nao">
+      <h3><span class="st no">não dá</span> Separar pela campanha</h3>
+      <p>A mensagem que chega pelo QR não traz de qual anúncio ela veio. O código na mensagem pronta (<code>[#XYZ]</code>) existe no sistema, mas o cliente pode apagar, e nenhum lead da base tem código até hoje.</p>
+      <ul>
+        <li>O código entra no anúncio <b>só para medir</b> por criativo, não para rotear.</li>
+      </ul>
+    </div>
+    <div class="vc nao">
+      <h3><span class="st no">ainda não</span> A IA pronta para vender</h3>
+      <p>Ela nunca atendeu cliente de verdade na Prime. Nos 32 recados dos testes:</p>
+      <ul>
+        <li>disse <b>"amanhã às 10h está confirmado"</b> sem marcar nada;</li>
+        <li>respondeu <b>4 vezes em 17 segundos</b> quando o cliente mandou mensagens seguidas;</li>
+        <li>prometeu <b>"vou passar pra equipe"</b> sem avisar ninguém;</li>
+        <li>esqueceu a conversa (lê só as 12 últimas mensagens).</li>
+      </ul>
+      <p>As seis peças da seção "O que construir" resolvem isso antes de ligar.</p>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <header>
+    <span class="k">Tela 1 · Comunicação › Distribuição</span>
+    <h2>Regras por número</h2>
+    <p>Cada chip ganha a sua regra. O principal continua no rodízio; o CP Thiago passa a ter um dono só, com a IA ligada <b>só nele</b>. A chave geral da IA da empresa continua desligada.</p>
+  </header>
+  <div class="palco"><div class="tela">
+    <div class="painel">
+      <div class="tb"><h3>Distribuição de leads</h3><span>quem recebe o lead novo de cada número</span>
+        <div class="abas"><span class="aba">Rodízio</span><span class="aba on">Regras por número</span><span class="aba">Avisos</span></div></div>
+
+      <div class="regra velha">
+        <div class="num">
+          <span class="n">CP Zarb <span class="chip">principal</span></span>
+          <span class="t">número principal</span>
+          <span class="con">conectado</span>
+          <span class="uso">280 conversas novas em 30 dias</span>
+        </div>
+        <div class="campos">
+          <div class="cp"><label>Quem recebe</label><div class="sel">Rodízio · Jacqueline, Pedro, Thiago</div></div>
+          <div class="cp"><label>IA atende</label><div class="sw"><span class="tg"></span> desligada</div></div>
+        </div>
+      </div>
+
+      <div class="regra nova">
+        <div class="num">
+          <span class="n">CP Thiago <span class="chip ia">campanha nova</span></span>
+          <span class="t">número do Thiago</span>
+          <span class="con">conectado</span>
+          <span class="uso">4 conversas novas em 30 dias</span>
+        </div>
+        <div class="campos">
+          <div class="cp"><label>Quem recebe</label><div class="sel"><span class="avia">IA</span> zaq teste · vendedor IA</div></div>
+          <div class="cp"><label>IA atende</label><div class="sw"><span class="tg on"></span> ligada neste número</div></div>
+          <div class="cp"><label>Horário da IA</label><div class="seg"><span class="on">24 horas</span><span>Seg–sáb 8h–18h</span></div></div>
+          <div class="cp"><label>Vale para</label><div class="sel">Contatos novos a partir de 29/09</div></div>
+          <div class="cp"><label>Retaguarda · seg–sáb 8h–18h</label><div class="sel">Thiago Pinheiro · WhatsApp e app</div></div>
+          <div class="cp"><label>Retaguarda · fora do horário</label><div class="sel">Manoel Soares · WhatsApp</div></div>
+          <div class="alerta">Nos últimos 30 dias, <b>54% das mensagens enviadas por este número saíram do celular</b>. Com a regra ligada, quem responder pelo celular <b>pausa a IA naquela conversa</b>, para os dois não falarem com o cliente ao mesmo tempo.</div>
+          <div class="rodape full"><span class="bt">Pausar a regra</span><span class="bt pri">Salvar regra</span></div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <p class="nota"><i>1</i><span>Os <b>14 leads que já existem</b> no CP Thiago continuam com os donos de hoje (Pedro 6, Thiago 4, Jacqueline 3, zaq teste 1). A regra nunca tira lead de ninguém.</span></p>
+  <p class="nota"><i>2</i><span>Se quem clicar no anúncio <b>já for lead de outro vendedor</b> pelo chip principal, a conversa nova é ligada à ficha que já existe: o lead fica com o dono dele, a IA não atende e o dono é avisado.</span></p>
+</section>
+
+<section class="sec">
+  <header>
+    <span class="k">Tela 2 · A conversa</span>
+    <h2>A IA atende, qualifica, propõe a visita e chama gente para confirmar</h2>
+    <p>Exemplo de uma conversa de campanha. A IA fala o vocabulário de quem vende festa: <b>tipo, data, convidados, visita</b>. O preço sai <b>só do catálogo</b>, e a data e a visita <b>nunca</b> são confirmadas pela IA.</p>
+  </header>
+  <div class="palco"><div class="tela">
+    <div class="conv">
+      <div class="chatbox">
+        <div class="ch"><div><div class="n">Larissa M.</div><div class="s">exemplo · CP Thiago · entrou 21:42 · lead do zaq teste</div></div><span class="selo">IA atendendo</span></div>
+        <div class="msgs">
+          <div class="b">Oi! Vi o anúncio, queria saber o valor do espaço pra um aniversário de 15 anos<span class="h">21:42</span></div>
+          <div class="b out">Oi, Larissa! Que bom falar com você 😊 Sou a assistente virtual da Prime Eventos. Pra eu te passar certinho: qual a data que vocês pensam e mais ou menos quantos convidados?<span class="h">21:42</span></div>
+          <div class="b">Março do ano que vem, dia 13. Uns 120<span class="h">21:44</span></div>
+          <div class="b">é sábado</div>
+          <div class="sis">2 mensagens seguidas → uma resposta só</div>
+          <div class="b out">Anotei: 15 anos, sábado 13/03/2027, cerca de 120 convidados. Pela agenda, <b>essa data consta livre</b> hoje. A confirmação é feita pela equipe na visita.<br><br>Pra festa no sábado, o pacote do espaço fica a partir de <b>R$ 7.800 à vista</b> (valores de 2027, do nosso catálogo). O ideal é você conhecer o espaço: tenho <b>quinta 17h</b> ou <b>sábado 10h</b>. Qual fica melhor?<span class="h">21:44</span></div>
+          <div class="b">Sábado 10h!<span class="h">21:46</span></div>
+          <div class="b out">Perfeito! Vou pedir pra equipe confirmar o sábado 10h com você amanhã cedo 🙌<span class="h">21:46</span></div>
+          <div class="chama">
+            <span class="t">Chamando a retaguarda · visita aceita</span>
+            <p>Larissa aceitou <b>sábado 03/10, 10h</b>. A IA pausou nesta conversa até alguém responder. Fora do horário: avisado o <b>Manoel</b>; às 8h o aviso vai também para o <b>Thiago</b>.</p>
+            <div class="bts"><span class="bt pri">Confirmar visita</span><span class="bt">Assumir a conversa</span><span class="bt ia">Devolver à IA</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="lado">
+        <div class="ficha">
+          <h3>O que a IA gravou no lead</h3>
+          <div class="kv">
+            <span>Tipo</span><b class="ia">15 anos</b>
+            <span>Data</span><b class="ia">sáb 13/03/2027 · consta livre</b>
+            <span>Convidados</span><b class="ia">~120</b>
+            <span>Etapa</span><b>Agendado Visita (a confirmar)</b>
+            <span>Dono</span><b>zaq teste · IA</b>
+          </div>
+          <div class="chips"><span class="chip ok">1ª resposta: 20 s</span><span class="chip ia">3 respostas da IA</span><span class="chip warn">esperando confirmação</span></div>
+        </div>
+        <div class="fone"><div class="in">
+          <div class="not"><span class="ap">Zaq · agora</span><b>Visita aceita · Larissa M.</b><p>15 anos, 13/03/2027, ~120 pessoas. Quer sábado 03/10 às 10h. Toque para confirmar.</p></div>
+          <div class="not"><span class="ap">Zaq · 21:30</span><b>A IA pediu ajuda · Rafael S.</b><p>Pediu desconto. Conversa pausada esperando você.</p></div>
+        </div></div>
+      </div>
+    </div>
+  </div></div>
+</section>
+
+<section class="sec">
+  <header>
+    <span class="k">As regras da IA</span>
+    <h2>O que ela faz sozinha, quando chama gente e o que nunca faz</h2>
+  </header>
+  <div class="tres">
+    <div class="col3 a">
+      <h3>Faz sozinha</h3>
+      <ul>
+        <li>Responde o primeiro contato em segundos, <b>24 horas</b>.</li>
+        <li>Pergunta e grava <b>tipo de festa, data e convidados</b> no lead.</li>
+        <li>Diz o preço <b>só do catálogo</b> (40 itens), como faixa "a partir de".</li>
+        <li>Olha a agenda e diz <b>"consta livre"</b> ou "consta ocupada".</li>
+        <li>Oferece <b>dois horários</b> de visita, sempre de segunda a sábado, das 8h às 18h.</li>
+        <li>Junta as mensagens seguidas do cliente e responde uma vez só.</li>
+        <li>Espera o áudio ser transcrito e responde o que foi dito.</li>
+      </ul>
+    </div>
+    <div class="col3 c">
+      <h3>Para e chama a retaguarda</h3>
+      <ul>
+        <li>O cliente <b>aceita um horário</b> de visita.</li>
+        <li>O cliente pede <b>desconto</b> ou negocia valor.</li>
+        <li>A data <b>consta ocupada</b> ou pré-reservada.</li>
+        <li>O cliente pede <b>orçamento formal</b>, contrato ou sinal.</li>
+        <li>O cliente pede para falar com uma pessoa, ou reclama.</li>
+        <li>A pergunta não está na base, ou a IA não tem certeza.</li>
+        <li>Quatro trocas sem avançar.</li>
+      </ul>
+    </div>
+    <div class="col3 n">
+      <h3>Nunca faz</h3>
+      <ul>
+        <li>Confirmar data de festa ou visita.</li>
+        <li>Dar preço que não está no catálogo, ou somar pacotes que são alternativas.</li>
+        <li>Mandar proposta formal, contrato ou cobrança de sinal.</li>
+        <li>Prometer "vou passar pra equipe" sem que o aviso tenha saído.</li>
+        <li>Responder enquanto um humano está na conversa.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <header>
+    <span class="k">Tela 3 · Relatórios › Desafio</span>
+    <h2>zaq teste (IA) × equipe</h2>
+    <p>Mesmas medidas para todos, por lead recebido. Os números da equipe são reais (conta 34, últimos 30 dias); a coluna da IA começa vazia e enche com a campanha.</p>
+  </header>
+  <div class="kpis">
+    <div class="kpi ia"><span class="l">Leads da campanha</span><span class="v">—</span><span class="s">desde 29/09</span></div>
+    <div class="kpi ia"><span class="l">1ª resposta da IA</span><span class="v">—</span><span class="s">meta: menos de 1 min</span></div>
+    <div class="kpi ia"><span class="l">Visitas marcadas</span><span class="v">—</span><span class="s">meta do time: 8% dos leads</span></div>
+    <div class="kpi ia"><span class="l">Custo da IA</span><span class="v">—</span><span class="s">por lead e por contrato</span></div>
+  </div>
+  <div class="tabw">
+    <table>
+      <thead><tr><th>Últimos 30 dias</th><th class="ia">zaq teste · IA</th><th>Jacqueline</th><th>Pedro</th><th>Thiago</th><th>Meta</th></tr></thead>
+      <tbody>
+        <tr><td>Leads novos</td><td class="ia">—</td><td>112</td><td>93</td><td>97</td><td></td></tr>
+        <tr><td>1ª resposta (mediana)</td><td class="ia">—</td><td>40 min</td><td>69 min</td><td>82 min</td><td class="alvo">&lt; 1 min</td></tr>
+        <tr><td>Respondidos em até 5 min</td><td class="ia">—</td><td>15%</td><td>16%</td><td>8%</td><td class="alvo">95%</td></tr>
+        <tr><td>Qualificados (data e convidados)</td><td class="ia">—</td><td colspan="3" style="text-align:center;color:var(--faint)">medido a partir do início</td><td></td></tr>
+        <tr><td>Visitas agendadas</td><td class="ia">—</td><td>13</td><td>5</td><td>6</td><td class="alvo">8% dos leads</td></tr>
+        <tr><td>Leads novos com orçamento</td><td class="ia">—</td><td>8</td><td>5</td><td>2</td><td></td></tr>
+        <tr><td>Contratos assinados</td><td class="ia">—</td><td>5</td><td>3</td><td>3</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="tres">
+    <div class="col3">
+      <h3>Por que a IA chamou gente</h3>
+      <div class="esc">
+        <div class="er"><span>Visita aceita</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
+        <div class="er"><span>Pediu desconto</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
+        <div class="er"><span>Data ocupada</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
+        <div class="er"><span>Fora da base</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
+        <div class="er"><span>Pediu uma pessoa</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
+      </div>
+      <p style="margin:0;color:var(--dim);font-size:.8rem">Ao lado de cada motivo: quanto tempo a retaguarda levou para assumir.</p>
+    </div>
+    <div class="col3">
+      <h3>Onde a IA tende a ganhar</h3>
+      <p style="margin:0;color:var(--dim)">Fora do horário comercial, a equipe responde em <b style="color:var(--text)">285 minutos</b> (mediana) e só <b style="color:var(--text)">5%</b> em até 5 minutos. São <b style="color:var(--text)">32%</b> dos leads novos.</p>
+    </div>
+    <div class="col3">
+      <h3>Leitura com cuidado</h3>
+      <p style="margin:0;color:var(--dim)">O tráfego da campanha nova não é o mesmo do chip principal. A comparação serve de indicação; para uma comparação limpa, metade da campanha teria de ir para a equipe.</p>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <header>
+    <span class="k">O que construir, nesta ordem</span>
+    <h2>Seis peças antes de ligar, e o painel</h2>
+  </header>
+  <div class="passos">
+    <div class="ps"><b>Regra por número</b><p>Tabela nova com chip, dono, IA ligada, horário e retaguarda. Lida quando o lead nasce e quando a conversa vira lead. A conexão do chip e o cadastro de canais não são tocados.</p></div>
+    <div class="ps"><b>Chamar gente de verdade</b><p>A IA passa a poder dizer "preciso de humano" com o motivo: a conversa pausa e a retaguarda recebe WhatsApp e aviso no app.</p></div>
+    <div class="ps"><b>Uma resposta por rajada</b><p>A conversa fica travada enquanto a IA responde, e mensagens seguidas viram uma resposta só (a clínica já faz isso).</p></div>
+    <div class="ps"><b>Celular pausa a IA</b><p>Mensagem enviada pelo celular do CP Thiago pausa a IA naquela conversa.</p></div>
+    <div class="ps"><b>Agenda de verdade</b><p>A IA consulta a data da festa e propõe horários de visita reais; a confirmação é sempre humana.</p></div>
+    <div class="ps"><b>Áudio e memória</b><p>Responder depois da transcrição do áudio (hoje 7% das mensagens de cliente são áudio), e dar à IA o resumo da conversa longa, não só as 12 últimas mensagens.</p></div>
+    <div class="ps"><b>Painel do desafio e custo</b><p>A tela 3, com o custo da IA gravado por conversa.</p></div>
+  </div>
+  <p class="nota"><i>!</i><span>Antes de ligar, sem código: a base de conhecimento da Prime <b>se contradiz</b>. As instruções dizem "nunca feche valor exato", mas a IA está autorizada a mandar orçamento formal; e uma resposta pronta oferece horário de visita que a IA não pode marcar. A pergunta 4 abaixo resolve isso.</span></p>
+</section>
+
+<section class="sec">
+  <header>
+    <span class="k">Para aprovar</span>
+    <h2>As decisões que são suas</h2>
+    <p>Cada uma já vem com a minha recomendação. Se aprovar "assim", sigo todas elas.</p>
+  </header>
+  <div class="dec">
+    <div class="q2"><span class="qn">01</span><h3>O anúncio novo aponta só para o CP Thiago?</h3><p>A regra depende disso. Se o número estiver também na bio, no cartão ou em outro anúncio, esses contatos também vão para a IA.</p><span class="rec">sim, só este anúncio usa o número, e ninguém responde pelo celular dele (se responder, a IA pausa).</span></div>
+    <div class="q2"><span class="qn">02</span><h3>A IA atende quem?</h3><p>Só contatos novos, ou também quem voltar a escrever nas 35 conversas antigas do chip.</p><span class="rec">só contatos novos a partir da data de início.</span></div>
+    <div class="q2"><span class="qn">03</span><h3>Horário da IA</h3><p>32% dos leads chegam fora do horário comercial, quando a equipe leva quase 5 horas para responder.</p><span class="rec">IA responde 24 horas; visita só é oferecida de segunda a sábado, das 8h às 18h.</span></div>
+    <div class="q2"><span class="qn">04</span><h3>Preço: faixa ou proposta formal?</h3><p>As instruções da Prime dizem que o valor fechado sai da visita.</p><span class="rec">faixa "a partir de" do catálogo e convite para a visita; a IA não manda proposta formal.</span></div>
+    <div class="q2"><span class="qn">05</span><h3>Quem é a retaguarda?</h3><p>Quem recebe o chamado da IA e confirma a visita.</p><span class="rec">Thiago de segunda a sábado, das 8h às 18h; Manoel fora disso. Preciso do WhatsApp de cada um para o aviso.</span></div>
+    <div class="q2"><span class="qn">06</span><h3>Como a IA se apresenta?</h3><p>Com nome próprio ou como assistente.</p><span class="rec ab">assistente virtual da Prime Eventos. Se quiser um nome, qual?</span></div>
+    <div class="q2"><span class="qn">07</span><h3>De quem é o lead depois que a visita é confirmada?</h3><p>Isso decide a comissão e quem fecha o contrato.</p><span class="rec">fica com o zaq teste até a visita; quem confirma a visita vira o dono do lead a partir dali.</span></div>
+    <div class="q2"><span class="qn">08</span><h3>Quanto tempo dura o desafio, e o que é sucesso?</h3><p>Critério para ligar de vez ou desligar.</p><span class="rec">30 dias ou 100 leads, o que vier primeiro; sucesso é 1ª resposta abaixo de 1 minuto, visita marcada em pelo menos 8% dos leads e nenhuma promessa sem lastro.</span></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header>
+    <span class="k">Regra 6 e o aviso</span>
+    <h2>Serve para outros nichos, com o vocabulário de cada um</h2>
+    <p>A regra por número é da empresa, não da festa: numa conta de serviço, a IA fala de <b>reunião</b>, não de visita; e em conta de produto a regra só escolhe quem recebe, sem IA vendendo. O aviso de Novidade vai para o <b>dono</b> das contas que ativarem uma regra de número.</p>
+  </header>
+</section>
+
+</div>

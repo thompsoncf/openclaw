@@ -5496,8 +5496,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 
 <div class="card" id="oc-esc-card"{% if servico_avulso %} style="display:none"{% endif %}>
   <h2 style="margin-top:0">Escopo automático · IA</h2>
-  <p class="mut" style="margin-top:0">Cole o site ou a descrição do cliente. A IA escolhe os módulos e escreve o escopo da proposta.</p>
-  <textarea id="oc-desc" class="oc-inp" rows="3" placeholder="Ex.: clínica com 3 unidades, muito WhatsApp, quer reduzir faltas e organizar leads..."></textarea>
+  <p class="mut" style="margin-top:0">Cole o site ou a descrição do {{ voc.cliente }}. A IA escolhe os módulos e escreve o escopo da proposta.</p>
+  <textarea id="oc-desc" class="oc-inp" rows="3" placeholder="Ex.: clínica com 3 unidades, muito WhatsApp, quer reduzir faltas e organizar {{ voc.leads }}..."></textarea>
   <div style="display:flex; align-items:center; gap:.8rem; margin-top:.6rem">
     <button id="oc-sugerir" class="oc-btn-g" style="border:none; border-radius:8px; padding:.55rem 1rem; cursor:pointer; font-weight:600; width:auto; margin:0">Sugerir escopo</button>
     <span id="oc-ia-msg" class="mut" style="font-size:.85rem"></span>
@@ -5537,21 +5537,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     </div>
   </div>
   <div class="oc-field" style="margin-bottom:.3rem"><label>Local</label><input id="ev-local" class="oc-inp" value="{{ local_padrao }}" data-padrao="{{ local_padrao }}" placeholder="Espaço 01 — Rua Deoclécio Brito, 3399"></div>
-  <p class="mut" style="font-size:.78rem;margin:0">Festa que encerra às <b>24:00</b> termina 00:00 do dia seguinte — quando o cliente aprovar, o compromisso entra na agenda já com essa virada.</p>
+  <p class="mut" style="font-size:.78rem;margin:0">Festa que encerra às <b>24:00</b> termina 00:00 do dia seguinte — quando o {{ voc.cliente }} aprovar, o compromisso entra na agenda já com essa virada.</p>
 </div>
 {% endif %}
 
 <div class="card" id="oc-cli-card">
-  <h2 style="margin-top:0">Cliente</h2>
+  <h2 style="margin-top:0">{{ voc.cliente|capitalize }}</h2>
 
   {# A BUSCA NA BASE vale pros dois nichos (pedido do dono em 23/09/2026: "o
      mesmo modelo que já tem na Prime"). O que muda de nicho pra nicho são os
      CAMPOS do formulário abaixo, não o caminho até ele. #}
   <div style="position:relative">
-    <input id="cli-busca" class="oc-inp" placeholder="🔍 Buscar cliente já cadastrado na Base… (nome, empresa)" autocomplete="off">
+    <input id="cli-busca" class="oc-inp" placeholder="🔍 Buscar {{ voc.cliente }} já cadastrado na Base… (nome, empresa)" autocomplete="off">
     <div id="cli-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
   </div>
-  <a id="cli-novo-link" href="#" style="font-size:.78rem; color:var(--verde-claro); text-decoration:none; display:inline-block; margin-top:.5rem">✏️ ou cadastrar um cliente novo, sem vínculo com lead</a>
+  <a id="cli-novo-link" href="#" style="font-size:.78rem; color:var(--verde-claro); text-decoration:none; display:inline-block; margin-top:.5rem">✏️ ou cadastrar um {{ voc.cliente }} novo, sem vínculo com {{ voc.lead }}</a>
 
   <div id="cli-chip" style="display:none; align-items:center; gap:.8rem; padding:.7rem .9rem; border:1px solid var(--borda); border-radius:12px; background:var(--card-2); margin-top:.8rem">
     <div id="cli-chip-av" style="width:38px; height:38px; border-radius:10px; background:#10241d; border:1px solid #1c3a30; color:var(--verde-claro); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1rem; flex-shrink:0">?</div>
@@ -5602,11 +5602,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
        salva a PROPOSTA (é nela que o cliente mora), mesmo sem serviço ainda: ela
        fica no funil como rascunho, e o cliente não se perde mais. #}
     <div style="display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; margin-top:.9rem">
-      <button type="button" id="cli-salvar" class="oc-btn-g" style="border:0; border-radius:8px; padding:.55rem 1.1rem; font-weight:600; cursor:pointer">Salvar cliente</button>
+      <button type="button" id="cli-salvar" class="oc-btn-g" style="border:0; border-radius:8px; padding:.55rem 1.1rem; font-weight:600; cursor:pointer">Salvar {{ voc.cliente }}</button>
       <span id="cli-salvar-msg" class="mut" style="font-size:.8rem"></span>
     </div>
   </div>
-  <div id="cli-salvo" class="mut" style="display:none; font-size:.8rem; margin-top:.5rem; color:var(--verde-claro)">✓ Cliente salvo — a proposta está no funil como rascunho. Agora escolha os serviços.</div>
+  <div id="cli-salvo" class="mut" style="display:none; font-size:.8rem; margin-top:.5rem; color:var(--verde-claro)">✓ {{ voc.cliente|capitalize }} salvo — a proposta está no funil como rascunho. Agora escolha os serviços.</div>
 </div>
 
 <div class="oc-grid">
@@ -5682,7 +5682,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
          ninguém descobre por quê. No catálogo da Prime são 27 de 38. #}
       <div class="oc-avi amb" id="oc-sem-cat" style="display:none">
         <div class="txt"><b id="oc-sem-cat-t"></b>
-          <span style="opacity:.85">A folha do cliente sai sem os subtotais por categoria.</span></div>
+          <span style="opacity:.85">A folha do {{ voc.cliente }} sai sem os subtotais por categoria.</span></div>
         <button type="button" id="oc-sem-cat-b">Ver o catálogo</button>
       </div>
       {% endif %}
@@ -5801,7 +5801,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
          que esta tela dizia numa proposta onde ninguém tinha descontado nada. #}
       <div class="oc-inclbox" id="oc-inclusos" style="display:none">
         <div class="lin"><span>Incluso no pacote · <b id="oc-incl-n" style="font-weight:600">0</b></span><b id="oc-incl-v">R$ 0</b></div>
-        <p>Não entra no total. Na folha do cliente cada um sai marcado <b style="color:var(--verde-claro)">Incluso</b>, com o valor de tabela ao lado.</p>
+        <p>Não entra no total. Na folha do {{ voc.cliente }} cada um sai marcado <b style="color:var(--verde-claro)">Incluso</b>, com o valor de tabela ao lado.</p>
       </div>
       {% endif %}
       <div class="oc-ll oc-dline" id="oc-r-descitens-l" style="display:none"><span class="mut">{{ 'Descontos por item' if servico_avulso else 'Desconto nos serviços' }}</span><b id="oc-r-descitens">R$ 0,00</b></div>
@@ -5886,7 +5886,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     </div>
     <div class="env-msg" id="env-msg"></div>
     <div class="env-campo"><label for="env-para">Para</label>
-      <input id="env-para" type="email" inputmode="email" autocomplete="off" placeholder="email@do-cliente.com"></div>
+      <input id="env-para" type="email" inputmode="email" autocomplete="off" placeholder="email@do-{{ voc.cliente }}.com"></div>
     <div class="env-campo"><label for="env-assunto">Assunto</label>
       <input id="env-assunto" type="text"></div>
     <div class="env-campo"><label for="env-texto">Mensagem</label>

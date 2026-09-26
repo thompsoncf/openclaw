@@ -817,7 +817,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   </a>
   <button type="button" class="forn-card" onclick="fornAbrir('cestas')">
     <span class="fc-tile">🧺</span>
-    <span class="fc-txt"><span class="fc-tit">Cestas</span><span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span></span>
+    <span class="fc-txt"><span class="fc-tit">Cestas</span><span class="fc-leg">Os tamanhos de cesta que seus {{ voc.clientes }} podem assinar.</span></span>
   </button>
   <div class="forn-grupo">Gestão</div>
   <a href="/painel/fornecedor/financeiro" class="forn-card" style="text-decoration:none">
@@ -835,7 +835,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
     <h3 style="margin:0">🧺 Tamanhos de cesta</h3>
   </div>
-  <p class="mut">Defina os tamanhos que seus clientes podem assinar. O preço é FIXO — o que vai dentro varia conforme a estação e o estoque.</p>
+  <p class="mut">Defina os tamanhos que seus {{ voc.clientes }} podem assinar. O preço é FIXO — o que vai dentro varia conforme a estação e o estoque.</p>
 
   <!-- lista dos tamanhos -->
   {% if tamanhos %}
@@ -2760,7 +2760,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
     <label>Festas por dia <span class="mut" style="font-weight:400;font-size:.78rem">— quantas você faz no mesmo dia</span></label>
     <input id="festas_dia" name="festas_por_dia" value="{{ dados.festas_por_dia or '' }}"
            inputmode="numeric" placeholder="deixe em branco pra não usar lista de espera">
-    <div class="mut" style="font-size:.72rem;margin-top:.25rem">Com esse número preenchido, o cliente
+    <div class="mut" style="font-size:.72rem;margin-top:.25rem">Com esse número preenchido, o {{ voc.cliente }}
       que pedir um dia já vendido entra na <b>lista de espera</b>, e o vendedor é avisado quando a data abrir.</div>
     {% endif %}
     <div style="display:grid;grid-template-columns:1fr 2fr;gap:.7rem">
@@ -3097,11 +3097,11 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
     </div>
     <div id="pdv-itens" style="margin-bottom:.6rem"></div>
     <div style="position:relative;margin-bottom:.5rem">
-      <input id="pdv-cli-busca" placeholder="Cliente — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
+      <input id="pdv-cli-busca" placeholder="{{ voc.cliente|capitalize }} — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
       <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:var(--card-2);border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
       <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:var(--verde-claro)"></div>
       <div id="pdv-cli-novo" style="display:none;margin-top:.4rem;gap:.4rem;grid-template-columns:1fr 1fr">
-        <input id="pdv-novo-nome" placeholder="Nome do novo cliente" class="prod-inp" style="margin:0">
+        <input id="pdv-novo-nome" placeholder="Nome do novo {{ voc.cliente }}" class="prod-inp" style="margin:0">
         <input id="pdv-novo-cpf" placeholder="CPF/CNPJ (opcional)" class="prod-inp" style="margin:0">
       </div>
     </div>
@@ -3294,8 +3294,8 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
 </style>
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
-    <h2 style="margin:0">👥 Clientes/Fornecedores <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
-    <button type="button" onclick="var e=document.getElementById('cli-novo');e.style.display=e.style.display==='block'?'none':'block'" style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
+    <h2 style="margin:0">👥 {{ voc.clientes|capitalize }}/Fornecedores <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
+    <button type="button" onclick="var e=document.getElementById('cli-novo');e.style.display=e.style.display==='block'?'none':'block'" style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo {{ voc.cliente }}</button>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
@@ -3322,12 +3322,12 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
      `_dono = papel=='dono'`) sumiria pra todo mundo nesta tela. #}
   <div style="display:flex;gap:.4rem;margin:0 0 .9rem">
     <a href="/painel/clientes{{ '?busca='+busca if busca else '' }}" style="text-decoration:none;background:{{ 'var(--verde)' if not papel_filtro else 'var(--card-2)' }};color:{{ 'var(--sobre-verde)' if not papel_filtro else 'var(--txt-mut)' }};border:1px solid {{ 'var(--verde)' if not papel_filtro else 'var(--borda)' }};border-radius:20px;padding:.35rem .9rem;font-size:.78rem;font-weight:600">Todos</a>
-    <a href="/painel/clientes?papel=cliente{{ '&busca='+busca if busca else '' }}" style="text-decoration:none;background:{{ 'var(--verde)' if papel_filtro=='cliente' else 'var(--card-2)' }};color:{{ 'var(--sobre-verde)' if papel_filtro=='cliente' else 'var(--txt-mut)' }};border:1px solid {{ 'var(--verde)' if papel_filtro=='cliente' else 'var(--borda)' }};border-radius:20px;padding:.35rem .9rem;font-size:.78rem;font-weight:600">Clientes</a>
+    <a href="/painel/clientes?papel=cliente{{ '&busca='+busca if busca else '' }}" style="text-decoration:none;background:{{ 'var(--verde)' if papel_filtro=='cliente' else 'var(--card-2)' }};color:{{ 'var(--sobre-verde)' if papel_filtro=='cliente' else 'var(--txt-mut)' }};border:1px solid {{ 'var(--verde)' if papel_filtro=='cliente' else 'var(--borda)' }};border-radius:20px;padding:.35rem .9rem;font-size:.78rem;font-weight:600">{{ voc.clientes|capitalize }}</a>
     <a href="/painel/clientes?papel=fornecedor{{ '&busca='+busca if busca else '' }}" style="text-decoration:none;background:{{ 'var(--verde)' if papel_filtro=='fornecedor' else 'var(--card-2)' }};color:{{ 'var(--sobre-verde)' if papel_filtro=='fornecedor' else 'var(--txt-mut)' }};border:1px solid {{ 'var(--verde)' if papel_filtro=='fornecedor' else 'var(--borda)' }};border-radius:20px;padding:.35rem .9rem;font-size:.78rem;font-weight:600">Fornecedores</a>
   </div>
 
   <div id="cli-novo" style="display:none;background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:1rem">
-    <h4 style="margin-top:0">Novo cliente</h4>
+    <h4 style="margin-top:0">Novo {{ voc.cliente }}</h4>
     <form method="post" action="/painel/clientes/novo">
       <div class="mini-grid">
         <div class="col-2">
@@ -3345,7 +3345,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
         <div class="col-2" style="display:flex;gap:.7rem;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;margin:.15rem 0 .2rem">
           <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
             <input type="checkbox" name="eh_cliente" value="1" checked style="width:auto;accent-color:var(--verde)">
-            <span><span style="font-size:.85rem;font-weight:600;color:var(--txt)">Cliente</span>
+            <span><span style="font-size:.85rem;font-weight:600;color:var(--txt)">{{ voc.cliente|capitalize }}</span>
             <span style="display:block;font-size:.7rem;color:var(--txt-mut);margin-top:1px">compra de você, ou pode vir a comprar</span></span>
           </label>
           <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
@@ -3376,7 +3376,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
       <div class="cli-item">
         <div class="cli-head" role="button" tabindex="0" aria-expanded="false" onclick="toggleCli(this)">
           <div style="flex:1;min-width:0">
-            <div style="color:var(--txt);font-weight:600">{{ c.nome }}<span class="tbadge {{ 'pj' if c.tipo=='pj' else 'pf' }}">{{ 'PJ' if c.tipo=='pj' else 'PF' }}</span>{% if c.eh_cliente %}<span class="tbadge cli">CLIENTE</span>{% endif %}{% if c.eh_fornecedor %}<span class="tbadge forn">FORNECEDOR</span>{% endif %}</div>
+            <div style="color:var(--txt);font-weight:600">{{ c.nome }}<span class="tbadge {{ 'pj' if c.tipo=='pj' else 'pf' }}">{{ 'PJ' if c.tipo=='pj' else 'PF' }}</span>{% if c.eh_cliente %}<span class="tbadge cli">{{ voc.cliente|upper }}</span>{% endif %}{% if c.eh_fornecedor %}<span class="tbadge forn">FORNECEDOR</span>{% endif %}</div>
             <div class="mut" style="font-size:.8rem">{% if c.telefone %}📱 {{ c.telefone }}{% endif %}{% if c.documento_fmt %} · {{ 'CNPJ' if c.tipo=='pj' else 'CPF' }} {{ c.documento_fmt }}{% endif %}</div>
           </div>
           {% if c.telefone %}
@@ -3401,7 +3401,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
                 <div class="col-2" style="display:flex;gap:.7rem;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;margin:.15rem 0 .2rem">
                   <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
                     <input type="checkbox" name="eh_cliente" value="1" {% if c.eh_cliente %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
-                    <span style="font-size:.85rem;font-weight:600;color:var(--txt)">Cliente</span>
+                    <span style="font-size:.85rem;font-weight:600;color:var(--txt)">{{ voc.cliente|capitalize }}</span>
                   </label>
                   <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
                     <input type="checkbox" name="eh_fornecedor" value="1" {% if c.eh_fornecedor %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
@@ -3421,7 +3421,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
               <div class="pfoot">
                 <button class="btn-primary" type="submit">Salvar alterações</button>
                 <span onclick="event.stopPropagation()">
-                  <button type="button" class="btn-danger" onclick="if(confirm('Arquivar este cliente?')){this.closest('.pane').querySelector('.arq').submit()}">Arquivar</button>
+                  <button type="button" class="btn-danger" onclick="if(confirm('Arquivar este {{ voc.cliente }}?')){this.closest('.pane').querySelector('.arq').submit()}">Arquivar</button>
                 </span>
               </div>
             </form>
@@ -3432,7 +3432,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
       </div>
       {% endfor %}
     {% else %}
-    <p class="mut">{% if busca %}Nenhum cliente pra "{{ busca }}".{% else %}Nenhum cliente ainda. As vendas de balcão vão populando aqui, ou cadastre no botão acima.{% endif %}</p>
+    <p class="mut">{% if busca %}Nenhum {{ voc.cliente }} pra "{{ busca }}".{% else %}Nenhum {{ voc.cliente }} ainda. As vendas de balcão vão populando aqui, ou cadastre no botão acima.{% endif %}</p>
     {% endif %}
   </div>
 </div>
@@ -3535,7 +3535,7 @@ _CLIENTES_DUP = """{% extends "base" %}{% block conteudo %}
   .dup-lin [hidden]{display:none!important}
 </style>
 <div class="card larga">
-  <a href="/painel/clientes" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← Clientes/Fornecedores</a>
+  <a href="/painel/clientes" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← {{ voc.clientes|capitalize }}/Fornecedores</a>
   <h2 style="margin:.4rem 0">🔗 Cadastros repetidos</h2>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
@@ -3559,7 +3559,7 @@ _CLIENTES_DUP = """{% extends "base" %}{% block conteudo %}
         <div class="dup-dados">
           <div class="dup-nome">{{ c.nome }}
             {% if c.id == g.sugerido %}<span class="dup-fica">sugerido</span>{% endif %}
-            {% if c.eh_cliente %}<span class="tbadge cli">CLIENTE</span>{% endif %}
+            {% if c.eh_cliente %}<span class="tbadge cli">{{ voc.cliente|upper }}</span>{% endif %}
             {% if c.eh_fornecedor %}<span class="tbadge forn">FORNECEDOR</span>{% endif %}
           </div>
           <div class="dup-campo">
@@ -3734,7 +3734,7 @@ _CLIENTES_DUP_REVISAR = """{% extends "base" %}{% block conteudo %}
 
 _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
-  <a href="/painel/clientes" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← Clientes</a>
+  <a href="/painel/clientes" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← {{ voc.clientes|capitalize }}</a>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
   <h2 style="margin:.4rem 0">{{ cliente.nome }}</h2>
@@ -3791,8 +3791,8 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
   {% else %}
   <p class="mut">Sem compras registradas ainda.</p>
   {% endif %}
-  <form method="post" action="/painel/clientes/{{ cliente.id }}/arquivar" style="margin-top:1.2rem" onsubmit="return confirm('Arquivar este cliente?')">
-    <button style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;padding:.4rem .8rem;border-radius:6px;cursor:pointer;font-size:.85rem;width:auto">Arquivar cliente</button>
+  <form method="post" action="/painel/clientes/{{ cliente.id }}/arquivar" style="margin-top:1.2rem" onsubmit="return confirm('Arquivar este {{ voc.cliente }}?')">
+    <button style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;padding:.4rem .8rem;border-radius:6px;cursor:pointer;font-size:.85rem;width:auto">Arquivar {{ voc.cliente }}</button>
   </form>
 </div>
 <script>
@@ -3838,11 +3838,11 @@ _PDV = """{% extends "base" %}{% block conteudo %}
   <div id="pdv-itens" style="margin-bottom:.6rem"></div>
 
   <div style="position:relative;margin-bottom:.5rem">
-    <input id="pdv-cli-busca" placeholder="Cliente — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
+    <input id="pdv-cli-busca" placeholder="{{ voc.cliente|capitalize }} — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
     <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:var(--card-2);border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
     <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:var(--verde-claro)"></div>
     <div id="pdv-cli-novo" style="display:none;margin-top:.4rem;gap:.4rem;grid-template-columns:1fr 1fr">
-      <input id="pdv-novo-nome" placeholder="Nome do novo cliente" class="prod-inp" style="margin:0">
+      <input id="pdv-novo-nome" placeholder="Nome do novo {{ voc.cliente }}" class="prod-inp" style="margin:0">
       <input id="pdv-novo-cpf" placeholder="CPF (opcional)" class="prod-inp" style="margin:0">
     </div>
   </div>
@@ -3862,7 +3862,7 @@ _PDV = """{% extends "base" %}{% block conteudo %}
   <div id="pdv-fiado-box" style="display:none;margin-bottom:.5rem">
     <div style="font-size:.72rem;color:#e0b878">Vencimento do fiado</div>
     <input id="pdv-venc" type="date" class="prod-inp" style="margin:.15rem 0 0;max-width:180px">
-    <div style="font-size:.7rem;color:#888;margin-top:.2rem">Fiado exige cliente identificado.</div>
+    <div style="font-size:.7rem;color:#888;margin-top:.2rem">Fiado exige {{ voc.cliente }} identificado.</div>
   </div>
   <div id="pdv-troco" style="display:flex;justify-content:space-between;font-size:.82rem;color:#888;margin-bottom:.6rem"><span>Troco</span><span id="pdv-troco-v" style="color:var(--txt)">R$ 0,00</span></div>
 
@@ -3938,7 +3938,7 @@ _VENDA_DETALHE = """{% extends "base" %}{% block conteudo %}
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:.5rem 0 1rem">
     <div><div style="font-size:1.2rem;font-weight:600">Venda #{{ venda.id }}</div><div class="mut" style="font-size:.8rem">{{ venda.hora.strftime('%d/%m %H:%M') if venda.hora else '' }} · {{ venda.pagamento }}</div></div>
-    {% if venda.cliente %}<div style="text-align:right"><div class="mut" style="font-size:.72rem">Cliente</div><div>{{ venda.cliente }}</div></div>{% endif %}
+    {% if venda.cliente %}<div style="text-align:right"><div class="mut" style="font-size:.72rem">{{ voc.cliente|capitalize }}</div><div>{{ venda.cliente }}</div></div>{% endif %}
   </div>
   <div class="mut" style="font-size:.72rem;margin-bottom:.3rem">{{ itens|length }} item(ns)</div>
   {% for it in itens %}
@@ -4066,7 +4066,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <a href="#titulos" class="on">Contas <small>{{ titulos|length }}</small></a>
   {% if planej %}<a href="#planejamento">Caixa</a>{% endif %}
   <a href="#dre">Resultado</a>
-  {% if carteira and carteira.n_titulos %}<a href="#carteira">Clientes</a>{% endif %}
+  {% if carteira and carteira.n_titulos %}<a href="#carteira">{{ voc.clientes|capitalize }}</a>{% endif %}
   <a href="#folha">Equipe</a>
   <a href="#config">Configurações</a>
 </nav>
@@ -4153,7 +4153,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     <div class="rcb-acoes">
       <a href="{{ recibo_flash.link }}" target="_blank" rel="noopener">abrir / imprimir</a>
       <button type="button" data-link="{{ recibo_flash.link }}" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.dataset.link).then(()=>{this.textContent='link copiado ✓'})">copiar link</button>
-      {% if recibo_flash.pode_mandar %}<form method="post" action="/painel/empresa/titulo/{{ recibo_flash.titulo_id }}/recibo/mandar" data-confirmar="Mandar o recibo nº {{ recibo_flash.rotulo }} pro WhatsApp do cliente?"><button class="pr">mandar pro cliente{% if recibo_flash.enviado_em %} de novo{% endif %}</button></form>
+      {% if recibo_flash.pode_mandar %}<form method="post" action="/painel/empresa/titulo/{{ recibo_flash.titulo_id }}/recibo/mandar" data-confirmar="Mandar o recibo nº {{ recibo_flash.rotulo }} pro WhatsApp do cliente?"><button class="pr">mandar pro {{ voc.cliente }}{% if recibo_flash.enviado_em %} de novo{% endif %}</button></form>
       {% else %}<span class="mut" style="font-size:.72rem">sem conversa no Zaq: copie o link e mande por onde preferir</span>{% endif %}
     </div>
   </div>{% endif %}
@@ -4720,7 +4720,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
           {% if _alv %}<label><input type="radio" name="destino" value="abater"><span>fica de crédito e abate da parcela:</span></label>
           <select name="alvo_id" aria-label="parcela que recebe o crédito" onchange="var r=this.form.querySelector('input[value=abater]'); if(r) r.checked=true">{% for a in _alv %}<option value="{{ a.id }}">{{ a.vencimento.strftime('%d/%m') if a.vencimento else '' }} · {{ a.valor_centavos|brl }} · {{ a.descricao|e }}</option>{% endfor %}</select>
           <span class="mut tit-dif-nota" style="margin-left:1.4rem">se passar do valor dela, o resto abate das seguintes</span>
-          {% else %}<span class="mut tit-dif-nota">este cliente não tem outra parcela em aberto pra abater o crédito</span>{% endif %}
+          {% else %}<span class="mut tit-dif-nota">este {{ voc.cliente }} não tem outra parcela em aberto pra abater o crédito</span>{% endif %}
           <label><input type="radio" name="destino" value="juros"><span>foi multa e juros do atraso</span></label>
         </div>
       </div>
@@ -5115,7 +5115,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
 {% if carteira and carteira.n_titulos %}
 <div class="card larga" id="carteira">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
-    <strong>👥 Carteira de clientes</strong>
+    <strong>👥 Carteira de {{ voc.clientes }}</strong>
     <span class="mut" style="font-size:.72rem">{{ (rotulo_receber or 'A receber') }} em aberto: <b style="color:var(--verde-claro)">{{ carteira.total_centavos|brl }}</b>{% if carteira.atrasado_centavos %} · <b style="color:#f0c05a">{{ carteira.atrasado_centavos|brl }} atrasado</b>{% endif %}</span>
   </div>
   <style>
@@ -5133,10 +5133,10 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       <div class="cart-val" style="color:{{ '#f0c05a' if c.atrasado else 'var(--verde-claro)' }}">{{ c.total_centavos|brl }}</div>
     </div>{% endmacro %}
     {% for c in carteira.clientes[:5] %}{{ cart_lin(c) }}{% endfor %}
-    {% if carteira.clientes|length > 5 %}<details class="cart-mais"><summary>ver os {{ carteira.clientes|length }} clientes</summary>
+    {% if carteira.clientes|length > 5 %}<details class="cart-mais"><summary>ver os {{ carteira.clientes|length }} {{ voc.clientes }}</summary>
     {% for c in carteira.clientes[5:] %}{{ cart_lin(c) }}{% endfor %}</details>{% endif %}
   </div>
-  <div class="mut" style="font-size:.7rem;margin-top:.6rem">Vem dos títulos <b>a receber</b> ligados a cada cliente. Cobre pelo botão na ficha do cliente.</div>
+  <div class="mut" style="font-size:.7rem;margin-top:.6rem">Vem dos títulos <b>a receber</b> ligados a cada {{ voc.cliente }}. Cobre pelo botão na ficha do {{ voc.cliente }}.</div>
 </div>
 {% endif %}
 
@@ -5968,7 +5968,7 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
       <option value="mes"            {% if filtro_periodo=='mes' %}selected{% endif %}>Próximos 30 dias</option>
       <option value="passadas"       {% if filtro_periodo=='passadas' %}selected{% endif %}>Já entregues</option>
     </select>
-    <input name="busca" value="{{ filtro_busca or '' }}" placeholder="Buscar cliente..." class="ped-busca">
+    <input name="busca" value="{{ filtro_busca or '' }}" placeholder="Buscar {{ voc.cliente }}..." class="ped-busca">
     {% if filtro_status or filtro_periodo or filtro_busca %}
     <a href="/painel/fornecedor/pedidos" class="ped-limpa" title="Limpar filtros">×</a>
     {% endif %}
@@ -6012,7 +6012,7 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
     {% else %}
       <p>Ainda não há pedidos.</p>
       <p class="mut" style="margin-top:.5rem;font-size:.9rem">
-        Os pedidos aparecem aqui quando a janela semanal monta as cestas dos seus clientes.
+        Os pedidos aparecem aqui quando a janela semanal monta as cestas dos seus {{ voc.clientes }}.
       </p>
     {% endif %}
   </div>
@@ -6078,7 +6078,7 @@ _PEDIDO_DETALHE_FORN = """{% extends "base" %}{% block conteudo %}
 
   <div class="ped-det">
     <div class="ped-det-bloco">
-      <div class="ped-det-rot">Cliente</div>
+      <div class="ped-det-rot">{{ voc.cliente|capitalize }}</div>
       <div class="ped-det-val">{{ p.cliente_nome }}</div>
       {% if p.endereco %}<div class="mut" style="margin-top:.3rem;font-size:.9rem">{{ p.endereco }}</div>{% endif %}
       {% if p.cep %}<div class="mut" style="font-size:.85rem">CEP {{ p.cep }}</div>{% endif %}
@@ -6185,7 +6185,7 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
 
   {% if dados.qtd_cestas_em_ajuste %}
   <div class="sep-alerta">
-    ⚠️ <strong>{{ dados.qtd_cestas_em_ajuste }}</strong> cesta{% if dados.qtd_cestas_em_ajuste != 1 %}s{% endif %} ainda em ajuste pelos clientes — a lista pode mudar.
+    ⚠️ <strong>{{ dados.qtd_cestas_em_ajuste }}</strong> cesta{% if dados.qtd_cestas_em_ajuste != 1 %}s{% endif %} ainda em ajuste pelos {{ voc.clientes }} — a lista pode mudar.
     <a href="/painel/fornecedor/pedidos?status=em_aberto" class="sep-alerta-link">ver →</a>
   </div>
   {% endif %}
@@ -6238,7 +6238,7 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
     {% if dados.qtd_cestas_em_ajuste %}
       <p>Nenhuma cesta confirmada nesse período ainda.</p>
       <p class="mut" style="margin-top:.5rem;font-size:.9rem">
-        Há {{ dados.qtd_cestas_em_ajuste }} em ajuste pelos clientes — assim que confirmarem, aparecem aqui.
+        Há {{ dados.qtd_cestas_em_ajuste }} em ajuste pelos {{ voc.clientes }} — assim que confirmarem, aparecem aqui.
       </p>
     {% else %}
       <p>Sem cestas confirmadas pra esse período.</p>
@@ -6382,7 +6382,7 @@ _EMBALAGEM_FORN = """{% extends "base" %}{% block conteudo %}
   <div class="ped-vazio">
     <div style="font-size:2.5rem;opacity:.4;margin-bottom:.5rem">📦</div>
     <p>Sem cestas confirmadas pra embalar neste período.</p>
-    <p class="mut" style="margin-top:.5rem;font-size:.9rem">Cestas em sugerida/em_ajuste não aparecem aqui (cliente ainda pode mexer).</p>
+    <p class="mut" style="margin-top:.5rem;font-size:.9rem">Cestas em sugerida/em_ajuste não aparecem aqui ({{ voc.cliente }} ainda pode mexer).</p>
   </div>
   {% endif %}
 </div>
@@ -7074,9 +7074,9 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
       <div style="flex:1;min-width:96px;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:var(--txt)">{{ sep.total_itens_distintos }}</div><div class="mut" style="font-size:.7rem">produtos</div></div>
       <div style="flex:1;min-width:96px;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:var(--txt)">R$ {{ "%.0f"|format(sep.valor_total_reais) }}</div><div class="mut" style="font-size:.7rem">em cestas</div></div>
     </div>
-    {% if sep.qtd_cestas_em_ajuste %}<div style="background:#2a2417;border:1px solid #6b5a2a;border-radius:10px;padding:.6rem .9rem;font-size:.82rem;color:#e0c07a;margin-bottom:.6rem">⚠️ {{ sep.qtd_cestas_em_ajuste }} cesta(s) ainda em ajuste pelos clientes — a lista pode mudar.</div>{% endif %}
+    {% if sep.qtd_cestas_em_ajuste %}<div style="background:#2a2417;border:1px solid #6b5a2a;border-radius:10px;padding:.6rem .9rem;font-size:.82rem;color:#e0c07a;margin-bottom:.6rem">⚠️ {{ sep.qtd_cestas_em_ajuste }} cesta(s) ainda em ajuste pelos {{ voc.clientes }} — a lista pode mudar.</div>{% endif %}
     <div style="display:flex;gap:.5rem;margin:.2rem 0 .8rem">
-      <button type="button" class="sep-tg" data-v="cliente" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid var(--verde);background:var(--verde);color:var(--sobre-verde)">Por cliente (separar)</button>
+      <button type="button" class="sep-tg" data-v="cliente" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid var(--verde);background:var(--verde);color:var(--sobre-verde)">Por {{ voc.cliente }} (separar)</button>
       <button type="button" class="sep-tg" data-v="total" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid var(--borda);background:transparent;color:var(--txt-mut)">Total a comprar</button>
     </div>
     <div id="sep-cliente">
@@ -7154,7 +7154,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
       <details style="margin-top:.5rem">
         <summary style="list-style:none;cursor:pointer;background:var(--verde);color:var(--sobre-verde);border-radius:8px;padding:.42rem .9rem;font-size:.8rem;font-weight:500;display:inline-block">Entregue — como recebeu?</summary>
         <div style="margin-top:.5rem;background:#101011;border:1px dashed #3a5c4e;border-radius:9px;padding:.7rem">
-          <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como o cliente pagou{% if p.tipo=='avulso' %} R$ {{ (p.total_centavos/100)|n2 }}{% endif %}?</div>
+          <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como o {{ voc.cliente }} pagou{% if p.tipo=='avulso' %} R$ {{ (p.total_centavos/100)|n2 }}{% endif %}?</div>
           <div style="display:flex;gap:.4rem;flex-wrap:wrap">
             {% for fv, fl in [('entrega_dinheiro','💵 Dinheiro'),('entrega_cartao','💳 Cartão'),('entrega_pix','📱 Pix'),('pagar_agora','🔗 Pagou pelo link')] %}
             <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/receber" style="margin:0"><input type="hidden" name="fase" value="rotas"><input type="hidden" name="forma" value="{{ fv }}"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:var(--card);border:1px solid var(--borda);color:var(--txt)">{{ fl }}</button></form>
@@ -7907,7 +7907,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       a escapagem continua valendo. -#}{% if row.cliente_link %}<a class="rel-cli"
       href="{{ row.cliente_link }}" title="Dizer de quem é este compromisso">{% endif
       %}<span{% if row.cliente_deduzido %} class="rel-deriv"{% endif %}>{{ row[col.chave] }}</span>{%
-      if row.cliente_do_lead %}<span class="rel-selo lead" title="Nome do lead que marcou a visita — ainda não é um cadastro ligado">do lead</span>{%
+      if row.cliente_do_lead %}<span class="rel-selo lead" title="Nome do {{ voc.lead }} que marcou a visita — ainda não é um cadastro ligado">do {{ voc.lead }}</span>{%
       elif row.cliente_do_titulo %}<span class="rel-selo" title="Lido do título do compromisso — ainda não é um cadastro ligado">do título</span>{%
       endif %}{% if row.cliente_link %}</a>{% endif %}{% else %}{{ row[col.chave]
       }}{#- numa coluna ELÁSTICA o `extra` é a linha de baixo, menor: é o "Talvez
@@ -8170,7 +8170,7 @@ _AGENDA_CLIENTE = """{% extends "base" %}{% block conteudo %}
   <form method="post" action="/painel/relatorios/agenda/{{ evento_id }}/cliente">
     <div class="ac-par">
       <div>
-        <label style="font-size:.78rem;color:var(--txt-mut);font-weight:600">Cliente</label>
+        <label style="font-size:.78rem;color:var(--txt-mut);font-weight:600">{{ voc.cliente|capitalize }}</label>
         {#- já vem preenchido: do lead quando a visita veio do funil, senão do
             nome lido no título. Quase sempre é só conferir. -#}
         <input name="cliente_nome" id="acNome" value="{{ sugerido }}" autocomplete="off"
@@ -8195,7 +8195,7 @@ _AGENDA_CLIENTE = """{% extends "base" %}{% block conteudo %}
           batizada com o nome do vendedor. Sem ela essas linhas cobrariam atenção
           pra sempre, e lista que nunca esvazia é lista que ninguém olha. -#}
       <span class="mut" style="font-size:.82rem">ou
-        <button class="ac-nao" name="sem_cliente" value="1">este compromisso não tem cliente</button></span>
+        <button class="ac-nao" name="sem_cliente" value="1">este compromisso não tem {{ voc.cliente }}</button></span>
     </div>
   </form>
 </div>
@@ -8322,6 +8322,9 @@ _env = Environment(loader=DictLoader({
     "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "agenda_cliente": _AGENDA_CLIENTE, "clientes": _CLIENTES, "clientes_dup": _CLIENTES_DUP, "clientes_dup_revisar": _CLIENTES_DUP_REVISAR, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE, "relatorios": _RELATORIOS, "relatorio_pdf": _RELATORIO_PDF, "novidades.html": _NOVIDADES,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
+# o nome de quem compra, quando a tela não tem conta (ver `_render`): o padrão
+from finance.raio_x_perfil import VOC_PESSOA_PADRAO as _VOC_PADRAO
+_env.globals["voc"] = dict(_VOC_PADRAO)
 _env.filters["brl"] = brl
 from finance import marca as _marca
 _marca.registrar_jinja(_env)   # marca_avatar / marca_cabecalho nos templates
@@ -8552,6 +8555,11 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             _perfil = _rxp.perfil(nicho_da_conta(_c))
             ctx["raio_x_perfil"] = _perfil
             ctx.setdefault("motivos_perda", _perfil["motivos"])
+        # o nome de quem compra na tela ("cliente", ou "paciente" na clínica): os
+        # templates dizem {{ voc.cliente }} / {{ voc.lead }}. Sem perfil (fora do
+        # login), vale o global do _env, que é o padrão.
+        if "voc" not in ctx and ctx.get("raio_x_perfil"):
+            ctx["voc"] = ctx["raio_x_perfil"].get("vocab") or {}
         # A conta já ganhou o Follow-up? Quem decide é `finance.follow_up`, não um
         # 'eventos' escrito no template: quando o recorrente entrar em
         # PERFIS_COM_TELA, a aba nasce sozinha nas duas telas que a citam.

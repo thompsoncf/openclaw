@@ -149,6 +149,21 @@ def semente_motivos(chave_perfil: str) -> tuple:
     return _SEMENTE_MOTIVOS.get(chave_perfil) or ()
 
 
+# O NOME DE QUEM COMPRA, na tela (regra 6: o vocabulário vem do perfil). Todo
+# template diz {{ voc.cliente }} / {{ voc.lead }} em vez de escrever a palavra; na
+# clínica os dois são "paciente" (pedido do dono em 26/09/2026: o paciente é paciente
+# desde a primeira mensagem, e quem ainda não veio é o filtro "Novos contatos", não
+# outra palavra). O resto dos nichos continua lendo exatamente o que lia.
+VOC_PESSOA_PADRAO = {"cliente": "cliente", "clientes": "clientes", "lead": "lead", "leads": "leads"}
+_VOC_PESSOA = {
+    "clinica": {"cliente": "paciente", "clientes": "pacientes", "lead": "paciente", "leads": "pacientes"},
+}
+
+
+def vocabulario_pessoa(chave_perfil: str | None) -> dict:
+    return {**VOC_PESSOA_PADRAO, **_VOC_PESSOA.get(chave_perfil or "", {})}
+
+
 _PERFIS = {
     "eventos": {
         "chave": "eventos", "rotulo": "eventos",
@@ -573,7 +588,7 @@ def perfil(slug: str | None) -> dict:
     """O perfil inteiro pra um slug de nicho (puro, sem banco)."""
     chave = perfil_por_nicho(slug)
     p = dict(_PERFIS[chave])
-    p["vocab"] = dict(p["vocab"])
+    p["vocab"] = {**vocabulario_pessoa(chave), **p["vocab"]}
     p["motivos"] = tuple((k, r) for k, r in MOTIVOS_TODOS if k in _MOTIVOS_POR_PERFIL[chave])
     p["nicho"] = (slug or "").strip().lower() or None
     p["nicho_escolhido"] = bool(p["nicho"]) and _n.nicho_existe(p["nicho"])

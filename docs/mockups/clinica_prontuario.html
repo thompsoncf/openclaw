@@ -77,7 +77,7 @@ code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5
 <div class="alerta" style="margin-bottom:18px"><b>Mockup para aprovação.</b> Nada no banco e nenhum código mudou. Pacientes, fotos e textos clínicos das telas são <b>fictícios</b>. Os nomes dos profissionais e da cidade são os da Espaço Pelle.</div>
 
 <h1>Clínica no Zaq, parte 4: prontuário, documentos e nota fiscal</h1>
-<p class="lead">Em 26/09/2026 o dono decidiu que a Espaço Pelle deixa o Amigo por inteiro. O desenho anterior deixava no Amigo o prontuário, o laudo, o convênio e a nota fiscal ("é onde mora o dado sensível, é regulado, e o Amigo já faz"). Agora isso vem para o Zaq. A clínica atende <b>só particular</b>, então o convênio (guias TISS) fica fora. Entram quatro partes: o <b>prontuário</b>, os <b>documentos assinados</b> (receita, atestado, pedido de exame, laudo), a <b>nota fiscal</b> pela prefeitura de Pedreiras e o <b>histórico que está no Amigo</b>.</p>
+<p class="lead"><b>Para analisar antes de qualquer código.</b> Em 26/09/2026 o dono decidiu que a Espaço Pelle deixa o Amigo por inteiro. O desenho anterior deixava no Amigo o prontuário, o laudo, o convênio e a nota fiscal ("é onde mora o dado sensível, é regulado, e o Amigo já faz"). Agora isso vem para o Zaq. A clínica atende <b>só particular</b>, então o convênio (guias TISS) fica fora. Entram quatro partes: o <b>prontuário</b>, os <b>documentos assinados</b> (receita, atestado, pedido de exame, laudo), a <b>nota fiscal</b> pela prefeitura de Pedreiras e o <b>histórico que está no Amigo</b>.</p>
 
 <div class="big">
   <div><b>P1</b><span>prontuário: ficha, evolução, fotos, anexos</span></div>
@@ -230,9 +230,116 @@ code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5
 <tr><td>LGPD, art. 11</td><td>dado de saúde é sensível: finalidade, acesso restrito, segurança</td><td>seções 01, 05 e 09</td></tr>
 </table></div>
 
-<h2><span class="n">11</span>A ordem de construção</h2>
+<h2><span class="n">11</span>As outras telas, uma a uma</h2>
+<p class="sub">Tudo o que o profissional, a recepção e o dono vão ver. Pacientes e textos clínicos são fictícios</p>
+
+<p><b>11.1 · A agenda do profissional abre o prontuário.</b> Só quem atende aquele horário vê o botão, e só quando o paciente está presente.</p>
+<div class="pn">
+  <div class="top"><span class="tt">Hoje · Dr. Manoel · Espaço Pelle</span><span class="mut">qui 24/09/2026</span></div>
+  <div class="lin"><div class="nm">08:00 · Marina Costa · Consulta<small>finalizado · evolução assinada</small></div><span class="tag g">assinado</span></div>
+  <div class="lin"><div class="nm">08:30 · Paulo Ribeiro · Consulta<small>em atendimento há 12 min · rascunho salvo</small></div><span class="bt">Abrir prontuário</span></div>
+  <div class="lin"><div class="nm">09:00 · Lívia Andrade · Retorno<small>presente na recepção</small></div><span class="bt sec">Abrir prontuário</span></div>
+  <div class="lin"><div class="nm">09:30 · Rafael Moura · Procedimento estético<small>agendado · ainda não chegou</small></div><span class="tag">aguardando</span></div>
+  <span class="mut">Fim do dia: 1 evolução em rascunho · <b>assinar as 9 de hoje</b> (certificado em nuvem, uma autorização)</span>
+</div>
+
+<p><b>11.2 · O que a recepção vê do paciente.</b> Cadastro, contato e agenda, mais o aviso de alergia. Nada da evolução, das fotos ou do conteúdo dos documentos.</p>
+<div class="pn">
+  <div class="top"><div><span class="tt">Marina Costa</span> <span class="mut">· 34 anos · particular</span></div><span class="tag r">ALERGIA registrada: confirmar com o profissional</span></div>
+  <div class="grid2">
+    <div class="box"><span class="lbl">Contato</span>WhatsApp · e-mail · endereço<br><span class="lbl">Próximo horário</span>22/10 · 09:00 · Retorno · Dr. Manoel</div>
+    <div class="box"><span class="lbl">Documentos da consulta de 24/09</span>Receita · Pedido de exame<br><span class="mut">prontos para entregar; o conteúdo só o profissional vê</span><br><span class="bt sec">Enviar link ao paciente</span><span class="bt sec">Imprimir</span></div>
+  </div>
+  <span class="mut">Prontuário: 7 atendimentos registrados · acesso só para profissionais de saúde</span>
+</div>
+
+<p><b>11.3 · Assinar com certificado.</b> Os dois caminhos, lado a lado.</p>
+<div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:14px">
+<div class="pn" style="margin:0">
+  <div class="top"><span class="tt">Certificado em arquivo (A1)</span></div>
+  <span class="mut">Primeira evolução do dia</span>
+  <span class="lbl">Senha do certificado</span><span class="inp">••••••••</span>
+  <span class="mut" style="display:block;margin-top:.4rem">A senha fica só na memória, até 19:00 de hoje. O Zaq assina cada evolução ao finalizar, sem perguntar de novo.</span>
+  <span class="bt">Liberar assinatura até 19:00</span>
+</div>
+<div class="pn" style="margin:0">
+  <div class="top"><span class="tt">Certificado em nuvem ou cartão (A3)</span></div>
+  <span class="mut">9 evoluções de hoje · CRM Digital</span>
+  <div class="box" style="text-align:center;margin-top:.5rem">📱 Autorize no aplicativo do seu certificado<br><span class="mut">pedido enviado · expira em 5 min</span></div>
+  <span class="mut">Autorizou: as 9 ficam assinadas de uma vez, cada uma com a própria data e hora.</span>
+</div>
+</div>
+
+<p><b>11.4 · O cadastro do profissional.</b> Sem conselho e número, o profissional não assina; sem certificado, assina só com o login (e os documentos saem para assinar à mão).</p>
+<div class="pn">
+  <div class="top"><span class="tt">Dr. Manoel · editar profissional</span><span class="mut">Configurar › Profissionais</span></div>
+  <div class="grid2">
+    <div><span class="lbl">Conselho</span><span class="inp">CRM</span> <span class="inp" style="min-width:60px">MA</span> <span class="inp" style="min-width:90px">nº ·····</span></div>
+    <div><span class="lbl">Login no Zaq</span><span class="chip on">tem login</span><span class="chip on">código no celular (2 fatores)</span></div>
+  </div>
+  <span class="lbl">Certificado digital</span><span class="chip">nenhum</span><span class="chip">arquivo (A1)</span><span class="chip on">nuvem ou cartão (A3)</span>
+  <div class="grid2"><div><span class="lbl">Provedor</span><span class="inp">CRM Digital (CFM)</span></div><div><span class="lbl">Válido até</span><span class="inp">14/03/2028</span> <span class="tag g">testado hoje</span></div></div>
+  <span class="lbl">No prontuário</span><span class="chip on">escreve evolução</span><span class="chip on">emite receita e atestado</span><span class="chip on">emite laudo</span>
+</div>
+
+<p><b>11.5 · A receita em PDF.</b> Com o cabeçalho da clínica, a assinatura digital e o código para a farmácia conferir.</p>
+<div class="pn" style="background:#fff;color:#14213D;border-color:#E3DDD0">
+  <div style="display:flex;justify-content:space-between;border-bottom:1px solid #E3DDD0;padding-bottom:.4rem;margin-bottom:.6rem"><b>ESPAÇO PELLE · Clínica Dermatológica</b><span style="font-size:.8rem;color:#5A6678">Pedreiras-MA</span></div>
+  <div style="font-size:.85rem"><b>Paciente:</b> Marina Costa · <b>Data:</b> 24/09/2026</div>
+  <div style="font-size:.85rem;margin:.6rem 0;line-height:1.7">1. Hidratante labial com FPS — aplicar 3×/dia<br>2. Sabonete para pele acneica — lavar o rosto 2×/dia</div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #E3DDD0;padding-top:.5rem;font-size:.75rem;color:#5A6678"><span>Assinado digitalmente por <b>Dr. Manoel</b> · CRM-MA ····· · 24/09/2026 08:52<br>Confira em validar.iti.gov.br</span><span style="border:1px solid #C9BFA8;padding:.6rem;font-size:.7rem">[QR]</span></div>
+</div>
+
+<p><b>11.6 · O registro de acesso.</b> O que o dono vê: quem abriu, quando e o quê. Nunca o conteúdo.</p>
+<div class="pn">
+  <div class="top"><span class="tt">Registro de acesso ao prontuário</span><span class="mut">últimos 7 dias · filtrar por paciente ou pessoa</span></div>
+  <table><tr><th>Quando</th><th>Quem</th><th>O quê</th><th>Paciente</th></tr>
+  <tr><td>24/09 08:31</td><td>Dr. Manoel</td><td>abriu o prontuário · escreveu evolução</td><td>Paulo Ribeiro</td></tr>
+  <tr><td>24/09 08:52</td><td>Dr. Manoel</td><td>assinou evolução · emitiu receita</td><td>Marina Costa</td></tr>
+  <tr><td>24/09 09:05</td><td>Rosinete (recepção)</td><td>enviou o link dos documentos</td><td>Marina Costa</td></tr>
+  <tr><td>23/09 17:40</td><td>Juliana</td><td>viu 4 fotos</td><td>Marina Costa</td></tr>
+  </table>
+  <span class="mut">O paciente pode pedir o registro dele: sai em PDF, pelo profissional.</span>
+</div>
+
+<p><b>11.7 · Nota fiscal.</b> O que entrou e ainda não tem nota, com um clique para emitir.</p>
+<div class="pn">
+  <div class="top"><span class="tt">Notas fiscais de serviço · setembro</span><span class="mut">prefeitura de Pedreiras · modo: a recepção confere</span></div>
+  <div class="lin"><div class="nm">Marina Costa · Consulta · recebido 24/09 (Pix)<small>CPF ok · serviço: consulta médica</small></div><span class="vl">R$ 500</span><span class="bt">Emitir</span></div>
+  <div class="lin"><div class="nm">Paulo Ribeiro · parcela 2/4 do plano · recebido 23/09 (cartão)<small>CPF ok</small></div><span class="vl">R$ 905</span><span class="bt">Emitir</span></div>
+  <div class="lin"><div class="nm">Lívia Andrade · Consulta · recebido 22/09<small>falta o CPF no cadastro</small></div><span class="vl">R$ 500</span><span class="tag y">completar cadastro</span></div>
+  <div class="lin"><div class="nm">Rafael Moura · Consulta · emitida 21/09<small>nota nº 000123 · enviada por e-mail</small></div><span class="tag g">emitida</span></div>
+</div>
+
+<p><b>11.8 · O histórico do Amigo dentro do prontuário.</b> O que vier da exportação aparece junto, marcado, sem poder editar.</p>
+<div class="pn">
+  <div class="top"><span class="tt">Marina Costa · atendimentos</span><span class="mut">Zaq + histórico do Amigo</span></div>
+  <div class="lin"><div class="nm">12/08/2026 · Consulta · Dr. Manoel<small>registrado no Zaq · assinado</small></div><span class="tag g">Zaq</span></div>
+  <div class="lin"><div class="nm">14/03/2025 · Consulta · Dr. Manoel<small>importado do Amigo em 10/2026 · somente leitura · arquivo original anexado</small></div><span class="tag">Amigo</span></div>
+  <div class="lin"><div class="nm">02/02/2025 · Sessão · Juliana<small>importado do Amigo · somente leitura</small></div><span class="tag">Amigo</span></div>
+</div>
+
+<h2><span class="n">12</span>No nicho clínica, "cliente" vira "paciente"</h2>
+<p class="sub">Pedido do dono em 26/09/2026. Vale em todas as telas que a conta da clínica vê, não só no prontuário</p>
+<p>Hoje "cliente" está escrito direto em cerca de 90 frases das telas. O conserto segue a regra 6 do repositório (toda tela segue o nicho): o nome de quem compra passa a vir do <b>perfil do nicho</b>. Na clínica ele é <b>paciente</b>; nos outros nichos continua <b>cliente</b>. Nada muda no banco, só o que se lê.</p>
+<div class="tw"><table>
+<tr><th>Tela</th><th>Hoje</th><th>Na clínica</th></tr>
+<tr><td>Base (menu)</td><td>👥 Clientes/Fornecedores · + novo cliente · Arquivar cliente</td><td>👥 Pacientes/Fornecedores · + novo paciente · Arquivar paciente</td></tr>
+<tr><td>Caixa e produtos</td><td>Cliente — CPF, telefone ou nome · Fiado exige cliente identificado</td><td>Paciente — CPF, telefone ou nome · Fiado exige paciente identificado</td></tr>
+<tr><td>Financeiro</td><td>Carteira de clientes · campo "cliente" no título a receber · Por cliente (separar)</td><td>Carteira de pacientes · "paciente" · Por paciente (separar)</td></tr>
+<tr><td>Comunicação</td><td>O cliente falou por último e ninguém respondeu · De onde veio o cliente</td><td>O paciente falou por último… · De onde veio o paciente</td></tr>
+<tr><td>Cockpit</td><td>O cliente apareceu? · De qual cliente · O que o cliente quer</td><td>O paciente apareceu? · De qual paciente · O que o paciente quer</td></tr>
+<tr><td>Follow-up</td><td>O cliente respondeu por último · cliente esperando é mais urgente</td><td>O paciente respondeu por último · paciente esperando…</td></tr>
+<tr><td>Origens e Raio-X</td><td>Quem não era cliente · coluna Cliente</td><td>Quem não era paciente · coluna Paciente</td></tr>
+<tr><td>Catálogo de serviços</td><td>Buscar cliente já cadastrado · Salvar cliente</td><td>Buscar paciente já cadastrado · Salvar paciente</td></tr>
+</table></div>
+<div class="nota"><b>O que NÃO muda:</b> "fornecedor" continua fornecedor; textos em que a clínica é cliente do Zaq (a fatura do Zaq, "como este cliente conecta o WhatsApp") continuam como estão; as telas de outros nichos (festa, seguro, obra) não mudam. Uma trava de teste garante que nenhuma tela da clínica volte a dizer "cliente" e que nenhum outro nicho passe a dizer "paciente".</div>
+<div class="q"><div class="qt">E o "lead"?</div><div class="qo">No funil e na Comunicação, quem ainda não veio à clínica aparece como <b>lead</b> ("buscar lead", "card do lead"). Na clínica ele pode continuar <b>lead</b>, virar <b>contato</b>, ou virar <b>paciente</b> desde a primeira mensagem. <span class="rec">Sugestão: "paciente" desde a primeira mensagem, como a recepção já fala.</span></div></div>
+
+<h2><span class="n">13</span>A ordem de construção</h2>
 <div class="tw"><table>
 <tr><th>#</th><th>Parte</th><th>Entrega</th></tr>
+<tr><td class="num">0</td><td>Cliente vira paciente</td><td>o nome vem do perfil do nicho, em todas as telas da clínica (seção 12); independe do prontuário e pode sair antes</td></tr>
 <tr><td class="num">1</td><td>Quem vê o quê</td><td>login dos profissionais ligado ao cadastro, conselho e número; as regras da seção 01; o registro de acesso; a trava que impede o agente de ler</td></tr>
 <tr><td class="num">2</td><td>Ficha e evolução</td><td>alergias, medicamentos, problemas; evolução com os modelos; assinatura simples; adendo; "abrir prontuário" pela agenda</td></tr>
 <tr><td class="num">3</td><td>Fotos e anexos</td><td>área privada cifrada, câmera direto no prontuário, comparação, termo de imagem</td></tr>
@@ -243,7 +350,7 @@ code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5
 </table></div>
 <div class="nota"><b>Por que o histórico do Amigo não é o último.</b> Ele define quando a clínica pode cancelar o Amigo. Se a virada da agenda for antes, o Amigo fica pago só para consulta até a importação terminar.</div>
 
-<h2><span class="n">12</span>O que depende de resposta</h2>
+<h2><span class="n">14</span>O que depende de resposta</h2>
 <div class="q"><div class="qt">A. Quais profissionais escrevem no prontuário, e qual o conselho de cada um?</div><div class="qo">No Amigo são 4 profissionais de saúde com usuário: Dr. Manoel, Juliana, Brenda e Cristiane (o CIMLAB é laboratório). Falta o conselho e o número de cada um (CRM, CREFITO…). Todos precisam de login próprio no Zaq para assinar.</div></div>
 <div class="q"><div class="qt">B. Qual certificado cada um tem?</div><div class="qo">Arquivo (A1) ou nuvem/cartão (A3), e de qual provedor. O desenho atende os dois; a integração com nuvem é por provedor. <span class="rec">Sugestão: começar pelo do Dr. Manoel.</span></div></div>
 <div class="q"><div class="qt">C. O dono da clínica é profissional de saúde?</div><div class="qo">Se não for, ele não lê o conteúdo clínico, só o registro de acesso (seção 01).</div></div>

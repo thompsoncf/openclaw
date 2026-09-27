@@ -79,6 +79,14 @@ def _sql_candidatos() -> str:
          and r.ativa and r.ia_ligada and r.ia_insiste and r.membro_id = l.membro_id
          and p.vendedor_id = l.membro_id and p.estagio = 'lead'
          and p.status <> 'perdido' and p.status not in {fr.sql_fechadas('p')}
+         -- quem espera a EMPRESA não é cobrado (revisão de 27/09/2026): a lista de
+         -- espera, a data segurada, e o orçamento da IA parado na conferência ou
+         -- bloqueado ("vou confirmar com a equipe e te retorno")
+         and {fr.sql_nao_cobra('p')}
+         and not exists (select 1 from ia_orcamentos io
+                          where io.conta_id = p.conta_id and io.prospeccao_id = p.id
+                            and (io.estado = 'conferir'
+                                 or (io.bloqueio is not null and io.estado <> 'descartado')))
          and (p.evento_em is null or p.evento_em >= current_date + 3)
          and not exists (select 1 from eventos_agenda e
                           where e.conta_id = p.conta_id and e.prospeccao_id = p.id
@@ -257,6 +265,7 @@ def _um_toque(pool, conta_id: int, lead: dict, agora: datetime) -> bool:
 def _uma_conta(pool, conta_id: int, agora: datetime) -> dict:
     from finance import chip_regra as _cr
     from finance import resgate as _rg
+    from finance import teto_chip as _tc
     out = {"toques": 0, "perdidos": 0}
     with pool.connection() as c:
         todos = devidos(c, conta_id, agora)
@@ -278,6 +287,10 @@ def _uma_conta(pool, conta_id: int, agora: datetime) -> dict:
                 continue
             regra = _cr.regra(c, conta_id, lead["chip_id"])
             if not _cr.ia_pode_falar(regra, agora) or not _rg._chip_de_pe(c, conta_id, lead["chip_id"]):
+                continue
+            # o TETO DO CHIP: as rotinas da visita, do sinal e do pós-festa saem pelo
+            # mesmo número (revisão de 27/09/2026)
+            if not _tc.pode(c, conta_id, lead["conversa_id"], agora):
                 continue
             alvo = lead
             break

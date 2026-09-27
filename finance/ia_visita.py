@@ -524,16 +524,28 @@ def _mandar(c, conta_id: int, conversa_id: int, texto: str) -> dict:
 
 MAX_FALHAS = 5
 INTERVALO_FALHA = timedelta(minutes=15)
+#: a janela das mensagens do relógio ao cliente (hora de Brasília)
+HORAS_CLIENTE = (8, 20)
 
 
-def _passo(pool, conta_id: int, v: dict, coluna: str, texto: str) -> bool:
+def _passo(pool, conta_id: int, v: dict, coluna: str, texto: str,
+          agora: datetime | None = None) -> bool:
     """Reivindica o passo (a coluna nula vira agora) ANTES de mandar — dois workers
     nunca mandam a mesma pergunta duas vezes. Se o provedor ACEITOU, a reivindicação
     fica, mesmo que gravar a mensagem na conversa falhe depois: mandar de novo seria
     o cliente recebendo duas vezes. Se o envio falhou, devolve a reivindicação e conta
-    a falha — o relógio tenta de novo depois de 15 min, e desiste na quinta."""
+    a falha — o relógio tenta de novo depois de 15 min, e desiste na quinta.
+
+    Antes de reivindicar, o TETO DO CHIP (`finance.teto_chip`): cheio, fica pro próximo
+    ciclo. E o prazo estourado conta como enviado (`festa_rotinas.talvez_saiu`)."""
     from finance import agente
+    from finance import festa_rotinas as _frt
+    from finance import teto_chip as _tc
+    agora = agora or datetime.now(timezone.utc)
     with pool.connection() as c:
+        if not _tc.pode(c, conta_id, v["conversa_id"], agora):
+            c.commit()
+            return False
         pegou = c.execute(f"update ia_visitas set {coluna}=now() where evento_id=%s and {coluna} is null "
                           "returning evento_id", (v["evento_id"],)).fetchone()
         c.commit()
@@ -544,10 +556,12 @@ def _passo(pool, conta_id: int, v: dict, coluna: str, texto: str) -> bool:
         except Exception as e:  # noqa: BLE001
             _log.warning("ia_visita: envio falhou (evento %s): %s", v["evento_id"], e)
             c.rollback()
-            res = {"ok": False}
-        if res.get("ok"):
+            res = {"ok": False, "erro": str(e)}
+        if res.get("ok") or _frt.talvez_saiu(res):
+            _tc.registrar(c, conta_id, v["conversa_id"], "ia_visita", agora)
             try:
-                agente._add_bot_msg(c, v["conversa_id"], "whatsapp", texto, res.get("sid"))
+                if res.get("ok"):
+                    agente._add_bot_msg(c, v["conversa_id"], "whatsapp", texto, res.get("sid"))
                 c.execute("update ia_visitas set envio_falhas=0, envio_falhou_em=null "
                           "where evento_id=%s", (v["evento_id"],))
                 c.commit()
@@ -575,6 +589,8 @@ def rodar(pool, agora: datetime | None = None) -> dict:
         except Exception:  # noqa: BLE001 — banco sem a 390
             return out
         try:
+            from finance import funil_regua as _fr
+            from finance.resgate import RE_PARAR
             try:
                 with pool.connection() as c:
                     rows = c.execute(
@@ -584,7 +600,10 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                                   v.conf_no_dia, v.vespera_em, v.duas_horas_em, v.confirmado_em,
                                   v.pede_remarcar_em, v.sem_resposta_em, v.falta_em, v.marcado_em,
                                   e.inicio, e.desfecho, e.local,
-                                  coalesce(nullif(p.contato,''), nullif(p.empresa,''), '')
+                                  coalesce(nullif(p.contato,''), nullif(p.empresa,''), ''),
+                                  (select m.texto from mensagens m
+                                    where m.conversa_id = v.conversa_id and m.direcao = 'in'
+                                    order by m.criado_em desc, m.id desc limit 1)
                              from ia_visitas v
                              join eventos_agenda e on e.id = v.evento_id and e.conta_id = v.conta_id
                              join conversas cv on cv.id = v.conversa_id and cv.conta_id = v.conta_id
@@ -592,7 +611,11 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                             where e.status='ativo' and cv.agente_ativo and cv.status <> 'pendente'
                               and v.envio_falhas < %s
                               and (v.envio_falhou_em is null or v.envio_falhou_em < %s)
-                              and e.inicio between %s and %s""",
+                              and e.inicio between %s and %s
+                              -- o card saiu do jogo ou espera a data: o relógio não
+                              -- escreve mais (revisão de 27/09/2026)
+                              and (p.id is null or (""" + _fr.sql_encerradas_nao("p") + """
+                                                    and p.status <> 'lista_espera'))""",
                         (MAX_FALHAS, agora - INTERVALO_FALHA,
                          agora - timedelta(days=3), agora + timedelta(days=2))).fetchall()
             except Exception:  # noqa: BLE001
@@ -604,14 +627,22 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                 v = dict(zip(("evento_id", "conta_id", "lead", "conversa_id", "conf_no_dia",
                               "vespera_em", "duas_horas_em", "confirmado_em", "pede_remarcar_em",
                               "sem_resposta_em", "falta_em", "marcado_em", "inicio", "desfecho",
-                              "local", "quem"), r))
+                              "local", "quem", "ultima_in"), r))
                 conta, ini = v["conta_id"], v["inicio"]
+                if RE_PARAR.search(v["ultima_in"] or ""):
+                    continue                  # pediu pra parar: o relógio não escreve
+                # A MENSAGEM AO CLIENTE SÓ SAI DAS 8H ÀS 20H (a mesma janela das rotinas
+                # da visita). A véspera já nascia às 18h, mas o "2h antes" de uma visita
+                # às 9h saía às 7h, e o "sentimos sua falta" saía na hora em que alguém
+                # marcava a falta — até de madrugada (revisão de 27/09/2026).
+                cliente_ok = HORAS_CLIENTE[0] <= agora.astimezone(ag.BRT).hour < HORAS_CLIENTE[1]
                 try:
                     esp = endereco_empresa(pool, conta)
                     nome = primeiro_nome(v["quem"])
                     nome = nome[:1].upper() + nome[1:].lower() if nome else ""
                     if v["desfecho"] == "nao_realizado":
-                        if not v["falta_em"] and _passo(pool, conta, v, "falta_em", TEXTO_FALTA):
+                        if (not v["falta_em"] and cliente_ok
+                                and _passo(pool, conta, v, "falta_em", TEXTO_FALTA, agora)):
                             out["faltas"] += 1
                         continue
                     if ini <= agora or v["pede_remarcar_em"]:
@@ -619,16 +650,19 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                     momento = _momento_vespera(ini, v["conf_no_dia"])
                     if (not v["vespera_em"] and not v["confirmado_em"] and agora >= momento
                             and v["marcado_em"] < momento and ini - agora > timedelta(hours=2, minutes=30)):
-                        if _passo(pool, conta, v, "vespera_em",
-                                  texto_vespera(ini, nome, agora, esp["nome"])):
+                        if cliente_ok and _passo(pool, conta, v, "vespera_em",
+                                                 texto_vespera(ini, nome, agora, esp["nome"]),
+                                                 agora):
                             out["vesperas"] += 1
                         continue
                     if not v["duas_horas_em"] and ini - agora <= timedelta(hours=2) \
                             and v["marcado_em"] < ini - timedelta(hours=2):
-                        if _passo(pool, conta, v, "duas_horas_em",
-                                  texto_duas_horas(ini, esp["nome"],
-                                                   v["local"] or esp["endereco"] or esp["nome"],
-                                                   bool(v["confirmado_em"]))):
+                        if cliente_ok and _passo(pool, conta, v, "duas_horas_em",
+                                                 texto_duas_horas(ini, esp["nome"],
+                                                                  v["local"] or esp["endereco"]
+                                                                  or esp["nome"],
+                                                                  bool(v["confirmado_em"])),
+                                                 agora):
                             out["duas_horas"] += 1
                         continue
                     if (v["vespera_em"] and not v["confirmado_em"] and not v["sem_resposta_em"]

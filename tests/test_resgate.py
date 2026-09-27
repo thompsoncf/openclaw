@@ -69,6 +69,8 @@ create table contratos (id bigserial primary key, conta_id bigint, orcamento_id 
 create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
 create table funil_etapas (conta_id bigint, chave text, fase text, gatilho text);
+create table ia_orcamentos (orcamento_id bigint primary key, conta_id bigint,
+  prospeccao_id bigint, estado text default 'conferir', bloqueio text);
 create table canais_config (conta_id bigint, canal text, provedor text, ativo boolean,
   desconectado_em timestamptz, rotulo text);
 """
@@ -937,6 +939,27 @@ def test_card_fechado_nao_recebe_toque_nem_vira_perdido(pool, equipe, duble):
         assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "fechado"
 
 
+@pytest.mark.parametrize("coluna", ["lista_espera", "evento_realizado"])
+def test_quem_espera_a_empresa_nao_recebe_toque_nem_vira_perdido(pool, equipe, duble, coluna):
+    """A Lista de espera e a Data segurada esperam a EMPRESA (a data abrir, o sinal):
+    o toque "ainda faz sentido?" e o perdido por silêncio não valem (revisão de
+    27/09/2026)."""
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("insert into funil_etapas (conta_id, chave, fase, gatilho) "
+                  "values (%s,'evento_realizado','venda','orcamento_aprovado')", (EMPRESA,))
+        c.execute("update prospeccao set status=%s where id=%s", (coluna, lid))
+        _atrasar(c, 3)
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1                           # só a retomada
+    with pool.connection() as c:
+        c.execute("update resgate_leads set toques=3")
+        _atrasar(c, 4)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == coluna
+
+
 def test_visita_marcada_depois_da_retomada_para_os_toques(pool, equipe, duble):
     lid, cv = _resgatado(pool, equipe, duble)
     with pool.connection() as c:
@@ -1081,7 +1104,9 @@ def test_o_cliente_que_volta_a_falar_zera_a_conta(pool, equipe, duble, expedient
 
 
 @pytest.mark.parametrize("caso", ["cliente_por_ultimo", "gente_assumiu", "pediu_pra_parar",
-                                  "visita_marcada", "fechado", "de_outro_vendedor"])
+                                  "visita_marcada", "fechado", "de_outro_vendedor",
+                                  # revisão de 27/09/2026: quem espera a EMPRESA
+                                  "lista_espera", "data_segurada", "orcamento_na_conferencia"])
 def test_quando_a_ia_nao_insiste(pool, equipe, duble, expediente, caso):
     with pool.connection() as c:
         _insiste(c, equipe)
@@ -1098,6 +1123,15 @@ def test_quando_a_ia_nao_insiste(pool, equipe, duble, expediente, caso):
             c.execute("update prospeccao set status='fechado' where id=%s", (lid,))
         if caso == "de_outro_vendedor":
             c.execute("update prospeccao set vendedor_id=%s where id=%s", (equipe["PEDRO"], lid))
+        if caso == "lista_espera":
+            c.execute("update prospeccao set status='lista_espera' where id=%s", (lid,))
+        if caso == "data_segurada":
+            c.execute("insert into funil_etapas (conta_id, chave, fase, gatilho) "
+                      "values (%s,'evento_realizado','venda','orcamento_aprovado')", (EMPRESA,))
+            c.execute("update prospeccao set status='evento_realizado' where id=%s", (lid,))
+        if caso == "orcamento_na_conferencia":
+            c.execute("insert into ia_orcamentos (orcamento_id, conta_id, prospeccao_id, estado) "
+                      "values (7001,%s,%s,'conferir')", (EMPRESA, lid))
         c.commit()
         assert ii.devidos(c, EMPRESA) == []
 

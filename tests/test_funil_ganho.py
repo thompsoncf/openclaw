@@ -174,3 +174,23 @@ def test_conta_sem_etapas_cadastradas_usa_o_piso_padrao(pool):
     lid = _lead(pool, "proposta")
     assert fg.marcar_por_assinatura(pool, CONTA, 900)["ok"] is True
     assert _status(pool, lid) == "ganho"
+
+
+def test_a_lista_de_espera_acima_do_ganho_e_venda_em_andamento(pool):
+    """Revisão de 27/09/2026: a Lista de espera mora na ordem 908, ACIMA do ganho, e é
+    fase de VENDA (medido em produção: a única assim). O contrato assinado leva o
+    card pra ganho — antes, a ordem o barrava como "já passou da venda"."""
+    with pool.connection() as c:
+        c.execute("alter table funil_etapas add column if not exists fase text")
+        c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem, fase) "
+                  "values (%s,'lista_espera','Lista de espera',908,'venda')", (CONTA,))
+        c.execute("update funil_etapas set fase='pos' where conta_id=%s and chave='evento_realizado'",
+                  (CONTA,))
+        c.commit()
+    lid = _lead(pool, "lista_espera", orc=908)
+    assert fg.marcar_por_assinatura(pool, CONTA, 908)["ok"] is True
+    assert _status(pool, lid) == "ganho"
+    # e o pós-venda de verdade continua barrado
+    lid2 = _lead(pool, "evento_realizado", orc=920)
+    assert fg.marcar_por_assinatura(pool, CONTA, 920)["motivo"] == "ja_passou_da_venda"
+    assert _status(pool, lid2) == "evento_realizado"

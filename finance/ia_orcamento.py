@@ -36,6 +36,8 @@ _LOCK_DIA = 771174      # + (conta, dia): uma reserva de data por vez no mesmo d
 
 MAX_FALHAS = 5
 INTERVALO_FALHA = timedelta(minutes=15)
+#: a janela das mensagens que o relógio inicia ao cliente (hora de Brasília)
+HORAS_CLIENTE = (8, 20)
 
 
 # ------------------------------------------------------------------ config
@@ -480,10 +482,22 @@ def _texto_aprovado(sinal: int, ate: datetime | None, pix_txt: str, bloqueio: st
             + "Assim que pagar, me manda o comprovante aqui 😊")
 
 
-def _passo(pool, conta_id: int, i: dict, coluna: str, texto: str) -> bool:
-    """Reivindica, manda pelo chip da conversa e grava; falha devolve e conta."""
+def _passo(pool, conta_id: int, i: dict, coluna: str, texto: str,
+          agora: datetime | None = None, automatica: bool = True) -> bool:
+    """Reivindica, manda pelo chip da conversa e grava; falha devolve e conta.
+
+    `automatica`: a mensagem que o SISTEMA inicia (lembrete, data liberada, sinal
+    confirmado) passa pelo TETO DO CHIP (`finance.teto_chip`) e conta nele. A resposta
+    à aprovação que o cliente acabou de fazer é conversa, não disparo. O prazo
+    estourado conta como enviado (`festa_rotinas.talvez_saiu`)."""
     from finance import agente
+    from finance import festa_rotinas as _frt
+    from finance import teto_chip as _tc
+    agora = agora or datetime.now(timezone.utc)
     with pool.connection() as c:
+        if automatica and not _tc.pode(c, conta_id, i["conversa_id"], agora):
+            c.commit()
+            return False
         pegou = c.execute(f"update ia_orcamentos set {coluna}=now() where orcamento_id=%s "
                           f"and {coluna} is null returning orcamento_id", (i["id"],)).fetchone()
         c.commit()
@@ -500,10 +514,14 @@ def _passo(pool, conta_id: int, i: dict, coluna: str, texto: str) -> bool:
         except Exception as e:  # noqa: BLE001
             _log.warning("ia_orcamento: envio falhou (orçamento %s): %s", i["id"], e)
             c.rollback()
-            res = {"ok": False}
-        if (res or {}).get("ok"):
+            res = {"ok": False, "erro": str(e)}
+        res = res or {}
+        if res.get("ok") or _frt.talvez_saiu(res):
+            if automatica:
+                _tc.registrar(c, conta_id, i["conversa_id"], "ia_orcamento", agora)
             try:
-                agente._add_bot_msg(c, i["conversa_id"], "whatsapp", texto, res.get("sid"))
+                if res.get("ok"):
+                    agente._add_bot_msg(c, i["conversa_id"], "whatsapp", texto, res.get("sid"))
                 c.execute("update ia_orcamentos set envio_falhas=0, envio_falhou_em=null "
                           "where orcamento_id=%s", (i["id"],))
                 c.commit()
@@ -559,6 +577,12 @@ def rodar(pool, agora: datetime | None = None) -> dict:
             except Exception:  # noqa: BLE001
                 return out
             from finance import vendas
+            # A MENSAGEM QUE O RELÓGIO INICIA SÓ SAI DAS 8H ÀS 20H: o lembrete das 24h de
+            # uma aprovação às 23h caía às 23h do dia seguinte, e a data liberada saía
+            # na hora em que a reserva vencia — de madrugada (revisão de 27/09/2026). A
+            # resposta à aprovação sai na hora: foi o cliente que acabou de agir.
+            loc_h = agora.astimezone(ag.BRT).hour
+            janela = HORAS_CLIENTE[0] <= loc_h < HORAS_CLIENTE[1]
             for r in rows:
                 i = dict(zip(("id", "conta_id", "conversa_id", "aprovado_msg_em", "l24", "l48",
                               "liberada_msg_em", "confirmada_msg_em", "bloqueio", "aprovada_em",
@@ -568,10 +592,10 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                 try:
                     sinal = vendas.valor_do_sinal(i["parcelas"])
                     if i["sinal_pago_em"]:
-                        if not i["confirmada_msg_em"] and i["aprovado_msg_em"]:
+                        if not i["confirmada_msg_em"] and i["aprovado_msg_em"] and janela:
                             if _passo(pool, conta, i, "confirmada_msg_em",
                                       "Sinal confirmado! 🎉 A sua data está garantida. "
-                                      "Qualquer coisa, é só me chamar aqui."):
+                                      "Qualquer coisa, é só me chamar aqui.", agora):
                                 out["confirmadas"] += 1
                         continue
                     if not i["aprovado_msg_em"]:
@@ -584,18 +608,24 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                         dono = primeiro_nome(i["dono"]) if i["dono"] else ""
                         dono = dono[:1].upper() + dono[1:].lower() if dono else ""
                         pix_txt = _pix(pool, conta, sinal, i["id"]) if sinal else ""
+                        # a resposta à aprovação: na hora, se o cliente acabou de aprovar;
+                        # atrasada (o poller parado, a reserva demorando), espera a janela
+                        if not janela and agora - i["aprovada_em"] > timedelta(minutes=30):
+                            continue
                         if _passo(pool, conta, i, "aprovado_msg_em",
                                   _texto_aprovado(sinal, i["pre_ate"], pix_txt, i["bloqueio"],
-                                                  bool(i["ev_id"]), dono)):
+                                                  bool(i["ev_id"]), dono),
+                                  agora, automatica=False):
                             out["aprovados"] += 1
                         continue
                     # LIBERADA = a reserva VENCEU. O dono cancelar antes ("apareceu quem
                     # paga hoje") ou cancelar à mão não é "o seu prazo acabou"
                     if (i["ev_status"] == "cancelado" and not i["liberada_msg_em"]
                             and i["pre_ate"] and i["pre_ate"] <= agora):
-                        if _passo(pool, conta, i, "liberada_msg_em",
+                        if janela and _passo(pool, conta, i, "liberada_msg_em",
                                   "Oi! O prazo pra garantir a sua data acabou e ela foi liberada 😕 "
-                                  "Se ainda quiser, me chama que eu vejo se continua livre."):
+                                  "Se ainda quiser, me chama que eu vejo se continua livre.",
+                                  agora):
                             out["liberadas"] += 1
                             if i["agenda_id"]:
                                 from finance import chip_regra as _cr
@@ -603,7 +633,8 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                                               f"{i['quem']}: a reserva de 72h venceu sem sinal.",
                                               f"/cockpit/orcamentos/{i['id']}")
                         continue
-                    if i["ev_status"] != "pre_reservado" or i["bloqueio"] or not sinal:
+                    if i["ev_status"] != "pre_reservado" or i["bloqueio"] or not sinal \
+                            or not janela:
                         continue
                     desde = agora - i["aprovada_em"]
                     ate = i["pre_ate"]
@@ -613,13 +644,15 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                         if _passo(pool, conta, i, "lembrete_24_em",
                                   f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊 A sua "
                                   f"data está segurada até {ate.astimezone(ag.BRT):%d/%m às %Hh}."
-                                  if ate else f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊"):
+                                  if ate else f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊",
+                                  agora):
                             out["lembretes"] += 1
                     elif i["l24"] and not i["l48"] and desde >= 2 * terco:
                         if _passo(pool, conta, i, "lembrete_48_em",
                                   "Oi! Último lembrete: a reserva da sua data vence "
                                   + (f"{ate.astimezone(ag.BRT):%d/%m às %Hh}" if ate else "em breve")
-                                  + ". Se precisar de ajuda com o pagamento, me chama 🙏"):
+                                  + ". Se precisar de ajuda com o pagamento, me chama 🙏",
+                                  agora):
                             out["lembretes"] += 1
                 except Exception as e:  # noqa: BLE001
                     _log.warning("ia_orcamento.rodar: orçamento %s: %s", i["id"], e)

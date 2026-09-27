@@ -60,6 +60,8 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
   criado_em timestamptz default now());
 create unique index idx_mensagens_sid_conversa
   on mensagens (conversa_id, provider_sid) where provider_sid is not null;
+create table funil_etapas (conta_id bigint, chave text, rotulo text, ordem int, fase text,
+  gatilho text);
 """
 
 
@@ -119,6 +121,7 @@ def prime(pool, rec):
                "PEDRO": _membro(c, "Pedro Lima", "5586900000002"),
                "ZAQ": _membro(c, "ZAQ SDR", "5586900000009")}
         c.execute((BASE / "414_visita_rotinas.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "425_revisao_motores_parte1.sql").read_text(encoding="utf-8"))
         c.execute("update visita_rotinas_config set ligado_em=%s where conta_id=%s",
                   (QUA_10 - timedelta(days=3), PRIME))
         c.commit()
@@ -259,10 +262,13 @@ def test_sim_depois_de_a_equipe_falar_de_outra_coisa_nao_e_resposta(pool, rec, p
     _cliente_diz(pool, conv, "sim", datetime(2026, 9, 29, 18, 25, tzinfo=BRT))
     vr.rodar(pool, datetime(2026, 9, 29, 18, 30, tzinfo=BRT))
     assert _estado(pool, ev)["confirmado_em"] is None
-    # o "1" puro continua sendo resposta
+    # NEM O "1" PURO (revisão de 27/09/2026): depois que a equipe fala, o número pode
+    # estar respondendo a ela ("salão 1 ou 2?"). A conversa é da equipe, e quem confirma
+    # é ela, pelo app
     _cliente_diz(pool, conv, "1", datetime(2026, 9, 29, 18, 40, tzinfo=BRT))
     vr.rodar(pool, datetime(2026, 9, 29, 18, 42, tzinfo=BRT))
-    assert _estado(pool, ev)["confirmado_em"] is not None
+    assert _estado(pool, ev)["confirmado_em"] is None
+    assert len(rec["cliente"]) == 1                              # e nada saiu ao cliente
 
 
 def test_o_vendedor_marca_confirmada_e_as_mensagens_param(pool, rec, prime):
@@ -541,3 +547,83 @@ def test_os_templates_compilam():
     from web import painel_prospeccao as pp
     pp._env.parse(pp._REGUA_TPL)
     pp._env.parse(pp._KANBAN_TPL)
+
+
+# ══════════════════════════════════════════════ a revisão de 27/09/2026 (parte 1)
+
+@pytest.mark.parametrize("status", ["perdido", "ganho", "lista_espera"])
+def test_card_fora_do_jogo_nao_recebe_a_vespera(pool, rec, prime, status):
+    lead, conv, ev = _visita(pool, prime["JAC"])
+    with pool.connection() as c:
+        c.execute("update prospeccao set status=%s where id=%s", (status, lead))
+        c.commit()
+    vr.rodar(pool, datetime(2026, 9, 29, 18, 3, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 30, 8, 5, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 30, 8, 35, tzinfo=BRT))
+    assert rec["cliente"] == []
+    assert not [z for z in rec["zap"] if "sem confirmação" in z[1].lower()]
+
+
+def test_quem_pediu_pra_parar_nao_recebe_mais_nada(pool, rec, prime):
+    lead, conv, ev = _visita(pool, prime["JAC"])
+    _cliente_diz(pool, conv, "não quero mais, obrigada", datetime(2026, 9, 29, 12, 0, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 29, 18, 3, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 30, 8, 5, tzinfo=BRT))
+    assert rec["cliente"] == []
+
+
+def test_o_membro_da_ia_nao_recebe_aviso_quem_responde_e_gente(pool, rec, prime):
+    """O 'ZAQ SDR' é dono de uma regra com a IA ligada: o WhatsApp dele é o do dono da
+    conta. A visita na agenda dele, com o card da Jacqueline: o 'veio?' vai pra ela."""
+    with pool.connection() as c:
+        c.execute("""insert into chip_regra (conta_id, chip_id, ativa, membro_id, ia_ligada)
+                     values (%s,%s,true,%s,true)""", (PRIME, CHIP2, prime["ZAQ"]))
+        c.commit()
+    _l1, _c1, ev1 = _visita(pool, prime["JAC"], recebe=prime["ZAQ"])
+    vr.rodar(pool, datetime(2026, 9, 30, 11, 2, tzinfo=BRT))
+    veio = [z for z in rec["zap"] if "veio?" in z[1]]
+    assert [z[0] for z in veio] == ["5586900000001"]                 # a Jacqueline
+    # e a visita que só tem a IA (card e agenda dela): nenhum aviso sai
+    _l2, _c2, ev2 = _visita(pool, prime["ZAQ"], nome="Rui Costa")
+    vr.rodar(pool, datetime(2026, 9, 30, 11, 4, tzinfo=BRT))
+    assert not [z for z in rec["zap"] if z[0] == "5586900000009"]
+
+
+def test_o_teto_do_chip_segura_e_solta_depois(pool, rec, prime, monkeypatch):
+    from finance import teto_chip as tc
+    lead, conv, ev = _visita(pool, prime["JAC"], chip=CHIP2)
+    vespera = datetime(2026, 9, 29, 18, 3, tzinfo=BRT)
+    with pool.connection() as c:
+        for i in range(tc.POR_HORA):
+            c.execute("""insert into envios_automaticos (conta_id, chip_id, origem, criado_em)
+                         values (%s,%s,'teste',%s)""",
+                      (PRIME, CHIP2, vespera - timedelta(minutes=30)))
+        c.commit()
+    vr.rodar(pool, vespera)
+    assert rec["cliente"] == []
+    assert _estado(pool, ev)["vespera_em"] is None                  # não gastou o passo
+    assert _estado(pool, ev)["envio_falhas"] == 0                   # nem contou falha
+    # uma hora depois, o teto da hora abriu: sai, e conta
+    vr.rodar(pool, vespera + timedelta(minutes=35))
+    assert len(rec["cliente"]) == 1 and "Amanhã às 10h" in rec["cliente"][0][1]
+    with pool.connection() as c:
+        assert c.execute("select count(*) from envios_automaticos where origem='visita'"
+                         ).fetchone()[0] == 1
+    # outro chip não é afetado pelo teto deste
+    with pool.connection() as c:
+        assert tc.pode(c, PRIME, None, vespera) is True
+
+
+def test_o_prazo_estourado_conta_como_enviado(pool, rec, prime, monkeypatch):
+    lead, conv, ev = _visita(pool, prime["JAC"])
+    tentativas = []
+
+    def _lento(c, conta, canal, destino, texto, conversa_id=None):
+        tentativas.append(texto)
+        return {"ok": False, "erro": "Read timed out. (read timeout=15)"}
+    monkeypatch.setattr(agente, "_mandar", _lento)
+    vr.rodar(pool, datetime(2026, 9, 29, 18, 3, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 29, 18, 30, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 29, 19, 0, tzinfo=BRT))
+    assert len(tentativas) == 1                                     # não manda de novo
+    assert _estado(pool, ev)["vespera_em"] is not None

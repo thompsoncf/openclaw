@@ -81,6 +81,14 @@ create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug 
 """
 
 
+
+@pytest.fixture(autouse=True)
+def _o_dia_todo(monkeypatch):
+    """Os testes do relógio usam a hora de verdade: a janela das 8h às 20h (revisão de
+    27/09/2026) fica aberta o dia todo aqui, e tem os testes dela à parte, com hora
+    fixa — senão a suíte quebraria rodando de noite."""
+    monkeypatch.setattr(iao, "HORAS_CLIENTE", (0, 24))
+
 @pytest.fixture()
 def pool():
     admin = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1, open=True)
@@ -578,3 +586,38 @@ def test_um_orcamento_esperando_conferencia_por_vez(pool, prime, agente_ia):
     with pool.connection() as c:
         assert c.execute("select count(*) from orcamentos").fetchone()[0] == 1
     assert "já está com a equipe" in agente_ia["enviados"][-1][1]
+
+
+# ══════════════════════════════════════════════ a janela das 8h às 20h (revisão de 27/09/2026)
+
+def _amanha_as(h, m=0):
+    d = datetime.now(BRT).date() + timedelta(days=1)
+    return datetime(d.year, d.month, d.day, h, m, tzinfo=BRT)
+
+
+def test_de_noite_o_lembrete_espera_a_manha(pool, prime, envios, monkeypatch):
+    monkeypatch.setattr(iao, "HORAS_CLIENTE", (8, 20))
+    noite = _amanha_as(23)
+    oid, conv = _aprovado(pool, prime, ha=timedelta(hours=25))
+    with pool.connection() as c:
+        c.execute("update orcamentos set aprovada_em=%s where id=%s", (noite - timedelta(hours=25), oid))
+        c.execute("update ia_orcamentos set aprovado_msg_em=%s", (noite - timedelta(hours=25),))
+        c.commit()
+    assert iao.rodar(pool, noite)["lembretes"] == 0 and envios == []
+    assert iao.rodar(pool, noite + timedelta(hours=4))["lembretes"] == 0
+    assert iao.rodar(pool, noite + timedelta(hours=9, minutes=5))["lembretes"] == 1
+
+
+def test_de_noite_a_resposta_a_quem_acabou_de_aprovar_sai_na_hora(pool, prime, envios, monkeypatch):
+    monkeypatch.setattr(iao, "HORAS_CLIENTE", (8, 20))
+    noite = _amanha_as(23)
+    agora_mesmo, _ = _aprovado(pool, prime, ha=timedelta(minutes=12))
+    atrasada, _ = _aprovado(pool, prime, ha=timedelta(hours=2))
+    with pool.connection() as c:
+        c.execute("update orcamentos set aprovada_em=%s where id=%s",
+                  (noite - timedelta(minutes=12), agora_mesmo))
+        c.execute("update orcamentos set aprovada_em=%s where id=%s",
+                  (noite - timedelta(hours=2), atrasada))
+        c.commit()
+    assert iao.rodar(pool, noite)["aprovados"] == 1                 # o cliente acabou de agir
+    assert iao.rodar(pool, noite + timedelta(hours=9, minutes=5))["aprovados"] == 1

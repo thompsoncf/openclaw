@@ -69,6 +69,14 @@ create unique index idx_mensagens_sid_conversa
 """
 
 
+
+@pytest.fixture(autouse=True)
+def _o_dia_todo(monkeypatch):
+    """Os testes do relógio usam a hora de verdade: a janela das 8h às 20h (revisão de
+    27/09/2026) fica aberta o dia todo aqui, e tem os testes dela à parte, com hora
+    fixa — senão a suíte quebraria rodando de noite."""
+    monkeypatch.setattr(iv, "HORAS_CLIENTE", (0, 24))
+
 @pytest.fixture()
 def pool(monkeypatch):
     admin = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1, open=True)
@@ -727,3 +735,56 @@ def test_sim_com_pergunta_confirma_e_a_ia_responde_o_resto(pool, prime, agente_i
     assert "acabou de CONFIRMAR" in agente_ia["prompts"][0]
     with pool.connection() as c:
         assert c.execute("select confirmado_em is not null from ia_visitas").fetchone()[0]
+
+
+# ══════════════════════════════════════════════ a revisão de 27/09/2026 (parte 1)
+
+def _amanha_as(h, m=0, dias=1):
+    d = datetime.now(BRT).date() + timedelta(days=dias)
+    return datetime(d.year, d.month, d.day, h, m, tzinfo=BRT)
+
+
+def test_o_2h_antes_de_uma_visita_as_9h_espera_as_8h(pool, prime, envios, monkeypatch):
+    monkeypatch.setattr(iv, "HORAS_CLIENTE", (8, 20))
+    ini = _amanha_as(9, dias=2)
+    _visita_marcada(pool, prime, ini)
+    with pool.connection() as c:
+        c.execute("update ia_visitas set vespera_em=now()")
+        c.commit()
+    assert iv.rodar(pool, ini - timedelta(minutes=115))["duas_horas"] == 0      # 7h05
+    assert iv.rodar(pool, ini - timedelta(minutes=55))["duas_horas"] == 1       # 8h05
+    assert "Consegue vir?" in envios[-1][1]
+
+
+def test_a_falta_marcada_de_noite_sai_de_manha(pool, prime, envios, monkeypatch):
+    monkeypatch.setattr(iv, "HORAS_CLIENTE", (8, 20))
+    ini = _amanha_as(19)
+    ev, lead, conv = _visita_marcada(pool, prime, ini)
+    with pool.connection() as c:
+        c.execute("update eventos_agenda set desfecho='nao_realizado' where id=%s", (ev,))
+        c.commit()
+    assert iv.rodar(pool, _amanha_as(22, 30))["faltas"] == 0
+    assert iv.rodar(pool, _amanha_as(8, 10, dias=2))["faltas"] == 1
+    assert envios[-1][1] == iv.TEXTO_FALTA
+
+
+@pytest.mark.parametrize("status", ["perdido", "ganho", "lista_espera"])
+def test_card_fora_do_jogo_nao_recebe_nada_do_relogio(pool, prime, envios, status):
+    ini = _amanha_as(15)
+    ev, lead, conv = _visita_marcada(pool, prime, ini)
+    with pool.connection() as c:
+        c.execute("update prospeccao set status=%s where id=%s", (status, lead))
+        c.commit()
+    r = iv.rodar(pool, _amanha_as(18, 5, dias=0))
+    r2 = iv.rodar(pool, ini - timedelta(minutes=110))
+    assert r["vesperas"] == 0 and r2["duas_horas"] == 0 and envios == []
+
+
+def test_quem_pediu_pra_parar_nao_recebe_a_vespera(pool, prime, envios):
+    ini = _amanha_as(15)
+    ev, lead, conv = _visita_marcada(pool, prime, ini)
+    with pool.connection() as c:
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead','por favor não me mande mais mensagem')", (conv,))
+        c.commit()
+    assert iv.rodar(pool, _amanha_as(18, 5, dias=0))["vesperas"] == 0 and envios == []

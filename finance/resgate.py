@@ -344,13 +344,10 @@ def _sql_leads(festa: bool) -> str:
                and not exists (select 1 from resgate_leads r2
                                 where r2.prospeccao_id = p.id and r2.origem = 'ia_numero')))
          and p.status not in {fr.sql_fechadas('p')}
-         -- A LISTA DE ESPERA (parte 2b): quem aceitou esperar a data não é parado.
-         and p.status <> 'lista_espera'
-         -- A DATA SEGURADA (funil novo de eventos): aprovou e espera o sinal, não
-         -- está parado — a reserva tem prazo próprio. O resgate não chama.
-         and p.status not in (select fe.chave from funil_etapas fe
-                               where fe.conta_id = p.conta_id and fe.gatilho = 'orcamento_aprovado'
-                                 and fe.fase = 'venda')
+         -- A LISTA DE ESPERA e a DATA SEGURADA (funil novo de eventos): quem aceitou
+         -- esperar a data, ou aprovou e espera o sinal, não está parado. O resgate
+         -- não chama (a mesma regra dos toques e da IA insiste: `sql_nao_cobra`).
+         and {fr.sql_nao_cobra('p')}
          and (%(perdidos)s or p.status <> 'perdido')
          -- O PERDIDO CONFORME O MOTIVO (seção 4 do mockup): quem fechou com outro,
          -- desistiu ou não cabe no que a empresa faz não é chamado; a data
@@ -1308,7 +1305,7 @@ def _sql_toque_ok() -> str:
     from finance import visita as vis
     return f"""
               and p.vendedor_id = r.membro_id and cv.agente_ativo and cv.status <> 'pendente'
-              and p.status not in {fr.sql_fechadas('p')}
+              and p.status not in {fr.sql_fechadas('p')} and {fr.sql_nao_cobra('p')}
               and (p.evento_em is null or p.evento_em >= current_date + {int(FESTA_MIN_DIAS)})
               and not exists (select 1 from mensagens mi where mi.conversa_id = r.conversa_id
                                  and mi.direcao = 'in' and mi.criado_em > r.entrou_em)
@@ -1418,7 +1415,8 @@ def _perder_sem_resposta(pool, conta_id: int, agora: datetime) -> int:
     n = 0
     with pool.connection() as c:
         rows = c.execute(
-            f"""select r.prospeccao_id, p.status, p.status in {fr.sql_fechadas('p')}
+            f"""select r.prospeccao_id, p.status,
+                       (p.status in {fr.sql_fechadas('p')} or not {fr.sql_nao_cobra('p')})
                   from resgate_leads r
                   join prospeccao p on p.id = r.prospeccao_id and p.conta_id = r.conta_id
                  where r.conta_id=%s and r.ativo and r.estado='chamado'
@@ -1431,7 +1429,9 @@ def _perder_sem_resposta(pool, conta_id: int, agora: datetime) -> int:
              agora - timedelta(days=UMA_VEZ_DIAS))).fetchall()
         for lead, status, fechado in rows:
             if fechado:
-                continue            # alguém fechou a venda: isso não é "não respondeu"
+                # alguém fechou a venda, ou o card espera a EMPRESA (lista de espera,
+                # data segurada): isso não é "não respondeu"
+                continue
             if status != "perdido":
                 try:
                     with c.transaction():

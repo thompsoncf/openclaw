@@ -803,3 +803,78 @@ def test_a_chave_do_preco_direto_da_lista_um_e_todos(pool, equipe):
     assert _ligados() == {"pacote", "dj"}                                  # inativo e alheio, não
     assert scat.definir_diz_preco(pool, EMPRESA, False) == 2
     assert _ligados() == set()
+
+
+# ══════════════════════════════════════════════ a saudação automática do celular
+# 27/09/2026, medido na produção: o celular do chip Thiago manda sozinho "Olá, tudo
+# bem? me chamo Thiago Pinheiro e sou o gerente de vendas…" segundos depois de um
+# contato novo — o mesmo texto em cinco conversas. Pra IA era "gente respondeu", e
+# ela saía antes de dizer oi (finance/saudacao.py).
+
+SAUDACAO = ("Olá, tudo bem? me chamo Thiago Pinheiro e sou o gerente de vendas da Prime "
+            "eventos, estou aqui para lhe ajudar.")
+
+
+def _saudacao_antiga(c, equipe):
+    """A mesma saudação, já mandada numa conversa de outro dia, do mesmo chip."""
+    antiga = _conversa(c, equipe, da_regra=False)
+    _msg(c, antiga, "lead", "oi", seg_atras=86400 * 3)
+    _msg(c, antiga, "humano", SAUDACAO, seg_atras=86400 * 3 - 8)
+    return antiga
+
+
+def test_a_saudacao_automatica_nao_pausa_a_ia(pool, equipe):
+    with pool.connection() as c:
+        _regra(c, equipe["ZAQ"])
+        r = cr.regra(c, EMPRESA, CHIP2)
+        _saudacao_antiga(c, equipe)
+        conv = _conversa(c, equipe)
+        _msg(c, conv, "lead", "olá, gostaria de mais informações", seg_atras=20)
+        _msg(c, conv, "humano", SAUDACAO, seg_atras=10)
+        assert not cr.pausar_se_humano(c, EMPRESA, conv, r)
+        # e o "oi" do cliente continua sem resposta: a IA responde
+        assert cr.tem_o_que_responder(c, conv, r)
+        # resposta digitada de verdade continua pausando
+        _msg(c, conv, "humano", "Oi! Aqui é o Thiago, já te ajudo", seg_atras=5)
+        assert cr.pausar_se_humano(c, EMPRESA, conv, r)
+
+
+def test_a_primeira_vez_que_o_texto_aparece_nao_e_saudacao(pool, equipe):
+    """Sem o mesmo texto em outra conversa do chip, é gente: na dúvida, a IA pausa."""
+    with pool.connection() as c:
+        _regra(c, equipe["ZAQ"])
+        r = cr.regra(c, EMPRESA, CHIP2)
+        conv = _conversa(c, equipe)
+        _msg(c, conv, "lead", "olá", seg_atras=20)
+        _msg(c, conv, "humano", SAUDACAO, seg_atras=10)
+        assert cr.pausar_se_humano(c, EMPRESA, conv, r)
+
+
+def test_o_mesmo_texto_mandado_depois_dos_2_minutos_e_gente(pool, equipe):
+    with pool.connection() as c:
+        _regra(c, equipe["ZAQ"])
+        r = cr.regra(c, EMPRESA, CHIP2)
+        _saudacao_antiga(c, equipe)
+        conv = _conversa(c, equipe)
+        _msg(c, conv, "lead", "olá", seg_atras=600)
+        _msg(c, conv, "humano", SAUDACAO, seg_atras=10)     # 10 min depois: colado à mão
+        assert cr.pausar_se_humano(c, EMPRESA, conv, r)
+
+
+def test_oi_curto_repetido_nao_e_saudacao(pool, equipe):
+    from finance import saudacao as sd
+    with pool.connection() as c:
+        antiga = _conversa(c, equipe, da_regra=False)
+        _msg(c, antiga, "lead", "oi", seg_atras=100)
+        _msg(c, antiga, "humano", "Oi, tudo bem?", seg_atras=95)
+        conv = _conversa(c, equipe)
+        _msg(c, conv, "lead", "oi", seg_atras=20)
+        _msg(c, conv, "humano", "Oi, tudo bem?", seg_atras=10)
+        mid = c.execute("select max(id) from mensagens").fetchone()[0]
+        assert not sd.e_saudacao(c, EMPRESA, mid)
+        # o mesmo texto de outro CHIP não conta: a saudação é do celular daquele número
+        _saudacao_antiga(c, equipe)
+        c.execute("update conversas set chip_id=null where id <> %s", (conv,))
+        _msg(c, conv, "humano", SAUDACAO, seg_atras=9)
+        mid = c.execute("select max(id) from mensagens").fetchone()[0]
+        assert not sd.e_saudacao(c, EMPRESA, mid)

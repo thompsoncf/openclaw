@@ -278,3 +278,29 @@ def test_a_tela_renderiza(pool, prime):
     miolo = tpl[tpl.index('<div style="display:flex;align-items:flex-start'):tpl.rindex("{% endblock %}")]
     html = _env.from_string(miolo).render(d=d, brl=pp.brl, dur=pp._dur)
     assert "Desafio: IA × equipe" in html and "zaq teste · IA" in html and "0,3 min" in html
+
+
+def test_a_saudacao_automatica_nao_e_a_1a_resposta_da_equipe(pool, prime):
+    """27/09/2026: o celular do chip manda sozinho a mesma saudação segundos depois de
+    todo contato novo. Contava como a equipe respondendo em 10 segundos
+    (finance/saudacao.py)."""
+    j = prime["Jacqueline"]
+    saud = ("Olá, tudo bem? me chamo Thiago Pinheiro e sou o gerente de vendas da Prime eventos, "
+            "estou aqui para lhe ajudar.")
+    leads = []
+    for dia_ in (DIA_10, DIA_10 + timedelta(days=1)):
+        lead, conv = _lead(pool, j, chega=dia_)
+        with pool.connection() as c:
+            c.execute("insert into mensagens (conversa_id, direcao, autor, texto, criado_em) "
+                      "values (%s,'out','humano',%s,%s)", (conv, saud, dia_ + timedelta(seconds=9)))
+            c.execute("insert into mensagens (conversa_id, direcao, autor, texto, criado_em) "
+                      "values (%s,'out','humano','Oi! Pra quando é a festa?',%s)",
+                      (conv, dia_ + timedelta(minutes=30)))
+            c.commit()
+        leads.append(lead)
+    linhas = {x["id"]: x for x in dia._por_lead(pool, EMPRESA, DIA_10.date().replace(day=1),
+                                                 DIA_10.date().replace(month=10, day=1))}
+    # a saudação é reconhecida nas duas (olhando pra trás, o padrão vale pra ambas), e a
+    # 1ª resposta é a de verdade, 30 minutos depois
+    for lead, dia_ in zip(leads, (DIA_10, DIA_10 + timedelta(days=1))):
+        assert linhas[lead]["t_resp"] - dia_ == timedelta(minutes=30)

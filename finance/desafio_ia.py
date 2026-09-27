@@ -90,6 +90,17 @@ def _ia_ligada_hoje(pool, conta_id: int) -> bool:
         return False
 
 
+def tem_desafio(pool, conta_id: int) -> bool:
+    """A conta tem o Desafio? Vende festa (a tela mede visita e convidados) e tem um
+    número com a IA atendendo. É o portão dos links pra ele: no funil de Atendimento
+    e na barra de Relatórios (27/09/2026 — o único caminho era um botão escondido
+    em Comunicação › Agente)."""
+    try:
+        return bool(vis.vende_festa(pool, conta_id)) and _ia_ligada_hoje(pool, conta_id)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _por_lead(pool, conta_id: int, ini: date, fim: date) -> list[dict]:
     """Uma linha por lead recebido no mês: de QUEM é e o que aconteceu com ele.
 
@@ -129,8 +140,11 @@ def _por_lead(pool, conta_id: int, ini: date, fim: date) -> list[dict]:
                     " else p.vendedor_id end)")
     except Exception:  # noqa: BLE001 — banco sem a 396
         vend_sql = "p.vendedor_id"
-    # O NÚMERO DO SUPERVISOR não é cliente (27/09/2026): o teste dele não vira placar
+    # O NÚMERO DO SUPERVISOR não é cliente (27/09/2026): o teste dele não vira placar.
+    # E a SAUDAÇÃO AUTOMÁTICA do celular não é a 1ª resposta da equipe — contava como
+    # resposta em 10 segundos (finance/saudacao.py).
     from finance import resgate as _rg
+    from finance import saudacao as _sd
     with pool.connection() as c:
         fora, fora_v = _rg.sql_fora_do_supervisor(c, conta_id)
     sql = f"""
@@ -153,9 +167,11 @@ def _por_lead(pool, conta_id: int, ini: date, fim: date) -> list[dict]:
                  min(m.criado_em) filter (where m.autor = 'humano') t_humano,
                  min(m.criado_em) filter (where m.autor in ('humano','bot')) t_todos
             from pin join cv on cv.lead = pin.lead
+            join conversas cvx on cvx.id = cv.id
             join mensagens m on m.conversa_id = cv.id and m.direcao = 'out'
                             and m.criado_em >= pin.t
                             and coalesce(m.status, '') not in ('ia_fora', 'erro')
+                            and {_sd.sql_nao_saudacao('m', 'cvx')}
            group by pin.lead)
         select l.id, l.vendedor_id, l.ia_membro, pin.t,
                case when l.ia_membro is not null then pout.t_todos else pout.t_humano end,

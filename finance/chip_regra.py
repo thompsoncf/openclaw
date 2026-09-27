@@ -310,17 +310,23 @@ def pausar_se_humano(c, conta_id: int, conversa_id: int, r: dict) -> bool:
     mesmo: gente assumiu, e a IA falando por cima faria o cliente ouvir duas vozes.
     Fica como o botão "Assumir" deixa: status 'pendente' e IA desligada, pra ninguém
     religar sem querer. O eco da PRÓPRIA IA não conta — `_add_bot_msg` marca a linha
-    como bot, e o texto igual a uma fala recente dela é o seguro da corrida."""
+    como bot, e o texto igual a uma fala recente dela é o seguro da corrida.
+
+    A SAUDAÇÃO AUTOMÁTICA do WhatsApp Business também não conta (27/09/2026,
+    finance/saudacao.py): ela sai do celular sozinha, segundos depois do 1º "oi", e
+    calava a IA antes de ela dizer qualquer coisa."""
+    from finance import saudacao as _sd
     desde = _depois_de(c, conversa_id, r)
     h = c.execute(
-        """select 1 from mensagens m
-            where m.conversa_id=%s and m.direcao='out' and m.autor='humano'
+        f"""select 1 from mensagens m join conversas cv on cv.id = m.conversa_id
+            where m.conversa_id=%s and cv.conta_id=%s and m.direcao='out' and m.autor='humano'
               and m.criado_em > coalesce(%s::timestamptz, '-infinity')
               and not exists (select 1 from mensagens b
                                where b.conversa_id=m.conversa_id and b.autor='bot'
                                  and b.texto = m.texto
                                  and b.criado_em > now() - interval '1 hour')
-            limit 1""", (conversa_id, desde)).fetchone()
+              and {_sd.sql_nao_saudacao('m', 'cv')}
+            limit 1""", (conversa_id, conta_id, desde)).fetchone()
     if not h:
         return False
     c.execute("update conversas set status='pendente', agente_ativo=false "
@@ -334,10 +340,16 @@ def tem_o_que_responder(c, conversa_id: int, r: dict) -> bool:
     """A última mensagem é do cliente? Numa rajada, cada mensagem acorda o agente;
     a volta que responde lê todas, e as outras não podem responder de novo. O
     recado de fora do horário não conta como resposta: quando a IA abre, ela
-    responde o que ficou (ver `pendentes_da_abertura`)."""
-    u = c.execute("""select autor, coalesce(texto,''), coalesce(status,'') from mensagens
-                      where conversa_id=%s
-                      order by criado_em desc, id desc limit 1""", (conversa_id,)).fetchone()
+    responde o que ficou (ver `pendentes_da_abertura`). A saudação automática do
+    celular também não: ela sai sozinha logo depois do "oi", e o "oi" continua sem
+    resposta (finance/saudacao.py)."""
+    from finance import saudacao as _sd
+    u = c.execute(f"""select m.autor, coalesce(m.texto,''), coalesce(m.status,'')
+                        from mensagens m join conversas cv on cv.id = m.conversa_id
+                       where m.conversa_id=%s and cv.conta_id = coalesce(%s, cv.conta_id)
+                         and {_sd.sql_nao_saudacao('m', 'cv')}
+                       order by m.criado_em desc, m.id desc limit 1""",
+                    (conversa_id, (r or {}).get("conta_id"))).fetchone()
     if not u:
         return False
     return u[0] == "lead" or (u[0] == "bot" and u[2] == STATUS_FORA)

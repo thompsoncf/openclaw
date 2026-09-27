@@ -406,11 +406,23 @@ def _titulo(pool, conta_id: int, mid: int, paciente: str, fone: str, plano_nome:
                 return r[0]
     except Exception:  # noqa: BLE001
         pass
-    cliente_id = None
+    from finance import clinica_pacientes as _cpa
+    lead = None
+    try:
+        with pool.connection() as c:
+            r = c.execute("""select a.prospeccao_id from clinica_assinatura_mensalidades m
+                               join clinica_assinantes a on a.id = m.assinante_id and a.conta_id = m.conta_id
+                              where m.id=%s and m.conta_id=%s""", (mid, conta_id)).fetchone()
+            lead = r[0] if r else None
+    except Exception:  # noqa: BLE001
+        lead = None
+    cliente_id = _cpa.ficha_do_paciente(pool, conta_id, lead, paciente, fone)
     try:
         from finance import clientes as _cli
-        achado = _cli.buscar_unico_por_telefone(pool, conta_id, fone) if fone else None
-        cliente_id = achado["id"] if achado else _cli.criar_cliente(pool, conta_id, paciente, telefone=fone or None)
+        if not cliente_id:
+            achado = _cli.buscar_unico_por_telefone(pool, conta_id, fone) if fone else None
+            cliente_id = achado["id"] if achado else _cli.criar_cliente(pool, conta_id, paciente,
+                                                                         telefone=fone or None)
     except Exception:  # noqa: BLE001 — sem a base de clientes, o título vai sem a ficha
         cliente_id = None
     try:

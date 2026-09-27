@@ -284,11 +284,14 @@ def vender(pool, conta_id: int, *, evento_id: int | None = None, lead: int | Non
                          (pac["fone"] or "")[:40], q, b - d, d, rec, "aguardando" if rec else "sem",
                          membro_id)).fetchone()[0])
                 c.commit()
+                from finance import clinica_pacientes as _cpa
+                cliente_id = _cpa.ficha_do_paciente(pool, conta_id, pac["lead"], pac["paciente"], pac["fone"])
                 try:
                     r = pdv.registrar_venda_balcao(
                         pool, conta_id,
                         [{"produto_id": p["id"], "quantidade": q, "preco_unit_centavos": p["preco_centavos"]}
                          for p, q in linhas],
+                        cliente_id=cliente_id,
                         cliente_nome=pac["paciente"], cliente_telefone=pac["fone"] or None, pagamento=pagamento,
                         desconto_centavos=sum(descontos), membro_id=membro_id,
                         vencimento=(hoje + timedelta(days=30)).isoformat() if pagamento == "fiado" else None)

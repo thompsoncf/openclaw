@@ -151,6 +151,14 @@ def novo(request: Request):
     # sessão — nome, celular e busca nunca vão na URL
     form = request.session.pop("agenda_form", None) or {}
     with get_pool().connection() as c:
+        # marcar pela FICHA do paciente (a do filho no WhatsApp da mãe): o paciente é
+        # ela, não o nome do card
+        if not form and _int(q.get("cliente")):
+            from finance import clinica_pacientes as _cpa
+            fp = _cpa.ficha(c, conta_id, _int(q.get("cliente")), agora)
+            if fp:
+                form = {"lead_id": str(fp["lead"] or ""), "nome": fp["nome"], "fone": fp["fone"], "busca": fp["nome"],
+                        "cliente_id": str(fp["id"])}
         if not form and _int(q.get("lead")):
             r = c.execute("""select id, coalesce(nullif(contato,''), empresa, ''),
                                     coalesce(nullif(whatsapp,''), telefone, '')
@@ -199,7 +207,7 @@ def novo(request: Request):
 def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), inicio: str = Form(""),
                 lead_id: str = Form(""), nome: str = Form(""), fone: str = Form(""),
                 origem: str = Form(""), observacao: str = Form(""), busca: str = Form(""),
-                data: str = Form(""), acao: str = Form("agendar")):
+                data: str = Form(""), acao: str = Form("agendar"), cliente_id: str = Form("")):
     conta, _g, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -211,7 +219,7 @@ def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), in
     dia_volta = ca.local(quando).date().isoformat() if quando else data
     volta = "/painel/clinica/agenda/novo?" + urlencode({"prof": prof, "tipo": tipo, "data": dia_volta})
     guardar = {"inicio": inicio, "lead_id": lead_id, "nome": nome[:120], "fone": fone[:30],
-               "origem": origem, "observacao": observacao[:500], "busca": busca[:60]}
+               "origem": origem, "observacao": observacao[:500], "busca": busca[:60], "cliente_id": cliente_id}
     if acao == "buscar":
         request.session["agenda_form"] = guardar
         return _ir(request, volta)
@@ -219,9 +227,20 @@ def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), in
         request.session["agenda_form"] = guardar
         return _ir(request, volta, erro="Escolha um horário.")
     with get_pool().connection() as c:
+        # pela ficha: o paciente é o da ficha (conferido na conta), com o card dela
+        paciente = ""
+        kid = _int(cliente_id)
+        if kid:
+            from finance import clinica_pacientes as _cpa
+            fp = _cpa.ficha(c, conta_id, kid, datetime.now(timezone.utc))
+            if fp:
+                paciente, lead_id = fp["nome"], str(fp["lead"] or lead_id)
+            else:
+                kid = None
         eid, erro = ca.agendar(c, conta_id, profissional_id=_int(prof) or 0, servico_id=_int(tipo) or 0,
                                inicio=quando, lead_id=_int(lead_id), nome=nome, fone=fone, origem=origem,
-                               observacao=observacao, encaixe=encaixe, membro_id=membro)
+                               observacao=observacao, encaixe=encaixe, membro_id=membro, paciente=paciente,
+                               cliente_id=kid)
         if erro:
             c.rollback()
             request.session["agenda_form"] = guardar
@@ -532,6 +551,7 @@ _TPL_NOVO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
         {% for a in achados %}<label><input type="radio" name="lead_id" value="{{ a.id }}" {% if lead_escolhido == a.id %}checked{% endif %}> {{ a.nome }}{% if a.fone %} · {{ a.fone }}{% endif %}</label>{% endfor %}
         <label><input type="radio" name="lead_id" value="" {% if not achados or (not lead_escolhido and form.nome) %}checked{% endif %}> Paciente novo</label>
       </div></div>
+    {% if form.cliente_id %}<input type="hidden" name="cliente_id" value="{{ form.cliente_id }}"><div class="inteira ok">Paciente: <b>{{ form.nome }}</b> (pela ficha)</div>{% endif %}
     <label>Nome (paciente novo)<input name="nome" maxlength="120" autocomplete="off" value="{{ form.nome or '' }}"></label>
     <label>Celular com DDD (paciente novo)<input name="fone" inputmode="tel" maxlength="20" autocomplete="off" placeholder="(99) 9 8888-7777" value="{{ form.fone or '' }}"></label>
     <div class="inteira"><span class="mut">Como conheceu</span><div class="ag-ops" style="margin-top:.3rem">{% for o in ORIGENS %}<label><input type="radio" name="origem" value="{{ o }}" {% if form.origem == o %}checked{% endif %}> {{ o }}</label>{% endfor %}</div></div>

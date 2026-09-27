@@ -217,6 +217,22 @@ def _gravar_diz_preco(c, conta_id: int, id: int, diz: bool) -> None:
         pass
 
 
+def definir_diz_preco(pool, conta_id: int, diz: bool, id: int | None = None) -> int:
+    """Liga ou desliga "a IA pode dizer este preço" de UM serviço (`id`) ou de todos os
+    ATIVOS da conta (`id` nulo — o "Liberar todos" / "Nenhum" da lista). Devolve
+    quantos mudaram. Sempre dentro da conta: um id de outra empresa não acha linha."""
+    sql = ("update servicos_catalogo set agente_diz_preco=%s "
+           "where conta_id=%s and ativo and agente_diz_preco is distinct from %s")
+    args = [bool(diz), conta_id, bool(diz)]
+    if id is not None:
+        sql += " and id=%s"
+        args.append(int(id))
+    with pool.connection() as c:
+        n = c.execute(sql, args).rowcount
+        c.commit()
+    return n
+
+
 def excluir(pool, conta_id: int, id: int) -> dict:
     """Inativa o serviço. Nome histórico — nunca apagou nada, e é por isso que a
     tela passou a chamar de "inativar" (ver `listar_inativos`)."""

@@ -208,7 +208,7 @@ def test_quem_respondeu_volta_pra_etapa_com_o_selo(monkeypatch, pool, equipe):
     _ia_e_resgate(pool, equipe)
     _resgatado(pool, equipe, "Ivo Respondeu", estado="respondeu")
     html = _render(monkeypatch, pool)
-    assert 'class="kbcol kbcol-rsg"' not in html                     # ninguém em andamento
+    assert "Ivo Respondeu" not in _coluna(html, "_resgate")         # ninguém em andamento
     assert "♻️ veio do Resgate" in _coluna(html, "contatado")
 
 
@@ -220,3 +220,31 @@ def test_o_proximo_passo_em_texto():
     assert tri.passo({"ultimo_envio_em": ult, "toques": 3}, agora) == "última chamada 27/09 · vira perdido em 2 dias"
     assert tri.passo({"ultimo_envio_em": ult, "uma_vez": True}, agora).startswith("chamado 27/09 · uma vez só")
     assert tri.passo({"ultimo_envio_em": None}, agora) == "na fila · sai hoje"
+
+
+def test_no_ensaio_a_coluna_mostra_os_proximos_da_fila(monkeypatch, pool, equipe):
+    """27/09/2026, o dono no primeiro teste: "faltou o funil resgate, não vi". No
+    Ensaio ninguém muda de dono — então a coluna mostra os próximos que a IA chamaria,
+    com a origem de cada um. O lead continua no card do vendedor, na etapa dele."""
+    from finance import resgate as rg
+    _ia_e_resgate(pool, equipe)
+    lid, _ = _lead(pool, "Olga Casamento", equipe["PEDRO"], ult="out", dias=12)
+    agora = datetime.now(timezone.utc)
+    monkeypatch.setattr(rg, "fila", lambda *a, **k: [
+        {"id": lid, "quem": "Olga Casamento", "vendedor_id": equipe["PEDRO"], "status": "contatado",
+         "origem": "follow_up", "desde": agora - timedelta(days=12), "faixa": 3,
+         "evento_em": None, "uma_vez": False}])
+    html = _render(monkeypatch, pool)
+    rsg = _coluna(html, "_resgate")
+    assert "Ensaio" in rsg and "Os próximos que a IA chamaria" in rsg
+    assert "Olga Casamento" in rsg and "vem do follow-up · de Pedro · 12 dias parado" in rsg
+    assert "etapa: Contatado" in rsg and "prévia no Ensaio" in rsg
+    assert "Olga Casamento" in _coluna(html, "contatado")     # continua com o vendedor
+
+
+def test_resgate_ligado_sem_ninguem_na_fila_diz_isso(monkeypatch, pool, equipe):
+    from finance import resgate as rg
+    _ia_e_resgate(pool, equipe)
+    monkeypatch.setattr(rg, "fila", lambda *a, **k: [])
+    html = _render(monkeypatch, pool)
+    assert "ninguém na fila hoje" in _coluna(html, "_resgate")

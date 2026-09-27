@@ -500,10 +500,96 @@ def test_salvar_a_etapa_sem_mexer_na_fase_nao_reordena(monkeypatch, pool):
 
 
 def test_a_fase_so_aparece_pra_quem_pode_mudar():
-    """O seletor não existe nas fixas — e a chave continua visível em todas."""
+    """O seletor não existe nas fixas. A chave, desde 27/09/2026, fica na dica do
+    nome em todas (a âncora deste teste) em vez de impressa ao lado dele."""
     tpl = pp._REGUA_TPL
     assert 'name="fase"' in tpl and "já vendido · pós-venda" in tpl
-    ini = tpl.index('<code class="mut" style="font-size:.68rem">{{ e.chave }}</code>')
+    ini = tpl.index('title="chave interna: {{ e.chave }}"')
     trecho = tpl[ini:ini + 900]
     assert "{% if e.fixa %}" in trecho and "{% else %}" in trecho, \
         "o seletor de fase não está atrás do portão das fixas"
+
+
+# ----------------------------------------------------------------- a tela (27/09/2026)
+#
+# Os bugs que o PDF da régua da Prime mostrou (mockup
+# docs/mockups/regua_funil_reorganizada.html, itens 2 a 6).
+
+def _tela(**extra):
+    """A Régua renderizada, com o mínimo de contexto que o template pede."""
+    from datetime import time
+
+    from finance import follow_up as fu
+    from finance import raio_x_perfil as rxp
+    from web.portal import _env
+    t = _env.get_template("prospeccao_regua")
+    etapa = {"id": 1, "chave": "qualificado", "rotulo": "Visita marcada", "fase": "venda",
+             "fixa": False, "prazo_n": "", "prazo_u": "h", "n": 213, "gatilho": None,
+             "gatilho_ativo": False, "teto_dias": None, "renovacoes_max": 0,
+             "teto_total": 0, "exige_justificativa": True, "saidas_lista": [],
+             "toques_dias": None, "exige_motivo": False, "sai_do_quadro": False,
+             "agenda_ao_entrar": False, "reativa_para": None}
+    base = dict(conta=None, aviso=None, etapas=[etapa], conv=[], eventos=[], unidades=[],
+                dias_on={1, 2, 3, 4, 5, 6}, n_mov=0, gerencia=True, request=None,
+                caps={"vendas": True, "origens": True}, raio_x_perfil=rxp.perfil("eventos"),
+                tem_follow_up=True, modelo={"itens": [], "colunas": ["Novo"], "fora": []},
+                escolhidas_tpl=set(), padrao_tpl={}, rot_ramo="eventos", janela_herda=True,
+                esc={"n": "", "u": "h", "ph": "4", "herda": True},
+                teto={"v": "", "ph": "5", "herda": True},
+                fup={"proposta": {"v": "", "ph": "3", "herda": True},
+                     "toques": {"v": "", "ph": "1,3,7", "herda": True},
+                     "festa": {"v": "", "ph": "30", "herda": True, "tem": True},
+                     "teto": {"v": "", "ph": "10", "herda": True}},
+                rotinas_festa={"confirmar": True, "perguntar_veio": True, "depois_visita": True},
+                festa_cfg={"proposta_validade_dias": 7, "reserva_disputada_h": 48,
+                           "pos_festa": True, "avaliacao_link": ""},
+                espelho={"de": None, "para": None}, equipe_espelho=[],
+                motivos_conta=[], modelo_motivos=[],
+                cfg=dict(fu._PADRAO, gatilhos_modo="off", cobranca_modo="off",
+                         esteira_modo="ligado", temperatura_modo="ligado",
+                         janela_abre=time(8), janela_fecha=time(19)))
+    base.update(extra)
+    return "".join(t.blocks["conteudo"](t.new_context(base)))
+
+
+def test_as_caixinhas_das_rotinas_nao_esticam():
+    """O CSS geral do app (web/portal.py) põe todo input com 100% de largura e 48px
+    de altura. As caixinhas das rotinas não zeravam isso: cada uma ocupava a linha
+    inteira e o texto ficava numa tira de uma palavra por linha (páginas 1 a 3 do
+    PDF). As outras caixinhas da Régua sempre zeraram."""
+    tpl = pp._REGUA_TPL
+    for campo in ('id="rf_{{ campo }}"', 'id="rf_pos_festa"'):
+        trecho = tpl[tpl.index(campo):]
+        trecho = trecho[:trecho.index(">")]
+        assert "width:auto" in trecho and "min-height:0" in trecho, campo
+
+
+def test_a_contagem_tem_nome_e_a_chave_sai_da_vista():
+    html = _tela()
+    # "213" sozinho ao lado de "horas" parecia prazo
+    assert ">213<span" in html and "leads</span>" in html
+    # "Visita marcada · qualificado" contradizia o nome; a chave fica só na dica
+    assert '<code class="mut" style="font-size:.68rem">qualificado</code>' not in html
+    assert 'title="chave interna: qualificado"' in html
+
+
+def test_o_texto_da_esteira_le_os_numeros_da_conta():
+    """Era fixo: "10 leads ... cobra no dia 1, 3 e 7", qualquer que fosse a escada."""
+    html = _tela(est_por_dia=8, est_dias_txt="2, 4 e 9")
+    assert "8 leads por vendedor por dia" in html and "cobra no dia 2, 4 e 9" in html
+    assert "10 leads por vendedor" not in html
+    assert pp._dias_br((1, 3, 7)) == "1, 3 e 7" and pp._dias_br((5,)) == "5"
+
+
+def test_o_aviso_da_temperatura_so_com_ela_desligada():
+    """"Hoje todo lead é carimbado quente e nada esfria" aparecia com a temperatura
+    LIGADA, que é o caso da Prime."""
+    from datetime import time
+
+    from finance import follow_up as fu
+    ligada = _tela()
+    assert "carimbado quente" not in ligada
+    desligada = _tela(cfg=dict(fu._PADRAO, gatilhos_modo="off", cobranca_modo="off",
+                               temperatura_modo="off", janela_abre=time(8),
+                               janela_fecha=time(19)))
+    assert "carimbado quente" in desligada

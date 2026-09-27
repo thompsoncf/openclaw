@@ -960,6 +960,8 @@ def test_os_quatro_degraus_do_periodo(pool, visita):
     assert dv["contratos"] == 2 and dv["contratos_valor"] == 700000
     # a Eva aceitou a proposta em agosto: é o contrato que "sobra" sobre as propostas
     assert dv["contratos_de_antes"] == 1
+    assert dv["por_vendedor"][visita["j"]]["ct_de_antes"] == 1
+    assert dv["por_vendedor"][visita["p"]]["ct_de_antes"] == 0
 
 
 def test_os_clientes_de_cada_ponta(pool, visita):
@@ -1013,3 +1015,7 @@ def test_a_tela_mostra_da_visita_ao_contrato(pool, visita, monkeypatch):
     assert "Total do time" in html
     # a Eva aceitou em agosto: a nota explica por que os contratos passam das propostas
     assert "1 contrato do período veio de proposta aceita antes dele" in html
+    # e a mesma nota POR VENDEDOR, embaixo da tabela (pedido do dono em 27/09/2026:
+    # o Thiago tinha 4 contratos e 3 propostas, e a tabela não dizia por quê)
+    assert "1 contrato de Jacqueline veio de proposta aceita antes do período" in html
+    assert "contrato de Pedro" not in html

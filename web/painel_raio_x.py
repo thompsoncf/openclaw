@@ -59,9 +59,11 @@ def _linhas_da_visita(d: dict, vendedores) -> list[dict]:
     for vid, nome in vendedores:
         x = por.pop(vid, {})
         out.append({"nome": nome, "leads": leads.get(vid, 0), **{k: x.get(k, 0) for k in
-                    ("visitas", "vis_orc", "prop_ass", "contratos", "contratos_valor")}})
+                    ("visitas", "vis_orc", "prop_ass", "contratos", "contratos_valor",
+                     "ct_de_antes")}})
     resto = {k: sum(x.get(k, 0) for x in por.values())
-             for k in ("visitas", "vis_orc", "prop_ass", "contratos", "contratos_valor")}
+             for k in ("visitas", "vis_orc", "prop_ass", "contratos", "contratos_valor",
+                       "ct_de_antes")}
     if any(resto.values()):
         out.append({"nome": "Outros (dono, sem vendedor)", "leads": None, **resto})
     return out
@@ -414,6 +416,12 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
     <tr class="tot"><td>Total do time</td><td class="n">{{ p.leads if p else '—' }}</td><td class="n">{{ dv.visitas }}</td><td class="n">{{ dv.vis_orc }}</td>
       <td class="n">{{ dv.prop_ass }}</td><td class="n">{{ dv.contratos }}</td><td class="n">{{ brl(dv.contratos_valor) }}</td></tr>
   </table></div>
+  {#- POR QUE OS CONTRATOS PASSAM DAS PROPOSTAS, por vendedor (pedido do dono em
+      27/09/2026): cada coluna conta pelo dia em que aconteceu, e o contrato de uma
+      proposta aceita no período anterior entra só nos contratos deste. -#}
+  {% for x in dv_linhas if x.ct_de_antes %}
+  <div class="rx-dv-nota">{{ x.ct_de_antes }} contrato{{ 's' if x.ct_de_antes != 1 }} de {{ x.nome|e }} {{ 'vieram' if x.ct_de_antes != 1 else 'veio' }} de proposta aceita antes do período — por isso, nessa linha, os contratos passam das propostas assinadas.</div>
+  {% endfor %}
   {% endif %}
   {% endif %}
 

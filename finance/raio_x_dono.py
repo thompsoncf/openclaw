@@ -660,7 +660,7 @@ def da_visita(c, conta_id: int, f: dict, ini, fim, festa: bool = False) -> dict:
 
     def _v(mid):
         return por.setdefault(mid, {"visitas": 0, "vis_orc": 0, "prop_ass": 0, "prop_ass_valor": 0,
-                                    "contratos": 0, "contratos_valor": 0})
+                                    "contratos": 0, "contratos_valor": 0, "ct_de_antes": 0})
     for v in vis:
         _v(v[2])["visitas"] += 1
         if v[3]:
@@ -670,9 +670,16 @@ def da_visita(c, conta_id: int, f: dict, ini, fim, festa: bool = False) -> dict:
     for _oid, mid, valor, _ct in prop:
         _v(mid)["prop_ass"] += 1
         _v(mid)["prop_ass_valor"] += int(valor or 0)
-    for *_x, valor, mid in cts:
+    ini_dia = ini.astimezone(_TZ).date()
+    for _num, _nome, prop_em, _ct_em, valor, mid in cts:
         _v(mid)["contratos"] += 1
         _v(mid)["contratos_valor"] += int(valor or 0)
+        # O CONTRATO DE PROPOSTA ACEITA ANTES DO PERÍODO, por vendedor (pedido do dono
+        # em 27/09/2026): é o que faz os contratos de alguém passarem das propostas
+        # dele — no Thiago, a proposta de 22/08 que virou contrato em 14/09
+        dp = _dia(prop_em)
+        if dp and dp < ini_dia:
+            _v(mid)["ct_de_antes"] += 1
 
     return {
         "marcadas": int(marcadas or 0),

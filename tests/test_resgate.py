@@ -44,6 +44,7 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   empresa text, contato text, telefone text, whatsapp text,
   status text default 'contatado', temperatura text default 'frio', estagio text default 'lead',
   evento_em date, orcamento_id bigint,
+  perda_motivo text, perda_descricao text, perda_em timestamptz, perda_etapa text,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, status text default 'aberta',
@@ -60,8 +61,13 @@ create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigi
 create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_id bigint,
   titulo text, inicio timestamptz, status text default 'ativo', tipo_evento text,
   tipo text, prospeccao_id bigint);
-create table orcamentos (id bigserial primary key, conta_id bigint,
+create table orcamentos (id bigserial primary key, conta_id bigint, status text,
   criado_em timestamptz default now());
+create table orcamento_envios (orcamento_id bigint, conta_id bigint, ok boolean);
+create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
+  substitui_id bigint, assinado_em timestamptz, status text);
+create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
 create table funil_etapas (conta_id bigint, chave text, fase text);
 create table canais_config (conta_id bigint, canal text, provedor text, ativo boolean,
   desconectado_em timestamptz);
@@ -85,6 +91,7 @@ def pool():
         c.execute(_SQL)
         c.execute((BASE / "388_regra_por_chip.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "396_resgate_ia.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "398_resgate_toques.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos')")
         c.execute("insert into contas (id, nome, chip_de, nicho_id) values "
                   "(%s,'Prime',null,1),(%s,'CP Thiago',%s,null),(%s,'Outra',null,1)",
@@ -121,6 +128,8 @@ def duble(monkeypatch):
     from finance import whatsapp_out as wo
     monkeypatch.setattr(rg, "redigir",
                         lambda pool, conta, lead, regra, agora=None: f"Oi {lead['quem']}, voltei!")
+    monkeypatch.setattr(rg, "redigir_toque",
+                        lambda pool, conta, lead, n, agora=None: f"Toque {n} pra {lead['quem']}")
     monkeypatch.setattr(wo, "preparar", lambda c, conta: {"conta": conta})
     estado = {"ok": True}
 
@@ -754,3 +763,148 @@ def test_o_resgatado_que_escreveu_fora_do_horario_e_atendido_na_abertura(pool, e
                   (cv, cv, cr.STATUS_FORA))
         c.commit()
         assert cv in cr.pendentes_da_abertura(c, EMPRESA)
+
+
+
+# ══════════════════════════════════════════════ etapa 2: os toques e o perdido
+
+def _atrasar(c, dias, lead=None):
+    """Volta o relógio do resgate `dias` dias (a entrada e o último envio)."""
+    c.execute("""update resgate_leads set entrou_em = entrou_em - make_interval(days => %s),
+                        ultimo_envio_em = ultimo_envio_em - make_interval(days => %s)"""
+              + (" where prospeccao_id=%s" if lead else ""),
+              (dias, dias, lead) if lead else (dias, dias))
+    c.execute("update resgate_envios set criado_em = criado_em - make_interval(days => %s)", (dias,))
+    c.commit()
+
+
+def test_o_2o_toque_so_no_dia_3(pool, equipe, duble):
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        _atrasar(c, 2)
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1                              # dia 2: nada
+    with pool.connection() as c:
+        _atrasar(c, 1)
+    rg.rodar(pool)
+    assert duble["saiu"][-1]["texto"] == "Toque 2 pra Carla"
+    assert duble["saiu"][-1]["numero"] == "5586999990001"
+    with pool.connection() as c:
+        assert c.execute("select toques from resgate_leads").fetchone()[0] == 2
+        assert c.execute("select count(*) from mensagens where conversa_id=%s and autor='bot'",
+                         (cv,)).fetchone()[0] == 2
+
+
+def test_o_3o_toque_no_dia_7_e_nunca_colado_no_2o(pool, equipe, duble):
+    _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        _atrasar(c, 6)                                           # o 2º atrasou até o dia 6
+    rg.rodar(pool)
+    assert duble["saiu"][-1]["texto"] == "Toque 2 pra Carla"
+    with pool.connection() as c:
+        _atrasar(c, 1)                                           # dia 7, mas 1 dia depois do 2º
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 2
+    with pool.connection() as c:
+        _atrasar(c, 2)
+    rg.rodar(pool)
+    assert duble["saiu"][-1]["texto"] == "Toque 3 pra Carla"
+
+
+def test_quem_respondeu_nao_recebe_toque(pool, equipe, duble):
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead','vou ver com meu marido')", (cv,))
+        c.commit()
+        _atrasar(c, 4)
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1
+
+
+def test_3_toques_sem_resposta_viram_perdido_no_dia_10(pool, equipe, duble):
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("update resgate_leads set toques=3")
+        _atrasar(c, 2)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "contatado"
+        _atrasar(c, 1)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select status, perda_motivo, vendedor_id from prospeccao where id=%s",
+                         (lid,)).fetchone() == ("perdido", "nao_respondeu", equipe["ZAQ"])
+        assert c.execute("select de, para from funil_movimentos where prospeccao_id=%s",
+                         (lid,)).fetchone() == ("contatado", "perdido")
+        assert c.execute("select estado, ativo from resgate_leads").fetchone() == ("perdido", True)
+    assert len(duble["saiu"]) == 1                               # o perdido não manda nada
+    # o cliente escreve depois: o resgate registra a resposta, e a IA (dona) segue
+    with pool.connection() as c:
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead','oi, desculpa a demora!')", (cv,))
+        c.commit()
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select estado from resgate_leads").fetchone()[0] == "respondeu"
+        assert cr.regra_da_conversa(c, EMPRESA, cv) is not None
+
+
+def test_o_toque_vem_antes_do_lead_novo_da_fila(pool, equipe, duble):
+    _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        _lead(c, equipe["PEDRO"], numero="5586999990009")
+        _atrasar(c, 3)
+    rg.rodar(pool)
+    assert duble["saiu"][-1]["texto"] == "Toque 2 pra Carla"
+    assert len(duble["saiu"]) == 2
+
+
+def test_o_toque_conta_no_teto(pool, equipe, duble):
+    _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        _atrasar(c, 3)
+        c.execute("update resgate_config set teto_dia=1")
+        c.execute("insert into resgate_envios (conta_id, tipo) values (%s,'retomada')", (EMPRESA,))
+        c.commit()
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1
+
+
+# ══════════════════════════════════════════════ etapa 2: a aba Resgate do Desafio
+
+def test_a_aba_resgate_do_desafio(pool, equipe, duble, monkeypatch):
+    from finance import desafio_ia as dia
+    from finance import visita as vis
+    monkeypatch.setattr(vis, "vende_festa", lambda pool, conta: True)
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead','quero sim!')", (cv,))
+        c.execute("insert into eventos_agenda (conta_id, titulo, inicio, prospeccao_id) "
+                  "values (%s,'Visita — Carla', now() + interval '2 days', %s)", (EMPRESA, lid))
+        c.commit()
+    rg.rodar(pool)
+    hoje = datetime.now(timezone(timedelta(hours=-3))).date()
+    d = dia.resgate(pool, EMPRESA, hoje.replace(day=1), hoje + timedelta(days=1))
+    t = d["total"]
+    assert (t["chamados"], t["responderam"], t["resp_7d_pct"], t["visitas"], t["contratos"]) == \
+        (1, 1, 100, 1, 0)
+    assert [f["nome"] for f in d["faixas"]] == ["Aberto"]
+
+
+def test_a_regua_do_vendedor(pool, equipe):
+    """O vendedor voltou a chamar depois de 7 dias de silêncio: o cliente respondeu em
+    até 7 dias? Mensagem da IA não entra na régua."""
+    from finance import desafio_ia as dia
+    with pool.connection() as c:
+        lid, cv = _lead(c, equipe["PEDRO"], dias=40)
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em)
+                     values (%s,'whatsapp','out','humano','e aí, ainda quer?', now() - interval '30 days'),
+                            (%s,'whatsapp','in','lead','quero!', now() - interval '28 days')""", (cv, cv))
+        lid2, cv2 = _lead(c, equipe["PEDRO"], dias=40, numero="5586999990002")
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em)
+                     values (%s,'whatsapp','out','bot','oi de novo', now() - interval '30 days')""", (cv2,))
+        c.commit()
+    r = dia.regua_do_vendedor(pool, EMPRESA)
+    assert r == {"retomadas": 1, "responderam": 1, "resp_pct": 100, "fecharam": 0}

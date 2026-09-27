@@ -160,6 +160,8 @@ def pool():
         c.execute((BASE / "395_novidade_desafio_ia.sql").read_text(encoding="utf-8"))
         # 397 amplia pela nona, com `resgate_ligado` — o portão do resgate da IA
         c.execute((BASE / "397_novidade_resgate_ia.sql").read_text(encoding="utf-8"))
+        # 399 amplia pela décima, com `resgate_eventos` (resgate ligado e vende festa)
+        c.execute((BASE / "399_novidade_resgate_toques.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1333,7 +1335,7 @@ def test_os_avisos_da_391(pool):
     with pool.connection() as c:
         # a 391 reescreve o check com a lista DELA, sem o `resgate_ligado` da 397: os
         # avisos da 397 saem antes, senão o check recusa a tabela
-        c.execute("delete from novidades where publico = 'resgate_ligado'")
+        c.execute("delete from novidades where publico in ('resgate_ligado','resgate_eventos')")
         c.execute((BASE / "391_novidade_ia_marca_visita.sql").read_text(encoding="utf-8"))
         rows = {r[0]: r[1:] for r in c.execute(
             """select chave, publico, pra_quem, resumo, link from novidades
@@ -1376,3 +1378,12 @@ def test_os_avisos_do_resgate_miram_quem_tem_o_resgate_ligado(pool):
 def test_o_portao_do_resgate_falha_fechado(pool):
     """Banco sem a 396 (o schema deste arquivo): ninguém recebe o aviso do resgate."""
     assert nv.alcanca("resgate_ligado", "eventos", pool, 1) is False
+
+
+def test_o_aviso_dos_toques_mira_quem_ve_a_aba_do_desafio(pool):
+    with pool.connection() as c:
+        r = c.execute("""select publico, pra_quem, resumo, link from novidades
+                          where chave='resgate-toques-e-desafio'""").fetchone()
+    assert r[:2] == ("resgate_eventos", ["dono", "gestor"]) and r[2]
+    assert r[3] == "/painel/prospeccao/desafio-ia"
+    assert nv.alcanca("resgate_eventos", "eventos", pool, 1) is False     # banco sem a 396

@@ -23,12 +23,15 @@ Só leitura. Mês = mês civil em Brasília.
 """
 from __future__ import annotations
 
+import logging
 import statistics
 from datetime import date, datetime, timedelta, timezone
 
 from finance import agenda as ag
 from finance import evento_lead as evl
 from finance import visita as vis
+
+_log = logging.getLogger("openclaw.desafio_ia")
 
 _TZ = "America/Sao_Paulo"
 META_MIN = 1          # meta da IA: responder em menos de 1 minuto
@@ -187,6 +190,122 @@ def _custo(pool, conta_id: int, ini: date, fim: date, leads_ia: list[int]) -> di
     return {"mes": int(r[0]), "dos_leads": int(r[1]), "chamadas": int(r[2])}
 
 
+def resgate(pool, conta_id: int, ini: date, fim: date) -> dict | None:
+    """A ABA RESGATE (etapa 2 do resgate da IA, finance/resgate.py): o que aconteceu
+    com os leads que passaram pra IA no mês, por faixa da fila — e a régua do próprio
+    vendedor, que é com quem a IA compete aqui (o dono decidiu "tudo pra IA depois de
+    7 dias", sem grupo de comparação).
+
+    Por lead que ENTROU no resgate no mês: respondeu (e em até 7 dias), visita e
+    orçamento depois da entrada, contrato assinado, pediu pra parar, virou perdido, e
+    o custo da IA com ele depois da entrada. None sem a 396 ou sem resgate no mês."""
+    festa = vis.vende_festa(pool, conta_id)
+    from web.painel_relatorios import _ORC_CHEGOU
+    from finance.cockpit_dono import SQL_CT_VIVO
+    try:
+        with pool.connection() as c:
+            with c.transaction():
+                c.execute("select 1 from resgate_leads limit 1")
+    except Exception:  # noqa: BLE001 — banco sem a 396
+        return None
+    sql = f"""
+        select r.faixa,
+               r.respondeu_em is not null,
+               r.respondeu_em is not null and r.respondeu_em <= r.entrou_em + interval '7 days',
+               exists (select 1 from eventos_agenda e
+                        where e.conta_id = r.conta_id and e.prospeccao_id = r.prospeccao_id
+                          and e.inicio >= r.entrou_em and {vis.sql_conta('e', festa=festa)}),
+               exists (select 1 from orcamentos o
+                        where o.id = p.orcamento_id and o.conta_id = r.conta_id
+                          and o.criado_em >= r.entrou_em and {_ORC_CHEGOU}),
+               exists (select 1 from contratos c
+                        where c.orcamento_id = p.orcamento_id and c.conta_id = r.conta_id
+                          and c.assinado_em >= r.entrou_em and {SQL_CT_VIVO}),
+               r.opt_out, r.estado = 'perdido',
+               r.prospeccao_id, r.entrou_em
+          from resgate_leads r join prospeccao p on p.id = r.prospeccao_id and p.conta_id = r.conta_id
+         where r.conta_id=%s and (r.entrou_em at time zone '{_TZ}')::date >= %s
+           and (r.entrou_em at time zone '{_TZ}')::date < %s"""
+    try:
+        with pool.connection() as c:
+            rows = c.execute(sql, (conta_id, ini, fim)).fetchall()
+            custo = {}
+            if rows:
+                try:
+                    with c.transaction():
+                        custo = {int(x[0]): int(x[1]) for x in c.execute(
+                            """select u.prospeccao_id, coalesce(sum(u.custo_centavos), 0)
+                                 from ia_uso u join resgate_leads r on r.prospeccao_id = u.prospeccao_id
+                                where u.conta_id=%s and r.conta_id=%s and u.criado_em >= r.entrou_em
+                                  and u.prospeccao_id = any(%s)
+                                group by u.prospeccao_id""",
+                            (conta_id, conta_id, [x[8] for x in rows])).fetchall()}
+                except Exception:  # noqa: BLE001 — banco sem a 394
+                    custo = {}
+    except Exception as e:  # noqa: BLE001
+        _log.info("desafio_ia.resgate: sem dados (conta=%s): %s", conta_id, e)
+        return None
+    if not rows:
+        return None
+
+    def _linha(nome, xs):
+        n = len(xs)
+        return {"nome": nome, "chamados": n,
+                "responderam": sum(1 for x in xs if x[1]),
+                "resp_7d_pct": _pct(sum(1 for x in xs if x[2]), n),
+                "visitas": sum(1 for x in xs if x[3]), "orcamentos": sum(1 for x in xs if x[4]),
+                "contratos": sum(1 for x in xs if x[5]), "pararam": sum(1 for x in xs if x[6]),
+                "perdidos": sum(1 for x in xs if x[7]),
+                "custo_centavos": sum(custo.get(int(x[8]), 0) for x in xs)}
+    from finance import resgate as _rg
+    faixas = [_linha(rot, [x for x in rows if x[0] == k]) for k, rot in _rg.FAIXAS.items()]
+    return {"faixas": [f for f in faixas if f["chamados"]], "total": _linha("Total", rows),
+            "regua": regua_do_vendedor(pool, conta_id)}
+
+
+def regua_do_vendedor(pool, conta_id: int, dias: int = 180) -> dict | None:
+    """A RÉGUA do resgate: quando um VENDEDOR voltou a chamar um lead depois de 7 dias
+    ou mais de silêncio, quantos clientes responderam em até 7 dias e quantos
+    fecharam. Medido na Prime em 26/09/2026: 10 de 32 (31%), 2 fechados. Só mensagem
+    de gente (a IA não entra na régua dela mesma), só o que já teve 7 dias pra ver a
+    resposta, e fora os leads que passaram pelo resgate."""
+    from finance import funil_regua as fr
+    try:
+        with pool.connection() as c:
+            with c.transaction():
+                tem = bool(c.execute("select to_regclass('public.resgate_leads')").fetchone()[0])
+            fora = ("and not exists (select 1 from resgate_leads rl where rl.prospeccao_id = cv.prospeccao_id)"
+                    if tem else "")
+            r = c.execute(
+                f"""with m as (
+                      select cv.prospeccao_id lead, m.direcao, m.autor, m.criado_em,
+                             lag(m.criado_em) over w antes, lag(m.direcao) over w dir_antes
+                        from mensagens m join conversas cv on cv.id = m.conversa_id
+                       where cv.conta_id = %s and cv.prospeccao_id is not null {fora}
+                         and m.criado_em > now() - make_interval(days => %s)
+                      window w as (partition by cv.prospeccao_id order by m.criado_em)),
+                    ret as (
+                      select distinct on (lead) lead, criado_em em from m
+                       where direcao = 'out' and autor = 'humano' and dir_antes = 'out'
+                         and criado_em - antes >= interval '7 days'
+                         and criado_em < now() - interval '7 days'
+                       order by lead, criado_em)
+                    select count(*),
+                           count(*) filter (where exists (select 1 from m x where x.lead = ret.lead
+                                              and x.direcao = 'in' and x.criado_em > ret.em
+                                              and x.criado_em <= ret.em + interval '7 days')),
+                           count(*) filter (where p.status in {fr.sql_fechadas('p')})
+                      from ret join prospeccao p on p.id = ret.lead""",
+                (conta_id, int(dias))).fetchone()
+    except Exception as e:  # noqa: BLE001
+        _log.info("desafio_ia.regua_do_vendedor: sem régua (conta=%s): %s", conta_id, e)
+        return None
+    if not r or not r[0]:
+        return None
+    return {"retomadas": int(r[0]), "responderam": int(r[1]), "resp_pct": _pct(int(r[1]), int(r[0])),
+            "fecharam": int(r[2])}
+
+
 MOTIVOS_ROTULO = {"visita": "Visita", "agenda": "Agenda / data ocupada", "pessoa": "Pediu uma pessoa",
                   "fora_da_base": "Fora da base", "reclamacao": "Reclamação",
                   "desconto": "Pediu desconto", "sinal": "Sinal"}
@@ -276,4 +395,5 @@ def dados(pool, conta_id: int, mes: str | None = None) -> dict:
                  "mediana_min": _mediana(esp_fora),
                  "em5_pct": _pct(sum(1 for e in esp_fora if e <= EM_MIN), len(fora))},
         "meta_min": META_MIN, "meta_visita_pct": round(META_VISITA * 100),
+        "resgate": resgate(pool, conta_id, ini, fim),
     }

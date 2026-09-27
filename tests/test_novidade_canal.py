@@ -167,12 +167,13 @@ def test_os_cinco_portoes_de_nicho_continuam_iguais(pool, canal):
     (migração 391): dois chips e vende festa — quem vê a IA marcando a visita.
 
     Em 27/09/2026, o quinto: `resgate_ligado` (migração 397) — a empresa com o resgate
-    da IA ligado, que é quando a rotina do vendedor muda."""
+    da IA ligado, que é quando a rotina do vendedor muda. E o sexto, `resgate_eventos`
+    (migração 399): resgate ligado e vende festa — quem vê a aba Resgate do Desafio."""
     assert {"todos", "produto", "servico", "eventos",
             "recorrente"} <= set(nv.PUBLICOS_NICHO)
     assert set(nv.PUBLICOS) == set(nv.PUBLICOS_NICHO) | {"canal_proprio", "empresa",
                                                           "mais_de_um_chip", "visita_da_ia",
-                                                          "resgate_ligado"}
+                                                          "resgate_ligado", "resgate_eventos"}
 
 
 def test_aviso_de_nicho_nao_passou_a_depender_do_canal(pool, canal):

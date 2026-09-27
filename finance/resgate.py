@@ -88,6 +88,16 @@ FREIO_FALHAS = 3
 FESTA_MIN_DIAS = 3
 #: o lead cujo envio falhou fica de fora por tantos dias
 FALHA_DIAS = 7
+#: OS TOQUES (etapa 2, a regra de sempre do dono: "3 toques e o 4º fica como
+#: perdido"). Contados da retomada: o 2º toque no dia 3, o 3º no dia 7 (e nunca
+#: menos de 3 dias depois do 2º), e sem resposta no dia 10 o lead vira perdido.
+TOQUE_2_DIAS = 3
+TOQUE_3_DIAS = 7
+TOQUE_INTERVALO_DIAS = 3
+PERDIDO_DEPOIS_DIAS = 3
+#: tudo que o resgate manda pra CLIENTE (e a prévia, que anda no mesmo ritmo): é o
+#: que conta no teto do dia e no espaçamento
+ENVIOS = ("previa", "retomada", "toque")
 
 #: "pare", "não quero mais", "me tira da lista"… — o cliente que pediu pra parar
 #: nunca mais é chamado pelo resgate. Palavra INTEIRA e frase inteira: "para" (a
@@ -517,10 +527,10 @@ def _contagem_hoje(c, conta_id: int, tipos: tuple, agora: datetime, *, ok=None) 
 def _pode_mandar_agora(c, conta_id: int, cfg: dict, lead_id: int, agora: datetime) -> bool:
     """O teto do dia e o espaçamento. Prévia conta igual à retomada: o Ensaio anda no
     ritmo do ligado."""
-    if _contagem_hoje(c, conta_id, ("previa", "retomada"), agora) >= int(cfg.get("teto_dia") or 20):
+    if _contagem_hoje(c, conta_id, ENVIOS, agora) >= int(cfg.get("teto_dia") or 20):
         return False
     u = c.execute("""select max(criado_em) from resgate_envios
-                      where conta_id=%s and tipo in ('previa','retomada')""", (conta_id,)).fetchone()
+                      where conta_id=%s and tipo = any(%s)""", (conta_id, list(ENVIOS))).fetchone()
     espaco = timedelta(minutes=ESPACO_MIN + (int(lead_id) * 7) % 11)
     return not (u and u[0] and agora - u[0] < espaco)
 
@@ -779,7 +789,10 @@ def _acompanhar(pool, conta_id: int, cfg: dict, agora: datetime) -> dict:
                 _devolvido(c, conta_id, lead, conv, vend)
                 out["devolvidos"] += 1
                 continue
-            if estado == "chamado":
+            if estado in ("chamado", "perdido"):
+                # depois do perdido do resgate, a resposta reabre: a entrada de mensagem
+                # já devolve o lead à etapa que a conta manda (funil_perda.reativar), e a
+                # IA — ainda dona do lead — segue a conversa
                 resp = c.execute("""select texto from mensagens where conversa_id=%s
                                       and direcao='in' and criado_em > %s
                                     order by criado_em""", (conv, entrou)).fetchall()
@@ -813,7 +826,7 @@ def _freio(pool, conta_id: int, cfg: dict, agora: datetime) -> bool:
         return True
     with pool.connection() as c:
         parou = _contagem_hoje(c, conta_id, ("parou",), agora)
-        falhas = _contagem_hoje(c, conta_id, ("retomada",), agora, ok=False)
+        falhas = _contagem_hoje(c, conta_id, ("retomada", "toque"), agora, ok=False)
         motivo = None
         if parou >= FREIO_PARAR:
             motivo = f"{parou} clientes pediram pra parar hoje"
@@ -903,6 +916,7 @@ def resumo(c, conta_id: int, cfg: dict, agora: datetime) -> str:
         return (f"📋 Ensaio do resgate · hoje\n{n} prévia{'s' if n != 1 else ''} pra você. "
                 "Nada foi enviado pra cliente.\n" + rodape)
     cham = _contagem_hoje(c, conta_id, ("retomada",), agora, ok=True)
+    toques = _contagem_hoje(c, conta_id, ("toque",), agora, ok=True)
     resp = c.execute("""select count(*) filter (where estado in ('respondeu','parou')),
                                count(*) filter (where estado = 'parou'),
                                count(*) filter (where estado = 'pausado')
@@ -924,6 +938,13 @@ def resumo(c, conta_id: int, cfg: dict, agora: datetime) -> str:
         linhas.append(f"{vis} visita{'s' if vis != 1 else ''} marcada{'s' if vis != 1 else ''}")
     if orc:
         linhas.append(f"{orc} orçamento{'s' if orc != 1 else ''} esperando conferência")
+    if toques:
+        linhas.append(f"{toques} toque{'s' if toques != 1 else ''} em quem não respondeu")
+    perd = c.execute("""select count(*) from resgate_leads where conta_id=%s and perdido_em >= %s""",
+                     (conta_id, ini)).fetchone()[0]
+    if perd:
+        linhas.append(f"{perd} virou perdido (3 toques sem resposta)" if perd == 1
+                      else f"{perd} viraram perdidos (3 toques sem resposta)")
     if resp[1]:
         linhas.append(f"{resp[1]} pediu pra parar (não chamo mais)" if resp[1] == 1
                       else f"{resp[1]} pediram pra parar (não chamo mais)")
@@ -954,7 +975,7 @@ def resumo(c, conta_id: int, cfg: dict, agora: datetime) -> str:
 # ══════════════════════════════════════════════════════════════════ o ciclo
 
 def _uma_conta(pool, conta_id: int, agora: datetime) -> dict:
-    out = {"previas": 0, "retomadas": 0, "avisos": 0}
+    out = {"previas": 0, "retomadas": 0, "avisos": 0, "toques": 0, "perdidos": 0}
     with pool.connection() as c:
         cfg = config(c, conta_id)
         c.commit()
@@ -964,6 +985,7 @@ def _uma_conta(pool, conta_id: int, agora: datetime) -> dict:
     ligado = modo == "ligado"
     if ligado:
         out.update(_acompanhar(pool, conta_id, cfg, agora))
+        out["perdidos"] = _perder_sem_resposta(pool, conta_id, agora)
     pausado = ligado and _freio(pool, conta_id, cfg, agora)
     dentro = pode_rodar_agora(cfg, agora)
     todos, regra = [], None
@@ -974,10 +996,164 @@ def _uma_conta(pool, conta_id: int, agora: datetime) -> dict:
             c.commit()
     if ligado and dentro and not pausado and cfg.get("aviso_vendedor"):
         out["avisos"] = _avisos_vendedor(pool, conta_id, cfg, todos, agora)
-    if dentro and not pausado and (not ligado or (regra and regra.get("ativa") and regra.get("ia_ligada"))):
-        _um_envio(pool, conta_id, cfg, regra, todos, agora, out)
+    regra_ok = bool(regra and regra.get("ativa") and regra.get("ia_ligada"))
+    if dentro and not pausado and (not ligado or regra_ok):
+        # o toque de quem já foi chamado vem antes do lead novo da fila: é conversa
+        # começada, e o dia dele passa
+        if not (ligado and _um_toque(pool, conta_id, cfg, regra, agora, out)):
+            _um_envio(pool, conta_id, cfg, regra, todos, agora, out)
     _resumo_do_dia(pool, conta_id, cfg, agora)
     return out
+
+
+def _pedido_toque(lead: dict, n: int, festa: bool, historico: str, dias: int) -> str:
+    passo = "conhecer o espaço" if festa else "uma conversa rápida com a equipe"
+    if n == 2:
+        o_que = ("É o 2º TOQUE: o cliente não respondeu a sua mensagem. Escreva uma mensagem CURTA "
+                 "(até 2 linhas) trazendo UMA coisa nova e útil tirada da base (um item do "
+                 f"catálogo que combina com o que ele queria, ou o convite pra {passo}) — sem "
+                 "cobrar a resposta e sem repetir a mensagem anterior.")
+    else:
+        o_que = ("É o 3º e ÚLTIMO TOQUE: o cliente não respondeu às duas mensagens. Pergunte com "
+                 "gentileza, em 1 ou 2 linhas, se ainda faz sentido continuar ou se pode encerrar o "
+                 "atendimento — deixando a porta aberta pra quando ele quiser.")
+    return (f"Conversa com {lead['quem']} (a sua última mensagem foi há {dias} dias):\n{historico}\n\n"
+            f"{o_que}\n- Sem lista, sem link, no máximo 1 emoji. Não se apresente de novo.\n"
+            'Retorne APENAS JSON: {"mensagem":"texto pra mandar ao cliente"}')
+
+
+def redigir_toque(pool, conta_id: int, lead: dict, n: int, agora: datetime | None = None) -> str | None:
+    """A IA escreve o 2º ou o 3º toque. None se não deu."""
+    from core.brain import Brain
+    from finance import agente as ag
+    from finance import ia_uso as _iu
+    agora = agora or datetime.now(timezone.utc)
+    try:
+        with pool.connection() as c:
+            festa = _perfil_eventos(c, conta_id)
+            system = _system(pool, c, conta_id, festa)
+            pedido = _pedido_toque(lead, n, festa, _historico(c, lead["conversa_id"]),
+                                   max(1, (agora - lead["ultimo_envio_em"]).days))
+            c.commit()
+        brain = Brain()
+        resp = brain.chamar(system=system, mensagens=[{"role": "user", "content": pedido}])
+        with pool.connection() as c:
+            _iu.registrar(c, conta_id, lead["conversa_id"], lead["id"],
+                          getattr(brain, "model", None), resp)
+            c.commit()
+        txt = "".join(getattr(b, "text", "") for b in resp.content
+                      if getattr(b, "type", None) == "text").strip()
+        msg = (ag._extrair_json(txt).get("mensagem") or "").strip()
+    except Exception as e:  # noqa: BLE001
+        _log.info("resgate.redigir_toque: a IA não escreveu (conta=%s lead=%s): %s",
+                  conta_id, lead["id"], e)
+        return None
+    return msg[:800] or None
+
+
+def _toques_devidos(c, conta_id: int, agora: datetime) -> list[dict]:
+    """Quem já foi chamado, não respondeu, e está no dia do próximo toque. Só com a
+    conversa ainda da IA (ninguém da equipe assumiu) e o lead ainda do membro IA."""
+    rows = c.execute(
+        """select r.prospeccao_id, r.conversa_id, r.toques, r.entrou_em, r.ultimo_envio_em,
+                  cv.chip_id,
+                  coalesce(nullif(p.whatsapp,''), cv.contato_ref, nullif(p.telefone,'')),
+                  coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Cliente')
+             from resgate_leads r
+             join prospeccao p on p.id = r.prospeccao_id and p.conta_id = r.conta_id
+             join conversas cv on cv.id = r.conversa_id and cv.conta_id = r.conta_id
+            where r.conta_id=%s and r.ativo and r.estado='chamado' and not r.opt_out
+              and p.vendedor_id = r.membro_id and cv.agente_ativo and cv.status <> 'pendente'
+              and r.ultimo_envio_em is not null
+              and ((r.toques = 1 and r.entrou_em <= %s and r.ultimo_envio_em <= %s)
+                or (r.toques = 2 and r.entrou_em <= %s and r.ultimo_envio_em <= %s))
+              and not exists (select 1 from resgate_envios e
+                               where e.prospeccao_id = r.prospeccao_id and not e.ok
+                                 and ((e.tipo = 'toque' and e.criado_em > %s)
+                                   or (e.tipo = 'erro_texto' and e.criado_em > %s)))
+            order by r.ultimo_envio_em""",
+        (conta_id, agora - timedelta(days=TOQUE_2_DIAS), agora - timedelta(days=TOQUE_2_DIAS),
+         agora - timedelta(days=TOQUE_3_DIAS), agora - timedelta(days=TOQUE_INTERVALO_DIAS),
+         agora - timedelta(days=1), agora - timedelta(hours=6))).fetchall()
+    return [{"id": r[0], "conversa_id": r[1], "toques": r[2], "entrou_em": r[3],
+             "ultimo_envio_em": r[4], "chip_id": r[5], "numero": _so_digitos(r[6]), "quem": r[7]}
+            for r in rows if _so_digitos(r[6])]
+
+
+def _um_toque(pool, conta_id: int, cfg: dict, regra, agora: datetime, out: dict) -> bool:
+    """Manda um toque, se algum está devido. Devolve True quando havia toque devido
+    que podia sair (saiu, ou o teto/espaçamento segurou) — aí o lead novo da fila
+    espera. Toque de chip fora do ar não segura a fila."""
+    from finance import agente as ag
+    from finance import whatsapp_out as wo
+    with pool.connection() as c:
+        devidos = [x for x in _toques_devidos(c, conta_id, agora)
+                   if _chip_de_pe(c, conta_id, x["chip_id"])]
+        if not devidos:
+            c.commit()
+            return False
+        lead = devidos[0]
+        pode = _pode_mandar_agora(c, conta_id, cfg, lead["id"], agora)
+        c.commit()
+    if not pode:
+        return True
+    n = lead["toques"] + 1
+    texto = redigir_toque(pool, conta_id, lead, n, agora)
+    if not texto:
+        # a IA não escreveu: não é falha de envio (não entra no freio); o lead espera 6h
+        with pool.connection() as c:
+            _registrar(c, conta_id, "erro_texto", lead=lead["id"], ok=False)
+            c.commit()
+        return True
+    with pool.connection() as c:
+        destino = wo.preparar(c, conta_id)
+        c.commit()
+    res = wo.enviar_pronto(destino, lead["numero"], texto, chip_id=lead["chip_id"])
+    with pool.connection() as c:
+        if res.get("ok"):
+            ag._add_bot_msg(c, lead["conversa_id"], "whatsapp", texto, res.get("sid"))
+            c.execute("""update resgate_leads set toques=%s, ultimo_envio_em=now()
+                          where prospeccao_id=%s and conta_id=%s""", (n, lead["id"], conta_id))
+            _registrar(c, conta_id, "toque", lead=lead["id"], texto=texto)
+            out["toques"] = out.get("toques", 0) + 1
+        else:
+            _registrar(c, conta_id, "toque", lead=lead["id"], texto=texto, ok=False,
+                       erro=str(res.get("erro") or "falhou")[:200])
+        c.commit()
+    return True
+
+
+def _perder_sem_resposta(pool, conta_id: int, agora: datetime) -> int:
+    """3 toques sem resposta e mais 3 dias: o lead vira perdido, motivo "não
+    respondeu" — pela mesma porta do perdido automático (histórico, motivo, etapa de
+    origem). Nada é apagado, e o lead continua da IA: se o cliente escrever, a
+    entrada reabre o card e a IA responde. Quem já estava perdido só muda de estado
+    no resgate."""
+    from finance import funil_perdido as _fp
+    from finance import funil_regua as fr
+    n = 0
+    with pool.connection() as c:
+        rows = c.execute(
+            f"""select r.prospeccao_id, p.status, p.status in {fr.sql_fechadas('p')}
+                  from resgate_leads r
+                  join prospeccao p on p.id = r.prospeccao_id and p.conta_id = r.conta_id
+                 where r.conta_id=%s and r.ativo and r.estado='chamado' and r.toques >= 3
+                   and p.vendedor_id = r.membro_id
+                   and r.ultimo_envio_em <= %s""",
+            (conta_id, agora - timedelta(days=PERDIDO_DEPOIS_DIAS))).fetchall()
+        for lead, status, fechado in rows:
+            if not fechado and status != "perdido":
+                try:
+                    with c.transaction():
+                        _fp.fechar(c, conta_id, {"id": lead, "etapa": status}, agora)
+                except Exception as e:  # noqa: BLE001
+                    _log.warning("resgate: não fechei o lead %s como perdido: %s", lead, e)
+                    continue
+            c.execute("""update resgate_leads set estado='perdido', perdido_em=now()
+                          where prospeccao_id=%s and conta_id=%s""", (lead, conta_id))
+            n += 1
+        c.commit()
+    return n
 
 
 def _um_envio(pool, conta_id: int, cfg: dict, regra, todos: list[dict], agora: datetime,
@@ -1022,7 +1198,7 @@ def _um_envio(pool, conta_id: int, cfg: dict, regra, todos: list[dict], agora: d
                     and criado_em > %s""", (conta_id, agora - timedelta(hours=6))).fetchone()
             if avisar_chip:
                 _registrar(c, conta_id, "freio_chip")
-        n_hoje = _contagem_hoje(c, conta_id, ("previa", "retomada"), agora) + 1
+        n_hoje = _contagem_hoje(c, conta_id, ENVIOS, agora) + 1
         vendedor = _nome(c, conta_id, candidato["vendedor_id"]) if candidato else ""
         c.commit()
     if avisar_chip:
@@ -1080,7 +1256,7 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     worker mandaria uma segunda retomada dentro do espaçamento. Em autocommit a
     trava de sessão vale sem transação nenhuma aberta."""
     agora = agora or datetime.now(timezone.utc)
-    total = {"previas": 0, "retomadas": 0, "avisos": 0}
+    total = {"previas": 0, "retomadas": 0, "avisos": 0, "toques": 0, "perdidos": 0}
     with pool.connection() as lk:
         lk.commit()
         lk.autocommit = True
@@ -1321,7 +1497,7 @@ def tela(c, conta_id: int, agora: datetime | None = None) -> dict:
     com_ia = {"total": 0, "responderam": 0, "pararam": 0, "pausados": 0}
     try:
         with c.transaction():
-            hoje["envios"] = _contagem_hoje(c, conta_id, ("previa", "retomada"), agora)
+            hoje["envios"] = _contagem_hoje(c, conta_id, ENVIOS, agora)
             hoje["retomadas"] = _contagem_hoje(c, conta_id, ("retomada",), agora, ok=True)
             r = c.execute("""select count(*), count(*) filter (where estado='respondeu'),
                                     count(*) filter (where estado='parou'),

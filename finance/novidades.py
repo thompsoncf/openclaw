@@ -215,6 +215,21 @@ def _resgate_ligado(pool, conta_id: int) -> bool:
         return False
 
 
+def _resgate_eventos(pool, conta_id: int) -> bool:
+    """Resgate LIGADO e vende festa (migração 399): é quem vê a aba Resgate, que mora
+    na tela do Desafio — e o Desafio só existe pra quem vende festa (a rota manda os
+    outros embora). Os dois portões são os da própria tela. Falha fechada."""
+    if not _resgate_ligado(pool, conta_id):
+        return False
+    try:
+        from finance import vendas as _vendas
+        return bool(_vendas.vende_data(pool, conta_id))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ver se a conta %s vende festa: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
 # O REGISTRO. Cada chave aponta pro portão que já decide quem vê a funcionalidade.
 # Acrescentar um público aqui EXIGE mexer no check da migração — e um teste
 # compara as duas listas, pra deriva virar falha em vez de surpresa.
@@ -244,6 +259,7 @@ PUBLICOS_CONTA = {
     "mais_de_um_chip": _mais_de_um_chip,
     "visita_da_ia": _visita_da_ia,
     "resgate_ligado": _resgate_ligado,
+    "resgate_eventos": _resgate_eventos,
 }
 
 # A lista completa — é ela que o check da migração espelha.

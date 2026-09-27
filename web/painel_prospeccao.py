@@ -4424,7 +4424,7 @@ def prospeccao_desafio_ia(request: Request, mes: str = ""):
     d = _dia.dados(pool, ctx["conta_id"], mes)
     return _render("prospeccao_desafio_ia", request, titulo="Desafio: IA × equipe",
                    secao_ativa="prospeccao", nav_ativo="comunicacao", gerencia=True,
-                   d=d, brl=brl, dur=_dur)
+                   d=d, brl=brl, dur=_dur, modo_evento=True)
 
 
 @router.post("/painel/prospeccao/comunicacao/regra-chip")
@@ -18211,6 +18211,24 @@ _DESAFIO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.84rem;margin-top:.4rem;line-height:1.55">O tráfego da campanha do número da IA não é o mesmo do chip principal. A comparação indica; pra uma comparação limpa, metade da campanha teria de ir pra equipe.</div>
     </div>
   </div>
+  {% if d.resgate %}{% set rs = d.resgate %}
+  <h3 class="tt" style="margin-top:1.6rem;font-size:1.1rem">🤖 Resgate · {{ d.mes_rotulo }}</h3>
+  <div class="mut" style="font-size:.84rem;margin-top:.25rem;line-height:1.55;max-width:78ch">
+    Os {{ voc.leads }} que ficaram 7 dias sem mensagem e passaram pra IA no mês. Aqui a IA compete com o próprio
+    vendedor: a régua é o que acontecia quando alguém da equipe voltava a chamar um {{ voc.lead }} parado.</div>
+  <div class="ds-kpis">
+    <div class="ds-k"><div class="v">{{ rs.total.chamados }}</div><div class="l">{{ voc.leads|capitalize }} resgatados</div><div class="m">no mês</div></div>
+    <div class="ds-k"><div class="v">{{ (rs.total.resp_7d_pct ~ '%') if rs.total.resp_7d_pct is not none else '—' }}</div><div class="l">Responderam em até 7 dias</div><div class="m">{% if rs.regua %}régua do vendedor: {{ rs.regua.resp_pct }}% ({{ rs.regua.responderam }} de {{ rs.regua.retomadas }}){% else %}régua do vendedor: sem dado{% endif %}</div></div>
+    <div class="ds-k"><div class="v">{{ rs.total.contratos }}</div><div class="l">Contratos assinados</div><div class="m">{% if rs.regua %}régua: {{ rs.regua.fecharam }} de {{ rs.regua.retomadas }} fecharam{% endif %}</div></div>
+    <div class="ds-k"><div class="v">{{ brl(rs.total.custo_centavos) }}</div><div class="l">Gasto da IA com eles</div><div class="m">{{ ('por contrato ' ~ brl((rs.total.custo_centavos / rs.total.contratos)|round|int)) if rs.total.contratos else 'por contrato —' }}</div></div>
+  </div>
+  <div class="ds-wrap" style="margin-top:1rem"><table class="ds-tab">
+    <thead><tr><th>Faixa da fila</th><th class="ia">Chamados</th><th class="ia">Responderam</th><th class="ia">em 7 dias</th><th class="ia">{{ 'Visitas' if modo_evento else 'Reuniões' }}</th><th class="ia">Orçamentos</th><th class="ia">Contratos</th><th class="ia">Pararam</th><th class="ia">Perdidos</th><th class="ia">Custo da IA</th></tr></thead>
+    <tbody>
+      {% for f in rs.faixas + [rs.total] %}<tr><td>{% if f.nome == 'Festa com data por vir' and not modo_evento %}Com data por vir{% else %}{{ f.nome }}{% endif %}</td><td class="ia">{{ f.chamados }}</td><td class="ia">{{ f.responderam }}</td><td class="ia">{{ (f.resp_7d_pct ~ '%') if f.resp_7d_pct is not none else '—' }}</td><td class="ia">{{ f.visitas }}</td><td class="ia">{{ f.orcamentos }}</td><td class="ia">{{ f.contratos }}</td><td class="ia">{{ f.pararam }}</td><td class="ia">{{ f.perdidos }}</td><td class="ia">{{ brl(f.custo_centavos) }}</td></tr>{% endfor %}
+      {% if rs.regua %}<tr><td class="meta">Régua: vendedor retomando (últimos 6 meses)</td><td class="meta">{{ rs.regua.retomadas }}</td><td class="meta">{{ rs.regua.responderam }}</td><td class="meta">{{ rs.regua.resp_pct }}%</td><td class="meta">—</td><td class="meta">—</td><td class="meta">{{ rs.regua.fecharam }}</td><td class="meta">—</td><td class="meta">—</td><td class="meta">—</td></tr>{% endif %}
+    </tbody></table></div>
+  {% endif %}
 </div>
 {% endblock %}"""
 

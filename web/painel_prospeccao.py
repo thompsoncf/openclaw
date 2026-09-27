@@ -1165,9 +1165,21 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     except Exception:  # noqa: BLE001 — o quadro abre sem as trilhas
         _log.warning("trilhas do quadro falharam na conta %s", conta_id, exc_info=True)
         tri_por = {}
+    # O SELO DA VISITA (funil novo de eventos, parte 2a): confirmada, pediu pra
+    # remarcar, não confirmou, falar com o cliente. Uma consulta pro quadro inteiro,
+    # tolerante: sem as tabelas da 414, nenhum selo.
+    selo_visita: dict = {}
+    try:
+        from finance import visita_rotinas as _vrq
+        with pool.connection() as _cv:
+            selo_visita = _vrq.selos(_cv, conta_id, [x["id"] for x in todos_cards + outros_vend])
+            _cv.commit()
+    except Exception:  # noqa: BLE001
+        selo_visita = {}
     for cc in todos_cards + outros_vend:
         cc["tri"] = tri_por.get(cc["id"]) or {"trilha": "vend"}
         cc["sup"] = cc["id"] in sup_ids
+        cc["selo_visita"] = selo_visita.get(cc["id"])
 
     def _no_quadro(cc, com_trilha=True):
         return (_visivel(cc) and _passa_mes(cc) and _busca_bate(cc, busca_n, busca_dig)
@@ -8955,6 +8967,12 @@ def regua_pagina(request: Request):
         # o espelho do vendedor (migração 403): quem é copiado e quem recebe
         from finance import esteira as _est2
         espelho = _est2.espelho(c, ctx["conta_id"])
+        # AS ROTINAS DA VISITA (migração 414): só pra quem vende festa (§6) — o bloco
+        # fala de visita ao espaço, e o recorrente marca reunião
+        rotinas_festa = None
+        if perfil_chave == "eventos":
+            from finance import visita_rotinas as _vrt
+            rotinas_festa = _vrt.config(c, ctx["conta_id"])
         # o perdido automático (migração 282) também tem config própria, e pelo
         # mesmo motivo: a config da régua não conhece as colunas novas. O savepoint
         # é o que impede um deploy pela metade de derrubar a tela inteira.
@@ -9030,6 +9048,7 @@ def regua_pagina(request: Request):
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    espelho=espelho, equipe_espelho=_vendedores(get_pool(), ctx["conta_id"]),
+                   rotinas_festa=rotinas_festa,
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -9051,6 +9070,30 @@ def regua_espelho(request: Request, espelho_de: str = Form(""), espelho_para: st
             c.rollback()
     request.session["prosp_aviso"] = ("Espelho salvo ✓" if r.get("ok") else r.get("erro"))
     return RedirectResponse("/painel/prospeccao/regua#espelho", status_code=303)
+
+
+@router.post("/painel/prospeccao/regua/rotinas-festa")
+def regua_rotinas_festa(request: Request, confirmar: str = Form(""),
+                        perguntar_veio: str = Form(""), depois_visita: str = Form("")):
+    """AS ROTINAS DA VISITA (mockup docs/mockups/funil_novo_rotinas.html, aprovado em
+    27/09/2026): três chaves, cada uma uma família de rotinas. Só pra conta que vende
+    festa — as outras nem veem o bloco. Síncrona: o FastAPI a joga pra threadpool, e o
+    banco não roda no event loop (tests/test_event_loop_nao_trava.py)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    from finance import visita_rotinas as _vrt
+    valores = {"confirmar": confirmar == "1", "perguntar_veio": perguntar_veio == "1",
+               "depois_visita": depois_visita == "1"}
+    with get_pool().connection() as c:
+        if _fr.perfil_da_conta(c, ctx["conta_id"]) != "eventos":
+            return RedirectResponse("/painel/prospeccao/regua", status_code=303)
+        _vrt.salvar_config(c, ctx["conta_id"], valores)
+        c.commit()
+    request.session["prosp_aviso"] = "Rotinas da visita salvas ✓"
+    return RedirectResponse("/painel/prospeccao/regua#rotinas", status_code=303)
 
 
 @router.post("/painel/prospeccao/regua/config")
@@ -12183,6 +12226,11 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbtri.ia{background:#1a1422;color:#e3ccf2;border:1px solid #3e2e4e;padding:.1rem .4rem}
 .kbtri.ia b{color:#f0a9a2}
 .kbtri.sup{background:#1a1422;color:#e3ccf2;border:1px dashed #3e2e4e;padding:.1rem .4rem}
+.kbvis{align-self:flex-start;font-size:.66rem;line-height:1.35;border-radius:5px;padding:.05rem .4rem;border:1px solid var(--borda)}
+.kbvis.ok{background:#10241a;color:#46f58a;border-color:#1e4a3a}
+.kbvis.at{background:#241c0f;color:#f2c66e;border-color:#5a4520}
+.kbvis.bad{background:#241313;color:#f0a9a2;border-color:#5a2b2b}
+.kbvis.ia{background:#1a1422;color:#e3ccf2;border-color:#3e2e4e}
 .kbcol-rsg{border-color:#5a4520}
 .kbrsg-modo{font-style:normal;font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;border:1px solid #5a4520;color:#f2c66e;border-radius:4px;padding:0 .3rem;margin-left:.3rem;font-weight:600}
 .kbrsg-fila{display:flex;flex-direction:column;gap:.08rem;border:1px dashed #5a4520;border-radius:9px;padding:.4rem .5rem;margin:.3rem 0;text-decoration:none;font-size:.68rem;color:#b8a27a}
@@ -12985,6 +13033,7 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
           {% elif _t.trilha == 'ia' %}<div class="kbtri ia">🤖 IA do número{% if _t.gente %} · <b>gente assumiu</b>{% endif %}</div>
           {% elif _t.veio %}<div class="kbtri rsg veio">♻️ veio do Resgate{% if _t.era %} · era de {{ _t.era|e }}{% endif %}</div>{% endif %}
           {% if c.sup %}<div class="kbtri sup" title="É o número do supervisor do Resgate: não é {{ voc.cliente }} e não conta no Desafio nem no Raio-X">🧪 número do supervisor</div>{% endif %}
+          {% if c.selo_visita %}<div class="kbvis {{ c.selo_visita[1] }}" title="A visita (rotinas da visita, Funil › Régua)">📍 {{ c.selo_visita[0] }}</div>{% endif %}
           <div class="kbl2">
           {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
@@ -18067,6 +18116,27 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for m in equipe_espelho %}<option value="{{ m.id }}" {% if espelho.para == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
     </div>
     <div style="display:flex;justify-content:flex-end;margin-top:.6rem"><button class="pbtn">Salvar o espelho</button></div>
+  </form>
+  {% endif %}
+
+  {#- AS ROTINAS DA VISITA (mockup docs/mockups/funil_novo_rotinas.html, aprovado em
+      27/09/2026): só pra quem vende festa. As mensagens ao cliente saem pelo chip da
+      conversa dele; os avisos à equipe, pelo WhatsApp de avisos e pelo push. -#}
+  {% if rotinas_festa is defined and rotinas_festa is not none %}
+  <form method="post" action="/painel/prospeccao/regua/rotinas-festa" class="fsec" id="rotinas" style="margin-top:1rem">
+    <div class="sh"><b>📍 Rotinas da visita</b><span class="mut" style="font-size:.76rem">a visita ao espaço, do marcar ao depois</span></div>
+    <p class="mut" style="font-size:.8rem;line-height:1.55;margin:.2rem 0 .4rem">As mensagens ao {{ voc.cliente }} saem pelo número da conversa dele, das 8h às 20h. Os avisos à equipe vão pelo WhatsApp de avisos e pelo app, das 8h às 21h.</p>
+    {% for campo, nome, desc in [
+        ('confirmar', 'Confirmar as visitas da equipe', 'Ao marcar, na véspera às 18h e 2h antes, em nome da empresa (as da IA a IA já confirma). Se o ' ~ voc.cliente ~ ' pedir pra remarcar, quem atende é avisado. Ninguém confirmou até 1h30 antes: quem recebe é avisado.'),
+        ('perguntar_veio', 'Perguntar "veio?"', '1h depois do horário, a quem recebeu a visita (na visita da IA, a anfitriã). Sem resposta, de novo às 18h.'),
+        ('depois_visita', 'Depois da visita', 'Veio e ninguém escreveu em 2h: o vendedor é lembrado; na visita da IA, a IA agradece e oferece o orçamento. Faltou: o dono do card fica sabendo.')] %}
+    <label style="display:flex;align-items:flex-start;gap:.8rem;padding:.75rem 0;border-top:1px solid var(--borda);cursor:pointer">
+      <input type="checkbox" id="rf_{{ campo }}" name="{{ campo }}" value="1" {% if rotinas_festa[campo] %}checked{% endif %} style="margin-top:.2rem">
+      <span style="flex:1"><span style="font-size:.9rem;font-weight:600;display:block">{{ nome }}</span>
+        <span class="mut" style="font-size:.79rem;line-height:1.5">{{ desc }}</span></span>
+    </label>
+    {% endfor %}
+    <div style="display:flex;justify-content:flex-end;margin-top:.4rem"><button class="pbtn">Salvar as rotinas</button></div>
   </form>
   {% endif %}
 

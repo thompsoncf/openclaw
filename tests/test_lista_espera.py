@@ -607,3 +607,26 @@ def test_o_vendedor_que_e_a_ia_nao_recebe_push(pool, monkeypatch):
     assert le.avisar(pool, conta, HOJE, push=push, telegram=telegram) == 1
     assert pushes == []                                       # o aparelho do dono, não
     assert len(telegramas) == 1                               # o dono sabe pelo resumo
+
+
+def test_mudar_a_etapa_pelo_app_pra_lista_de_espera_passa_pelo_aceitar(pool, monkeypatch):
+    """Revisão de 27/09/2026: no app, escolher a etapa Lista de espera é o mesmo que o
+    botão "aceita esperar" — a data livre não põe o card na coluna, e a tela diz por
+    quê; a data tomada põe na fila."""
+    from finance import cockpit as ck
+    from finance import funil_regua as fr
+    monkeypatch.setattr(ck, "_posse", lambda c, conta, membro, lead: True)
+    monkeypatch.setattr(fr, "recusa_de_saida", lambda c, conta, de, para: None)
+    conta = _conta(pool, "App")
+    _coluna(pool, conta)
+    v = _vend(pool, conta)
+    livre = _lead(pool, conta, v, "Livre", date(2027, 4, 3), status="proposta")
+    r = ck.mudar_etapa(pool, conta, v, livre, le.COLUNA)
+    assert not r["ok"] and "está livre" in r["erro"]
+    assert _status(pool, livre) == "proposta"
+    dia = date(2027, 4, 10)
+    _festa(pool, conta, dia)
+    tomada = _lead(pool, conta, v, "Tomada", dia, status="proposta")
+    assert ck.mudar_etapa(pool, conta, v, tomada, le.COLUNA)["ok"]
+    assert _status(pool, tomada) == le.COLUNA
+    assert le.esperando_por(pool, conta, tomada) == [dia]

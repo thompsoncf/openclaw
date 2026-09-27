@@ -84,8 +84,27 @@ FESTA_PERTO_DIAS = 60
 CADENCIA_DIAS = (0.125, 1, 3, 7)
 #: depois do 4º toque sem resposta, o lead é parado (porta aberta), não fila
 MAX_TOQUES = 4
-#: status de lead que ainda estão em jogo
+#: status de lead que ainda estão em jogo — o PADRÃO, pra conta sem funil próprio.
+#: Com funil, vale `abertos()`: esta lista era de antes do funil novo, e deixava de
+#: fora Qualificado, Visita feita e Data segurada (42 leads da Prime em 27/09/2026).
 ABERTOS = ("novo", "contatado", "qualificado", "proposta")
+
+
+def abertos(c, conta_id: int) -> list[str]:
+    """As colunas em jogo DESTA conta: toda etapa da fase de venda, menos a Lista de
+    espera — que espera a data abrir, não o vendedor (revisão de 27/09/2026). Lida do
+    funil da conta, então nenhuma coluna de um nicho vaza pro outro. Tolerante: sem
+    funil (ou sem a coluna `fase`), o padrão."""
+    try:
+        with c.transaction():
+            rows = c.execute(
+                """select chave from funil_etapas
+                    where conta_id=%s and coalesce(fase, 'venda') = 'venda'
+                      and chave not in ('ganho', 'perdido', 'lista_espera')""",
+                (conta_id,)).fetchall()
+    except Exception:  # noqa: BLE001
+        rows = []
+    return [r[0] for r in rows] or list(ABERTOS)
 
 # O cliente se despediu: não é pergunta, é fechamento. Fica fora do "responda
 # hoje" (mas continua na Fila normal, como sempre).
@@ -283,7 +302,7 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
              where ult > coalesce(ult_in, '2000-01-01') and ult < %s - interval '24 hours'
                and (select count(*) from mensagens m where m.conversa_id = in_.cid
                       and m.direcao = 'out' and m.criado_em > coalesce(in_.ult_in, '2000-01-01')) = 1""",
-            (conta_id, membro_id, list(ABERTOS), fim)).fetchone()[0]
+            (conta_id, membro_id, abertos(c, conta_id), fim)).fetchone()[0]
         # A MESMA CONTA, com o nome de quem tá esperando: sem isto, "2 parou na 1ª"
         # não dizia se era a Beatriz ou a Larissa — o dono tinha que abrir a Fila e
         # procurar quem não teve resposta. `conversa_id` vai direto pro deep-link
@@ -307,7 +326,7 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
                and (select count(*) from mensagens m where m.conversa_id = in_.cid
                       and m.direcao = 'out' and m.criado_em > coalesce(in_.ult_in, '2000-01-01')) = 1
              order by ult limit 8""",
-            (conta_id, membro_id, list(ABERTOS), fim)).fetchall()
+            (conta_id, membro_id, abertos(c, conta_id), fim)).fetchall()
         # OS CONTRATOS DELE, pela mesma régua do cockpit e do relatório (24/09/2026):
         # o vendedor é quem fez o orçamento (na falta, o do lead), e conta o contrato
         # feito direto pelo orçamento, SEM lead — na Prime eram 2 dos 10 de setembro,
@@ -522,7 +541,7 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
                  where cv.prospeccao_id = p.id
                  order by ms.criado_em desc, ms.id desc limit 1) u on true
              where p.conta_id = %s and p.vendedor_id = %s and p.status = any(%s)""",
-            (conta_id, membro_id, list(ABERTOS))).fetchall()
+            (conta_id, membro_id, abertos(c, conta_id))).fetchall()
         visitas = c.execute("""
             select e.id, e.prospeccao_id, e.titulo, e.inicio, coalesce(nullif(p.contato,''), nullif(p.empresa,''), e.titulo)
               from eventos_agenda e join prospeccao p on p.id = e.prospeccao_id
@@ -558,7 +577,9 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
         if "festa" not in faixas or lid in usados or not ev_em or orc:
             continue
         dias = (ev_em - hoje).days
-        if 0 <= dias <= FESTA_PERTO_DIAS and status in ("novo", "contatado", "qualificado"):
+        # os leads já vêm das colunas em jogo (`abertos`): tudo antes da Proposta
+        # conta — Qualificado e Visita feita também (revisão de 27/09/2026)
+        if 0 <= dias <= FESTA_PERTO_DIAS and status != "proposta":
             tipo = f"{ev_tipo} " if ev_tipo else "Festa "
             _add("festa", lid, nome, f"{tipo}{ev_em:%d/%m} · em {dias} dias · sem proposta", "proposta", dias)
     # proposta parada: enviada, e a última mensagem é nossa há 3+ dias

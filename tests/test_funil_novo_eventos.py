@@ -97,7 +97,15 @@ def pool():
 
 def _migrar(c):
     c.execute((BASE / "412_funil_novo_eventos.sql").read_text(encoding="utf-8"))
+    c.execute((BASE / "433_festa_aconteceu.sql").read_text(encoding="utf-8"))
     c.commit()
+
+
+def _aconteceu(c, lead, dia):
+    """A equipe respondeu "aconteceu" (finance/festa_aconteceu.py)."""
+    c.execute("""insert into festa_confirmacao (prospeccao_id, conta_id, evento_em, resposta,
+                                                respondido_em)
+                 values (%s,%s,%s,'aconteceu',now())""", (lead, PRIME, dia))
 
 
 def _migrar_lista(c):
@@ -204,6 +212,13 @@ def test_a_festa_que_passou_leva_a_venda_fechada_pro_pos_festa(pool):
         negociando = _lead(c, "proposta", evento_em=ontem)
         futura = _lead(c, "ganho", evento_em=ontem + timedelta(days=30))
         c.commit()
+        # SEM O "ACONTECEU" NADA ANDA (revisão de 27/09/2026): a data passar não prova
+        # que a festa aconteceu
+        fr.aplicar_gatilhos(c, PRIME)
+        assert _status(c, fechada) == "ganho"
+        for lead in (fechada, negociando):
+            _aconteceu(c, lead, ontem)
+        c.commit()
         fr.aplicar_gatilhos(c, PRIME)
         assert (_status(c, fechada), _status(c, negociando), _status(c, futura)) == \
             ("pos_festa", "proposta", "ganho")
@@ -279,6 +294,7 @@ def test_a_venda_fechada_depois_da_festa_tambem_chega_no_pos_festa(pool):
         lead = _lead(c, "proposta", evento_em=antes)
         c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
         fr.registrar_movimento(c, PRIME, lead, "proposta", "ganho", "manual")
+        _aconteceu(c, lead, antes)
         c.commit()
         fr.aplicar_gatilhos(c, PRIME)
         assert _status(c, lead) == "pos_festa"

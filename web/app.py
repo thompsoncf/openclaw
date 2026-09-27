@@ -675,6 +675,16 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — rotinas de festa falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # A festa aconteceu? (revisão de 27/09/2026): a pergunta à equipe no dia
+                # seguinte à festa, às 9h e às 18h. O Pós-festa espera a resposta.
+                from finance import festa_aconteceu as _facs
+                _fa = _facs.rodar(pool)
+                if any(_fa.values()):
+                    log.info("poller: ciclo #%d — a festa aconteceu?: %s", ciclo, _fa)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — a festa aconteceu? falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # O orçamento que a IA montou (migração 392): a mensagem do sinal na
                 # aprovação, lembretes de 24h/48h, data liberada e data confirmada.
                 from finance import ia_orcamento as _iaos

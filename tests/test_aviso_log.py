@@ -740,3 +740,22 @@ def test_sem_esteira_o_follow_up_continua_avisando(pool, monkeypatch):
     _esteira(pool, "off")
     fu.notificar(pool, CONTA, [_pendente(1)])
     assert [x[1] for x in _linhas(pool)] == ["push", "email"]
+
+
+def test_o_historico_diz_o_tipo_de_cada_aviso_e_filtra(pool):
+    """Revisão de 27/09/2026: o histórico nasceu pra cobrança da manhã e passou a
+    receber o fecho do dia, a visita e o teste, todos iguais. Cada linha ganha o
+    tipo, e a tela filtra por ele."""
+    for origem in ("follow_up", "esteira", "esteira_fecho", "visita", "follow_up_teste"):
+        al.registrar(pool, CONTA, origem=origem, canal="whatsapp", ok=True, membro_id=1)
+    (p,) = al.historico(pool, CONTA)
+    tipos = sorted(e["tipo"] for e in p["canais"]["whatsapp"]["recentes"])
+    assert tipos == ["cobrança", "cobrança", "fecho do dia", "teste", "visita"]
+    assert al.contagem(pool, CONTA) == [
+        {"grupo": "cobranca", "rotulo": "Cobrança", "n": 3},
+        {"grupo": "visita", "rotulo": "Visita", "n": 1},
+        {"grupo": "teste", "rotulo": "Testes", "n": 1}]
+    (p,) = al.historico(pool, CONTA, grupo="visita")
+    assert [e["tipo"] for e in p["canais"]["whatsapp"]["recentes"]] == ["visita"]
+    assert al.historico(pool, CONTA, grupo="festa") == []
+    assert al.tipo("resgate_toque") == ("resgate", "resgate")

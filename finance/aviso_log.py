@@ -262,8 +262,57 @@ DIAS_VISIVEIS = 7
 MAX_EVENTOS = 60
 
 
+#: O TIPO DE CADA AVISO NO HISTÓRICO (revisão de 27/09/2026): o histórico nasceu pra
+#: cobrança da manhã e passou a receber o fecho do dia, a visita, a festa, o resgate,
+#: o espelho e o teste, todos iguais. (grupo, rótulo da linha) por origem.
+TIPOS = {
+    "follow_up": ("cobranca", "cobrança"),
+    "esteira": ("cobranca", "cobrança"),
+    "esteira_fecho": ("cobranca", "fecho do dia"),
+    "visita": ("visita", "visita"),
+    "festa": ("festa", "festa"),
+    "espelho": ("espelho", "espelho"),
+}
+#: a ordem dos filtros, com o nome que a tela mostra
+GRUPOS = (("cobranca", "Cobrança"), ("visita", "Visita"), ("festa", "Festa"),
+          ("resgate", "Resgate"), ("espelho", "Espelho"), ("teste", "Testes"),
+          ("outro", "Outros"))
+
+
+def tipo(origem: str | None) -> tuple[str, str]:
+    """(grupo, rótulo) de uma origem do `aviso_envios`."""
+    o = str(origem or "")
+    if o.endswith("_teste"):
+        return ("teste", "teste")
+    if o.startswith("resgate"):
+        return ("resgate", "resgate")
+    return TIPOS.get(o, ("outro", o or "aviso"))
+
+
+def contagem(pool, conta_id: int, *, dias: int = DIAS_CARD) -> list[dict]:
+    """[{grupo, rotulo, n}] dos grupos com aviso no período — os filtros da tela, só
+    os que têm o que mostrar. Tolerante: falha devolve lista vazia."""
+    d = max(1, min(int(dias or DIAS_CARD), 365))
+    try:
+        with pool.connection() as c:
+            with c.transaction():
+                rows = c.execute(
+                    """select e.origem, count(*) from aviso_envios e
+                         join membros m on m.id = e.membro_id
+                        where e.conta_id=%s and coalesce(m.ativo,true)
+                          and e.criado_em >= now() - make_interval(days => %s)
+                        group by e.origem""", (conta_id, d)).fetchall()
+    except Exception:  # noqa: BLE001
+        return []
+    por: dict = {}
+    for origem, n in rows:
+        g = tipo(origem)[0]
+        por[g] = por.get(g, 0) + int(n)
+    return [{"grupo": g, "rotulo": rot, "n": por[g]} for g, rot in GRUPOS if por.get(g)]
+
+
 def historico(pool, conta_id: int, *, dias: int = DIAS_CARD,
-              dias_visiveis: int = DIAS_VISIVEIS) -> list[dict]:
+              dias_visiveis: int = DIAS_VISIVEIS, grupo: str | None = None) -> list[dict]:
     """O histórico do aviso, pessoa por pessoa e canal por canal.
 
     Pedido do dono em 18/09/2026, mostrando o card do lead na campanha: "quero que
@@ -280,8 +329,9 @@ def historico(pool, conta_id: int, *, dias: int = DIAS_CARD,
     feito AQUI e não no template, porque a régua do que se mostra é decisão de
     produto e template não é lugar de decisão.
 
-    Cada evento é `{quando, ok, motivo, n_leads, teste, entregue_em, lido_em,
-    clicado_em}`. `teste` marca o que saiu pelo botão "Testar agora": ele aparece na
+    Cada evento é `{quando, ok, motivo, n_leads, teste, grupo, tipo, entregue_em,
+    lido_em, clicado_em}` — `tipo` é o rótulo da linha ("cobrança", "visita"…), e
+    `grupo` (o filtro da tela) deixa só os avisos daquele tipo. `teste` marca o que saiu pelo botão "Testar agora": ele aparece na
     linha do tempo (esconder o que chegou no celular do vendedor seria esconder
     metade da história) e continua FORA da estatística do card, que só olha
     `origem='follow_up'`.
@@ -314,6 +364,9 @@ def historico(pool, conta_id: int, *, dias: int = DIAS_CARD,
         return []
     por: dict = {}
     for r in linhas:
+        g, rot = tipo(r[9])
+        if grupo and g != grupo:
+            continue
         p = por.setdefault(r[0], {
             "membro_id": r[0], "quem": r[1], "email": r[2], "numero": r[3],
             "canais": {ch: {"recentes": [], "antigos": []} for ch in CANAIS}})
@@ -322,6 +375,6 @@ def historico(pool, conta_id: int, *, dias: int = DIAS_CARD,
         if len(faixa) >= MAX_EVENTOS:
             continue
         faixa.append({"quando": r[5], "ok": r[6], "motivo": r[7], "n_leads": r[8],
-                      "teste": str(r[9] or "").endswith("_teste"),
+                      "teste": str(r[9] or "").endswith("_teste"), "grupo": g, "tipo": rot,
                       "entregue_em": r[10], "lido_em": r[11], "clicado_em": r[12]})
     return list(por.values())

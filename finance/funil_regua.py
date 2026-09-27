@@ -450,14 +450,24 @@ _SQL_EVENTO = {
         select p.id, greatest(
                  ((p.evento_em + 1)::timestamp at time zone 'America/Sao_Paulo'),
                  (select max(fm.criado_em) + interval '1 second' from funil_movimentos fm
-                   where fm.prospeccao_id = p.id and fm.para = p.status))
+                   where fm.prospeccao_id = p.id and fm.para = p.status),
+                 fc.respondido_em)
           from prospeccao p
+          -- A FESTA ACONTECEU? (revisão de 27/09/2026, finance/festa_aconteceu.py): o
+          -- card só vai pro Pós-festa — e o agradecimento só sai — depois de alguém da
+          -- equipe responder "aconteceu". Vale pra Data segurada também: se a festa
+          -- aconteceu, foi vendida.
+          join festa_confirmacao fc on fc.prospeccao_id = p.id and fc.evento_em = p.evento_em
+                                   and fc.resposta = 'aconteceu'
          where p.conta_id=%(conta)s and p.evento_em is not null
            and p.evento_em < (now() at time zone 'America/Sao_Paulo')::date
-           and p.status in (select fe.chave from funil_etapas fe
-                             where fe.conta_id = p.conta_id and fe.fase = 'fechamento'
-                               and fe.chave <> 'perdido'
-                            union all select 'ganho')""",
+           and (p.status in (select fe.chave from funil_etapas fe
+                              where fe.conta_id = p.conta_id and fe.fase = 'fechamento'
+                                and fe.chave <> 'perdido'
+                             union all select 'ganho')
+                or p.status in (select fe.chave from funil_etapas fe
+                                 where fe.conta_id = p.conta_id and fe.fase = 'venda'
+                                   and fe.gatilho = 'orcamento_aprovado'))""",
 }
 
 

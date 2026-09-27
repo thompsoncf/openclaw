@@ -1702,6 +1702,16 @@ def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -
         recusa = _fr.recusa_de_saida(c, conta_id, antes[0] if antes else None, chave)
         if recusa:
             return {"ok": False, "erro": "saida", "msg": recusa}
+        c.commit()
+    # A LISTA DE ESPERA pelo mesmo caminho do botão "aceita esperar" (revisão de
+    # 27/09/2026): o card entra na fila da data, ou não entra e a tela diz por quê.
+    from finance import lista_espera as _le
+    if chave == _le.COLUNA and (not antes or antes[0] != chave) and _le.usa_lista(pool, conta_id):
+        r = _le.aceitar(pool, conta_id, lead_id, membro_id)
+        # `erro` com a frase: é o que o app mostra (`_erro` devolve o texto que não é código)
+        return {"ok": True} if r.get("ok") else {
+            "ok": False, "erro": r.get("erro") or "Não deu pra pôr na lista de espera."}
+    with pool.connection() as c:
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (chave, lead_id, conta_id))
         _historico(c, conta_id, lead_id, antes[0] if antes else None, chave, membro_id)

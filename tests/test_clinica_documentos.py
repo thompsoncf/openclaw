@@ -34,7 +34,7 @@ def test_emitir_nao_muda_mais_e_o_pdf_sai(banco, zap):  # noqa: F811
         did = _emitido(c, kid, q)
         c.commit()
         d = cdoc.documento(c, CLINICA, kid, did)
-        assert d["status"] == "assinado" and cdoc.integro(d, kid) and d["conselho"] == "CRM-MA 1234"
+        assert d["status"] == "assinado" and cdoc.integro(d, kid, CLINICA) and d["conselho"] == "CRM-MA 1234"
         assert cdoc.salvar(c, CLINICA, kid, did, q, {"corpo": "outra"}) == "Documento emitido não muda: emita outro."
         with pytest.raises(psycopg.errors.RaiseException):
             c.execute("update clinica_documentos set corpo='x' where id=%s", (did,))
@@ -42,6 +42,11 @@ def test_emitir_nao_muda_mais_e_o_pdf_sai(banco, zap):  # noqa: F811
         with pytest.raises(psycopg.errors.RaiseException):
             c.execute("delete from clinica_documentos where id=%s", (did,))
         c.rollback()
+        with pytest.raises(psycopg.errors.RaiseException):              # nem trocar de conta ou de atendimento
+            c.execute("update clinica_documentos set conta_id=34 where id=%s", (did,))
+        c.rollback()
+        rec = cdoc.novo(c, CLINICA, kid, q, "receita", "Lúcia", AGORA)
+        assert "só com o modelo" in cdoc.emitir(c, CLINICA, kid, rec, q)     # "Uso: 1." não sai vazio
         pdf = cdoc.pdf(c, CLINICA, kid, d)
         assert pdf[:4] == b"%PDF"
         cc_ = _emitido(c, kid, q, "receita_controle")
@@ -69,6 +74,11 @@ def test_a_recepcao_ve_o_tipo_e_manda_o_link_e_o_paciente_abre(cli, banco, zap):
     r = cli.post(f"/painel/clinica/pacientes/{kid}/documentos/enviar", data={"doc": str(did)})
     assert r.status_code == 303
     assert zap.saiu and f"/ficha/{tok}" in zap.saiu[-1][1] and ".pdf" not in zap.saiu[-1][1]   # o link, nunca o arquivo
+    with banco.connection() as c:                                     # na conversa (a equipe lê), sem o link
+        gravado = c.execute("select texto from mensagens where direcao='out' order by id desc limit 1").fetchone()[0]
+        assert tok not in gravado and "link dos documentos" in gravado
+        assert any("mandou o link dos documentos" in x["o_que"] for x in acc.registro(c, CLINICA, datetime.now(timezone.utc)))
+    assert cli.get(f"/ficha/{tok}/documento/{did}.pdf").status_code == 303          # logado no painel: não
     celular = type(cli)(cli.app, follow_redirects=False)
     assert celular.get(f"/ficha/{tok}/documento/{did}.pdf").status_code == 303        # sem a data, não abre
     celular.post(f"/ficha/{tok}/entrar", data={"nascimento": "1990-05-17"})
@@ -106,3 +116,14 @@ def test_antes_da_432(pool, zap):  # noqa: F811
     with pool.connection() as c:
         assert cdoc.listar(c, CLINICA, 1) == [] and cdoc.emitidos_sem_conteudo(c, CLINICA, 1) == []
         assert cdoc.no_link(c, CLINICA, 1, AGORA) == []
+
+
+def test_sem_data_de_nascimento_nao_manda(banco, zap):  # noqa: F811
+    kid, _eid, _prof = _liberado(banco)
+    with banco.connection() as c:
+        q = acc.leitor(c, CLINICA, MANOEL)
+        did = _emitido(c, kid, q)
+        c.execute("update clientes set aniversario=null where id=%s", (kid,))
+        c.commit()
+        assert "data de nascimento" in cdoc.enviar(c, CLINICA, kid, [did], None)
+        assert cdoc.no_link(c, CLINICA, kid, AGORA) == []

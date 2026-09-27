@@ -92,7 +92,7 @@ def prontuario(request: Request, cliente_id: int):
         arquivos = parq.listar(c, conta[0], cliente_id)
         docs = cdoc.listar(c, conta[0], cliente_id, q)
         for d in docs:
-            d["integro"] = cdoc.integro(d, cliente_id) if d["status"] == "assinado" else None
+            d["integro"] = cdoc.integro(d, cliente_id, conta[0]) if d["status"] == "assinado" else None
         imagem_op, imagem_txt = parq.autorizacao_de_imagem(c, conta[0], cliente_id)
         ev = ca.evento(c, conta[0], evento) if evento else None
         if ev and cpa_do_evento(c, conta[0], evento) != cliente_id:
@@ -302,11 +302,10 @@ def _documentos_enviar(request: Request, cliente_id: int, ids: list[int]):
         if resp is not None:
             return resp
         conta, q = ok
-        erro = cdoc.enviar(c, conta[0], cliente_id, ids, request.session.get("membro_id"))
+        erro = cdoc.enviar(c, conta[0], cliente_id, ids, request.session.get("membro_id"), quem_manda=q["nome"])
         if erro:
             c.rollback()
             return _ir(request, cliente_id, erro=erro)
-        acc.registrar(c, conta[0], q, cliente_id, f"mandou o link dos documentos {ids}", _ip(request))
         c.commit()
     return _ir(request, cliente_id, "Link dos documentos enviado no WhatsApp.")
 
@@ -575,7 +574,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       {% else %}{% if d.integro %}<span class="pr-tag g">emitido · íntegro</span>{% else %}<span class="pr-tag r">ALTERADO</span>{% endif %}
         {% if d.tipo != 'notificacao' %}<a href="/painel/clinica/prontuario/{{ p.id }}/documento/{{ d.id }}/pdf" target="_blank" rel="noopener">PDF</a>{% endif %}
         {% if d.enviado_em %}<span class="pr-m">· enviado {{ d.enviado_em.strftime('%d/%m %H:%M') }}</span>{% endif %}{% endif %}</div>{% endfor %}
-      <div class="pr-acoes"><button class="sec">Mandar os marcados no WhatsApp (link com a data de nascimento)</button></div></form>{% endif %}
+      <div class="pr-acoes"><button class="sec" onclick="this.disabled=true;this.form.submit()">Mandar os marcados no WhatsApp (link com a data de nascimento)</button></div></form>{% endif %}
     <form method="post" action="/painel/clinica/prontuario/{{ p.id }}/documento/novo" class="pr-acoes">
       {% if ev %}<input type="hidden" name="evento" value="{{ ev.id }}">{% endif %}
       <select name="tipo" style="width:auto;margin:0">{% for k, t in TIPOS_DOC.items() %}<option value="{{ k }}">{{ t[0] }}</option>{% endfor %}</select>

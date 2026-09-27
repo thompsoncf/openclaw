@@ -724,8 +724,11 @@ def _conversa(c, conta_id: int, ev: dict) -> int | None:
     return r[0] if r else None
 
 
-def enviar(c, conta_id: int, ev: dict, texto: str, *, autor: str, membro_id: int | None = None) -> dict:
-    """Manda pelo mesmo chip da conversa do paciente (se houver) e grava na conversa."""
+def enviar(c, conta_id: int, ev: dict, texto: str, *, autor: str, membro_id: int | None = None,
+           texto_gravado: str | None = None) -> dict:
+    """Manda pelo mesmo chip da conversa do paciente (se houver) e grava na conversa.
+    `texto_gravado`: o que fica na conversa, quando o enviado não pode ficar lá (o link
+    dos documentos, que a equipe toda lê)."""
     dig = _digitos(ev.get("fone"))
     if len(dig) < 10:
         return {"ok": False, "erro": "sem_numero"}
@@ -740,7 +743,7 @@ def enviar(c, conta_id: int, ev: dict, texto: str, *, autor: str, membro_id: int
     if res.get("ok") and conv:
         c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, membro_id, provider_sid)
                      values (%s,'whatsapp','out',%s,%s,%s,%s)""",
-                  (conv, autor, texto, membro_id, res.get("sid")))
+                  (conv, autor, texto if texto_gravado is None else texto_gravado, membro_id, res.get("sid")))
         c.execute("update conversas set ultima_msg_em=now() where id=%s and conta_id=%s", (conv, conta_id))
     return res
 

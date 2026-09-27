@@ -37,15 +37,12 @@ create table if not exists public.clinica_documentos (
   atualizado_em timestamptz not null default now());
 create index if not exists clinica_documentos_paciente on public.clinica_documentos (conta_id, cliente_id, criado_em desc);
 
--- o envio (enviado_em) é a ÚNICA coisa que muda num documento emitido
+-- o envio (enviado_em) é a ÚNICA coisa que muda num documento emitido: qualquer outra
+-- coluna (inclusive conta, paciente, atendimento, id) é recusada
 create or replace function public.clinica_documento_emitido_nao_muda() returns trigger language plpgsql as $$
 begin
-  if old.status = 'assinado' and (new.corpo is distinct from old.corpo or new.titulo is distinct from old.titulo
-      or new.tipo is distinct from old.tipo or new.status is distinct from old.status
-      or new.assinado_em is distinct from old.assinado_em or new.assinatura_hash is distinct from old.assinatura_hash
-      or new.numero_talao is distinct from old.numero_talao or new.cliente_id is distinct from old.cliente_id
-      or new.profissional_id is distinct from old.profissional_id or new.conselho is distinct from old.conselho
-      or new.profissional_nome is distinct from old.profissional_nome) then
+  if old.status = 'assinado'
+     and (to_jsonb(new) - 'enviado_em') is distinct from (to_jsonb(old) - 'enviado_em') then
     raise exception 'documento emitido não muda: emita outro';
   end if;
   return new;

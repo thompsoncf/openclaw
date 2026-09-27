@@ -120,14 +120,16 @@ def salvar(c, conta_id: int, cliente_id: int, doc_id: int, quem: dict, form: dic
     return None
 
 
-def _impressao(d: dict, cliente_id: int, assinado_em: datetime, nome: str, conselho: str) -> str:
-    corpo = {"cliente_id": cliente_id, "tipo": d["tipo"], "titulo": d["titulo"], "corpo": d["corpo"],
+def _impressao(d: dict, cliente_id: int, assinado_em: datetime, nome: str, conselho: str, conta_id: int) -> str:
+    corpo = {"id": d["id"], "conta_id": conta_id, "evento_id": d["evento_id"], "cliente_id": cliente_id, "tipo": d["tipo"], "titulo": d["titulo"], "corpo": d["corpo"],
              "numero_talao": d["numero_talao"], "profissional_id": d["profissional_id"], "profissional_nome": nome,
              "conselho": conselho, "assinado_em": assinado_em.astimezone(timezone.utc).isoformat(timespec="microseconds")}
     return hashlib.sha256(json.dumps(corpo, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def emitir(c, conta_id: int, cliente_id: int, doc_id: int, quem: dict) -> str | None:
+    # a linha travada: um "salvar" de outra aba não entra entre o hash e a gravação
+    c.execute("select 1 from clinica_documentos where id=%s and conta_id=%s for update", (doc_id, conta_id))
     d = documento(c, conta_id, cliente_id, doc_id)
     if not d or d["profissional_id"] != quem["profissional_id"]:
         return "Documento não encontrado."
@@ -138,29 +140,36 @@ def emitir(c, conta_id: int, cliente_id: int, doc_id: int, quem: dict) -> str | 
             return "Informe o número do talão e o medicamento."
     elif not d["corpo"] or "___" in d["corpo"]:
         return "Complete o texto do documento (troque os ___)."
+    else:
+        modelo = TIPOS[d["tipo"]][1]
+        if modelo and d["corpo"].strip().rstrip(".").strip() == modelo.strip().rstrip(".").strip():
+            return "O documento está só com o modelo: escreva o conteúdo."
     r = c.execute("select nome, coalesce(conselho,'') from clinica_profissionais where id=%s and conta_id=%s",
                   (quem["profissional_id"], conta_id)).fetchone()
     nome, conselho = (r[0], r[1]) if r else ("", "")
     if not conselho.strip():
         return "Sem conselho e número no cadastro, não dá pra emitir."
     quando = c.execute("select now()").fetchone()[0]
-    c.execute("""update clinica_documentos set status='assinado', assinado_em=%s, assinatura_hash=%s,
-                        profissional_nome=%s, conselho=%s, atualizado_em=%s
-                  where id=%s and conta_id=%s and status='rascunho'""",
-              (quando, _impressao(d, cliente_id, quando, nome, conselho), nome, conselho, quando, doc_id, conta_id))
-    return None
+    r = c.execute("""update clinica_documentos set status='assinado', assinado_em=%s, assinatura_hash=%s,
+                            profissional_nome=%s, conselho=%s, atualizado_em=%s
+                      where id=%s and conta_id=%s and status='rascunho' returning id""",
+                  (quando, _impressao(d, cliente_id, quando, nome, conselho, conta_id), nome, conselho, quando,
+                   doc_id, conta_id)).fetchone()
+    return None if r else "Este documento já foi emitido."
 
 
-def integro(d: dict, cliente_id: int) -> bool:
+def integro(d: dict, cliente_id: int, conta_id: int) -> bool:
     if d["status"] != "assinado" or not d["_assinado_cru"]:
         return False
-    return _impressao(d, cliente_id, d["_assinado_cru"], d["prof"], d["conselho"]) == d["hash"]
+    return _impressao(d, cliente_id, d["_assinado_cru"], d["prof"], d["conselho"], conta_id) == d["hash"]
 
 
 def marcar_enviados(c, conta_id: int, cliente_id: int, ids: list[int]) -> None:
-    c.execute("""update clinica_documentos set enviado_em=now() where conta_id=%s and cliente_id=%s
-                   and id = any(%s) and status='assinado' and tipo <> 'notificacao'""",
-              (conta_id, cliente_id, list(ids)))
+    c.execute("""update clinica_documentos
+                    set enviado_em = case when enviado_em is null or enviado_em < now() - interval '30 days'
+                                          then now() else enviado_em end
+                  where conta_id=%s and cliente_id=%s and id = any(%s) and status='assinado'
+                    and tipo <> 'notificacao'""", (conta_id, cliente_id, list(ids)))
 
 
 def no_link(c, conta_id: int, cliente_id: int, agora: datetime) -> list[dict]:
@@ -223,29 +232,60 @@ def texto_envio(paciente_primeiro: str, link: str) -> str:
             f"📄 {link}\n\nAbre com a data de nascimento e vale {VALE_DIAS} dias.")
 
 
-def enviar(c, conta_id: int, cliente_id: int, ids: list[int], membro_id: int | None) -> str | None:
+def enviar(c, conta_id: int, cliente_id: int, ids: list[int], membro_id: int | None,
+           quem_manda: str = "") -> str | None:
     """Manda o LINK DA FICHA pelo WhatsApp do paciente (ou do responsável) e marca os
-    documentos como enviados. Erro (texto) ou None."""
+    documentos como enviados. Erro (texto) ou None.
+
+    - Só com a DATA DE NASCIMENTO na ficha: é ela que protege o link (sem ela, quem
+      recebesse o link daria uma data qualquer e abriria a receita).
+    - Marca e registra ANTES de mandar (num savepoint) e desfaz se o envio falhar: o
+      paciente nunca recebe um link sem os documentos, e fica a trilha de quem mandou.
+    - Na conversa fica "[link dos documentos enviado]", nunca o link (a equipe lê a conversa)."""
     from finance import clinica_ficha_link as cfl
     from finance import clinica_pacientes as cpa
     if not cfl.ligado(c, conta_id):
         return "O link da ficha está desligado (Agenda › Link da ficha): ligue pra mandar documentos."
-    validos = [d["id"] for d in emitidos_sem_conteudo(c, conta_id, cliente_id) if d["id"] in set(ids)]
+    pedidos = {int(x) for x in ids}
+    validos = [r[0] for r in c.execute(
+        """select id from clinica_documentos where conta_id=%s and cliente_id=%s and status='assinado'
+             and tipo <> 'notificacao' and id = any(%s)""", (conta_id, cliente_id, list(pedidos))).fetchall()]
     if not validos:
         return "Escolha os documentos."
     agora = datetime.now(timezone.utc)
     p = cpa.ficha(c, conta_id, cliente_id, agora)
-    tok = cfl.token(c, conta_id, cliente_id) if p else None
-    if not p or not tok:
+    if not p:
         return "Paciente não encontrado."
+    if not p["nascimento"]:
+        return ("Cadastre a data de nascimento do paciente antes de mandar documentos: é ela que protege o link. "
+                "(Aba Cadastro.)")
+    tok = cfl.token(c, conta_id, cliente_id)
     fone = p["fone"]
     if p["responsavel"] and not ca._digitos(fone):
         r = cpa.ficha(c, conta_id, p["responsavel"]["id"], agora)
         fone = r["fone"] if r else ""
     primeiro = "" if p["responsavel"] else cpa._primeiro(p["nome"]).capitalize()
-    res = ca.enviar(c, conta_id, {"id": None, "lead": p["lead"], "fone": fone}, texto_envio(primeiro, cfl.link(tok)),
-                    autor="humano", membro_id=membro_id)
-    if not res.get("ok"):
+    try:
+        _marcar_e_mandar(c, conta_id, cliente_id, validos, membro_id, quem_manda, p, fone, primeiro, tok)
+    except _NaoMandou:
         return "Não deu pra mandar: confira o celular da ficha."
-    marcar_enviados(c, conta_id, cliente_id, validos)
     return None
+
+
+def _marcar_e_mandar(c, conta_id, cliente_id, validos, membro_id, quem_manda, p, fone, primeiro, tok):
+    from finance import clinica_acesso_clinico as acc
+    from finance import clinica_ficha_link as cfl
+    with c.transaction():
+        marcar_enviados(c, conta_id, cliente_id, validos)
+        acc.registrar(c, conta_id, {"nome": quem_manda or "equipe", "membro_id": membro_id}, cliente_id,
+                      f"mandou o link dos documentos {sorted(validos)}")
+        res = ca.enviar(c, conta_id, {"id": None, "lead": p["lead"], "fone": fone}, texto_envio(primeiro, cfl.link(tok)),
+                        autor="humano", membro_id=membro_id,
+                        texto_gravado="📄 [link dos documentos da consulta enviado — abre com a data de nascimento]")
+        if not res.get("ok"):
+            raise _NaoMandou()
+    return None
+
+
+class _NaoMandou(Exception):
+    pass

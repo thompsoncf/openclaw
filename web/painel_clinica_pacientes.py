@@ -182,7 +182,7 @@ def balcao(request: Request, cliente_id: int):
 @router.post(URL + "/{cliente_id}/documentos/enviar")
 async def documentos_enviar(request: Request, cliente_id: int):
     form = await request.form()
-    ids = [int(v) for v in form.getlist("doc") if str(v).isdigit()]
+    ids = [int(v) for v in form.getlist("doc") if str(v).isdecimal() and len(str(v)) < 12]
     from starlette.concurrency import run_in_threadpool
     return await run_in_threadpool(_documentos_enviar, request, cliente_id, ids)
 
@@ -194,8 +194,12 @@ def _documentos_enviar(request: Request, cliente_id: int, ids: list[int]):
     if redir is not None:
         return redir
     from finance import clinica_documentos as cdoc
+    membro = request.session.get("membro_id")
     with get_pool().connection() as c:
-        erro = cdoc.enviar(c, conta[0], cliente_id, ids, request.session.get("membro_id"))
+        r = c.execute("select coalesce(nullif(nome,''), email) from membros where id=%s and conta_id=%s",
+                      (membro, conta[0])).fetchone() if membro else None
+        erro = cdoc.enviar(c, conta[0], cliente_id, ids, membro,
+                           quem_manda=f"{r[0]} (recepção)" if r else "dono da conta")
         (c.rollback if erro else c.commit)()
     if erro:
         return _ir(request, f"{URL}/{cliente_id}", erro=erro)
@@ -344,7 +348,7 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   {% elif p.situacao %}<div class="pc-m" style="margin-top:.6rem">✓ Ficha completa{% if p.situacao.pre_em %} · pré-consulta respondida em {{ p.situacao.pre_em.strftime('%d/%m') }}{% endif %}</div>{% endif %}
   {% if docs_emitidos %}<form class="pc-cx" method="post" action="/painel/clinica/pacientes/{{ p.id }}/documentos/enviar"><b>Documentos emitidos</b> <span class="pc-m">· só o tipo; o conteúdo é do profissional</span>
     {% for d in docs_emitidos %}<div class="pc-m" style="margin-top:.3rem"><input type="checkbox" name="doc" value="{{ d.id }}" style="width:auto"> {{ d.tipo_txt }} · {{ d.quando.strftime('%d/%m/%Y') }}{% if d.enviado_em %} · enviado {{ d.enviado_em.strftime('%d/%m') }}{% endif %}</div>{% endfor %}
-    <div class="pc-acoes" style="margin-top:.4rem"><button class="sec">Mandar os marcados no WhatsApp</button></div></form>{% endif %}
+    <div class="pc-acoes" style="margin-top:.4rem"><button class="sec" onclick="this.disabled=true;this.form.submit()">Mandar os marcados no WhatsApp</button></div></form>{% endif %}
   {% if p.situacao and p.situacao.alergia %}<div style="margin-top:.5rem"><span class="pc-tag y">⚠ alergia (o profissional vê qual)</span></div>{% endif %}
   <div class="pc-abas">{% for k, r in abas %}<a class="{% if aba == k %}on{% endif %}" href="/painel/clinica/pacientes/{{ p.id }}?aba={{ k }}">{{ r }}</a>{% endfor %}</div>
 

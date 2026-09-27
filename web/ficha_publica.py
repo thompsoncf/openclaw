@@ -150,7 +150,9 @@ def ficha(request: Request, tok: str):
         # a cópia dos termos só pra quem provou a data (no tablet do balcão, não: a sessão fecha)
         aceitos = cfl.termos_aceitos(c, f["conta_id"], f["id"]) if nivel == "data" else []
         from finance import clinica_documentos as cdoc
-        documentos = cdoc.no_link(c, f["conta_id"], f["id"], agora) if nivel == "data" else []
+        # no aparelho logado no painel, não: a equipe não lê o documento pelo link do paciente
+        documentos = (cdoc.no_link(c, f["conta_id"], f["id"], agora)
+                      if nivel == "data" and not _logado(request) else [])
         c.commit()
     passo = int(q["passo"]) if re.fullmatch(r"[1-4]", q.get("passo") or "") else None
     if not liberado:
@@ -203,9 +205,10 @@ def _balcao(request: Request, tok: str, form: dict):
 @router.get("/ficha/{tok}/documento/{doc_id}.pdf")
 def documento_pdf(request: Request, tok: str, doc_id: int):
     """O documento que a clínica mandou (30 dias), pra quem provou a data de nascimento."""
-    if _nivel(request, tok) != "data":
+    if _nivel(request, tok) != "data" or _logado(request):
         return _ir(request, tok)
     from fastapi.responses import Response
+    from finance import clinica_acesso_clinico as acc
     from finance import clinica_documentos as cdoc
     with get_pool().connection() as c:
         f = _aberta(c, tok)
@@ -214,6 +217,10 @@ def documento_pdf(request: Request, tok: str, doc_id: int):
         d = next((x for x in cdoc.no_link(c, f["conta_id"], f["id"], datetime.now(timezone.utc)) if x["id"] == doc_id),
                  None)
         doc = cdoc.pdf(c, f["conta_id"], f["id"], d) if d else None
+        if doc:
+            acc.registrar(c, f["conta_id"], {"nome": "paciente (pelo link)"}, f["id"],
+                          f"abriu o documento #{doc_id} pelo link", _ip(request))
+            c.commit()
     if not doc:
         return _nao_achou()
     return Response(doc, media_type="application/pdf",

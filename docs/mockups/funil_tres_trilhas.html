@@ -49,7 +49,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
 
 /* palco: a tela do produto em tamanho real, rolando de lado no celular */
 .palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
-.tela{width:1060px;padding:22px;display:flex;flex-direction:column;gap:16px}
+.tela{width:1240px;padding:22px;display:flex;flex-direction:column;gap:16px}
 .tb{display:flex;align-items:center;gap:.6rem;font-size:.8rem;color:var(--dim)}
 .tb h3{font-size:1.05rem;color:var(--text)}
 .abas{display:flex;gap:4px;margin-left:auto}
@@ -75,7 +75,16 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
 .tr .modo{font-family:var(--mono);font-size:.58rem;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--ambar-borda);color:var(--ambar-2);border-radius:4px;padding:0 .3rem;margin-left:auto}
 
 /* o quadro */
-.quadro{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.quadro{display:grid;grid-template-columns:1.25fr repeat(5,1fr);gap:10px}
+.col.rsgcol{border-color:var(--ambar-borda);background:linear-gradient(180deg,var(--ambar-fundo),var(--surface) 60%)}
+.col.rsgcol h4{color:var(--ambar-2)}
+.orig{display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.1rem}
+.orig span{font-size:.6rem;border:1px solid var(--ambar-borda);color:var(--ambar-2);border-radius:999px;padding:0 .4rem}
+.card .de{font-size:.66rem;color:var(--ambar-2)}
+.card .etp{font-size:.62rem;font-family:var(--mono);color:var(--faint)}
+.card .rs{font-size:.66rem;color:var(--ia-2);border-top:1px dashed var(--line-2);padding-top:.2rem;margin-top:.1rem}
+.card .rs::before{content:"✨ "}
+.visao{font-size:.62rem;color:var(--faint);font-family:var(--mono);letter-spacing:.04em}
 .col{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.6rem;display:flex;flex-direction:column;gap:7px;min-height:230px}
 .col h4{margin:0 0 .15rem;font-family:var(--display);font-size:.82rem;display:flex;justify-content:space-between;color:var(--text)}
 .col h4 span{color:var(--faint);font-family:var(--mono);font-weight:400;font-size:.72rem}
@@ -134,6 +143,27 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
 .zap .h{display:block;font-size:.6rem;color:var(--faint);text-align:right;margin-top:.2rem}
 .zap.esp{border-color:var(--line-2);background:var(--surface-2)}
 
+/* resumo antes da conversa */
+.fluxo{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.fx{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.7rem .8rem;font-size:.8rem;display:flex;flex-direction:column;gap:.3rem}
+.fx .nn{font-family:var(--mono);font-size:.7rem;color:var(--neon)}
+.fx b{font-size:.86rem}
+.fx p{margin:0;color:var(--dim)}
+.rsm{border:1px solid var(--ia-borda);border-radius:12px;background:var(--ia-fundo);padding:.8rem .9rem;display:flex;flex-direction:column;gap:.45rem;font-size:.8rem}
+.rsm h3{font-size:.92rem;color:var(--ia-2)}
+.rsm .kv{display:grid;grid-template-columns:auto 1fr;gap:.25rem .8rem}
+.rsm .kv span{color:var(--faint)}
+.rsm .fato{color:var(--neon-2)}
+/* perdidos */
+.tabw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:.82rem}
+th,td{padding:.55rem .75rem;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+thead th{font-size:.68rem;color:var(--faint);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+tbody tr:last-child td{border-bottom:0}
+.sim{color:var(--neon-2)} .nao{color:var(--coral-2)} .tal{color:var(--ambar-2)}
+@media (max-width:760px){.fluxo{grid-template-columns:1fr 1fr}}
+
 /* ZAQ */
 .mini{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 
@@ -155,12 +185,13 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
 <div class="wrap">
 
 <header class="head">
-  <span class="k">Mockup pra aprovação · 27/09/2026</span>
+  <span class="k">Mockup pra aprovação · 27/09/2026 · versão 2</span>
   <h1>O funil em três trilhas</h1>
   <p>Vendedores, a <b>IA do número</b> (o ZAQ SDR no chip CP Thiago) e o <b>Resgate da IA</b>, cada um
   com a sua regra e quem acompanha. O quadro continua um só, com as mesmas etapas; em cima dele entra
   uma <b>barra com as três trilhas</b>, que mostra o que cada uma está fazendo e filtra o quadro.
-  E, pra você seguir testando a cobrança sem ser cobrado como vendedor, o <b>espelho do vendedor</b>.</p>
+  Na frente do quadro, <b>a coluna Resgate</b>, com a origem de cada lead; antes de cada conversa, <b>o
+  resumo</b>; e, pra você seguir testando a cobrança sem ser cobrado como vendedor, o <b>espelho do vendedor</b>.</p>
   <div class="quem">
     <span class="pill">Prime (34) · vende festa</span>
     <span class="pill">ZAQ (3) · vende mensalidade</span>
@@ -228,10 +259,16 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
     </div>
 
     <div class="quadro" id="quadro">
+      <div class="col rsgcol" data-t="rsg"><h4>♻️ Resgate <span>em andamento</span></h4>
+        <div class="orig"><span>do follow-up 7</span><span>perdidos 3</span><span>da IA 0</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Duda</span><span class="de">veio do follow-up · era do Pedro · 9 dias parado</span><span class="etp">etapa: Contatado · festa 08/11</span><span class="rel">retomada ontem · 2º toque em 2 dias</span><span class="rs">infantil pra 80 · parou no valor do pacote de domingo</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Olga</span><span class="de">veio dos perdidos · perdido pela esteira em 19/09</span><span class="etp">etapa: Perdido · sem data</span><span class="rel">na fila · sai hoje</span><span class="rs">casamento · pediu cardápio e ninguém mandou</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Paulo</span><span class="de">veio do follow-up · era da Jacqueline · 15 dias (tinha orçamento)</span><span class="etp">etapa: Negociação · festa 14/03</span><span class="rel">última chamada amanhã</span><span class="rs">15 anos · orçamento de R$ 9,8 mil, achou caro</span></div>
+        <span class="visao">a coluna é uma visão: a etapa do lead não muda</span>
+      </div>
       <div class="col"><h4>Contatado <span>247</span></h4>
         <div class="card" data-t="vend"><span class="nm">Carla</span><span class="sb">15 anos · 12/12</span><span class="tg">Thiago</span><span class="rel">esteira · dia 3</span></div>
         <div class="card" data-t="ia"><span class="nm">Bia</span><span class="sb">casamento · sem data</span><span class="tg">🤖 IA do número</span><span class="rel">cliente sumido · lembrete amanhã</span></div>
-        <div class="card" data-t="rsg"><span class="nm">Duda</span><span class="sb">infantil · 08/11</span><span class="tg">♻️ Resgate · era do Pedro</span><span class="rel">retomada ontem · toque 2 em 2 dias</span></div>
         <div class="card" data-t="vend"><span class="nm">Eva</span><span class="sb">debutante · 20/03</span><span class="tg">Jacqueline</span><span class="rel">falou hoje</span></div>
         <div class="mais">+ 243</div>
       </div>
@@ -242,7 +279,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
       </div>
       <div class="col"><h4>Negociação <span>163</span></h4>
         <div class="card" data-t="vend"><span class="nm">Hana</span><span class="sb">casamento · 30/05</span><span class="tg">Thiago</span><span class="rel">esteira · último dia</span></div>
-        <div class="card" data-t="rsg"><span class="nm">Ivo</span><span class="sb">infantil · 22/11</span><span class="tg">♻️ Resgate · era da Jacqueline</span><span class="rel">respondeu · IA conversando</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Ivo</span><span class="sb">infantil · 22/11</span><span class="tg">♻️ veio do Resgate · era da Jacqueline</span><span class="rel">respondeu · voltou pra etapa dele</span></div>
         <div class="card" data-t="ia"><span class="nm">Júlia</span><span class="sb">15 anos · 18/04</span><span class="tg">🤖 IA do número</span><span class="rel">orçamento esperando conferência</span></div>
         <div class="mais">+ 160</div>
       </div>
@@ -251,7 +288,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
         <div class="mais">+ 11</div>
       </div>
       <div class="col"><h4>Perdido <span>67</span></h4>
-        <div class="card" data-t="rsg"><span class="nm">Mel</span><span class="sb">infantil</span><span class="tg">♻️ Resgate · era do Thiago</span><span class="rel">3 toques sem resposta</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Mel</span><span class="sb">infantil</span><span class="tg">♻️ veio do Resgate · era do Thiago</span><span class="rel">3 toques sem resposta · dia 10</span></div>
         <div class="card" data-t="vend"><span class="nm">Nina</span><span class="sb">15 anos</span><span class="tg">Pedro</span><span class="rel">sem tratativa (esteira)</span></div>
         <div class="mais">+ 65</div>
       </div>
@@ -295,11 +332,11 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
         <ul><li>No Ensaio nenhum lead muda de dono: só as prévias.</li>
         <li>O card mostra de quem o lead era ("era do Pedro").</li></ul></div>
       <div class="esc">
-        <div class="er"><span>Cliente esperando</span><span class="bar"><i style="width:10%"></i></span><span class="q">—</span></div>
-        <div class="er"><span>Festa com data</span><span class="bar"><i style="width:30%"></i></span><span class="q">—</span></div>
-        <div class="er"><span>Abertos</span><span class="bar"><i style="width:100%"></i></span><span class="q">—</span></div>
-        <div class="er"><span>Perdidos</span><span class="bar"><i style="width:45%"></i></span><span class="q">—</span></div>
-        <p class="nota" style="margin-top:.3rem">a fila por faixa, a mesma do cartão do Resgate; os números vêm dele</p>
+        <div class="er"><span>Do follow-up (parado)</span><span class="bar"><i style="width:100%"></i></span><span class="q">~270</span></div>
+        <div class="er"><span>Perdido pelo vendedor</span><span class="bar"><i style="width:14%"></i></span><span class="q">~30</span></div>
+        <div class="er"><span>Perdido pela esteira</span><span class="bar"><i style="width:8%"></i></span><span class="q">20</span></div>
+        <div class="er"><span>Da IA do número</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
+        <p class="nota" style="margin-top:.3rem">de onde vem a fila; o número exato sai do cartão do Resgate</p>
       </div>
     </div>
   </div></div>
@@ -311,7 +348,89 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-
 </section>
 
 <section class="sec">
-  <header><h2>2. O espelho do vendedor</h2>
+  <header><h2>2. A coluna Resgate: de onde veio cada lead</h2>
+    <p>Pedido do dono: além da etiqueta no card, <b>uma coluna Resgate</b> pra acompanhar de quem veio.
+    Ela fica na frente do quadro, no <b>Todas</b> e na trilha do Resgate, e mostra quem está com o resgate
+    <b>em andamento</b> (chamado e ainda sem resposta).</p></header>
+  <div class="ver">
+    <div class="vc"><h3>A origem, escrita no card</h3>
+      <p><b>Veio do follow-up</b>: parado com o vendedor ("era do Pedro · 9 dias parado").<br>
+      <b>Veio dos perdidos</b>: perdido pelo vendedor ou pela esteira, com a data.<br>
+      <b>Veio da IA do número</b>: o perdido da IA que volta depois de um tempo (decisão 6).</p></div>
+    <div class="vc"><h3>A coluna é uma visão</h3>
+      <p>A etapa do lead <b>não muda</b>: o card mostra "etapa: Negociação" e continua contando lá no
+      relatório, no Raio-X e no teto da etapa. Mudar a etapa pra "Resgate" apagaria em que pé ele estava.</p></div>
+    <div class="vc"><h3>Quando sai da coluna</h3>
+      <p>O cliente respondeu: o card <b>volta pra coluna da etapa dele</b>, com o selo "♻️ veio do Resgate".
+      Três toques sem resposta: vai pra <b>Perdido</b>, com o mesmo selo. Nos dois casos a origem fica
+      guardada, e o Desafio conta o resultado por origem.</p></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>3. O resumo antes de cada conversa</h2>
+    <p>Hoje a retomada lê só as <b>16 últimas mensagens</b>. Com o resumo, a IA lê a conversa inteira
+    (até 60 mensagens), o orçamento, a visita e, no perdido, <b>o motivo da perda</b>. Primeiro ela entende,
+    depois escreve. É o mesmo ✨ Resumo que o vendedor já usa no card, agora feito sozinho antes de
+    chamar.</p></header>
+  <div class="fluxo">
+    <div class="fx"><span class="nn">1</span><b>Resume</b><p>O ✨ Resumo do lead: o que ele quer, em que pé parou, o que trava. Se já existe e não chegou mensagem nova, reaproveita, sem custo.</p></div>
+    <div class="fx"><span class="nn">2</span><b>Escreve em cima do resumo</b><p>A retomada tem que citar o ponto em que parou ("o valor do pacote de domingo que você pediu"), e não um "oi, tudo bem?" genérico.</p></div>
+    <div class="fx"><span class="nn">3</span><b>Confere</b><p>Valor que não está no orçamento, no catálogo liberado ou na fala do vendedor <b>não sai</b>. A mensagem vai pra você decidir.</p></div>
+    <div class="fx"><span class="nn">4</span><b>Guarda na ficha</b><p>O resumo fica no card. Se o lead voltar pro vendedor, ele abre e já sabe tudo, sem ler 60 mensagens.</p></div>
+  </div>
+  <div class="dois">
+    <div class="rsm">
+      <h3>✨ O que a IA entendeu antes de chamar · Duda</h3>
+      <div class="kv">
+        <span>Quer</span><b>infantil de 5 anos, ~80 convidados, 08/11 (sábado)</b>
+        <span>Parou em</span><b>pediu o valor do pacote de domingo; ninguém respondeu</b>
+        <span>Trava</span><b>preço: comparou com outro buffet</b>
+        <span>Próximo</span><b>mandar o valor de referência e convidar pra visita</b>
+        <span>Fatos</span><b class="fato">era do Pedro · 23 mensagens · última nossa há 9 dias</b>
+      </div>
+      <p class="nota" style="margin:0"><i>Sai</i><span>"Oi, Duda! Aqui é da equipe da Prime 😊 Você tinha
+      perguntado do pacote de domingo pro aniversário de 5 anos: ele sai a partir de R$ 6,2 mil pra até 80
+      convidados. Quer vir conhecer o espaço essa semana?"</span></p>
+    </div>
+    <div class="fone"><div class="in">
+      <span class="top">seu WhatsApp · Ensaio · 09:20</span>
+      <div class="zap esp">🧪 Ensaio do resgate · 3 de 20 hoje
+Duda · veio do follow-up (era do Pedro, 9 dias)
+Festa 08/11
+
+✨ Quer infantil ~80 pessoas. Parou no valor do domingo. Trava: preço.
+
+Mensagem:
+"Oi, Duda! Aqui é da equipe da Prime 😊 Você tinha perguntado do pacote de domingo…"<span class="h">09:20</span></div>
+    </div></div>
+  </div>
+  <p class="nota"><i>Custo</i><span>Um resumo por lead chamado: no máximo 20 por dia, o teto do Resgate.
+  Os toques do 3º e do 7º dia leem o mesmo resumo, sem gerar outro.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>4. Os perdidos: dá pra tratar, conforme o motivo</h2>
+    <p>O Resgate já chama os perdidos, mas por último. Com o motivo lido no resumo, dá pra separar quem
+    vale chamar de quem não se chama.</p></header>
+  <div class="tabw"><table>
+    <thead><tr><th>Motivo da perda</th><th class="n">Prime hoje</th><th>O Resgate</th><th>Como entra</th></tr></thead>
+    <tbody>
+      <tr><td>Sem tratativa (fechado pela esteira)</td><td class="n">20</td><td class="sim">chama</td><td>Ninguém falou com ele: retoma do ponto em que parou, como um aberto.</td></tr>
+      <tr><td>Não respondeu</td><td class="n">8</td><td class="sim">chama</td><td>Com leveza, uma vez só: "ainda faz sentido?". Sem os toques do 3º e do 7º dia.</td></tr>
+      <tr><td>Sem motivo / outro (fechado à mão)</td><td class="n">~18</td><td class="sim">chama</td><td>A IA lê a anotação do vendedor no resumo. Se disser "fechou com outro" ou "desistiu", não chama.</td></tr>
+      <tr><td>Data indisponível</td><td class="n">7</td><td class="tal">decisão 7</td><td>Pergunta se a data é flexível, sem prometer nenhuma. Quem confere a agenda é a anfitriã.</td></tr>
+      <tr><td>Fechou com concorrente</td><td class="n">5</td><td class="nao">não chama</td><td>Fica fora da fila.</td></tr>
+      <tr><td>Fora do escopo</td><td class="n">1</td><td class="nao">não chama</td><td>Fica fora da fila.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="nota"><i>Dado</i><span>Os 67 perdidos da Prime em 27/09, só leitura: 42 fechados à mão, 20 pela
+  esteira, 3 no ajuste do funil e 2 sem registro. "Sem motivo / outro" junta os 18 sem motivo e os
+  "outro" que não vieram da esteira.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>5. O espelho do vendedor</h2>
     <p>Pra você seguir testando a cobrança como ela chega na mão do vendedor, sem lead de teste e sem
     ser cobrado: escolha um vendedor, e o que ele recebe chega também no seu WhatsApp, marcado como cópia.
     Fica na tela <b>Follow-up</b>, no cartão da esteira.</p></header>
@@ -346,11 +465,12 @@ Resolveu por telefone ou pessoalmente? Escreva no histórico do lead — o que n
 </section>
 
 <section class="sec">
-  <header><h2>3. Na ZAQ, que vende mensalidade</h2>
+  <header><h2>6. Na ZAQ, que vende mensalidade</h2>
     <p>A ZAQ tem <b>um chip só</b> e a esteira desligada: sem IA do número nem Resgate, a barra <b>não
     aparece</b> e o quadro fica como está hoje (Novo 231, Contatado 4, Qualificado 1, Proposta 3). Se um
     dia ela ligar a IA num segundo número, a barra aparece com as palavras dela: <b>reunião</b> no lugar
-    de visita, <b>proposta</b> no lugar de orçamento, e nada de festa ou data.</p></header>
+    de visita, <b>proposta</b> no lugar de orçamento, e nada de festa ou data. O resumo segue o mesmo
+    perfil: pra ZAQ, ele fala de segmento, porte e reunião.</p></header>
   <div class="mini">
     <div class="tr vend on"><span class="t"><span class="d"></span>Vendedores</span><span class="n">239 <small>abertos</small></span><span class="rg">Follow-up da conta, sem esteira.</span></div>
     <div class="tr ia"><span class="t"><span class="d"></span>IA do número</span><span class="n">— <small>se ligar</small></span><span class="l">reuniões marcadas pela IA <b>—</b></span><span class="rg">Insiste no 3º e 7º dia; perdido no 10º.</span></div>
@@ -373,6 +493,15 @@ Resolveu por telefone ou pessoalmente? Escreva no histórico do lead — o que n
     <div class="q2"><span class="qn">4</span><h3>Lead da IA em que alguém da equipe assumiu: fica em qual trilha?</h3>
       <p>A IA sai da conversa quando alguém responde pelo celular, mas o lead segue no nome do ZAQ SDR.</p>
       <p class="rec">continua na trilha da IA, com o selo "gente assumiu", até alguém passar o lead pra um vendedor.</p></div>
+    <div class="q2"><span class="qn">5</span><h3>A coluna Resgate fica na frente ou atrás do quadro?</h3>
+      <p>Na frente, ela é a primeira coisa que se vê. Atrás, fica ao lado do Perdido.</p>
+      <p class="rec">na frente, e só no Todas e na trilha do Resgate. Nas outras trilhas ela some.</p></div>
+    <div class="q2"><span class="qn">6</span><h3>O perdido da IA do número volta pelo Resgate?</h3>
+      <p>A IA do número faz os 3 toques e marca perdido no 10º dia. Depois disso, ninguém mais chama esse cliente.</p>
+      <p class="rec">sim, uma vez, depois de 30 dias, com o resumo e a origem "veio da IA do número".</p></div>
+    <div class="q2"><span class="qn">7</span><h3>E o perdido por data indisponível?</h3>
+      <p>São 7 hoje. A data que ele queria estava tomada, mas ele pode aceitar outra.</p>
+      <p class="rec">chamar só se a festa ainda está a mais de 30 dias, perguntando se a data é flexível e chamando a anfitriã pra conferir a agenda.</p></div>
   </div>
 </section>
 
@@ -384,6 +513,8 @@ Resolveu por telefone ou pessoalmente? Escreva no histórico do lead — o que n
   function mostra(f){
     bts.forEach(function(b){var on=b.dataset.f===f;b.classList.toggle('on',on);b.setAttribute('aria-selected',on)});
     cards.forEach(function(c){c.classList.toggle('hide',f!=='todas'&&c.dataset.t!==f)});
+    var col=document.querySelector('.rsgcol'); col.style.display=(f==='todas'||f==='rsg')?'':'none';
+    document.getElementById('quadro').style.gridTemplateColumns=(f==='todas'||f==='rsg')?'':'repeat(5,1fr)';
     ['vend','ia','rsg'].forEach(function(k){document.getElementById('det-'+k).classList.toggle('on',k===f)});
   }
   bts.forEach(function(b){b.addEventListener('click',function(){mostra(b.dataset.f)})});

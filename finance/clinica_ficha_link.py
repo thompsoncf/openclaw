@@ -357,6 +357,9 @@ def linha_da_mensagem(c, conta_id: int, ev: dict, qual: str, agora: datetime | N
             if not tok:
                 return ""
             minus, maius = _de_quem(c, conta_id, kid)
+            _n, de = ca.quem_recebe(c, conta_id, ev)
+            if de:                           # "Lúcia, a consulta de Pedro… complete a ficha de Pedro"
+                minus, maius = f"a ficha de {de}", f"A ficha de {de}"
         if qual == "vespera":
             return f"\n\n📝 {maius} ainda está pela metade: dá pra terminar pelo mesmo link 😊 {link(tok)}"
         return f"\n\n📝 Complete {minus} antes da consulta (leva 3 minutos): {link(tok)}"

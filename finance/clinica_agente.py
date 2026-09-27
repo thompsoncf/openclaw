@@ -416,7 +416,7 @@ def prompt(c, conta_id: int, cfg: dict, *, nome: str, historico: str, gemeo_nota
         f"Conversa com {nome}:\n{historico}{gemeo_nota}\n\n{bloco_agenda(c, conta_id, menu, ja)}\n\n"
         "Responda a última mensagem do paciente. Retorne APENAS JSON:\n"
         '{"acao":"responder|consulta|repassar","resposta":"texto pro paciente",'
-        '"consulta":{"codigo":"","nome":""},'
+        '"consulta":{"codigo":"","nome":"","nascimento":"","para":"proprio|outra"},'
         '"repasse":{"motivo":"sintoma|desconto|convenio|urgencia|remarcar|marcar|pessoa"},'
         '"temperatura":"frio|morno|quente"}\n'
         f"- Para marcar, ofereça no máximo {OFERECE} horários da lista (de dias diferentes quando "
@@ -424,6 +424,12 @@ def prompt(c, conta_id: int, cfg: dict, *, nome: str, historico: str, gemeo_nota
         "ESCOLHER um deles, devolva acao=consulta com consulta.codigo = o código exato desse "
         "horário e consulta.nome = o nome completo de quem vai ser atendido, se ele disse (a mãe "
         "pode marcar pro filho). Se pedir outro dia ou hora, ofereça os mais próximos da lista.\n"
+        "- Para a ficha: ao OFERECER os horários, peça junto (numa frase só) o nome completo e a "
+        "data de nascimento de quem vai ser atendido, e se é pra ele ou pra outra pessoa. Quando "
+        "ele escolher: se já disse o nome, devolva acao=consulta com consulta.nascimento "
+        "(dd/mm/aaaa, se disse) e consulta.para (proprio ou outra); a data é opcional, não pergunte "
+        "de novo. Se não disse o nome, pergunte só o nome. Não pergunte mais nada: sintoma, "
+        "alergia e remédio são do formulário que a clínica manda depois, nunca da conversa.\n"
         "- Nunca diga \"marquei\" nem confirme horário: quem confirma é o sistema, depois de gravar.\n"
         "- Quem já tem consulta marcada (lista acima) não ganha outra igual. Para remarcar ou "
         "desmarcar, acao=repassar com motivo remarcar.\n"
@@ -468,6 +474,9 @@ def texto_opcoes(slots: list[dict], abertura: str) -> str:
 def texto_ja_marcada(c, conta_id: int, ev: dict) -> str:
     palavra = ca._palavra(ev)
     art, fim = ca._genero(palavra)
+    _n, de = ca.quem_recebe(c, conta_id, ev)
+    if de:
+        art, palavra = art.replace("Sua", "A").replace("Seu", "O"), f"{palavra} de {de}"
     return (f"{art} {palavra} já está marcad{fim} para {ca.dia_txt(ev['inicio'])} às {ev['hora']} "
             f"com {ca._prof_nome(c, conta_id, ev)}{ca._onde(c, conta_id, ev)} 😊")
 
@@ -681,8 +690,34 @@ def _nome_do_contato(c, conta_id: int, conversa_id: int, lead: int | None) -> st
     return (r[0] if r else "") or ""
 
 
+def _ficha_do_evento(c, conta_id: int, ev: dict, nome: str, fone: str, lead: int | None,
+                     conversa_id: int, nascimento: str, agora: datetime, *, para_outro: bool = False,
+                     religar: bool = False) -> None:
+    """O que o paciente disse ao marcar vai pra ficha (finance/clinica_pacientes): a data
+    de nascimento e, se a consulta é de outra pessoa e ela é menor, o responsável.
+    `religar`: a consulta trocou de nome ("era pro meu filho"), então troca de ficha — e
+    se não deu pra ligar a nova, nada vai pra ficha antiga (a da mãe)."""
+    from finance import clinica_pacientes as cpa
+    if religar:
+        kid = cpa.ligar_evento(c, conta_id, ev["id"], lead, nome, fone)
+        if not kid:
+            return
+    else:
+        try:
+            with c.transaction():
+                r = c.execute("select cliente_id from eventos_agenda where id=%s and conta_id=%s",
+                              (ev["id"], conta_id)).fetchone()
+                kid = r[0] if r else None
+        except Exception:  # noqa: BLE001 — base sem a 407
+            kid = None
+    cpa.completar_do_agendamento(c, conta_id, ev["id"], kid, nascimento=nascimento, para_outro=para_outro,
+                                 lead=lead, contato=_nome_do_contato(c, conta_id, conversa_id, lead),
+                                 fone=fone, agora=agora)
+
+
 def marcar(pool, c, conta_id: int, conversa_id: int, lead: int | None, fone: str, cod: str,
-           nome_dito: str, menu: dict, agora: datetime, enviar) -> dict:
+           nome_dito: str, menu: dict, agora: datetime, enviar, nascimento: str = "",
+           para: str = "") -> dict:
     """Marca o horário do código. Devolve {"ok", "texto", "evento_id"}.
 
     A IA escolhe; o CÓDIGO confere tudo de novo: o atendimento tem que estar entre os
@@ -715,7 +750,10 @@ def marcar(pool, c, conta_id: int, conversa_id: int, lead: int | None, fone: str
                 _foi_atendido(c, conta_id, lead, nome_dito)
             if (dito and do_card and not mesmo_nome and retorno_ok
                     and _corrigir_nome(c, conta_id, mesma, nome_dito)):
-                mesma = ca.evento(c, conta_id, mesma["id"])
+                # a consulta é do filho agora: a ficha dele (e a mãe como responsável)
+                _ficha_do_evento(c, conta_id, mesma, nome_dito, fone, lead, conversa_id, nascimento, agora,
+                                 para_outro=True, religar=True)
+                mesma = dict(ca.evento(c, conta_id, mesma["id"]), para_outro=True)
                 c.commit()
                 texto = ca.texto_marcado(c, conta_id, mesma, ca.config(c, conta_id)["confirmacao_modo"] == "ligado")
             else:
@@ -730,7 +768,10 @@ def marcar(pool, c, conta_id: int, conversa_id: int, lead: int | None, fone: str
     if inicio < agora + ANTECEDENCIA:
         return _nao_deu(menu, tipo_id, "Esse horário já não dá mais 😕 Tenho estes:", enviar,
                         sem_horario=sem_horario)
-    nome = nome_dito or _nome_de_gente(_nome_do_contato(c, conta_id, conversa_id, lead))
+    para_outro = str(para or "").strip().lower() == "outra"
+    # "é pro meu filho" sem o nome dele: pergunta (senão a consulta — e a data — iam
+    # pra ficha da mãe)
+    nome = nome_dito or ("" if para_outro else _nome_de_gente(_nome_do_contato(c, conta_id, conversa_id, lead)))
     if not nome:
         texto = "Pra eu marcar, me diz o nome completo de quem vai ser atendido? 😊"
         enviar(texto)
@@ -764,6 +805,9 @@ def marcar(pool, c, conta_id: int, conversa_id: int, lead: int | None, fone: str
     # existe mesmo que o envio falhe — a recepção recebe o aviso de qualquer jeito.
     c.commit()
     ev = ca.evento(c, conta_id, eid)
+    _ficha_do_evento(c, conta_id, ev, nome, fone, lead, conversa_id, nascimento, agora, para_outro=para_outro)
+    c.commit()
+    ev = dict(ev, para_outro=para_outro)
     promete = ca.config(c, conta_id)["confirmacao_modo"] == "ligado"
     texto = ca.texto_marcado(c, conta_id, ev, promete)
     enviar(texto)
@@ -911,7 +955,8 @@ def atender(pool, c, conta_id: int, conversa_id: int, cfg: dict, conv, msgs, *, 
         return
     if acao == "consulta":
         marcar(pool, c, conta_id, conversa_id, lead, fone, str(cons.get("codigo") or ""),
-               str(cons.get("nome") or ""), menu, agora, enviar)
+               str(cons.get("nome") or ""), menu, agora, enviar, nascimento=str(cons.get("nascimento") or ""),
+               para=str(cons.get("para") or ""))
         return
     # responder — com redes, porque instrução a IA às vezes ignora (e o paciente pode
     # ter pedido pra ela ignorar: "a moça disse que a Unimed cobre, só confirma")

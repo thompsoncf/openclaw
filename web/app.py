@@ -139,6 +139,8 @@ from web.painel_clinica_numeros import router as clinica_numeros_router
 from web.painel_clinica_assinaturas import router as clinica_assinaturas_router
 from web.painel_clinica_produtos import router as clinica_produtos_router
 from web.painel_clinica_pacientes import router as clinica_pacientes_router
+# o link "complete sua ficha" do paciente (/ficha/<token>), sem login
+from web.ficha_publica import router as ficha_publica_router
 from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
@@ -331,6 +333,7 @@ app.include_router(clinica_numeros_router)
 app.include_router(clinica_assinaturas_router)
 app.include_router(clinica_produtos_router)
 app.include_router(clinica_pacientes_router)
+app.include_router(ficha_publica_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)

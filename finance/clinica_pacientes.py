@@ -29,14 +29,16 @@ _log = logging.getLogger("clinica.pacientes")
 #: os filtros da lista (seção 11.1 do mockup), na ordem da tela
 FILTROS = (("todos", "Todos"), ("novos", "Novos contatos"), ("com_horario", "Com horário"),
            ("em_tratamento", "Em tratamento"), ("retorno_vencido", "Retorno vencido"),
-           ("assinantes", "Assinantes"), ("inativos", "Sem vir há 6 meses"))
+           ("assinantes", "Assinantes"), ("inativos", "Sem vir há 6 meses"),
+           ("ficha_incompleta", "Ficha incompleta"))
 INATIVO_DIAS = 180
 
 
 def _falta_migracao(e: Exception) -> bool:
     s = str(e)
     return "does not exist" in s and ("prospeccao_id" in s or "cliente_id" in s or "responsavel_id" in s
-                                      or "como_conheceu" in s)
+                                      or "como_conheceu" in s or "ficha_" in s or "preconsultas" in s
+                                      or "clinica_termos_aceites" in s)
 
 
 def _primeiro(nome: str | None) -> str:
@@ -77,11 +79,13 @@ def _mesmo_paciente(a: str, b: str) -> bool:
 
 
 def achar_ou_criar(c, conta_id: int, lead: int | None, nome: str, fone: str,
-                   origem: str | None = None) -> int | None:
+                   origem: str | None = None, exato: bool = False) -> int | None:
     """A ficha do paciente pra este card/celular e este NOME (`_mesmo_paciente`).
     Reaproveita a que tem o mesmo card (ou o mesmo celular) e o mesmo paciente; senão
     cria uma nova, ligada ao card. Na transação de quem chama, sem commit. Uma de cada
-    vez por número: duas marcações juntas do mesmo paciente novo não viram duas fichas."""
+    vez por número: duas marcações juntas do mesmo paciente novo não viram duas fichas.
+    `exato`: só o nome completo igual serve (o responsável digitado no link da ficha:
+    "Ana Maria Souza" não pode virar a irmã "Ana")."""
     nome = " ".join((nome or "").split())[:120]
     if not nome:
         return None
@@ -98,7 +102,7 @@ def achar_ou_criar(c, conta_id: int, lead: int | None, nome: str, fone: str,
              limit 30""",
         (conta_id, lead, dig, dig[-8:], lead)).fetchall()
     for kid, knome, kprosp in rows:
-        if _mesmo_paciente(knome or "", nome):
+        if (_sem_acento(" ".join((knome or "").split())) == _sem_acento(nome)) if exato                 else _mesmo_paciente(knome or "", nome):
             if lead and not kprosp:
                 c.execute("update clientes set prospeccao_id=%s, atualizado_em=now() where id=%s and dono_id=%s",
                           (lead, kid, conta_id))
@@ -253,10 +257,18 @@ def listar(c, conta_id: int, agora: datetime, *, filtro: str = "todos", busca: s
                           "ultima_msg": ca.local(ult_msg) if ult_msg else None,
                           "_msg_ts": ult_msg.timestamp() if ult_msg else 0.0})
 
+    # a ficha de quem tem horário: a recepção sabe quem cobrar antes da consulta (ideia 8)
+    from finance import clinica_ficha_link as cfl
+    sit = cfl.situacoes(c, conta_id, [p["id"] for p in pacientes if p["id"] and p["proximo"]], agora)
+    for p in pacientes:
+        p["ficha"] = sit.get(p["id"])
+        p["ficha_txt"] = cfl.falta_txt(p["ficha"])
+
     def passa(p, f):
         return {"todos": True, "novos": p["novo"], "com_horario": bool(p["proximo"]),
                 "em_tratamento": p["em_tratamento"], "retorno_vencido": p["retorno_vencido"],
-                "assinantes": p["assinante"], "inativos": p["inativo"]}[f]
+                "assinantes": p["assinante"], "inativos": p["inativo"],
+                "ficha_incompleta": bool(p.get("ficha") and not p["ficha"]["completa"])}[f]
     contagem = {k: sum(1 for p in pacientes if passa(p, k)) for k, _r in FILTROS}
     cidades = sorted({p["cidade"].strip() for p in pacientes if p["cidade"].strip()}, key=str.lower)
     f = filtro if filtro in dict(FILTROS) else "todos"
@@ -297,9 +309,10 @@ def ficha(c, conta_id: int, cliente_id: int, agora: datetime) -> dict | None:
          "desde": ca.local(criado).date() if criado else None, "obs": obs or ""}
     d["responsavel"] = None
     if resp_id:
-        rr = c.execute("""select k.id, coalesce(p.nome, k.nome) from clientes k left join pessoas p on p.id = k.pessoa_id
+        rr = c.execute("""select k.id, coalesce(p.nome, k.nome), p.cpf is not null
+                             from clientes k left join pessoas p on p.id = k.pessoa_id
                            where k.id=%s and k.dono_id=%s""", (resp_id, conta_id)).fetchone()
-        d["responsavel"] = {"id": rr[0], "nome": rr[1]} if rr else None
+        d["responsavel"] = {"id": rr[0], "nome": rr[1], "tem_cpf": bool(rr[2])} if rr else None
     # quem mais usa o mesmo card (a mãe e os filhos)
     d["mesmo_card"] = [{"id": x[0], "nome": x[1]} for x in c.execute(
         """select k.id, coalesce(p.nome, k.nome) from clientes k left join pessoas p on p.id = k.pessoa_id
@@ -355,9 +368,26 @@ def ficha(c, conta_id: int, cliente_id: int, agora: datetime) -> dict | None:
                      (conta_id, lead)).fetchone() if lead else None
     d["conversa_id"] = conv[0] if conv else None
     # o que falta na ficha (seção 12 do mockup: a ficha que nasce no agendamento)
-    d["falta"] = [x for x, ok in (("data de nascimento", bool(nasc)), ("CPF", bool(cpf)), ("cidade", bool(cid)))
-                  if not ok]
+    from finance import clinica_ficha_link as cfl
+    d["situacao"] = cfl.situacao(c, conta_id, kid, agora)
+    d["falta"] = d["situacao"]["falta"] if d["situacao"] else []
+    d["ficha_txt"] = cfl.falta_txt(d["situacao"])
+    d["termos"] = cfl.termos_aceitos(c, conta_id, kid)
     return d
+
+
+def cpf_de_outra_ficha(c, conta_id: int, pessoa_id: int | None, cpf: str) -> str | None:
+    """A mensagem quando o CPF já é de outra pessoa (o índice único de `pessoas`, que é
+    do Zaq inteiro). O nome só aparece se a ficha for DESTA clínica: o de um cliente de
+    outra conta nunca sai daqui."""
+    outro = c.execute(
+        """select case when k.id is not null then coalesce(k.nome, p.nome) end from pessoas p
+             left join clientes k on k.pessoa_id = p.id and k.dono_id = %s and k.ativo
+            where p.cpf = %s and p.id <> coalesce(%s, 0) limit 1""", (conta_id, cpf, pessoa_id)).fetchone()
+    if not outro:
+        return None
+    return (f"Este CPF já está na ficha de {outro[0]}." if outro[0]
+            else "Este CPF já está cadastrado em outra ficha do Zaq.")
 
 
 def salvar_cadastro(pool, conta_id: int, cliente_id: int, form: dict) -> str | None:
@@ -388,13 +418,9 @@ def salvar_cadastro(pool, conta_id: int, cliente_id: int, form: dict) -> str | N
                                   (resp, conta_id)).fetchone():
             return "Responsável não encontrado."
         if cpf:
-            outro = c.execute(
-                """select coalesce(k.nome, p.nome) from pessoas p
-                     left join clientes k on k.pessoa_id = p.id and k.dono_id = %s and k.ativo
-                    where p.cpf = %s and p.id <> coalesce(%s, 0) limit 1""", (conta_id, cpf, meu[0])).fetchone()
+            outro = cpf_de_outra_ficha(c, conta_id, meu[0], cpf)
             if outro:
-                return (f"Este CPF já está na ficha de {outro[0]}." if outro[0]
-                        else "Este CPF já está cadastrado em outra ficha do Zaq.")
+                return outro
     try:
         cli.atualizar_cliente(pool, conta_id, cliente_id, nome=nome, telefone=form.get("fone") or None,
                               email=form.get("email") or None, cpf=form.get("cpf") or None,

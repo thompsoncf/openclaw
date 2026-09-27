@@ -104,7 +104,10 @@ def test_cadastro_valida_cpf_e_guarda_o_responsavel(banco, zap):  # noqa: F811
                                                        "como_conheceu": "Instagram"}) is None
     with banco.connection() as c:
         f = cpa.ficha(c, CLINICA, pedro, AGORA)
-    assert f["idade"] == 9 and f["uf"] == "MA" and f["cpf"] == "52998224725" and f["falta"] == []
+    assert f["idade"] == 9 and f["uf"] == "MA" and f["cpf"] == "52998224725"
+    # menor: a nota é do responsável, e a Lúcia ainda não deu o CPF dela (com o link da ficha
+    # ligado, a pré-consulta e os termos também contam: tests/test_clinica_ficha_link.py)
+    assert f["falta"] == ["CPF do responsável"]
     assert f["responsavel"]["nome"] == "Lúcia Ferreira" and f["como_conheceu"] == "Instagram"
 
 
@@ -137,7 +140,7 @@ def test_a_recepcao_ve_a_lista_cadastra_e_abre_a_ficha(cli, banco):  # noqa: F81
     html = cli.get("/painel/clinica/pacientes").text
     assert "Helena Batista" in html and "Novos contatos" in html
     html = cli.get(ficha + "?aba=cadastro").text
-    assert "Data de nascimento" in html and "Ficha incompleta" in html
+    assert "Data de nascimento" in html and "falta data de nascimento" in html
 
 
 def test_a_recepcao_passa_no_gate_das_telas_da_clinica():

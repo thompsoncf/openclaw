@@ -170,6 +170,8 @@ TABELAS: dict[str, tuple[str, ...]] = {
     "clinica_vagas": ('conta_id',),         # 369: a vaga liberada
     "clinica_vaga_ofertas": ('conta_id',),  # 369: quem foi chamado pra ela
     "clinica_planos": ('conta_id',),        # 379: o plano de tratamento
+    "clinica_preconsultas": ('conta_id',),   # 409: a pré-consulta (só o profissional lê)
+    "clinica_termos_aceites": ('conta_id',),  # 409: os termos aceitos no link da ficha
     "clinica_pacotes": ('conta_id',),       # 381: o saldo de sessões
     "clinica_pacote_consumos": ('conta_id',),
     "clinica_retornos": ('conta_id',),

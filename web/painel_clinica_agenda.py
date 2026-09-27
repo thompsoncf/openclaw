@@ -104,6 +104,10 @@ def agenda(request: Request):
         profs = [p for p in cc.listar_profissionais(c, conta_id) if p["funcao"] != "Recepção, não atende"]
         locais = cc.listar_locais(c, conta_id)
         cfg = ca.config(c, conta_id)
+        from finance import clinica_ficha_link as _cfl
+        cfg["ficha_link"] = "ligado" if _cfl.ligado(c, conta_id) else "off"
+        _emp = c.execute("select coalesce(nome,'') from contas where id=%s", (conta_id,)).fetchone()
+        termos_padrao = _cfl.textos_dos_termos(_emp[0] if _emp else "", "", False)
         from finance import clinica_vagas as cvg
         vagas_esperando = cvg.esperando(c, conta_id)
         prof_id = _int(q.get("prof")) or (profs[0]["id"] if profs else None)
@@ -127,6 +131,7 @@ def agenda(request: Request):
     return _render("clinica_agenda.html", request, titulo="Agenda", **_ctx_base(request),
                    vista=vista, d=dados, profs=profs, locais=locais, local_id=local_id,
                    prof_id=prof_id, titulo_data=titulo_data, gerencia=gerencia, cfg=cfg,
+                   termos_padrao=termos_padrao, imagem_opcoes=_cfl.IMAGEM,
                    vagas_esperando=vagas_esperando,
                    data_iso=data.isoformat(), link_ant=link(data=ant.isoformat()),
                    link_prox=link(data=prox.isoformat()), link_hoje=link(data=hoje.isoformat()),
@@ -302,6 +307,13 @@ def ver_evento(request: Request, evento_id: int):
             r = None
         retorno = {"vence": r[0], "estado": r[1]} if r else None
         pac_cfg = ckp.config(c, conta_id)
+        # a ficha do paciente: o que falta, o CPF antes de receber e, pro profissional, a pré-consulta
+        from finance import clinica_ficha_link as _cfl
+        from finance import clinica_preconsulta as _cpc
+        kid = _cfl.cliente_do_evento(c, conta_id, evento_id)
+        ficha = _cfl.situacao(c, conta_id, kid, agora) if kid else None
+        pre = (_cpc.ultima(c, conta_id, kid)
+               if kid and _cpc.pode_ler(c, conta_id, request.session.get("membro_id")) else None)
         # produto no fim do atendimento (fase 7c): a reposição do paciente e o que vence logo
         prod = None
         if ev["situacao"] in ("presente", "atendimento", "finalizado"):
@@ -311,7 +323,7 @@ def ver_evento(request: Request, evento_id: int):
                     "vendas": cpr.vendas_do_evento(c, conta_id, evento_id), "pagamentos": cpr.PAGAMENTOS}
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
                    pacote_feito=pacote_feito, pacote_vai=pacote_vai, assin_vai=assin_vai, assin_feito=assin_feito, volta_padrao=volta_padrao, retorno=retorno,
-                   pac_cfg=pac_cfg, prod=prod,
+                   pac_cfg=pac_cfg, prod=prod, ficha_kid=kid, ficha=ficha, ficha_txt=_cfl.falta_txt(ficha), pre=pre,
                    ev=ev, prof=prof, proximos=ca.PROXIMOS.get(ev["situacao"], ()), remarcar=remarcar,
                    conversa=conversa, quando=f"{ca.dia_txt(ev['inicio'])} {ev['hora']}–{ev['fim_txt']}",
                    msg_marcado=msg_marcado, msg_vespera=msg_vespera,
@@ -379,7 +391,7 @@ def evento_mensagem(request: Request, evento_id: int, qual: str = Form("marcado"
 
 
 @router.post("/painel/clinica/agenda/config")
-def agenda_config(request: Request, modo: str = Form("off"), hora: str = Form("10")):
+def agenda_config(request: Request, modo: str = Form("off"), hora: str = Form("10"), ficha: str = Form("")):
     conta, gerencia, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -387,6 +399,9 @@ def agenda_config(request: Request, modo: str = Form("off"), hora: str = Form("1
         return _ir(request, "/painel/clinica/agenda", erro="Só o dono ou o gestor muda a confirmação.")
     with get_pool().connection() as c:
         erro = ca.salvar_config(c, conta[0], modo, _int(hora))
+        if not erro and ficha:
+            from finance import clinica_ficha_link as _cfl
+            erro = _cfl.salvar_ligado(c, conta[0], ficha)
         (c.rollback if erro else c.commit)()
     return _ir(request, "/painel/clinica/agenda", "" if erro else "salvo", erro or "")
 
@@ -495,7 +510,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <thead><tr><th></th>{% for col in d.colunas %}<th>{% if vista == 'dia' %}<span style="color:{{ col.prof.cor }}">●</span> {{ col.prof.nome }}<small>{{ col.prof.funcao }}</small>{% else %}{{ col.rotulo }}{% if col.hoje %} · hoje{% endif %}<small>{% if col.ocupacao is not none %}{{ col.ocupacao }}% ocupado{% else %}não atende{% endif %}</small>{% endif %}</th>{% endfor %}</tr></thead>
     <tbody>{% for h in d.linhas %}{% set i = loop.index0 %}<tr><td class="h">{{ '%02d:%02d'|format(h.hour, h.minute) }}</td>
       {% for col in d.colunas %}{% set cel = col.celulas[i] %}
-        {% if cel.tipo == 'ev' %}<td>{% for e in cel.evs %}<a class="ev s-{{ e.situacao }}" style="border-left-color:{{ e.cor }}" href="/painel/clinica/agenda/evento/{{ e.id }}"><b>{{ e.paciente }}</b><span>{{ e.tipo }} · {{ e.hora }}–{{ e.fim_txt }}{% if e.encaixe %} · encaixe{% endif %}</span><span>{{ SIT_D[e.situacao] }}{% if e.pede_remarcar_em %} · quer remarcar{% endif %}</span></a>{% endfor %}</td>
+        {% if cel.tipo == 'ev' %}<td>{% for e in cel.evs %}<a class="ev s-{{ e.situacao }}" style="border-left-color:{{ e.cor }}" href="/painel/clinica/agenda/evento/{{ e.id }}"><b>{{ e.paciente }}</b><span>{{ e.tipo }} · {{ e.hora }}–{{ e.fim_txt }}{% if e.encaixe %} · encaixe{% endif %}</span><span>{{ SIT_D[e.situacao] }}{% if e.pede_remarcar_em %} · quer remarcar{% endif %}</span>{% if e.ficha and e.situacao not in ('finalizado','cancelou','faltou') %}<span title="{{ e.ficha_txt }}">{% if e.ficha.completa %}✓ ficha completa{% else %}📝 ficha {{ e.ficha.pct }}%{% endif %}{% if e.ficha.alergia %} · ⚠ alergia{% endif %}</span>{% endif %}</a>{% endfor %}</td>
         {% elif cel.tipo == 'livre' and ((vista == 'dia' and col.marca) or (vista == 'semana' and prof_marca)) %}<td><a class="livre" href="/painel/clinica/agenda/novo?prof={{ col.prof.id if vista == 'dia' else prof_id }}&data={{ (col.dia if vista == 'semana' else d.data).isoformat() }}&hora={{ '%02d:%02d'|format(h.hour, h.minute) }}">+ livre</a></td>
         {% elif cel.tipo == 'livre' %}<td class="continua"></td>
         {% elif cel.tipo == 'continua' %}<td class="continua"></td>
@@ -513,6 +528,11 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <label>Modo<select name="modo"><option value="off" {% if cfg.confirmacao_modo == 'off' %}selected{% endif %}>Desligada</option><option value="ligado" {% if cfg.confirmacao_modo == 'ligado' %}selected{% endif %}>Ligada — o Zaq manda sozinho</option></select></label>
       <label>A partir de que hora (no horário de atendimento)<select name="hora">{% for hh in range(7, 19) %}<option value="{{ hh }}" {% if cfg.confirmacao_hora == hh %}selected{% endif %}>{{ hh }}h</option>{% endfor %}</select></label>
     </div>
+    <b style="display:block;margin-top:.9rem">Link da ficha</b>
+    <div class="mut" style="margin:.2rem 0 .5rem">A confirmação do horário leva o link "complete sua ficha antes da consulta"; a véspera lembra dele se faltar algo. O paciente abre com a data de nascimento e preenche cadastro (com o CPF da nota), a pré-consulta (só o profissional lê) e os termos de uso de dados e de imagem. <b>Leia os termos antes de ligar.</b></div>
+    <details class="mut" style="margin-bottom:.5rem"><summary>Ler os termos</summary>{% for t, par in termos_padrao.items() %}<div style="margin-top:.4rem"><b>{{ par[0] }}</b><div style="white-space:pre-wrap">{{ par[1] }}</div></div>{% endfor %}
+      <div style="margin-top:.4rem">Opções das fotos: {% for k, r in imagem_opcoes %}<div>• {{ r }}</div>{% endfor %}</div></details>
+    <div class="ag-form"><label>Link da ficha<select name="ficha"><option value="off" {% if cfg.ficha_link != 'ligado' %}selected{% endif %}>Desligado</option><option value="ligado" {% if cfg.ficha_link == 'ligado' %}selected{% endif %}>Ligado: vai na confirmação e na véspera</option></select></label></div>
     <div class="ag-acoes"><button>Salvar</button></div>
   </form>
   {% endif %}
@@ -573,6 +593,8 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div><b>Status:</b> <span class="ev s-{{ ev.situacao }}" style="display:inline-block;padding:.1rem .5rem;border-radius:6px;border:1px solid var(--borda)">{{ SIT_D[ev.situacao] }}</span>
       {% if ev.pede_remarcar_em %} · <b>pediu para remarcar</b>{% endif %}
       {% if ev.confirmado_em %} · confirmou{% elif ev.confirmacao_enviada_em %} · lembrete da véspera enviado{% endif %}</div>
+    {% if ficha_kid %}<div style="margin-top:.4rem"><a href="/painel/clinica/pacientes/{{ ficha_kid }}">Ficha do paciente</a> · {{ ficha_txt }}{% if ficha and ficha.alergia %} · <b>⚠ informou alergia</b>{% endif %}</div>
+    {% if ficha and not ficha.cpf_ok and ev.situacao in ('presente','atendimento','finalizado') %}<div class="alerta" style="margin-top:.4rem">Falta o CPF{% if ficha.menor %} do responsável{% endif %} (vai na nota fiscal): peça antes de receber. <a href="/painel/clinica/pacientes/{{ ficha_kid }}?aba=cadastro">Completar</a></div>{% endif %}{% endif %}
     <div class="mut" style="margin-top:.3rem">{% if ev.fone %}Celular {{ ev.fone }}{% endif %}{% if ev.origem %} · veio por {{ ev.origem }}{% endif %}{% if ev.marcado_por == 'ia' %} · marcado pelo agente no WhatsApp{% elif ev.marcado_por == 'vaga' %} · veio de vaga liberada{% endif %}{% if ev.observacao %} · {{ ev.observacao }}{% endif %}</div>
     {% if proximos %}<div class="ag-acoes">{% for s in proximos if s != 'finalizado' %}
       <form method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao"><input type="hidden" name="nova" value="{{ s }}"><button class="{% if s in ('faltou','cancelou') %}sec{% endif %}">{{ {'agendado':'Reabrir','confirmado':'Confirmar','presente':'Chegou','atendimento':'Entrou no atendimento','faltou':'Faltou','cancelou':'Cancelar'}[s] }}</button></form>
@@ -605,6 +627,12 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <a class="ag-bt sec" href="/painel/clinica/planos/novo?evento={{ ev.id }}">Plano de tratamento</a></div>
     {% endif %}
   </div>
+
+  {% if pre %}
+  <div class="ag-caixa"><b>Pré-consulta</b> <span class="mut">contado pelo {{ 'responsável' if pre.por == 'responsavel' else 'paciente' }} em {{ pre.quando.strftime('%d/%m') }}{% if pre.curta %} · retorno{% endif %}</span>
+    {% for pergunta, resposta in pre.linhas %}<div style="margin-top:.4rem"><div class="mut">{{ pergunta }}</div><div>{{ resposta }}</div></div>{% endfor %}
+    <div class="mut" style="margin-top:.5rem">Só os profissionais de saúde da clínica veem. Confira na consulta.</div></div>
+  {% endif %}
 
   {% if remarcar %}
   <form class="ag-caixa ag-form" method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/remarcar">

@@ -612,7 +612,7 @@ def _atender(pool, conta_id, conversa_id):
         gemeo_nota = _nota_gemeo(c, conta_id, conv)
 
         pedir = (
-            f"Conversa com {lead_empresa}:\n{historico}{_cal_bloco(historico)}{gemeo_nota}{visita_txt}"
+            f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{_cal_bloco(historico)}{visita_txt}"
             f"{seguros_txt}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
             + ('{"acao":"responder' + ("|visita" if vcfg else "") + ("|orcamento" if ocfg else "")

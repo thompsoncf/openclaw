@@ -52,3 +52,11 @@ def test_o_dia_certo_e_o_texto_sem_data_ficam_como_vieram():
     assert cal.corrigir("06/07/2028 (quinta-feira)", HOJE) == "06/07/2028 (quinta-feira)"
     txt = "Sábado é o dia mais procurado! Quer conhecer o espaço?"
     assert cal.corrigir(txt, HOJE) == txt
+
+
+def test_o_dia_certo_mantem_a_forma_de_quem_escreveu():
+    """A lista de horários da visita escreve "segunda 28/09": certo, fica como está."""
+    txt = "A) segunda 28/09 às 17h\nB) terça 29/09 às 9h\nC) quarta 30/09 às 9h"
+    assert cal.corrigir(txt, HOJE) == txt
+    assert cal.corrigir("Terça, 29/09", HOJE) == "Terça, 29/09"
+    assert cal.corrigir("sexta 28/09", HOJE) == "segunda-feira 28/09"

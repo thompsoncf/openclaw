@@ -776,3 +776,29 @@ def test_a_ia_que_comeca_a_meia_noite_grava_0h_e_nao_8h(pool, equipe):
         assert (r["ia_hora_ini"], r["ia_hora_fim"]) == (0, 24)
         meia_noite_e_meia = datetime(2026, 9, 27, 3, 30, tzinfo=timezone.utc)   # 00:30 em Brasília
         assert cr.ia_pode_falar(r, meia_noite_e_meia)
+
+
+def test_a_chave_do_preco_direto_da_lista_um_e_todos(pool, equipe):
+    """O botão "IA diz o preço" da lista (mockup servicos_ia_preco_na_lista): um por
+    toque, ou todos de uma vez — só os ATIVOS, e nunca de outra empresa."""
+    from finance import servicos_catalogo as scat
+    with pool.connection() as c:
+        ids = [c.execute("""insert into servicos_catalogo (conta_id, slug, nome, setup_centavos, ativo)
+                             values (%s,%s,%s,100,%s) returning id""",
+                         (conta, slug, slug, ativo)).fetchone()[0]
+               for conta, slug, ativo in ((EMPRESA, "pacote", True), (EMPRESA, "dj", True),
+                                          (EMPRESA, "velho", False), (OUTRA, "alheio", True))]
+        c.commit()
+
+    def _ligados():
+        with pool.connection() as c:
+            return {r[0] for r in c.execute(
+                "select slug from servicos_catalogo where agente_diz_preco").fetchall()}
+
+    assert scat.definir_diz_preco(pool, EMPRESA, True, ids[0]) == 1
+    assert _ligados() == {"pacote"}
+    assert scat.definir_diz_preco(pool, EMPRESA, True, ids[3]) == 0        # de outra empresa
+    assert scat.definir_diz_preco(pool, EMPRESA, True) == 1                # só o "dj" mudou
+    assert _ligados() == {"pacote", "dj"}                                  # inativo e alheio, não
+    assert scat.definir_diz_preco(pool, EMPRESA, False) == 2
+    assert _ligados() == set()

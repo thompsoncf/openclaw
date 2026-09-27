@@ -515,6 +515,28 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
     return JSONResponse(r)
 
 
+class DizPrecoIn(BaseModel):
+    id: int | None = None      # nulo = todos os serviços ativos
+    diz: bool = False
+
+
+@router.post("/painel/servicos/catalogo/diz-preco")
+def painel_servicos_diz_preco(request: Request, dados: DizPrecoIn):
+    """A chave "a IA pode dizer este preço" direto da LISTA (mockup
+    docs/mockups/servicos_ia_preco_na_lista.html): um serviço por toque, ou todos de
+    uma vez. Só existe onde existe a IA da regra por número (dois chips ou mais) —
+    o mesmo portão que mostra a chave na tela."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    from finance import chip_regra as _cr
+    if not _cr.tem_mais_de_um_chip(pool, conta[0]):
+        return JSONResponse({"erro": "sem IA por número nesta empresa"}, status_code=403)
+    n = scat.definir_diz_preco(pool, conta[0], dados.diz, dados.id)
+    return JSONResponse({"ok": True, "n": n})
+
+
 class ServicoDelIn(BaseModel):
     id: int
 
@@ -2434,6 +2456,28 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 .oc-browse-row{display:grid; grid-template-columns:auto 1fr 90px auto; gap:.55rem; align-items:center; padding:.5rem 0; border-bottom:1px solid var(--borda)}
 .oc-browse-row:last-child{border-bottom:0}
 .oc-browse-row.rec{grid-template-columns:auto 1fr 150px auto}
+/* "A IA pode dizer este preço" na LISTA (mockup servicos_ia_preco_na_lista): lilás é a
+   cor da IA no painel, pra não confundir com a chave verde de "está na proposta" */
+.oc-browse-row.iap{grid-template-columns:auto 1fr 90px auto auto}
+.oc-browse-row.rec.iap{grid-template-columns:auto 1fr 150px auto auto}
+.oc-iap{display:inline-flex; align-items:center; gap:.35rem; font:inherit; font-size:.74rem; border-radius:999px; padding:.26rem .65rem; border:1px dashed #3a4a42; color:var(--txt-mut); background:transparent; white-space:nowrap; cursor:pointer}
+.oc-iap::before{content:""; width:8px; height:8px; border-radius:50%; background:currentColor; opacity:.7}
+.oc-iap.on{border:1px solid #3E2E4E; background:#1A1422; color:#E3CCF2}
+.oc-iap.on::before{background:#C9A3E0; opacity:1}
+.oc-iap[disabled]{opacity:.6; cursor:wait}
+.oc-iap-chip{font:inherit; font-size:.78rem; border:1px solid #3E2E4E; background:#1A1422; color:#E3CCF2; border-radius:999px; padding:.25rem .7rem; cursor:pointer; white-space:nowrap}
+.oc-iap-barra{display:flex; align-items:center; gap:.5rem .8rem; flex-wrap:wrap; margin-bottom:.4rem; border:1px dashed #3E2E4E; background:#1A1422; border-radius:10px; padding:.55rem .75rem; font-size:.8rem; color:#E3CCF2}
+.oc-iap-barra .acoes{margin-left:auto; display:flex; gap:.6rem}
+.oc-iap-barra button{font:inherit; font-size:.8rem; background:none; border:0; color:#E3CCF2; text-decoration:underline; text-underline-offset:3px; cursor:pointer; padding:0}
+.oc-iap-sw{display:flex; align-items:center; gap:.7rem; margin-top:.6rem; border:1px solid #3E2E4E; background:#1A1422; border-radius:10px; padding:.6rem .75rem; cursor:pointer; font-size:.8rem}
+.oc-iap-sw input{position:absolute; opacity:0; pointer-events:none}
+.oc-iap-sw b{display:block; color:#E3CCF2; font-weight:600; font-size:.84rem}
+.oc-iap-sw .mut{display:block}
+.oc-iap-tg{width:42px; height:24px; border-radius:99px; background:#2a3550; position:relative; flex:none; transition:background .15s}
+.oc-iap-tg::after{content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#8FA197; transition:left .15s}
+.oc-iap-sw input:checked + .oc-iap-tg{background:#C9A3E0}
+.oc-iap-sw input:checked + .oc-iap-tg::after{left:21px; background:#1a1422}
+.oc-iap-sw input:focus-visible + .oc-iap-tg{outline:2px solid #C9A3E0; outline-offset:2px}
 .oc-seg button{padding:.45rem .7rem; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem; border-radius:7px}
 .oc-seg button.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
 .oc-step{display:inline-flex; align-items:center; gap:0}
@@ -2593,6 +2637,7 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
   .sv-wrap .oc-browse-row .oc-tog{order:1}
   .sv-wrap .oc-browse-row .oc-nome{order:2; flex:1 1 60%; min-width:0}
   .sv-wrap .oc-browse-row .oc-rowacts{order:3; margin-left:auto}
+  .sv-wrap .oc-browse-row .oc-iap{order:3}
   .sv-wrap .oc-browse-row .oc-num{order:4; flex:1 1 40%}
   .sv-wrap .oc-browse-row .oc-num input{text-align:left}
 }
@@ -2914,6 +2959,7 @@ _JS_PAREAR_CRU = r"""window.ZAQ_PAREAR = function (mods, itens, catalogo) {
 
 _JS_CRU = r"""(function(){
   var SERVICO_AVULSO = window.SERVICO_AVULSO;
+  var IA_PRECO = !!window.IA_PRECO;
   var INFRA={compartilhada:{s:0,m:0},dedicada:{s:1500,m:800},onpremise:{s:6000,m:1500}};
   // DINHEIRO COM CENTAVOS (24/09/2026, dono: "sim aceitar centavos", pros dois
   // nichos). `fmt` escreve R$ 1.397,50; `dinTxt` o mesmo sem o cifrão, pro campo.
@@ -3683,11 +3729,21 @@ _JS_CRU = r"""(function(){
     renderCatalogoCompleto();
     pinta();
   }
+  function pintaIap(){
+    if(!IA_PRECO)return;
+    var n=document.getElementById('oc-iap-n'), t=document.getElementById('oc-iap-total');
+    if(n)n.textContent=CATALOGO.filter(function(s){return s.diz_preco;}).length;
+    if(t)t.textContent=CATALOGO.length;
+  }
   function renderCatalogoCompleto(){
     var box=document.getElementById('oc-catalogo-completo');
     box.classList.toggle('open',VERTODOS_OPEN);
+    pintaIap();
     if(!VERTODOS_OPEN){box.innerHTML=''; return;}
-    box.innerHTML=CATALOGO.map(function(s){
+    var barra=IA_PRECO?'<div class="oc-iap-barra"><span>🤖 A IA só diz o valor dos serviços com o botão lilás ligado, sempre como "a partir de". Os outros ela não cita: '
+      +(SERVICO_AVULSO?'convida pra visita':'convida pra uma reunião')+' e o orçamento sai conferido.</span>'
+      +'<span class="acoes"><button type="button" class="oc-iap-todos">Liberar todos</button><button type="button" class="oc-iap-nenhum">Nenhum</button></span></div>':'';
+    box.innerHTML=barra+CATALOGO.map(function(s){
       var on=!!SELECIONADOS[s.slug];
       // o preço de vitrine: um valor no evento, as duas pontas no recorrente
       // o valor é TEXTO (24/09/2026): a caixinha readonly parecia um campo que se
@@ -3695,9 +3751,10 @@ _JS_CRU = r"""(function(){
       var preco=SERVICO_AVULSO
         ? '<div class="oc-bval"><i>Valor</i>'+fmt(s.setup)+'</div>'
         : '<div class="oc-bval"><i>'+(s.setup>0?'Implantação · mensal':'Mensal')+'</i>'+(s.setup>0?fmt(s.setup)+' · ':'')+fmt(s.mensal)+'/mês</div>';
-      return '<div class="oc-browse-row'+(SERVICO_AVULSO?'':' rec')+(on?' on':'')+'" data-id="'+ec(s.slug)+'"><button class="oc-tog'+(on?' on':'')+'" type="button" title="'+(on?'Remover da proposta':'Adicionar à proposta')+'"></button>'
+      var iap=IA_PRECO?'<button type="button" class="oc-iap'+(s.diz_preco?' on':'')+'" title="'+(s.diz_preco?'A IA diz este preço no WhatsApp. Toque pra desligar':'A IA não cita este preço. Toque pra liberar')+'">'+(s.diz_preco?'IA diz o preço':'IA não diz')+'</button>':'';
+      return '<div class="oc-browse-row'+(SERVICO_AVULSO?'':' rec')+(IA_PRECO?' iap':'')+(on?' on':'')+'" data-id="'+ec(s.slug)+'"><button class="oc-tog'+(on?' on':'')+'" type="button" title="'+(on?'Remover da proposta':'Adicionar à proposta')+'"></button>'
         +'<div class="oc-nome oc-nome-linha">'+(s.icone_svg?'<div class="svc-thumb">'+s.icone_svg+'</div>':'')+'<div style="min-width:0"><b title="'+ec(s.nome)+'">'+ec(s.nome)+(on?' <span class="oc-na">na proposta</span>':'')+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
-        +preco
+        +preco+iap
         +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Inativar serviço">⊘</button></div></div>';
     }).join('');
     // A GAVETA DOS INATIVOS, no fim da lista e fechada. O botão sempre foi
@@ -3785,7 +3842,39 @@ _JS_CRU = r"""(function(){
       VERTODOS_OPEN=!VERTODOS_OPEN;
       renderCatalogoAvulso();
     });
+    // o contador lilás do cabeçalho abre a lista completa, onde fica o botão de cada serviço
+    var iapChip=document.getElementById('oc-iap-chip');
+    if(iapChip)iapChip.addEventListener('click',function(){
+      VERTODOS_OPEN=true; renderCatalogoAvulso();
+      var box=document.getElementById('oc-catalogo-completo'); if(box&&box.scrollIntoView)box.scrollIntoView({behavior:'smooth',block:'start'});
+    });
     document.getElementById('oc-catalogo-completo').addEventListener('click',function(e){
+      var iap=e.target.closest('.oc-iap');
+      if(iap){
+        // salva no toque; "Salvando…" até o banco confirmar, e volta se falhar
+        var rowi=iap.closest('.oc-browse-row');
+        var si=CATALOGO.filter(function(x){return x.slug===rowi.getAttribute('data-id');})[0];
+        if(!si)return;
+        var novo=!si.diz_preco;
+        iap.disabled=true; iap.textContent='Salvando…';
+        zapFetch('/painel/servicos/catalogo/diz-preco',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:si.id,diz:novo})}).then(function(res){
+          if(res&&res.ok){si.diz_preco=novo;}
+          else{alert('Não consegui salvar. Tente de novo.');}
+          renderCatalogoCompleto();
+        });
+        return;
+      }
+      var todos=e.target.closest('.oc-iap-todos'), nenhum=e.target.closest('.oc-iap-nenhum');
+      if(todos||nenhum){
+        var liga=!!todos;
+        if(liga&&!confirm('A IA vai poder dizer o preço dos '+CATALOGO.length+' serviços, sempre como "a partir de". Confirma?'))return;
+        if(!liga&&!confirm('A IA deixa de citar o preço de todos os serviços. Confirma?'))return;
+        zapFetch('/painel/servicos/catalogo/diz-preco',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:null,diz:liga})}).then(function(res){
+          if(!res||!res.ok){alert('Não consegui salvar. Tente de novo.');return;}
+          carregarCatalogo(true);
+        });
+        return;
+      }
       var tog=e.target.closest('.oc-tog');
       if(tog){
         var row=tog.closest('.oc-browse-row'); var id=row.getAttribute('data-id');
@@ -5616,6 +5705,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <h2 style="margin:0">Meus serviços</h2>
         <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:center">
           <span class="oc-contador"><b id="oc-contador-n">0</b> de <span id="oc-contador-total">0</span> na proposta</span>
+          {% if ia_preco %}<button type="button" id="oc-iap-chip" class="oc-iap-chip" title="Ver quais serviços a IA pode dizer o preço">🤖 <b id="oc-iap-n">0</b> de <span id="oc-iap-total">0</span> com preço liberado pra IA</button>{% endif %}
           <button id="oc-add" class="oc-pill" type="button">+ Adicionar serviço</button>
           <button id="oc-margin" class="oc-pill" type="button">Modo margem</button>
         </div>
@@ -5654,7 +5744,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         </div>
         {# só onde existe a IA da regra por número (migração 388): a chave não muda
            nada no agente geral, e mostrar um controle que não faz nada é mentir #}
-        {% if ia_preco %}<label style="display:flex; gap:.45rem; align-items:flex-start; font-size:.8rem; margin-top:.55rem; cursor:pointer"><input id="svc-diz" type="checkbox" style="margin-top:.15rem"> <span>A IA pode dizer este preço no WhatsApp <span class="mut">(desmarcado, ela não cita o valor: {{ 'convida para a visita' if servico_avulso else 'convida para uma reunião' }} e o orçamento sai conferido por alguém da equipe)</span></span></label>{% endif %}
+        {% if ia_preco %}<label class="oc-iap-sw"><input id="svc-diz" type="checkbox"><span class="oc-iap-tg"></span><span><b>A IA pode dizer este preço no WhatsApp</b><span class="mut">Desligado, ela não cita o valor: {{ 'convida para a visita' if servico_avulso else 'convida para uma reunião' }} e o orçamento sai conferido por alguém da equipe.</span></span></label>{% endif %}
         <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>
       </div>
 
@@ -5916,7 +6006,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   </div>
 </div>
 
-<script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
+<script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }}; window.IA_PRECO = {{ 'true' if ia_preco else 'false' }};</script>
 <script>window.ZAQ_ICONES = {{ icones_paleta|tojson }};</script>
 """ + _JS_TAG + r"""
 {% endblock %}"""

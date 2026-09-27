@@ -103,6 +103,12 @@ def bloco(*textos: str, hoje: date | None = None) -> str:
             "O dia da semana decide o pacote do catálogo.")
 
 
+def _raiz(nome_dia: str) -> str:
+    """"Terça-feira", "terca", "TERÇA" → "terca": pra comparar o dia sem a forma."""
+    x = (nome_dia or "").strip().lower().split("-")[0].split()[0] if (nome_dia or "").strip() else ""
+    return x.replace("ç", "c").replace("á", "a")
+
+
 def corrigir(texto: str, hoje: date | None = None) -> str:
     """Troca o dia da semana ERRADO colado a uma data pelo certo. Só mexe onde o dia
     está grudado na data (parênteses, vírgula ou traço, antes ou depois); o resto do
@@ -117,6 +123,10 @@ def corrigir(texto: str, hoje: date | None = None) -> str:
         return dia(xs[0]) if xs else None
 
     def _como(original: str, certo: str) -> str:
+        # o dia CERTO fica como veio ("segunda 28/09" não vira "segunda-feira 28/09");
+        # só o errado é trocado, e na caixa em que estava
+        if _raiz(original) == _raiz(certo):
+            return original
         return certo.capitalize() if original[:1].isupper() else certo
 
     def _depois(m):          # grupos: 1 data · 2 separador · 3 dia

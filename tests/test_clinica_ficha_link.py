@@ -27,6 +27,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 def banco(_banco_pacientes):  # noqa: F811
     with _banco_pacientes.connection() as c:
         c.execute((BASE / "411_clinica_ficha_link.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "417_clinica_termos_modelos.sql").read_text(encoding="utf-8"))
         c.commit()
     return _banco_pacientes
 
@@ -154,13 +155,14 @@ def cli(banco, monkeypatch):  # noqa: F811
     from web import ficha_publica as fp
     from web import painel_clinica_agenda as pa
     from web import painel_clinica_pacientes as pw
-    for m in (fp, pa, pw):
+    from web import painel_clinica_termos as pt
+    for m in (fp, pa, pw, pt):
         monkeypatch.setattr(m, "get_pool", lambda: banco)
     monkeypatch.setattr(pa, "conta_logada", lambda request: (CLINICA,))
     monkeypatch.setattr(pa, "nicho_da_conta", lambda conta: "clinica")
     app = FastAPI()
     app.add_middleware(SessionMiddleware, secret_key="teste")
-    for m in (fp, pa, pw):
+    for m in (fp, pa, pw, pt):
         app.include_router(m.router)
 
     @app.get("/_papel/{papel}/{membro}")

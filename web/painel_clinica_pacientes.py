@@ -31,7 +31,7 @@ URL = "/painel/clinica/pacientes"
 ABAS = (("resumo", "Resumo"), ("agenda", "Agenda"), ("tratamento", "Plano e pacotes"),
         ("financeiro", "Financeiro"), ("produtos", "Produtos"), ("cadastro", "Cadastro"))
 _AVISOS = {"salvo": "Cadastro salvo.", "criado": "Paciente cadastrado.",
-           "link": "Link da ficha enviado no WhatsApp.", "link_novo": "Link novo gerado: o antigo não abre mais."}
+           "link": "Link da ficha enviado no WhatsApp.", "docs": "Link dos documentos enviado no WhatsApp.", "link_novo": "Link novo gerado: o antigo não abre mais."}
 
 
 def _ir(request: Request, url: str, aviso: str = "", erro: str = "") -> RedirectResponse:
@@ -124,6 +124,8 @@ def ver(request: Request, cliente_id: int):
             except acc.SemRegistro:
                 pre_erro = True
         ve_registro = acc.pode_ver_registro(c, conta[0], request.session) != (False, None)
+        from finance import clinica_documentos as cdoc
+        docs_emitidos = cdoc.emitidos_sem_conteudo(c, conta[0], cliente_id)
         ligado = cfl.ligado(c, conta[0])
         link = cfl.link(cfl.token(c, conta[0], cliente_id)) if ligado and p["falta"] else ""
         c.commit()
@@ -131,7 +133,7 @@ def ver(request: Request, cliente_id: int):
                    aviso=_AVISOS.get(request.query_params.get("aviso") or "", ""),
                    erro=request.session.pop("pacientes_erro", ""), p=p, aba=aba,
                    abas=abas, opcoes_resp=opcoes, brl=cc.reais, gerencia=gerencia, hoje=ca.hoje_br(agora),
-                   pre=pre, pre_erro=pre_erro, ficha_ligado=ligado, link_ficha=link, SEXO=cpa.SEXO, pode_ler=pode_ler,
+                   pre=pre, pre_erro=pre_erro, ficha_ligado=ligado, link_ficha=link, SEXO=cpa.SEXO, pode_ler=pode_ler, docs_emitidos=docs_emitidos,
                    ve_registro=ve_registro)
 
 
@@ -175,6 +177,33 @@ def balcao(request: Request, cliente_id: int):
     from finance.pix import qr_svg
     return _render("clinica_paciente_balcao.html", request, titulo=p["nome"], secao_ativa="pacientes",
                    p=p, url=url, qr=qr_svg(url) or "", minutos=cfl.BALCAO_MIN)
+
+
+@router.post(URL + "/{cliente_id}/documentos/enviar")
+async def documentos_enviar(request: Request, cliente_id: int):
+    form = await request.form()
+    ids = [int(v) for v in form.getlist("doc") if str(v).isdecimal() and len(str(v)) < 12]
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(_documentos_enviar, request, cliente_id, ids)
+
+
+def _documentos_enviar(request: Request, cliente_id: int, ids: list[int]):
+    """A recepção manda o link dos documentos (a pedido do profissional). Ela vê o tipo,
+    nunca o conteúdo; o paciente abre com a data de nascimento."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    from finance import clinica_documentos as cdoc
+    membro = request.session.get("membro_id")
+    with get_pool().connection() as c:
+        r = c.execute("select coalesce(nullif(nome,''), email) from membros where id=%s and conta_id=%s",
+                      (membro, conta[0])).fetchone() if membro else None
+        erro = cdoc.enviar(c, conta[0], cliente_id, ids, membro,
+                           quem_manda=f"{r[0]} (recepção)" if r else "dono da conta")
+        (c.rollback if erro else c.commit)()
+    if erro:
+        return _ir(request, f"{URL}/{cliente_id}", erro=erro)
+    return _ir(request, f"{URL}/{cliente_id}", "docs")
 
 
 @router.post(URL + "/{cliente_id}/link/novo")
@@ -317,6 +346,9 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <form method="post" action="/painel/clinica/pacientes/{{ p.id }}/balcao" style="margin:0"><button class="sec">Preencher no balcão</button></form></div>
     <div class="pc-m" style="margin-top:.3rem">O paciente abre com a data de nascimento e preenche cadastro, pré-consulta e termos.</div>{% endif %}</div>
   {% elif p.situacao %}<div class="pc-m" style="margin-top:.6rem">✓ Ficha completa{% if p.situacao.pre_em %} · pré-consulta respondida em {{ p.situacao.pre_em.strftime('%d/%m') }}{% endif %}</div>{% endif %}
+  {% if docs_emitidos %}<form class="pc-cx" method="post" action="/painel/clinica/pacientes/{{ p.id }}/documentos/enviar"><b>Documentos emitidos</b> <span class="pc-m">· só o tipo; o conteúdo é do profissional</span>
+    {% for d in docs_emitidos %}<div class="pc-m" style="margin-top:.3rem"><input type="checkbox" name="doc" value="{{ d.id }}" style="width:auto"> {{ d.tipo_txt }} · {{ d.quando.strftime('%d/%m/%Y') }}{% if d.enviado_em %} · enviado {{ d.enviado_em.strftime('%d/%m') }}{% endif %}</div>{% endfor %}
+    <div class="pc-acoes" style="margin-top:.4rem"><button class="sec" onclick="this.disabled=true;this.form.submit()">Mandar os marcados no WhatsApp</button></div></form>{% endif %}
   {% if p.situacao and p.situacao.alergia %}<div style="margin-top:.5rem"><span class="pc-tag y">⚠ alergia (o profissional vê qual)</span></div>{% endif %}
   <div class="pc-abas">{% for k, r in abas %}<a class="{% if aba == k %}on{% endif %}" href="/painel/clinica/pacientes/{{ p.id }}?aba={{ k }}">{{ r }}</a>{% endfor %}</div>
 

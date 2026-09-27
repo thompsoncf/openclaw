@@ -9391,6 +9391,27 @@ async def regua_etapa(request: Request, eid: int):
         validas = {x[0] for x in c.execute(
             "select chave from funil_etapas where conta_id=%s", (ctx["conta_id"],)).fetchall()}
         saidas = ",".join(x for x in f.getlist("saidas") if x in validas and x != r[0]) or None
+        toques = _escada_txt(f.get("toques_dias"))
+        exige_motivo = str(f.get("exige_motivo") or "").lower() in ("1", "on", "true", "sim")
+        # destino da reativação: só chave que existe, e nunca a própria etapa —
+        # reativar pra si mesmo não reativa nada
+        reativa = (f.get("reativa_para") or "").strip()
+        reativa = reativa if reativa in validas and reativa != r[0] else None
+        sai_quadro = str(f.get("sai_do_quadro") or "").lower() in ("1", "on", "true", "sim")
+        agenda = str(f.get("agenda_ao_entrar") or "").lower() in ("1", "on", "true", "sim")
+        # ETAPA DE RESULTADO: O QUE A TELA NÃO DESENHA, O SALVAR NÃO APAGA (27/09/2026).
+        # A linha do Fechado e a do Perdido só mostram rótulo e gatilho. Caixinha que
+        # não está na tela não vem no formulário — e ausente virava "desligado": quem
+        # renomeasse o Perdido desligava o "reabre em Contatado" e o "pede motivo", e
+        # quem salvasse o Fechado devolvia os fechados pro quadro. Caixinha desmarcada
+        # também não vem no POST, então "ausente = mantém" só vale onde o campo não
+        # existe na tela, que é aqui.
+        if r[0] in ("ganho", "perdido"):
+            renov, exige, saidas, toques, exige_motivo, reativa, sai_quadro, agenda = c.execute(
+                """select renovacoes_max, exige_justificativa, saidas_permitidas, toques_dias,
+                          exige_motivo, reativa_para, sai_do_quadro, agenda_ao_entrar
+                     from funil_etapas where id=%s and conta_id=%s""",
+                (eid, ctx["conta_id"])).fetchone()
         c.execute("""update funil_etapas
                         set rotulo = coalesce(nullif(%s,''), rotulo),
                             prazo_min = %s, gatilho = %s,
@@ -9402,17 +9423,8 @@ async def regua_etapa(request: Request, eid: int):
                             saidas_permitidas = %s, toques_dias = %s, exige_motivo = %s,
                             reativa_para = %s, sai_do_quadro = %s, agenda_ao_entrar = %s
                       where id=%s and conta_id=%s""",
-                  (rot, prazo, gat, ativo, gat, teto, renov, exige, saidas,
-                   _escada_txt(f.get("toques_dias")),
-                   str(f.get("exige_motivo") or "").lower() in ("1", "on", "true", "sim"),
-                   # destino da reativação: só chave que existe, e nunca a própria
-                   # etapa — reativar pra si mesmo não reativa nada
-                   ((f.get("reativa_para") or "").strip()
-                    if (f.get("reativa_para") or "").strip() in validas
-                    and (f.get("reativa_para") or "").strip() != r[0] else None),
-                   str(f.get("sai_do_quadro") or "").lower() in ("1", "on", "true", "sim"),
-                   str(f.get("agenda_ao_entrar") or "").lower() in ("1", "on", "true", "sim"),
-                   eid, ctx["conta_id"]))
+                  (rot, prazo, gat, ativo, gat, teto, renov, exige, saidas, toques,
+                   exige_motivo, reativa, sai_quadro, agenda, eid, ctx["conta_id"]))
         c.commit()
     # mudar a fase reordena a coluna no quadro: a tela recarrega pra mostrar onde ela
     # foi parar, em vez de deixar a linha no lugar antigo dizendo "salvo ✓"

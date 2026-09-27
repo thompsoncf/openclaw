@@ -86,6 +86,9 @@ DEPOIS_DEPOIS = timedelta(hours=3)
 JANELA_PASSADO = timedelta(hours=30)
 
 HORAS_CLIENTE = (8, 20)
+#: a resposta ao "1"/"2" que o cliente acabou de mandar sai fora da janela, se ele
+#: escreveu há até isto — é conversa, não disparo
+RESPOSTA_NA_HORA = timedelta(minutes=30)
 HORAS_EQUIPE = (8, 21)
 
 
@@ -412,6 +415,11 @@ def _ao_cliente(pool, conta_id: int, v: dict, conversa_id: int, coluna: str | No
 # ------------------------------------------------------------------ a resposta 1/2
 
 def ler_resposta(c, conta_id: int, v: dict, conversa_id: int) -> str | None:
+    """Só o que o cliente respondeu (`ler_resposta_em` diz também QUANDO)."""
+    return ler_resposta_em(c, conta_id, v, conversa_id)[0]
+
+
+def ler_resposta_em(c, conta_id: int, v: dict, conversa_id: int) -> tuple[str | None, datetime | None]:
     """O cliente respondeu ao "1 confirma, 2 remarca"? Olha as mensagens dele desde a
     PRIMEIRA pergunta, na ordem: a primeira que for resposta decide. Mesmas regras da
     confirmação da clínica (`clinica_agenda.ler_respostas`): "15h" não é "1".
@@ -420,19 +428,21 @@ def ler_resposta(c, conta_id: int, v: dict, conversa_id: int) -> str | None:
     salão 1 ou 2?" responde o vendedor, não a véspera — antes, o número puro ainda
     valia e confirmava (ou pedia remarcar) a visita sozinho (revisão de 27/09/2026).
     Com a conversa nas mãos da equipe, quem confirma é ela, pelo app.
-    Devolve 'confirmou', 'confirmou_e_mais', 'remarcar' ou None."""
+    Devolve (o que: 'confirmou', 'confirmou_e_mais', 'remarcar' ou None, quando o
+    cliente escreveu)."""
     from finance.clinica_agenda import _RE_REMARCAR, _RE_SIM, _SO_NUMERO
     perguntas = [x for x in (v["vespera_em"], v["duas_horas_em"]) if x]
     if not perguntas or v["confirmado_em"] or v["pede_remarcar_em"]:
-        return None
+        return None, None
     desde = min(perguntas)
-    for texto, depois_de_outra in c.execute(
+    for texto, depois_de_outra, quando in c.execute(
             """select m.texto,
                       exists (select 1 from mensagens o
                                where o.conversa_id = m.conversa_id and o.direcao = 'out'
                                  and coalesce(o.autor, '') <> 'bot'
                                  and o.criado_em > %s + interval '2 minutes'
-                                 and o.criado_em < m.criado_em)
+                                 and o.criado_em < m.criado_em),
+                      m.criado_em
                  from mensagens m join conversas cv on cv.id = m.conversa_id
                 where m.conversa_id=%s and cv.conta_id=%s and m.direcao='in' and m.criado_em > %s
                 order by m.criado_em, m.id limit 20""",
@@ -442,10 +452,10 @@ def ler_resposta(c, conta_id: int, v: dict, conversa_id: int) -> str | None:
             break
         if _RE_SIM.search(t):
             curto = bool(_SO_NUMERO.match(t)) or (len(t) <= 25 and "?" not in t)
-            return "confirmou" if curto else "confirmou_e_mais"
+            return ("confirmou" if curto else "confirmou_e_mais"), quando
         if _RE_REMARCAR.search(t):
-            return "remarcar"
-    return None
+            return "remarcar", quando
+    return None, None
 
 
 # ------------------------------------------------------------------ o relógio
@@ -499,14 +509,20 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
     # ---- antes da visita: confirmar (só a da equipe) --------------------------
     if cfg["confirmar"] and da_equipe and ini > agora and not v["hora_sugerida"]:
         with pool.connection() as c:
-            resp = ler_resposta(c, conta_id, v, conversa_id)
+            resp, resp_em = ler_resposta_em(c, conta_id, v, conversa_id)
             c.commit()
+        # A RESPOSTA A QUEM ACABOU DE ESCREVER NÃO ESPERA A JANELA (27/09/2026): a
+        # janela das 8h às 20h é da mensagem que o sistema INICIA. A cliente que
+        # respondeu "1" às 20h01 ficou sem o "Confirmadíssimo" — a confirmação foi
+        # gravada, e a resposta nunca mais saía. Respondida há pouco, sai na hora.
+        resposta_ok = (out["enviadas"] < TETO_CICLO and not parou and not v["fechado"]
+                       and (cliente_ok or bool(resp_em and agora - resp_em <= RESPOSTA_NA_HORA)))
         if resp in ("confirmou", "confirmou_e_mais"):
             if _reivindicar(pool, v["evento_id"], "confirmado_em"):
                 out["confirmadas"] += 1
                 # o "sim, qual o endereço?" fica pro vendedor: responder só o "sim"
                 # por cima de uma pergunta seria a empresa ignorando o cliente
-                if resp == "confirmou" and cliente_ok:
+                if resp == "confirmou" and resposta_ok:
                     if _mandar_cli(None,
                                    f"Confirmadíssimo! 🎉 Te esperamos {fmt(ini)}."):
                         out["enviadas"] += 1
@@ -514,8 +530,8 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
         if resp == "remarcar":
             if _reivindicar(pool, v["evento_id"], "pede_remarcar_em"):
                 out["remarcar"] += 1
-                if cliente_ok and _mandar_cli(None,
-                                              texto_remarcar(nome_dono)):
+                if resposta_ok and _mandar_cli(None,
+                                               texto_remarcar(nome_dono)):
                     out["enviadas"] += 1
                 avisar(pool, conta_id, dono, f"🔁 {quem} pediu pra remarcar a visita",
                        f"A visita era {fmt(ini)}. Chame pra achar outro horário.", link)

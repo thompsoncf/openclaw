@@ -667,3 +667,27 @@ def test_o_prazo_estourado_conta_como_enviado(pool, rec, prime, monkeypatch):
     vr.rodar(pool, datetime(2026, 9, 29, 19, 0, tzinfo=BRT))
     assert len(tentativas) == 1                                     # não manda de novo
     assert _estado(pool, ev)["vespera_em"] is not None
+
+
+def test_a_resposta_ao_1_depois_das_20h_sai_na_hora(pool, rec, prime):
+    """27/09/2026, na Prime: a véspera saiu às 18h, a cliente respondeu "1" às 20h01,
+    a confirmação foi gravada — e o "Confirmadíssimo" nunca saiu, porque a janela
+    das 8h às 20h (que é da mensagem que o sistema INICIA) barrou a resposta."""
+    lead, conv, ev = _visita(pool, prime["JAC"])
+    vr.rodar(pool, datetime(2026, 9, 29, 18, 3, tzinfo=BRT))
+    _cliente_diz(pool, conv, "1", datetime(2026, 9, 29, 20, 1, 40, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 29, 20, 2, 10, tzinfo=BRT))
+    assert _estado(pool, ev)["confirmado_em"] is not None
+    assert rec["cliente"][-1][1].startswith("Confirmadíssimo! 🎉")
+
+
+def test_a_resposta_velha_de_madrugada_nao_sai(pool, rec, prime):
+    """O "1" que só foi lido muito depois (o relógio parado, por exemplo) confirma,
+    mas a resposta não sai de madrugada: já não é conversa."""
+    lead, conv, ev = _visita(pool, prime["JAC"])
+    vr.rodar(pool, datetime(2026, 9, 29, 18, 3, tzinfo=BRT))
+    _cliente_diz(pool, conv, "1", datetime(2026, 9, 29, 22, 0, tzinfo=BRT))
+    antes = len(rec["cliente"])
+    vr.rodar(pool, datetime(2026, 9, 29, 23, 30, tzinfo=BRT))
+    assert _estado(pool, ev)["confirmado_em"] is not None
+    assert len(rec["cliente"]) == antes

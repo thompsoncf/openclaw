@@ -274,7 +274,8 @@ def test_marcou_no_nome_da_mae_e_era_pro_filho(pool, ia, zap):
     _rodar(pool, conv, lead)
     with pool.connection() as c:
         assert [e[0] for e in _eventos(c)] == ["Pedro Souza"]
-    assert zap.saiu[-1].startswith("Prontinho!! ✅ Pedro, sua consulta")
+    # a mensagem vai pro WhatsApp da mãe: é ela quem é cumprimentada
+    assert zap.saiu[-1].startswith("Prontinho!! ✅ Maria, a consulta de Pedro com Dr. Manoel")
 
 
 def test_retorno_e_pela_pessoa_nao_pelo_card(pool, ia, zap):

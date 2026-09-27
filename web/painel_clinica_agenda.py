@@ -212,7 +212,8 @@ def novo(request: Request):
 def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), inicio: str = Form(""),
                 lead_id: str = Form(""), nome: str = Form(""), fone: str = Form(""),
                 origem: str = Form(""), observacao: str = Form(""), busca: str = Form(""),
-                data: str = Form(""), acao: str = Form("agendar"), cliente_id: str = Form("")):
+                data: str = Form(""), acao: str = Form("agendar"), cliente_id: str = Form(""),
+                nascimento: str = Form(""), para_outro: str = Form("")):
     conta, _g, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -224,7 +225,8 @@ def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), in
     dia_volta = ca.local(quando).date().isoformat() if quando else data
     volta = "/painel/clinica/agenda/novo?" + urlencode({"prof": prof, "tipo": tipo, "data": dia_volta})
     guardar = {"inicio": inicio, "lead_id": lead_id, "nome": nome[:120], "fone": fone[:30],
-               "origem": origem, "observacao": observacao[:500], "busca": busca[:60], "cliente_id": cliente_id}
+               "origem": origem, "observacao": observacao[:500], "busca": busca[:60], "cliente_id": cliente_id,
+               "nascimento": nascimento[:10], "para_outro": para_outro}
     if acao == "buscar":
         request.session["agenda_form"] = guardar
         return _ir(request, volta)
@@ -242,6 +244,14 @@ def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), in
                 paciente, lead_id = fp["nome"], str(fp["lead"] or lead_id)
             else:
                 kid = None
+        outra = bool(para_outro) and not kid
+        if outra and _int(lead_id):
+            # o contato escolhido é o da mãe; o paciente é quem a recepção digitou (o filho).
+            # Só com a caixa marcada: sem ela, o nome que sobrou no campo não renomeia ninguém
+            if not nome.strip():
+                request.session["agenda_form"] = guardar
+                return _ir(request, volta, erro="Escreva o nome de quem vai ser atendido.")
+            paciente = " ".join(nome.split())[:120]
         eid, erro = ca.agendar(c, conta_id, profissional_id=_int(prof) or 0, servico_id=_int(tipo) or 0,
                                inicio=quando, lead_id=_int(lead_id), nome=nome, fone=fone, origem=origem,
                                observacao=observacao, encaixe=encaixe, membro_id=membro, paciente=paciente,
@@ -250,6 +260,18 @@ def novo_salvar(request: Request, prof: str = Form(""), tipo: str = Form(""), in
             c.rollback()
             request.session["agenda_form"] = guardar
             return _ir(request, volta, erro=erro)
+        c.commit()
+        # a data de nascimento vai pra ficha; menor marcado no WhatsApp de outra pessoa
+        # ganha ela como responsável (finance/clinica_pacientes.completar_do_agendamento)
+        from finance import clinica_pacientes as _cpa
+        ev0 = ca.evento(c, conta_id, eid) or {}
+        from finance import clinica_ficha_link as _cfl
+        kid_ev = _cfl.cliente_do_evento(c, conta_id, eid)
+        contato = c.execute("select coalesce(contato,'') from prospeccao where id=%s and conta_id=%s",
+                            (ev0.get("lead"), conta_id)).fetchone() if ev0.get("lead") else None
+        _cpa.completar_do_agendamento(c, conta_id, eid, kid_ev, nascimento=nascimento, para_outro=outra,
+                                      lead=ev0.get("lead"), contato=contato[0] if contato else "",
+                                      fone=ev0.get("fone") or fone)
         c.commit()
         aviso = "marcado"
         if acao == "confirmar":
@@ -572,12 +594,14 @@ _TPL_NOVO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
         <label><input type="radio" name="lead_id" value="" {% if not achados or (not lead_escolhido and form.nome) %}checked{% endif %}> Paciente novo</label>
       </div></div>
     {% if form.cliente_id %}<input type="hidden" name="cliente_id" value="{{ form.cliente_id }}"><div class="inteira ok">Paciente: <b>{{ form.nome }}</b> (pela ficha)</div>{% endif %}
-    <label>Nome (paciente novo)<input name="nome" maxlength="120" autocomplete="off" value="{{ form.nome or '' }}"></label>
+    <label>Nome do paciente (novo, ou o filho: marque a caixa abaixo)<input name="nome" maxlength="120" autocomplete="off" value="{{ form.nome or '' }}"></label>
+    <label>Data de nascimento do paciente<input type="date" name="nascimento" value="{{ form.nascimento or '' }}"></label>
+    <label class="inteira" style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" name="para_outro" value="1" style="width:auto" {% if form.para_outro %}checked{% endif %}> A consulta é de outra pessoa deste contato (ex.: o filho): o nome acima é o do paciente</label>
     <label>Celular com DDD (paciente novo)<input name="fone" inputmode="tel" maxlength="20" autocomplete="off" placeholder="(99) 9 8888-7777" value="{{ form.fone or '' }}"></label>
     <div class="inteira"><span class="mut">Como conheceu</span><div class="ag-ops" style="margin-top:.3rem">{% for o in ORIGENS %}<label><input type="radio" name="origem" value="{{ o }}" {% if form.origem == o %}checked{% endif %}> {{ o }}</label>{% endfor %}</div></div>
     <label class="inteira">Observação para a recepção (nunca vai pro paciente)<input name="observacao" maxlength="500" value="{{ form.observacao or '' }}"></label>
     <div class="ag-acoes inteira"><button name="acao" value="agendar">Agendar</button><button class="sec" name="acao" value="confirmar">Agendar e mandar confirmação</button></div>
-    <div class="mut inteira">O Zaq guarda só nome, celular, atendimento, horário e origem. Nada de queixa ou diagnóstico.</div>
+    <div class="mut inteira">Menor de idade marcado no WhatsApp da mãe (ou do pai) ganha a ficha dele, com ela como responsável. O Zaq guarda só nome, nascimento, celular, atendimento, horário e origem: nada de queixa ou diagnóstico.</div>
   </form>
   {% endif %}
 </div>

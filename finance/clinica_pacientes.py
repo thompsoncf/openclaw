@@ -524,6 +524,80 @@ def salvar_cadastro(pool, conta_id: int, cliente_id: int, form: dict) -> str | N
     return None
 
 
+def ler_data(txt) -> date | None:
+    """'17/05/1990', '17/5/90' ou '1990-05-17' → date. Ano de 2 dígitos: até o ano
+    que vem é 20xx, o resto 19xx."""
+    import re
+    t = str(txt or "").strip()
+    try:
+        m = re.fullmatch(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})", t)
+        if m:
+            d, mes, a = (int(x) for x in m.groups())
+            if a < 100:
+                a += 2000 if a <= (date.today().year + 1) % 100 else 1900
+            return date(a, mes, d)
+        return date.fromisoformat(t) if t else None
+    except ValueError:
+        return None
+
+
+def completar_do_agendamento(c, conta_id: int, evento_id: int | None, cliente_id: int | None, *,
+                             nascimento=None, para_outro: bool = False, lead: int | None = None,
+                             contato: str = "", fone: str = "", agora: datetime | None = None) -> None:
+    """O que se soube ao marcar (o agente na conversa, a recepção no balcão) vai pra ficha:
+
+    - a data de nascimento (só se a ficha não tinha);
+    - `para_outro` (quem marcou disse que a consulta é de OUTRA pessoa): fica no
+      agendamento (`eventos_agenda.para_outro`, migração 415), pra mensagem cumprimentar
+      quem recebe; e, se o paciente é MENOR, o contato vira o RESPONSÁVEL — só uma ficha
+      de ADULTO do mesmo WhatsApp com o nome completo IGUAL, ou uma nova. Nunca por
+      primeiro nome (a irmã "Ana Clara" não é a mãe "Ana"), nunca um nome provisório
+      ("Contato WhatsApp").
+    Nunca troca o que a ficha já tem. Tolerante: o agendamento nunca cai por causa disto."""
+    nasc = nascimento if isinstance(nascimento, date) else ler_data(nascimento)
+    hoje = ca.hoje_br(agora or datetime.now(timezone.utc))
+    if nasc and (nasc > hoje or nasc.year < 1900):
+        nasc = None
+    if para_outro and evento_id:
+        try:
+            with c.transaction():
+                c.execute("update eventos_agenda set para_outro=true where id=%s and conta_id=%s",
+                          (evento_id, conta_id))
+        except Exception:  # noqa: BLE001 — base sem a 415
+            pass
+    if not cliente_id:
+        return
+    try:
+        with c.transaction():
+            if nasc:
+                c.execute("update clientes set aniversario=%s where id=%s and dono_id=%s and aniversario is null",
+                          (nasc, cliente_id, conta_id))
+            if not para_outro:
+                return
+            r = c.execute("""select coalesce(p.nome, k.nome), k.aniversario, k.responsavel_id
+                               from clientes k left join pessoas p on p.id = k.pessoa_id
+                              where k.id=%s and k.dono_id=%s""", (cliente_id, conta_id)).fetchone()
+            if not r or r[2]:
+                return
+            idade = _idade(r[1], hoje)
+            from finance.clinica_agente import _nome_de_gente
+            quem = _nome_de_gente(" ".join((contato or "").split()))
+            if idade is None or idade >= 18 or not quem:
+                return
+            resp = achar_ou_criar(c, conta_id, lead, quem, fone, exato=True)
+            if not resp or resp == cliente_id:
+                return
+            rn = c.execute("select aniversario from clientes where id=%s and dono_id=%s",
+                           (resp, conta_id)).fetchone()
+            if rn and rn[0] and (_idade(rn[0], hoje) or 0) < 18:
+                return                              # outro menor do mesmo WhatsApp não é responsável
+            c.execute("update clientes set responsavel_id=%s where id=%s and dono_id=%s and responsavel_id is null",
+                      (resp, cliente_id, conta_id))
+    except Exception as e:  # noqa: BLE001
+        if not _falta_migracao(e):
+            _log.warning("pacientes: não completou a ficha %s do agendamento", cliente_id, exc_info=True)
+
+
 def novo(pool, conta_id: int, form: dict) -> tuple[int | None, str | None]:
     """Paciente cadastrado na mão (sem agendamento): nome e celular."""
     nome = " ".join((form.get("nome") or "").split())

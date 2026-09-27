@@ -625,12 +625,71 @@ def _quando(inicio: datetime, agora: datetime) -> str:
     return f"{artigo} {_DIA_LONGO[d.isoweekday()]}, {d:%d/%m},"
 
 
-def texto_marcado(c, conta_id: int, ev: dict, promete_lembrete: bool = False) -> str:
+def _sem_acento(t: str | None) -> str:
+    import unicodedata
+    return "".join(ch for ch in unicodedata.normalize("NFD", (t or "").lower()) if not unicodedata.combining(ch))
+
+
+def quem_recebe(c, conta_id: int, ev: dict) -> tuple[str, str | None]:
+    """(quem a mensagem cumprimenta, de quem é a consulta — None quando é a própria).
+
+    A mãe que marcou pro filho recebe no WhatsApp DELA: "Lívia, a consulta de Pedro",
+    nunca "Pedro, sua consulta". Só com SINAL EXPLÍCITO de que a consulta é de outra
+    pessoa: a ficha tem responsável, ou quem marcou disse que era pra outra pessoa (o
+    agente perguntou; a recepção marcou a caixa; a mãe disse "era pro meu filho") —
+    `eventos_agenda.para_outro` (migração 415), ou `ev["para_outro"]` logo ao marcar.
+    Nunca por comparar nomes: o perfil "Duda 💕" é a própria Maria Eduarda."""
     from finance.voltar_a_chamar import primeiro_nome
-    n = primeiro_nome(ev["paciente"])
+    nome_pac = " ".join((ev.get("paciente") or "").split())
+    pac = primeiro_nome(nome_pac)
+    outro_marcou = bool(ev.get("para_outro"))
+    resp = ""
+    if ev.get("id"):
+        try:
+            with c.transaction():
+                r = c.execute(
+                    """select coalesce(pr.nome, rk.nome) from eventos_agenda e
+                         join clientes k on k.id = e.cliente_id and k.dono_id = e.conta_id
+                         join clientes rk on rk.id = k.responsavel_id and rk.dono_id = k.dono_id
+                         left join pessoas pr on pr.id = rk.pessoa_id
+                        where e.id=%s and e.conta_id=%s""", (ev["id"], conta_id)).fetchone()
+                resp = (r[0] if r else "") or ""
+        except Exception:  # noqa: BLE001 — base sem a 407
+            resp = ""
+        if not outro_marcou:
+            try:
+                with c.transaction():
+                    r = c.execute("select para_outro from eventos_agenda where id=%s and conta_id=%s",
+                                  (ev["id"], conta_id)).fetchone()
+                    outro_marcou = bool(r and r[0])
+            except Exception:  # noqa: BLE001 — base sem a 415
+                pass
+    if not (resp or outro_marcou) or not pac:
+        return pac, None
+    from finance.clinica_agente import _nome_de_gente
+    quem = _nome_de_gente(resp)
+    if not quem and ev.get("lead"):
+        r = c.execute("select coalesce(nullif(contato,''), '') from prospeccao where id=%s and conta_id=%s",
+                      (ev["lead"], conta_id)).fetchone()
+        quem = _nome_de_gente(r[0] if r else "")
+    o = primeiro_nome(quem)
+    de = pac
+    if o and _sem_acento(o) == _sem_acento(pac):
+        de = " ".join(nome_pac.split()[:2])       # Maria (a mãe), a consulta de Maria Eduarda
+    return o, de
+
+
+def texto_marcado(c, conta_id: int, ev: dict, promete_lembrete: bool = False) -> str:
+    n, de = quem_recebe(c, conta_id, ev)
     palavra = _palavra(ev)
     art, fim = _genero(palavra)
-    return (f"Prontinho!! ✅ {n + ', ' + art.lower() if n else art} {palavra} com {_prof_nome(c, conta_id, ev)} "
+    if de:
+        o_a = "a" if art == "Sua" else "o"
+        abre = (f"Prontinho!! ✅ {n}, {o_a} {palavra} de {de}" if n
+                else f"Prontinho!! ✅ {o_a.upper()} {palavra} de {de}")
+    else:
+        abre = f"Prontinho!! ✅ {n + ', ' + art.lower() if n else art} {palavra}"
+    return (f"{abre} com {_prof_nome(c, conta_id, ev)} "
             f"está marcad{fim} para {dia_txt(ev['inicio'])} às {ev['hora']}{_onde(c, conta_id, ev)}."
             + (" Na véspera eu te mando um lembrete 😊" if promete_lembrete
                else " Qualquer coisa, é só responder por aqui 😊")
@@ -645,10 +704,9 @@ def _link_da_ficha(c, conta_id: int, ev: dict, qual: str, agora: datetime | None
 
 
 def texto_vespera(c, conta_id: int, ev: dict, agora: datetime | None = None) -> str:
-    from finance.voltar_a_chamar import primeiro_nome
-    n = primeiro_nome(ev["paciente"])
+    n, de = quem_recebe(c, conta_id, ev)
     quando = _quando(ev["inicio"], agora or datetime.now(timezone.utc))
-    return (f"Oi{', ' + n if n else ''}! {quando} você tem {_palavra(ev)} às {ev['hora']} com "
+    return (f"Oi{', ' + n if n else ''}! {quando} {de or 'você'} tem {_palavra(ev)} às {ev['hora']} com "
             f"{_prof_nome(c, conta_id, ev)}{_onde(c, conta_id, ev)}. Confirma? "
             "Responda 1 para confirmar ou 2 se precisar remarcar."
             + _link_da_ficha(c, conta_id, ev, "vespera", agora))

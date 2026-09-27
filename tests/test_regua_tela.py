@@ -260,6 +260,66 @@ def test_etapa_de_resultado_nao_aceita_prazo(monkeypatch, pool):
     assert _etapa(pool, "perdido")[0] is None
 
 
+def _regras(pool, chave):
+    with pool.connection() as c:
+        return c.execute("""select exige_motivo, reativa_para, sai_do_quadro, agenda_ao_entrar,
+                                   exige_justificativa, renovacoes_max
+                              from funil_etapas where conta_id=%s and chave=%s""",
+                         (CONTA, chave)).fetchone()
+
+
+def _como_na_prime(pool):
+    """O Perdido e o Fechado como a Prime (conta 34) tem hoje: o Perdido pede motivo e
+    reabre em Contatado; o Fechado sai do quadro e cria o compromisso na Agenda."""
+    with pool.connection() as c:
+        c.execute("""update funil_etapas set exige_motivo=true, reativa_para='contatado'
+                      where conta_id=%s and chave='perdido'""", (CONTA,))
+        c.execute("""update funil_etapas set sai_do_quadro=true, agenda_ao_entrar=true
+                      where conta_id=%s and chave='ganho'""", (CONTA,))
+        c.commit()
+
+
+def test_renomear_o_perdido_nao_apaga_as_regras_dele(monkeypatch, pool):
+    """O defeito de 27/09/2026, achado lendo o PDF da régua da Prime.
+
+    A linha do Perdido só desenha rótulo e gatilho. O resto não vem no formulário,
+    e o servidor gravava "desligado" em tudo que não veio: renomear o Perdido
+    desligava, sem aviso, o "reabre em Contatado se o cliente voltar a falar" e o
+    "pede motivo" — duas regras que a tela nem mostrava pra alguém religar.
+    """
+    _logado(monkeypatch, pool)
+    _como_na_prime(pool)
+    r = asyncio.run(pp.regua_etapa(_Req({"rotulo": "Perdidos"}), _eid(pool, "perdido")))
+    assert r.status_code == 200
+    assert _etapa(pool, "perdido")[3] == "Perdidos", "o que a tela mostra tinha que gravar"
+    assert _regras(pool, "perdido")[:2] == (True, "contatado")
+
+
+def test_salvar_o_fechado_nao_devolve_os_fechados_pro_quadro(monkeypatch, pool):
+    """Na Prime, isto punha os 12 fechados de volta no quadro e parava de criar o
+    compromisso na Agenda."""
+    _logado(monkeypatch, pool)
+    _como_na_prime(pool)
+    asyncio.run(pp.regua_etapa(_Req({"rotulo": "Fechado", "gatilho": "contrato_assinado",
+                                     "gatilho_ativo": "1"}), _eid(pool, "ganho")))
+    assert _etapa(pool, "ganho")[1:] == ("contrato_assinado", True, "Fechado")
+    assert _regras(pool, "ganho")[2:4] == (True, True)
+
+
+def test_na_etapa_comum_desmarcar_continua_desligando(monkeypatch, pool):
+    """O conserto é só das etapas de resultado. Nas outras, a caixinha está na tela,
+    e caixinha desmarcada não vem no POST: ali, ausente TEM que ser desligado, senão
+    ninguém consegue mais desmarcar nada."""
+    _logado(monkeypatch, pool)
+    with pool.connection() as c:
+        c.execute("""update funil_etapas set exige_motivo=true, reativa_para='novo',
+                            sai_do_quadro=true, agenda_ao_entrar=true
+                      where conta_id=%s and chave='contatado'""", (CONTA,))
+        c.commit()
+    asyncio.run(pp.regua_etapa(_Req({"rotulo": "Contatado"}), _eid(pool, "contatado")))
+    assert _regras(pool, "contatado")[:4] == (False, None, False, False)
+
+
 def test_rotulo_vazio_nao_apaga_o_nome_da_etapa(monkeypatch, pool):
     _logado(monkeypatch, pool)
     asyncio.run(pp.regua_etapa(_Req({"rotulo": "  ", "gatilho": "sinal_pago"}), _eid(pool, "ganho")))

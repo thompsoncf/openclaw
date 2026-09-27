@@ -1,0 +1,573 @@
+<title>Régua do funil reorganizada</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde; lilás pro que é novo), igual aos
+   mockups do funil novo (funil_novo_eventos.html, funil_novo_rotinas.html). Tema único
+   de propósito: o painel não tem modo claro. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --azul:#7FB2E6; --azul-borda:#23405E; --azul-fundo:#0F1B28;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+code{font-family:var(--mono);font-size:.78em;color:var(--dim)}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:82ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:82ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:88ch;margin:0}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota b{color:var(--text)}
+
+/* números medidos */
+.med{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.mt{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.75rem .9rem;display:flex;flex-direction:column;gap:.2rem}
+.mt .v{font-family:var(--display);font-size:1.6rem;font-variant-numeric:tabular-nums;line-height:1.1}
+.mt .v small{font-size:.85rem;color:var(--dim);font-weight:500}
+.mt p{margin:0;font-size:.8rem;color:var(--dim)}
+.mt.al{border-color:var(--coral-borda)} .mt.al .v{color:var(--coral-2)}
+.mt.at{border-color:var(--ambar-borda)} .mt.at .v{color:var(--ambar-2)}
+
+/* tabela do diagnóstico */
+.tab{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-2)}
+.lr{display:grid;grid-template-columns:2.2rem 1.25fr 1fr 1fr;border-top:1px solid var(--line)}
+.lr:first-child{border-top:0}
+.lr>div{padding:.65rem .8rem;min-width:0;font-size:.82rem;color:var(--dim)}
+.lr>div+div{border-left:1px solid var(--line)}
+.lr.cab>div{background:var(--surface-2);font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);padding-block:.5rem}
+.lr .n{font-family:var(--mono);font-size:.72rem;color:var(--faint);text-align:center}
+.lr .r{font-weight:600;color:var(--text);display:block;margin-bottom:.15rem}
+.lr p{margin:0}
+.lr b{color:var(--text)}
+.st{display:inline-block;font-family:var(--mono);font-size:.58rem;letter-spacing:.04em;border-radius:4px;padding:.02rem .35rem;margin-bottom:.25rem}
+.st.gr{background:var(--coral-fundo);color:var(--coral-2);border:1px solid var(--coral-borda)}
+.st.bug{background:var(--ambar-fundo);color:var(--ambar-2);border:1px solid var(--ambar-borda)}
+.st.org{background:var(--ia-fundo);color:var(--ia-2);border:1px solid var(--ia-borda)}
+.st.ok{background:var(--neon-fundo);color:var(--neon-2);border:1px solid var(--neon-borda)}
+
+/* o plano aprovado */
+.plano{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.pp{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.6rem .7rem;display:flex;flex-direction:column;gap:.25rem;font-size:.78rem;color:var(--dim)}
+.pp h4{font-size:.86rem;color:var(--text)}
+.pp.falta{border-style:dashed;border-color:var(--ia-borda)}
+
+/* ======== A TELA PROPOSTA ======== */
+.palco{border:1px solid var(--line);border-radius:16px;background:var(--bg-2);padding:clamp(12px,2.5vw,22px);display:flex;flex-direction:column;gap:14px}
+.tt{display:flex;flex-direction:column;gap:.15rem}
+.tt h3{font-size:1.35rem}
+.tt p{margin:0;font-size:.82rem;color:var(--dim)}
+.tt p b{color:var(--neon-2)}
+.indice{display:flex;gap:6px;flex-wrap:wrap}
+.indice a{font-size:.76rem;color:var(--dim);text-decoration:none;border:1px solid var(--line-2);border-radius:999px;padding:.2rem .7rem;background:var(--surface)}
+.indice a:hover,.indice a:focus-visible{color:var(--text);border-color:var(--neon-borda);outline:none}
+.indice a b{color:var(--neon-2);font-weight:500;font-family:var(--mono);font-size:.68rem;margin-left:.25rem}
+
+.blk{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem .95rem;display:flex;flex-direction:column;gap:.7rem}
+.blk>.sh{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;flex-wrap:wrap}
+.blk>.sh h4{font-size:1rem}
+.blk>.sh span{font-size:.76rem;color:var(--dim)}
+.novo{box-shadow:inset 3px 0 0 var(--ia)}
+.mud{font-family:var(--mono);font-size:.58rem;color:var(--ia-2);background:var(--ia-fundo);border:1px solid var(--ia-borda);border-radius:4px;padding:.02rem .35rem;letter-spacing:.03em;white-space:nowrap}
+
+/* resumo dos motores */
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pl{font-size:.74rem;border-radius:999px;padding:.18rem .6rem;border:1px solid var(--line-2);color:var(--dim);display:inline-flex;gap:.35rem;align-items:center}
+.pl::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.pl.on{border-color:var(--neon-borda);color:var(--neon-2);background:var(--neon-fundo)} .pl.on::before{background:var(--neon)}
+.pl.obs{border-color:var(--azul-borda);color:var(--azul);background:var(--azul-fundo)} .pl.obs::before{background:var(--azul)}
+
+/* motores */
+.motores{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.mo{border:1px solid var(--line-2);border-radius:10px;background:var(--bg);padding:.7rem .8rem;display:flex;flex-direction:column;gap:.55rem}
+.mo.off{background:transparent;border-style:dashed}
+.mo.largo{grid-column:1/-1}
+.mo .t{display:flex;justify-content:space-between;gap:.6rem;align-items:flex-start;flex-wrap:wrap}
+.mo .t h5{margin:0;font-family:var(--display);font-size:.95rem;font-weight:600}
+.mo .t p{margin:.1rem 0 0;font-size:.76rem;color:var(--dim);max-width:44ch}
+.mo .t p b{color:var(--text)}
+.seg{display:inline-flex;padding:2px;border:1px solid var(--line-2);border-radius:999px;gap:2px;flex:none}
+.seg span{font-size:.68rem;padding:.2rem .55rem;border-radius:999px;color:var(--faint)}
+.seg span.a{background:var(--azul-fundo);color:var(--azul);box-shadow:inset 0 0 0 1px var(--azul-borda);font-weight:600}
+.seg span.d{background:var(--surface-2);color:var(--dim);font-weight:600}
+.cps{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.cp{display:flex;flex-direction:column;gap:.2rem}
+.cp label{font-size:.7rem;color:var(--dim);display:flex;gap:.3rem;align-items:center;flex-wrap:wrap}
+.pr{font-family:var(--mono);font-size:.56rem;border-radius:4px;padding:0 .3rem;border:1px solid var(--line-2);color:var(--faint)}
+.pr.v{border-color:var(--neon-borda);color:var(--neon-2)}
+.fld{border:1px solid var(--line-2);background:var(--surface);border-radius:7px;padding:.32rem .5rem;font-size:.82rem;color:var(--text);font-variant-numeric:tabular-nums;min-height:32px;display:flex;align-items:center;gap:.3rem}
+.fld small{color:var(--faint);font-size:.72rem}
+.fld.ph{color:var(--faint)}
+.mo .obs{font-size:.72rem;color:var(--faint);margin:0}
+.mo .obs b{color:var(--dim)}
+.esp{border-top:1px solid var(--line);padding-top:.55rem;display:flex;flex-direction:column;gap:.4rem}
+.esp .l{font-size:.78rem;font-weight:600}
+.esp .g{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ver{font-size:.72rem;color:var(--azul)}
+
+/* etapas */
+.et{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.er{display:grid;grid-template-columns:minmax(9rem,1.1fr) minmax(12rem,2fr) 8.5rem 5rem;align-items:center;border-top:1px solid var(--line);font-size:.8rem}
+.er:first-child{border-top:0}
+.er>div{padding:.5rem .65rem;min-width:0}
+.er.cab>div{background:var(--surface-2);font-family:var(--mono);font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);padding-block:.4rem}
+.er.fase>div{grid-column:1/-1;background:var(--bg);font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.er.fase span{text-transform:none;letter-spacing:0;font-family:var(--body)}
+.nm{display:flex;align-items:center;gap:.45rem;font-weight:600}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:#229ED9}
+.dot.g{background:var(--neon)} .dot.x{background:var(--faint)}
+.gt{display:flex;align-items:center;gap:.4rem;color:var(--dim);min-width:0}
+.gt .ck{width:15px;height:15px;border-radius:4px;border:1px solid var(--line-2);flex:none;display:grid;place-items:center;font-size:.6rem;color:var(--bg)}
+.gt .ck.on{background:var(--azul);border-color:var(--azul)}
+.gt span.tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp{color:var(--dim);font-variant-numeric:tabular-nums}
+.tp b{color:var(--text)}
+.ld{text-align:right;font-variant-numeric:tabular-nums;color:var(--text)}
+.ld small{color:var(--faint);font-size:.7rem;display:block;line-height:1.1}
+.ld.z{color:var(--faint)}
+.selos{display:flex;gap:4px;flex-wrap:wrap;margin-top:.25rem}
+.sl{font-size:.64rem;border-radius:4px;padding:.02rem .35rem;border:1px solid var(--line-2);color:var(--dim);font-weight:400}
+.sl.c{border-color:var(--coral-borda);color:var(--coral-2)}
+.sl.v{border-color:var(--neon-borda);color:var(--neon-2)}
+.mais{font-size:.7rem;color:var(--azul);font-weight:400;margin-top:.2rem;display:inline-block}
+.aberta{grid-column:1/-1;background:var(--bg);border-top:1px dashed var(--line-2);padding:.7rem .8rem .8rem 1.9rem!important;display:flex;flex-direction:column;gap:.55rem;font-size:.76rem;color:var(--dim)}
+.aberta .li{display:flex;gap:.45rem;align-items:center;flex-wrap:wrap}
+.aberta .li .fld{min-height:28px;padding:.2rem .45rem;font-size:.76rem}
+.cx{display:inline-flex;gap:.3rem;align-items:center}
+.cx i{width:13px;height:13px;border-radius:3px;border:1px solid var(--line-2);display:inline-block}
+.cx i.on{background:var(--neon);border-color:var(--neon)}
+.btn{font-size:.76rem;border:1px solid var(--line-2);border-radius:8px;padding:.3rem .7rem;color:var(--text);background:var(--surface);align-self:flex-end}
+.btn.p{background:var(--neon);color:#062312;border-color:var(--neon);font-weight:600}
+.fora{display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap;font-size:.76rem;color:var(--dim);padding:.5rem .65rem;border-top:1px solid var(--line);background:var(--bg)}
+
+/* rotinas de festa (o conserto do layout) */
+.rt{display:flex;flex-direction:column}
+.ro{display:flex;gap:.7rem;align-items:flex-start;padding:.6rem 0;border-top:1px solid var(--line)}
+.ro:first-child{border-top:0}
+.ro .bx{width:17px;height:17px;border-radius:4px;background:var(--neon);flex:none;margin-top:.15rem;display:grid;place-items:center;color:#062312;font-size:.7rem;font-weight:700}
+.ro .bx.no{background:transparent;border:1px solid var(--line-2)}
+.ro div{flex:1;min-width:0}
+.ro b{font-size:.86rem;display:block}
+.ro p{margin:.1rem 0 0;font-size:.76rem;color:var(--dim);max-width:78ch}
+.ro .fld{flex:none;width:auto}
+
+/* horário + motivos lado a lado */
+.duo{display:grid;grid-template-columns:1fr 1.3fr;gap:12px}
+.dias{display:flex;gap:4px;flex-wrap:wrap}
+.dias span{font-size:.72rem;border-radius:999px;padding:.2rem .55rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.dias span.x{border-color:var(--line-2);background:transparent;color:var(--faint)}
+.mv{display:flex;flex-direction:column}
+.mv div{display:flex;justify-content:space-between;gap:.5rem;align-items:center;padding:.38rem 0;border-top:1px solid var(--line);font-size:.8rem}
+.mv div:first-child{border-top:0}
+.mv .ar{font-family:var(--mono);font-size:.7rem;color:var(--faint);white-space:nowrap}
+
+/* antes x depois */
+.ad{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ad>div{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem;display:flex;flex-direction:column;gap:.4rem}
+.ad h4{font-size:.95rem}
+.ad ul{margin:0;padding-left:1.1rem;color:var(--dim);font-size:.82rem;display:flex;flex-direction:column;gap:.25rem}
+.ad ul b{color:var(--text)}
+
+/* decisões */
+.dec{display:flex;flex-direction:column;gap:10px}
+.dc{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem;display:grid;grid-template-columns:2rem 1fr;gap:.2rem .6rem}
+.dc .nn{font-family:var(--display);font-size:1.3rem;color:var(--neon-2);grid-row:span 3}
+.dc h4{font-size:.95rem}
+.dc p{margin:0;font-size:.82rem;color:var(--dim)}
+.dc p b{color:var(--text)}
+.dc .rec{font-size:.8rem;color:var(--neon-2)}
+.dc .rec::before{content:"recomendo: ";font-family:var(--mono);font-size:.62rem;color:var(--faint);letter-spacing:.04em}
+
+.passos{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.ps{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem;display:flex;flex-direction:column;gap:.4rem}
+.ps h4{font-size:.95rem}
+.ps ul{margin:0;padding-left:1.1rem;color:var(--dim);font-size:.8rem;display:flex;flex-direction:column;gap:.2rem}
+.ps .k{font-size:.6rem}
+
+@media (max-width:860px){
+  .med{grid-template-columns:repeat(2,1fr)}
+  .plano{grid-template-columns:repeat(2,1fr)}
+  .motores,.duo,.ad,.passos{grid-template-columns:1fr}
+  .lr{grid-template-columns:2rem 1fr}
+  .lr>div:nth-child(3),.lr>div:nth-child(4){grid-column:2;border-left:0;border-top:1px dashed var(--line);padding-top:.45rem}
+  .lr.cab{display:none}
+  .er{grid-template-columns:1fr 4.5rem}
+  .er.cab{display:none}
+  .er>div:nth-child(2),.er>div:nth-child(3){grid-column:1/-1;padding-top:0}
+  .er>div:nth-child(4){grid-row:1;grid-column:2}
+}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+
+<div class="wrap">
+
+<div class="head">
+  <span class="k">Mockup pra aprovação · 27/09/2026 · Prime Eventos e ZAQ</span>
+  <h1>A Régua do funil, reorganizada</h1>
+  <p>O PDF da régua da Prime tem <b>18 páginas</b>. Li cada bloco, cruzei com o código e com o
+  banco (só leitura) e separei três coisas: o que está <b>quebrado</b>, o que está
+  <b>no lugar errado</b> e o que <b>ainda falta</b> do funil novo. Nenhuma regra, motor ou
+  coluna do banco muda. Muda a tela, e um conserto no salvar que não pode esperar.</p>
+</div>
+
+<!-- ============ MEDIDO ============ -->
+<section class="sec">
+  <header><h2>O que medi</h2>
+  <p>Consulta só de leitura em <code>funil_regua</code> e <code>funil_etapas</code>, nas 11 contas, em 27/09.</p></header>
+  <div class="med">
+    <div class="mt"><span class="v">1 <small>de 11</small></span><p>contas usa a régua: a Prime. As outras 10 estão com tudo desligado.</p></div>
+    <div class="mt at"><span class="v">0 <small>de 75</small></span><p>etapas usam "daqui a mão só leva para". Na Prime a tela desenha <b>110 caixinhas</b> disso.</p></div>
+    <div class="mt at"><span class="v">0</span><p>etapas com prazo em horas ou tentativas próprias. O prazo só vale pra Cobrança por prazo, que está desligada.</p></div>
+    <div class="mt al"><span class="v">2</span><p>etapas com regra que a tela esconde e o botão Salvar apaga: <b>Perdido</b> e <b>Fechado</b>.</p></div>
+  </div>
+  <p class="nota"><i>prime</i><span>Motores na Prime: <b>ligados</b> Gatilhos, Teto de dias, Esteira, Temperatura e Follow-up; <b>desligados</b> Cobrança por prazo e Perdido automático. O PDF foi tirado antes do deploy do #898 (a seção ainda se chama "Rotinas da visita" e tem só 3 itens); no código ela já tem validade da proposta, data disputada e pós-festa.</span></p>
+</section>
+
+<!-- ============ DIAGNÓSTICO ============ -->
+<section class="sec">
+  <header><h2>O que está errado, e o conserto</h2>
+  <p>Em ordem de gravidade. <b>Grave</b> perde configuração do cliente; <b>bug</b> mostra coisa errada; <b>organização</b> é o que faz a tela ter 18 páginas.</p></header>
+  <div class="tab">
+    <div class="lr cab"><div>#</div><div>o que acontece</div><div>por quê</div><div>conserto</div></div>
+
+    <div class="lr"><div class="n">1</div>
+      <div><span class="st gr">grave · §0</span><span class="r">Salvar o Perdido ou o Fechado apaga regras que a tela não mostra</span>
+        <p>Renomear "Perdido" e clicar Salvar desliga o <b>"reabre em Contatado se o cliente voltar a falar"</b> e o <b>"pede motivo"</b>. No Fechado, desliga o "fora do quadro": os <b>12 fechados voltam pro quadro</b>, e a Agenda deixa de ganhar o compromisso.</p></div>
+      <div><p>A tela esconde esses campos nas duas etapas de resultado, e o servidor grava "desligado" em todo campo que não veio no formulário.</p></div>
+      <div><p>O servidor só grava o que veio. A tela mostra as regras do Perdido e do Fechado (selos na linha). Teste fixando o caso. <b>Conserto próprio, antes do resto.</b></p></div></div>
+
+    <div class="lr"><div class="n">2</div>
+      <div><span class="st bug">bug</span><span class="r">Rotinas espremidas numa coluna de uma palavra</span>
+        <p>Páginas 1 a 3 do PDF: a caixinha ocupa a linha inteira e o texto fica numa tira à direita.</p></div>
+      <div><p>O CSS geral do app faz todo <code>input</code> ter 100% de largura e 48px de altura. As quatro caixinhas das rotinas não zeram isso.</p></div>
+      <div><p>Largura automática nas quatro. É o que as outras caixinhas da régua já fazem.</p></div></div>
+
+    <div class="lr"><div class="n">3</div>
+      <div><span class="st bug">bug</span><span class="r">O número cinza ao lado de "horas" parece prazo</span>
+        <p>"Novo · horas · 1", "Contatado · horas · 213". É a quantidade de leads na etapa, sem nome.</p></div>
+      <div><p>A contagem fica colada no campo de prazo, que está vazio em todas as etapas.</p></div>
+      <div><p>Vira "213 leads", numa coluna própria.</p></div></div>
+
+    <div class="lr"><div class="n">4</div>
+      <div><span class="st bug">bug</span><span class="r">O nome interno contradiz o nome da etapa</span>
+        <p>"Visita marcada · <code>qualificado</code>", "Qualificado · <code>ficha_completa</code>", "Data segurada · <code>evento_realizado</code>".</p></div>
+      <div><p>A parte 1 renomeou as colunas e a chave nunca muda (está gravada nos leads). A tela mostra a chave.</p></div>
+      <div><p>A chave sai da tela. Fica só na dica ao passar o mouse, pra quem dá suporte.</p></div></div>
+
+    <div class="lr"><div class="n">5</div>
+      <div><span class="st bug">bug</span><span class="r">A Esteira diz "10 leads, dia 1, 3 e 7" com qualquer número</span>
+        <p>O texto está fixo no código. Os números de verdade estão três blocos abaixo, em "Prazos do follow-up".</p></div>
+      <div><p>A esteira reaproveita o teto do dia e a escada do follow-up, mas a tela não liga uma coisa à outra.</p></div>
+      <div><p>O texto lê os números. E os números vão pra dentro do cartão da Esteira.</p></div></div>
+
+    <div class="lr"><div class="n">6</div>
+      <div><span class="st bug">bug</span><span class="r">"Hoje todo lead é carimbado quente e nada esfria"</span>
+        <p>Aparece embaixo de "Temperatura: ligada". Na Prime ela está ligada.</p></div>
+      <div><p>O texto foi escrito pra quando a temperatura ainda não existia.</p></div>
+      <div><p>Só aparece com a temperatura desligada.</p></div></div>
+
+    <div class="lr"><div class="n">7</div>
+      <div><span class="st org">organização</span><span class="r">Os números moram longe da chave que os usa</span>
+        <p>"Quando a bola está com a gente", "Escalonamento", "Teto de avisos" e o prazo em horas de cada etapa só valem pra <b>Cobrança por prazo</b>, que está desligada. Estão no meio da tela, parecendo ativos.</p></div>
+      <div><p>A régua cresceu um motor por vez (7 até hoje), e cada motor deixou os números num bloco solto.</p></div>
+      <div><p>Um cartão por motor: a chave e os números dele juntos. Motor desligado mostra só a chave, e os números ficam a um clique.</p></div></div>
+
+    <div class="lr"><div class="n">8</div>
+      <div><span class="st org">organização</span><span class="r">Dois tetos com quase o mesmo nome</span>
+        <p>"Teto de avisos por vendedor / dia" (5) e "Teto de leads cobrados por vendedor / dia" (10).</p></div>
+      <div><p>O primeiro é da Cobrança por prazo; o segundo, da Esteira. Na tela ficam em blocos vizinhos, sem dono.</p></div>
+      <div><p>Cada um dentro do seu cartão, com o nome do que conta: "avisos por dia" e "leads cobrados por dia".</p></div></div>
+
+    <div class="lr"><div class="n">9</div>
+      <div><span class="st org">organização</span><span class="r">Cada etapa é um formulário de 6 linhas</span>
+        <p>12 etapas × (fase, prazo, gatilho, teto, 11 saídas, tentativas, motivo, quadro, agenda, reativação). É a maior parte das 18 páginas.</p></div>
+      <div><p>Tudo aberto o tempo todo, inclusive o que nenhuma conta usa (saídas e tentativas: 0 de 75).</p></div>
+      <div><p>Uma linha por etapa: nome, quando entra sozinha, teto e leads. O resto em "mais regras", recolhido. Regra em uso vira selo na linha.</p></div></div>
+
+    <div class="lr"><div class="n">10</div>
+      <div><span class="st org">organização</span><span class="r">A coluna Follow-up saiu do quadro e continua na régua</span>
+        <p>Etapa inteira, e aparece em todas as listas de "leva para" e "reativa para".</p></div>
+      <div><p>A parte 1 tirou do quadro (0 leads) e nunca apaga etapa.</p></div>
+      <div><p>Etapa fora do quadro fica num grupo recolhido no fim ("Fora do quadro: Follow-up · Fechado").</p></div></div>
+
+    <div class="lr"><div class="n">11</div>
+      <div><span class="st org">organização</span><span class="r">A tela começa pelo que menos se usa</span>
+        <p>Espelho do vendedor e Rotinas vêm primeiro. As etapas, que são o funil, aparecem no meio.</p></div>
+      <div><p>Cada entrega nova foi posta no topo.</p></div>
+      <div><p>Um índice no topo e a ordem: resumo, etapas, automações, rotinas de festa, horário, motivos. O Espelho vai pra dentro da Esteira, que é de onde ele copia.</p></div></div>
+  </div>
+</section>
+
+<!-- ============ O QUE AINDA FALTA ============ -->
+<section class="sec">
+  <header><h2>O funil novo de eventos: o que já está no código</h2>
+  <p>O plano aprovado em 27/09 (<code>funil_novo_eventos.html</code> e <code>funil_novo_rotinas.html</code>) tinha quatro partes e o aviso. Três foram entregues; o bastão ainda falta.</p></header>
+  <div class="plano">
+    <div class="pp"><span class="st ok">#891</span><h4>1 · Colunas e gatilhos</h4>Qualificado, Visita feita, Data segurada e Pós-festa andando sozinhas.</div>
+    <div class="pp"><span class="st ok">#893</span><h4>2a · A visita</h4>Confirmar, "veio?", depois da visita, IA insiste.</div>
+    <div class="pp"><span class="st ok">#896 · #898</span><h4>2b · Proposta e data</h4>Lista de espera, validade, data disputada, pós-festa.</div>
+    <div class="pp falta"><span class="st org">falta</span><h4>3 · O bastão</h4>No cartão do chip: validação, passa na visita feita ou passa quando alguém assume.</div>
+    <div class="pp falta"><span class="st org">falta</span><h4>Link de avaliação</h4>O pós-festa pede avaliação; sem o link do Google da Prime, sai só o agradecimento.</div>
+  </div>
+  <p class="nota"><i>nota</i><span>A reorganização abaixo não depende do bastão. Proponho fazê-la antes, porque o bastão vai acrescentar mais um bloco nesta tela, e hoje não há onde pôr.</span></p>
+</section>
+
+<!-- ============ A TELA ============ -->
+<section class="sec" id="tela">
+  <header><h2>A tela proposta</h2>
+  <p>Com os números da Prime. Em lilás, o que muda de lugar ou de forma. Os campos são os mesmos de hoje e salvam nas mesmas rotas.</p></header>
+
+  <div class="palco">
+    <div class="tt">
+      <h3>Régua do funil</h3>
+      <p><b>🏢 Prime Eventos</b> · as etapas, o que traz o lead pra cada uma, e quanto tempo ela aguenta</p>
+    </div>
+
+    <nav class="indice" aria-label="Seções da régua">
+      <a href="#t-etapas">Etapas<b>10</b></a>
+      <a href="#t-auto">Automações<b>5 de 7</b></a>
+      <a href="#t-festa">Rotinas de festa</a>
+      <a href="#t-horario">Horário</a>
+      <a href="#t-motivos">Por que perdemos<b>10</b></a>
+    </nav>
+
+    <!-- resumo -->
+    <div class="blk novo">
+      <div class="sh"><h4>O que está agindo agora</h4><span class="mud">novo · o resumo antes do detalhe</span></div>
+      <div class="pills">
+        <span class="pl on">Gatilhos das etapas</span>
+        <span class="pl on">Teto de dias</span>
+        <span class="pl on">Esteira da cobrança</span>
+        <span class="pl on">Follow-up</span>
+        <span class="pl on">Temperatura</span>
+        <span class="pl">Cobrança por prazo</span>
+        <span class="pl">Perdido automático</span>
+      </div>
+      <p class="obs" style="margin:0;font-size:.74rem;color:var(--faint)">1.669 movimentos gravados no histórico · <span class="ver">📈 ver o ritmo real</span></p>
+    </div>
+
+    <!-- etapas -->
+    <div class="blk novo" id="t-etapas">
+      <div class="sh"><h4>As etapas do funil</h4><span>igual ao modelo de eventos ✓ · cada linha salva sozinha</span></div>
+      <div class="et">
+        <div class="er cab"><div>etapa</div><div>entra sozinha quando</div><div>teto na etapa</div><div style="text-align:right">no quadro</div></div>
+
+        <div class="er fase"><div>Fase · venda <span>o lead ainda está sendo conquistado</span></div></div>
+        <div class="er"><div class="nm"><i class="dot"></i>Novo</div><div class="gt"><i class="ck"></i><span class="tx">só na mão</span></div><div class="tp">—</div><div class="ld">1<small>lead</small></div></div>
+
+        <div class="er"><div><div class="nm"><i class="dot"></i>Contatado</div><span class="mais">▾ mais regras</span></div>
+          <div class="gt"><i class="ck on">✓</i><span class="tx">primeira resposta nossa (painel, Cockpit ou celular)</span></div>
+          <div class="tp"><b>7</b> dias × 3 = 21<div class="selos"><span class="sl">pede justificativa</span></div></div>
+          <div class="ld">213<small>leads</small></div>
+          <div class="aberta">
+            <div class="li">no máximo <span class="fld">7</span> dias, com <span class="fld">2</span> renovações · total de <b style="color:var(--text)">21 dias</b> <span class="cx"><i class="on"></i>exigir justificativa pra renovar</span></div>
+            <div class="li">tentativas próprias <span class="fld ph">em branco = escada da esteira (1,3,7)</span></div>
+            <div class="li"><span class="cx"><i></i>exigir motivo pra entrar</span> <span class="cx"><i></i>criar compromisso na Agenda</span> <span class="cx"><i></i>fora do quadro</span></div>
+            <div class="li">se o cliente voltar a falar daqui, leva pra <span class="fld">não reativa ▾</span></div>
+            <div class="li">a mão só leva pra <span class="fld">qualquer etapa ▾</span> <span style="color:var(--faint)">(escolher abre a lista)</span></div>
+            <div class="li">o que está aqui <span class="fld">ainda é venda ▾</span> · prazo pra Cobrança por prazo <span class="fld ph">— horas</span> <span style="color:var(--faint)">(desligada)</span></div>
+            <span class="btn">Salvar</span>
+          </div></div>
+
+        <div class="er"><div class="nm"><i class="dot"></i>Qualificado</div><div class="gt"><i class="ck on">✓</i><span class="tx">a ficha ficou completa: tipo de festa, data e convidados</span></div><div class="tp">—</div><div class="ld">34<small>leads</small></div></div>
+        <div class="er"><div class="nm"><i class="dot"></i>Visita marcada</div><div class="gt"><i class="ck on">✓</i><span class="tx">compromisso criado na agenda vinculado ao lead</span></div><div class="tp">—</div><div class="ld">5<small>leads</small></div></div>
+        <div class="er"><div class="nm"><i class="dot"></i>Visita feita</div><div class="gt"><i class="ck on">✓</i><span class="tx">compromisso marcado como realizado na agenda</span></div><div class="tp">—</div><div class="ld">8<small>leads</small></div></div>
+        <div class="er"><div class="nm"><i class="dot"></i>Proposta</div><div class="gt"><i class="ck on">✓</i><span class="tx">orçamento enviado, ou preço passado e o cliente respondeu</span></div><div class="tp"><b>7</b> dias × 3 = 21<div class="selos"><span class="sl">pede justificativa</span></div></div><div class="ld">163<small>leads</small></div></div>
+        <div class="er"><div><div class="nm"><i class="dot"></i>Data segurada</div><div class="selos"><span class="sl v">cria compromisso</span></div></div><div class="gt"><i class="ck on">✓</i><span class="tx">cliente aprovou a proposta no link público</span></div><div class="tp" style="font-size:.74rem">o prazo é o da reserva</div><div class="ld z">0<small>leads</small></div></div>
+        <div class="er"><div class="nm"><i class="dot"></i>Lista de espera</div><div class="gt"><i class="ck"></i><span class="tx">só na mão (botão no card, ou a IA)</span></div><div class="tp">—</div><div class="ld z">0<small>leads</small></div></div>
+
+        <div class="er fase"><div>Fase · fechamento <span>relatório e comissão contam a partir daqui</span></div></div>
+        <div class="er"><div><div class="nm"><i class="dot g"></i>Perdido</div><div class="selos"><span class="sl c">pede motivo</span><span class="sl c">reabre em Contatado se voltar a falar</span></div></div><div class="gt"><i class="ck"></i><span class="tx">só na mão · ou o Perdido automático</span></div><div class="tp">—</div><div class="ld">70<small>leads</small></div></div>
+
+        <div class="er fase"><div>Fase · pós-venda <span>já é cliente, continua contando como fechado</span></div></div>
+        <div class="er"><div class="nm"><i class="dot g"></i>Pós-festa</div><div class="gt"><i class="ck on">✓</i><span class="tx">a data da festa passou</span></div><div class="tp">—</div><div class="ld z">0<small>leads</small></div></div>
+
+        <div class="fora"><span>▸ <b style="color:var(--text)">Fora do quadro:</b> Fechado (12 leads · entra no contrato assinado · cria compromisso) · Follow-up (0)</span><span class="ver">+ nova etapa</span></div>
+      </div>
+      <p class="nota" style="font-size:.74rem"><i>§0</i><span>Os selos em coral são as regras que o Salvar apaga hoje. Na tela nova elas aparecem, e o servidor deixa de gravar "desligado" no que não veio.</span></p>
+    </div>
+
+    <!-- automações -->
+    <div class="blk novo" id="t-automacoes">
+      <div class="sh" id="t-auto"><h4>Automações</h4><span><b style="color:var(--azul)">Observando</b> roda o motor e anota o que teria feito, sem mover card nem avisar ninguém</span></div>
+      <div class="motores">
+
+        <div class="mo largo">
+          <div class="t"><div><h5>Esteira da cobrança</h5><p>Cobra <b>10 leads</b> por vendedor por dia, com os nomes no WhatsApp, nos dias <b>1, 3 e 7</b>, e avisa no último.</p></div>
+            <span class="seg"><span>Desligado</span><span>Observando</span><span class="a">Ligado</span></span></div>
+          <div class="cps">
+            <div class="cp"><label>Leads cobrados por vendedor / dia <span class="pr v">você</span></label><span class="fld">10</span></div>
+            <div class="cp"><label>Cobra nos dias <span class="pr v">você</span></label><span class="fld">1,3,7</span></div>
+          </div>
+          <div class="esp">
+            <span class="l">🪞 Espelho do vendedor <span class="mud">veio do topo</span></span>
+            <p class="obs">Uma cópia do que um vendedor recebe vai pro WhatsApp de quem você escolher. Não conta no teto dele e ele não fica sabendo.</p>
+            <div class="g"><span class="fld ph">de quem: ninguém ▾</span><span class="fld ph">pra quem ▾</span></div>
+          </div>
+        </div>
+
+        <div class="mo">
+          <div class="t"><div><h5>Follow-up</h5><p>A chave fica na aba Follow-up (<b>ligado</b>). Aqui, os prazos. A escada de toques é a mesma da esteira.</p></div>
+            <span class="seg"><span class="a">Ligado na aba</span></span></div>
+          <div class="cps">
+            <div class="cp"><label>Proposta parada cobra depois de <span class="pr v">você</span></label><span class="fld">3 <small>dias</small></span></div>
+            <div class="cp"><label>Festa perto aperta o prazo <span class="pr v">você</span></label><span class="fld">30 <small>dias</small></span></div>
+          </div>
+        </div>
+
+        <div class="mo">
+          <div class="t"><div><h5>Temperatura</h5><p>Quente: o cliente falou há pouco. Frio: não respondeu às tentativas, ou sumiu.</p></div>
+            <span class="seg"><span>Desligada</span><span>Ensaio</span><span class="a">Ligada</span></span></div>
+          <div class="cps">
+            <div class="cp"><label>Ainda quente até <span class="pr v">você</span></label><span class="fld">24 <small>horas</small></span></div>
+            <div class="cp"><label>Esfria sem falar em <span class="pr v">você</span></label><span class="fld">7 <small>dias</small></span></div>
+            <div class="cp"><label>Esfria depois de <span class="pr v">você</span></label><span class="fld">4 <small>tentativas</small></span></div>
+            <div class="cp"><label>Ordem da fila do vendedor</label><span class="fld">por prazo ▾</span></div>
+          </div>
+        </div>
+
+        <div class="mo">
+          <div class="t"><div><h5>Gatilhos das etapas</h5><p>Movem o card quando o fato acontece, a qualquer hora. <b>8 etapas</b> estão com gatilho ligado.</p></div>
+            <span class="seg"><span>Desligado</span><span>Observando</span><span class="a">Ligado</span></span></div>
+          <p class="obs">Os gatilhos se escolhem em cada etapa, lá em cima.</p>
+        </div>
+
+        <div class="mo">
+          <div class="t"><div><h5>Teto de dias na etapa</h5><p>Avisa antes de vencer e trava a renovação sem justificativa. Hoje em <b>Contatado</b> e <b>Proposta</b>, 21 dias.</p></div>
+            <span class="seg"><span>Desligado</span><span>Observando</span><span class="a">Ligado</span></span></div>
+          <p class="obs">O teto se põe em cada etapa, lá em cima.</p>
+        </div>
+
+        <div class="mo off">
+          <div class="t"><div><h5>Cobrança por prazo</h5><p>Avisa o vendedor quando a conversa ou a etapa passa do prazo, e escala pro gestor.</p></div>
+            <span class="seg"><span class="d">Desligado</span><span>Observando</span><span>Ligado</span></span></div>
+          <p class="obs"><span class="ver">▸ ver os números</span> · sem resposta <b>2h</b> · bola com você <b>4h</b> · bola com o cliente <b>3 dias</b> · escala pro gestor em <b>4h</b> · até <b>5 avisos</b> por vendedor/dia · <span style="color:var(--faint)">padrão eventos</span></p>
+        </div>
+
+        <div class="mo off">
+          <div class="t"><div><h5>Perdido automático</h5><p>Fecha quem passou do prazo e não respondeu aos toques. Nunca fecha quem está esperando você.</p></div>
+            <span class="seg"><span class="d">Desligado</span><span>Observando</span><span>Ligado</span></span></div>
+          <p class="obs">Usa o teto de cada etapa e a escada da esteira.</p>
+        </div>
+
+      </div>
+      <span class="btn p">Salvar as automações</span>
+    </div>
+
+    <!-- rotinas de festa -->
+    <div class="blk" id="t-festa">
+      <div class="sh"><h4>📍 Rotinas de festa</h4><span>só pra quem vende festa · a visita, a proposta, a data segurada e o pós-festa</span></div>
+      <p class="obs" style="margin:0;font-size:.76rem;color:var(--dim)">As mensagens ao cliente saem pelo número da conversa dele, das 8h às 20h. Os avisos à equipe vão pelo WhatsApp de avisos e pelo app, das 8h às 21h.</p>
+      <div class="rt">
+        <div class="ro"><span class="bx">✓</span><div><b>Confirmar as visitas da equipe</b><p>Ao marcar, na véspera às 18h e 2h antes, em nome da empresa. Se o cliente pedir pra remarcar, quem atende é avisado. Ninguém confirmou até 1h30 antes: quem recebe é avisado.</p></div></div>
+        <div class="ro"><span class="bx">✓</span><div><b>Perguntar "veio?"</b><p>1h depois do horário, a quem recebeu a visita (na visita da IA, a anfitriã). Sem resposta, de novo às 18h.</p></div></div>
+        <div class="ro"><span class="bx">✓</span><div><b>Depois da visita</b><p>Veio e ninguém escreveu em 2h: o vendedor é lembrado; na visita da IA, a IA agradece e oferece o orçamento. Faltou: o dono do card fica sabendo.</p></div></div>
+        <div class="ro"><span class="bx no" style="visibility:hidden"></span><div><b>Validade da proposta</b><p>Aparece no card e no link do cliente: "vale até", "vence amanhã", "venceu".</p></div><span class="fld">7 <small>dias</small></span></div>
+        <div class="ro"><span class="bx no" style="visibility:hidden"></span><div><b>Data segurada disputada</b><p>Se outro cliente pedir a mesma data, a reserva passa a vencer em tantas horas e quem segura é avisado.</p></div><span class="fld">48 <small>horas</small></span></div>
+        <div class="ro"><span class="bx">✓</span><div><b>Pós-festa</b><p>No dia seguinte à festa: o vendedor recebe o texto pronto pra agradecer e pedir avaliação e indicação; no cliente da IA, a IA manda. <span style="color:var(--ambar-2)">Ligado, mas falta o link de avaliação do Google: por enquanto sai só o agradecimento e o pedido de indicação.</span></p></div></div>
+      </div>
+      <p class="nota" style="font-size:.74rem"><i>layout</i><span>No PDF, as três primeiras ocupam as páginas 1 a 3. Com a caixinha no tamanho certo, cabem em um terço de página.</span></p>
+      <span class="btn p">Salvar as rotinas</span>
+    </div>
+
+    <!-- horário + motivos -->
+    <div class="duo">
+      <div class="blk" id="t-horario">
+        <div class="sh"><h4>Horário de atendimento</h4></div>
+        <div class="dias"><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span><span class="x">Dom</span></div>
+        <div class="cps"><div class="cp"><label>Abre</label><span class="fld">08:00</span></div><div class="cp"><label>Fecha</label><span class="fld">19:00</span></div></div>
+        <p class="obs" style="margin:0;font-size:.74rem;color:var(--faint)">Todo prazo da régua só corre aqui dentro. Gatilho, não: sinal pago às 23h move o card às 23h.</p>
+      </div>
+      <div class="blk" id="t-motivos">
+        <div class="sh"><h4>Por que perdemos</h4><span>a lista que o vendedor escolhe ao encerrar</span></div>
+        <div class="mv">
+          <div><span>Não respondeu, após as tentativas de follow</span><span class="ar">↑ ↓ · pede texto</span></div>
+          <div><span>Preço acima do orçamento dele</span><span class="ar">↑ ↓</span></div>
+          <div><span>Fechou com concorrente</span><span class="ar">↑ ↓</span></div>
+          <div><span>Desistiu / cancelou o evento</span><span class="ar">↑ ↓</span></div>
+          <div><span class="ver">▸ mais 6 · + novo motivo</span><span></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="nota"><i>zaq</i><span>Na ZAQ (recorrente) a mesma tela sai sem Rotinas de festa, sem "festa perto aperta o prazo" e com as etapas do modelo recorrente. Como lá todos os motores estão desligados, o cartão de Automações mostra só as sete chaves, e o resumo diz "nada agindo agora". Nenhuma palavra de festa aparece (§6).</span></p>
+</section>
+
+<!-- ============ ANTES × DEPOIS ============ -->
+<section class="sec">
+  <header><h2>O que sai da vista, e o que não muda</h2></header>
+  <div class="ad">
+    <div><h4>Sai da vista (fica a um clique)</h4><ul>
+      <li>As <b>110 caixinhas</b> de "daqui a mão só leva para" (0 etapas usam). Viram um seletor dentro de "mais regras".</li>
+      <li>Tentativas próprias, motivo pra entrar, Agenda, reativação e fora do quadro de cada etapa. Quando uma etapa usa, vira selo na linha.</li>
+      <li>Os números da Cobrança por prazo e do Perdido automático, enquanto estiverem desligados.</li>
+      <li>A etapa Follow-up, que foi pro grupo "fora do quadro".</li>
+      <li>O nome interno de cada etapa.</li>
+    </ul></div>
+    <div><h4>Não muda</h4><ul>
+      <li><b>Nenhuma coluna de banco</b>, nenhuma migração de dados, nenhum motor. As rotas de salvar são as mesmas.</li>
+      <li>Os valores de hoje da Prime ficam exatamente como estão.</li>
+      <li>Nada toca conversa, mensagem, chip, conexão ou <code>canais_config</code> (§0 e §1).</li>
+      <li>Ligar, observar e desligar continua um motor por vez, como o dono pediu.</li>
+      <li>A régua segue só pra dono e gestor.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ DECISÕES ============ -->
+<section class="sec">
+  <header><h2>Pra você decidir</h2></header>
+  <div class="dec">
+    <div class="dc"><span class="nn">1</span><h4>O conserto do Salvar vai sozinho, antes do mockup?</h4>
+      <p>Hoje não perdeu nada: o Perdido e o Fechado da Prime estão como a migração deixou. Mas basta alguém renomear o Perdido pra desligar a reativação sem saber.</p>
+      <p class="rec">sim. PR pequeno, só o servidor e um teste, sem mudar a tela.</p></div>
+    <div class="dc"><span class="nn">2</span><h4>O Espelho do vendedor vai pra dentro da Esteira?</h4>
+      <p>Ele só existe com a esteira ligada, e copia justamente as mensagens dela. No topo, parece a primeira coisa a configurar.</p>
+      <p class="rec">sim, dentro do cartão da Esteira.</p></div>
+    <div class="dc"><span class="nn">3</span><h4>As regras raras de cada etapa: recolhidas ou fora da tela?</h4>
+      <p>"Leva para" e "tentativas próprias" têm 0 uso em 11 contas. Tirar da tela seria mais limpo, mas quem precisar amanhã não acha.</p>
+      <p class="rec">recolhidas em "mais regras", com selo quando usadas.</p></div>
+    <div class="dc"><span class="nn">4</span><h4>O bastão (parte 3) vem antes ou depois?</h4>
+      <p>O bastão acrescenta uma escolha no cartão do chip e troca o dono do card. Não depende desta tela, mas vai somar mais um bloco nela.</p>
+      <p class="rec">reorganizar primeiro, bastão em seguida.</p></div>
+  </div>
+</section>
+
+<!-- ============ COMO SERIA CONSTRUÍDO ============ -->
+<section class="sec">
+  <header><h2>Como seria construído</h2></header>
+  <div class="passos">
+    <div class="ps"><span class="k">PR 1 · já</span><h4>O Salvar que não apaga</h4><ul>
+      <li>Etapa de resultado: o servidor só grava os campos que vieram.</li>
+      <li>Teste: salvar o Perdido mantém reativação e motivo; salvar o Fechado mantém fora do quadro e Agenda.</li>
+      <li>Sem aviso: não muda tela.</li></ul></div>
+    <div class="ps"><span class="k">PR 2 · junto ou logo depois</span><h4>Os bugs da tela</h4><ul>
+      <li>Caixinhas das rotinas no tamanho certo (itens 2 a 6).</li>
+      <li>"213 leads", sem a chave interna.</li>
+      <li>Texto da esteira e da temperatura lendo o estado real.</li>
+      <li>Sem aviso: correção de tela quebrada.</li></ul></div>
+    <div class="ps"><span class="k">PR 3 · com esta aprovação</span><h4>A tela reorganizada</h4><ul>
+      <li>Resumo, índice, etapas em linha, cartões por motor, espelho na esteira.</li>
+      <li>Conferida na Prime (eventos) e na ZAQ (recorrente).</li>
+      <li>Aviso nas Novidades, público <code>todos</code>, pra dono e gestor: a régua é de toda conta, e o vendedor não a vê.</li></ul></div>
+  </div>
+</section>
+
+</div>

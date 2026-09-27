@@ -65,7 +65,8 @@ def pool():
         c.execute("insert into contas (id, nome, chip_de) values (%s,'Prime',null),(%s,'CP',%s)",
                   (CONTA, CHIP2, CONTA))
         for m in ("388_regra_por_chip.sql", "396_resgate_ia.sql", "398_resgate_toques.sql",
-                  "401_ia_fora_da_esteira.sql", "403_resgate_origem_e_espelho.sql"):
+                  "401_ia_fora_da_esteira.sql", "403_resgate_origem_e_espelho.sql",
+                  "409_resgate_teste_chip.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem) values "
                   "(%s,'contatado','Contatado',10),(%s,'negociacao','Negociação',50),"

@@ -743,9 +743,13 @@ def _chip_de_pe(c, conta_id: int, chip_id) -> bool:
 
 
 def supervisor(pool, conta_id: int, texto: str, *, tipo: str = "supervisor", lead=None,
-               ref_em=None, cfg: dict | None = None) -> bool:
-    """Manda uma mensagem pro WhatsApp do supervisor, pelo número principal da
-    empresa, e registra. Nunca levanta."""
+               ref_em=None, cfg: dict | None = None, chip_id=None) -> bool:
+    """Manda uma mensagem pro WhatsApp do supervisor e registra. Nunca levanta.
+
+    Sai pelo número principal da empresa, MENOS quando `chip_id` diz outro: o teste
+    ("Testar comigo") fala pelo chip da conversa do lead do teste, e a resposta a
+    uma mensagem do supervisor sai pelo chip onde ele escreveu. Sem isso, em
+    27/09/2026 o dono escreveu pro chip Thiago e o CP Zarb respondeu."""
     try:
         with pool.connection() as c:
             cfg = cfg or config(c, conta_id)
@@ -755,7 +759,8 @@ def supervisor(pool, conta_id: int, texto: str, *, tipo: str = "supervisor", lea
             from finance import whatsapp_out as wo
             destino = wo.preparar(c, conta_id)
             c.commit()
-        res = wo.enviar_pronto(destino, num, texto)
+        chip = int(chip_id) if chip_id and int(chip_id) != int(conta_id) else None
+        res = wo.enviar_pronto(destino, num, texto, chip_id=chip)
         with pool.connection() as c:
             _registrar(c, conta_id, tipo, lead=lead, ref_em=ref_em, texto=texto,
                        ok=bool(res.get("ok")), erro=None if res.get("ok") else str(res.get("erro"))[:200])
@@ -1608,9 +1613,17 @@ def rodar(pool, agora: datetime | None = None) -> dict:
 
 # ══════════════════════════════════════════════════════════════════ o supervisor fala
 
-def e_do_supervisor(c, conta_id: int, numero) -> bool:
-    """Esta mensagem que chegou é do supervisor do resgate? Aí ela não vira lead nem
-    conversa da empresa: ou é o "Testar comigo", ou é ele respondendo um aviso."""
+TESTE_MARCA = "🧪"
+
+
+def _chip(conta_id: int, chip_id) -> int:
+    """O chip de verdade: nulo (a conversa do principal) é a própria empresa."""
+    return int(chip_id) if chip_id else int(conta_id)
+
+
+def e_o_supervisor(c, conta_id: int, numero) -> bool:
+    """Este número é o do supervisor do resgate (com o resgate em Ensaio ou Ligado)?
+    Só o número — em QUAL chip ele escreveu é `e_do_supervisor` quem olha."""
     chave = chave_do_numero(numero)
     if not chave:
         return False
@@ -1619,9 +1632,114 @@ def e_do_supervisor(c, conta_id: int, numero) -> bool:
             and chave_do_numero(cfg.get("supervisor_whatsapp")) == chave)
 
 
+def teste_aberto(c, conta_id: int) -> dict | None:
+    """O "Testar comigo" em andamento, ou None. `chip` é o chip por onde o teste fala
+    (o da conversa do lead do teste; o principal quando ela é do principal).
+    Tolerante: banco sem a 409 lê sem o chip (= principal, como era)."""
+    try:
+        with c.transaction():
+            r = c.execute("""select id, prospeccao_id, chip_id, historico, criado_em, expira_em
+                               from resgate_teste where conta_id=%s and expira_em > now()
+                              order by id desc limit 1""", (conta_id,)).fetchone()
+    except Exception:  # noqa: BLE001 — sem a 409 (ou sem a 396)
+        try:
+            with c.transaction():
+                r = c.execute("""select id, prospeccao_id, null, historico, criado_em, expira_em
+                                   from resgate_teste where conta_id=%s and expira_em > now()
+                                  order by id desc limit 1""", (conta_id,)).fetchone()
+        except Exception:  # noqa: BLE001
+            return None
+    if not r:
+        return None
+    return {"id": r[0], "lead": r[1], "chip": _chip(conta_id, r[2]), "historico": list(r[3] or []),
+            "criado_em": r[4], "expira_em": r[5]}
+
+
+def e_do_supervisor(c, conta_id: int, numero, chip_id=None) -> bool:
+    """Esta mensagem é do supervisor do resgate, NESTE chip? Aí ela não vira lead nem
+    conversa da empresa: ou é o "Testar comigo", ou é ele respondendo um aviso.
+
+    O CHIP decide (27/09/2026, o dono: "mandei mensagem pro chip Thiago e o CP Zarb
+    respondeu"). O resgate só segura o número do supervisor onde fala com ele: no
+    chip do teste aberto e no principal (por onde saem os avisos). Em outro chip, o
+    supervisor é tratado como qualquer contato — é assim que ele testa a IA daquele
+    número (o ZAQ SDR) de verdade. `chip_id` nulo = quem chamou não sabe o chip: vale
+    o de antes, todos."""
+    if not e_o_supervisor(c, conta_id, numero):
+        return False
+    if chip_id is None:
+        return True
+    alvo = _chip(conta_id, chip_id)
+    if alvo == int(conta_id):
+        return True
+    t = teste_aberto(c, conta_id)
+    return bool(t and t["chip"] == alvo)
+
+
+def nome_do_chip(c, conta_id: int, chip_id) -> str:
+    """O nome do chip como o Inbox mostra: `canais_config.rotulo`, senão o nome da
+    conta-chip (ver finance/wa_silencio.py)."""
+    alvo = _chip(conta_id, chip_id)
+    try:
+        with c.transaction():
+            r = c.execute("""select coalesce(nullif(btrim(cc.rotulo),''), nullif(btrim(ct.nome),''))
+                               from contas ct left join canais_config cc
+                                 on cc.conta_id = ct.id and cc.canal='whatsapp'
+                              where ct.id=%s""", (alvo,)).fetchone()
+    except Exception:  # noqa: BLE001
+        r = None
+    if r and r[0]:
+        return str(r[0])
+    return "o número principal" if alvo == int(conta_id) else f"o chip {alvo}"
+
+
+def sql_chave(expr: str) -> str:
+    """A CHAVE DO NÚMERO no SQL (a mesma de `chave_do_numero`): DDD + 8 últimos
+    dígitos, com ou sem o 55 e o nono dígito. O `%%` é pra rodar COM parâmetros."""
+    d = rf"regexp_replace(coalesce({expr},''),'\D','','g')"
+    d = (f"(case when {d} like '55%%' and length({d}) in (12,13) then substr({d},3) "
+         f"else {d} end)")
+    return f"(case when length({d}) in (10,11) then left({d},2) || right({d},8) else '' end)"
+
+
+def sql_fora_do_supervisor(c, conta_id: int, alias: str = "p") -> tuple[str, list]:
+    """O LEAD DO NÚMERO DO SUPERVISOR não é cliente: sai do Desafio e do Raio-X (o dono
+    aprovou em 27/09/2026 — cada teste dele viraria "lead da IA", e visita marcada no
+    teste viraria placar). Devolve (" and <condição>", valores), ou ("", []) sem
+    supervisor. É o mesmo lead que ganha o selo 🧪 no funil."""
+    try:
+        cfg = config(c, conta_id)
+    except Exception:  # noqa: BLE001
+        return "", []
+    chave = chave_do_numero(cfg.get("supervisor_whatsapp")) if cfg.get("modo") in ("ensaio", "ligado") else ""
+    if not chave:
+        return "", []
+    return (f" and {sql_chave(f'coalesce({alias}.whatsapp, {alias}.telefone)')} <> %s", [chave])
+
+
+def leads_do_supervisor(c, conta_id: int) -> set[int]:
+    """Os leads com o número do supervisor (o selo 🧪 no card e na ficha)."""
+    fora, vals = sql_fora_do_supervisor(c, conta_id)
+    if not fora:
+        return set()
+    cond = fora.replace(" and ", "", 1).replace("<>", "=")
+    try:
+        with c.transaction():
+            return {int(r[0]) for r in c.execute(
+                f"select p.id from prospeccao p where p.conta_id=%s and {cond}",
+                [conta_id, *vals]).fetchall()}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
 def testar(pool, conta_id: int) -> dict:
     """O "Testar comigo": pega o primeiro da fila, a IA escreve a retomada e manda pro
-    supervisor como se ele fosse o cliente. Nada vira lead, nada vai pro cliente."""
+    supervisor como se ele fosse o cliente. Nada vira lead, nada vai pro cliente.
+
+    Fala pelo CHIP DA CONVERSA do lead — o mesmo por onde a retomada de verdade
+    sairia — e toda mensagem leva o 🧪: o supervisor sabe que é o teste, e por qual
+    número. É também o único chip onde a resposta dele vira fala do "cliente"
+    (`e_do_supervisor`)."""
     agora = datetime.now(timezone.utc)
     with pool.connection() as c:
         cfg = config(c, conta_id)
@@ -1646,18 +1764,67 @@ def testar(pool, conta_id: int) -> dict:
         return {"ok": False, "erro": f"A IA leu a conversa do lead #{lead['id']} e não chamaria: "
                                      f"{r['motivo']}"}
     texto = r["texto"]
+    chip = _chip(conta_id, lead.get("chip_id"))
     with pool.connection() as c:
+        nome_chip = nome_do_chip(c, conta_id, chip)
         c.execute("delete from resgate_teste where conta_id=%s", (conta_id,))
-        c.execute("""insert into resgate_teste (conta_id, numero8, prospeccao_id, historico)
-                     values (%s,%s,%s,%s)""",
+        c.execute("""insert into resgate_teste (conta_id, numero8, prospeccao_id, historico, chip_id)
+                     values (%s,%s,%s,%s,%s)""",
                   (conta_id, chave_do_numero(cfg["supervisor_whatsapp"]), lead["id"],
-                   json.dumps([{"quem": "ia", "texto": texto}], ensure_ascii=False)))
+                   json.dumps([{"quem": "ia", "texto": texto}], ensure_ascii=False),
+                   None if chip == int(conta_id) else chip))
         c.commit()
-    supervisor(pool, conta_id, f"🧪 Testar comigo · você é {_primeiro(lead['quem'])} (lead #{lead['id']}).\n"
-                               "Responda como o cliente responderia. Nada disso vai pro cliente "
-                               "nem vira lead.", tipo="teste", cfg=cfg)
-    supervisor(pool, conta_id, texto, tipo="teste", lead=lead["id"], cfg=cfg)
+    ok = supervisor(pool, conta_id,
+                    f"{TESTE_MARCA} Testar comigo · você é {_primeiro(lead['quem'])} (lead #{lead['id']}), "
+                    f"pelo {nome_chip}, o número onde a conversa está.\n"
+                    "Responda como o cliente responderia. Nada disso vai pro cliente nem vira lead. "
+                    "O teste fecha sozinho 2h depois da sua última mensagem, ou no botão "
+                    "Encerrar teste, no painel.", tipo="teste", cfg=cfg, chip_id=chip)
+    if not ok:
+        return {"ok": False, "erro": f"Não consegui mandar pelo {nome_chip}: confira se ele está "
+                                     "conectado e tente de novo."}
+    supervisor(pool, conta_id, f"{TESTE_MARCA} {texto}", tipo="teste", lead=lead["id"], cfg=cfg,
+               chip_id=chip)
     return {"ok": True}
+
+
+def encerrar_teste(pool, conta_id: int) -> dict:
+    """"Encerrar teste" no cartão: o teste vence agora (nada é apagado — o histórico
+    fica na linha, e o que foi mandado, em `resgate_envios`) e o supervisor recebe o
+    aviso de fim pelo chip do teste. O teste que fecha sozinho, por tempo, não avisa."""
+    with pool.connection() as c:
+        t = teste_aberto(c, conta_id)
+        if not t:
+            c.commit()
+            return {"ok": False, "erro": "Não há teste aberto."}
+        c.execute("update resgate_teste set expira_em = now() where id=%s", (t["id"],))
+        nome = c.execute("select coalesce(nullif(contato,''), nullif(empresa,''), 'o cliente') "
+                         "from prospeccao where id=%s and conta_id=%s", (t["lead"], conta_id)).fetchone()
+        cfg = config(c, conta_id)
+        c.commit()
+    quem = _primeiro(nome[0]) if nome else "o cliente"
+    supervisor(pool, conta_id, f"{TESTE_MARCA} Teste encerrado ({quem}, lead #{t['lead']}). Daqui pra "
+                               "frente, o que você mandar neste número é resposta de supervisor, "
+                               "não do cliente.", tipo="teste", lead=t["lead"], cfg=cfg,
+               chip_id=t["chip"])
+    return {"ok": True}
+
+
+def teste_da_tela(c, conta_id: int) -> dict | None:
+    """A faixa do teste aberto no cartão do Resgate: quem o supervisor está fingindo
+    ser, por qual chip, quantas mensagens, a última dele e quando fecha sozinho."""
+    t = teste_aberto(c, conta_id)
+    if not t:
+        return None
+    r = c.execute("select coalesce(nullif(contato,''), nullif(empresa,''), 'Cliente') from prospeccao "
+                  "where id=%s and conta_id=%s", (t["lead"], conta_id)).fetchone()
+    falas = [h for h in t["historico"] if h.get("quem") in ("cliente", "ia")]
+    return {"lead": t["lead"], "quem": _primeiro(r[0]) if r else "Cliente",
+            "chip": nome_do_chip(c, conta_id, t["chip"]), "n": len(falas),
+            "falas": falas, "ultima": t["expira_em"] - timedelta(hours=2),
+            "expira_em": t["expira_em"],
+            "ultima_txt": (t["expira_em"] - timedelta(hours=2)).astimezone(_BRT).strftime("%H:%M"),
+            "expira_txt": t["expira_em"].astimezone(_BRT).strftime("%H:%M")}
 
 
 def _teste_visita(pool, c, conta_id: int, cfg: dict, festa: bool):
@@ -1717,7 +1884,8 @@ def _visita_do_teste(pool, conta_id: int, vcfg: dict, d: dict, texto: str, ofert
     return None, []
 
 
-def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None) -> None:
+def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None,
+                         chip_id=None) -> None:
     """O supervisor escreveu. Com um teste aberto, a IA responde como responderia ao
     cliente — e, quando a regra dela marca visita, MARCA como marcaria (27/09/2026, o
     dono no teste: "não tá agendando a visita"): oferece os horários livres da grade e
@@ -1728,7 +1896,11 @@ def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None
 
     A mensagem fica GUARDADA (`resgate_envios`, tipo 'do_supervisor'): não vira
     conversa da empresa, mas também não some. E é por ela que a reentrega do wa-qr (a
-    mesma mensagem de novo, quando a conexão oscila) não ganha segunda resposta."""
+    mesma mensagem de novo, quando a conexão oscila) não ganha segunda resposta.
+
+    O CHIP (`chip_id`, onde ele escreveu): a resposta sai por ele, e só no chip do
+    teste a mensagem vira fala do "cliente". No principal com o teste em outro chip,
+    ele ouve onde o teste está. Nulo = quem chamou não sabe: vale o teste que houver."""
     try:
         from core.brain import Brain
         from finance import agente as ag
@@ -1740,25 +1912,38 @@ def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None
                 return
             _registrar(c, conta_id, "do_supervisor", texto=texto, erro=(str(sid)[:200] if sid else None))
             cfg = config(c, conta_id)
-            # o histórico cresce por APPEND no banco: duas mensagens seguidas não se
-            # atropelam reescrevendo o mesmo jsonb
-            t = c.execute("""update resgate_teste set historico = historico || %s::jsonb,
-                                    expira_em = now() + interval '2 hours'
-                              where id = (select id from resgate_teste
-                                           where conta_id=%s and expira_em > now()
-                                           order by id desc limit 1)
-                          returning id, prospeccao_id, historico""",
-                          (json.dumps([{"quem": "cliente", "texto": (texto or "")[:1000]}],
-                                      ensure_ascii=False), conta_id)).fetchone()
+            aberto = teste_aberto(c, conta_id)
+            aqui = _chip(conta_id, chip_id) if chip_id else (aberto["chip"] if aberto else int(conta_id))
+            t = None
+            if aberto and aberto["chip"] == aqui:
+                # o histórico cresce por APPEND no banco: duas mensagens seguidas não se
+                # atropelam reescrevendo o mesmo jsonb
+                t = c.execute("""update resgate_teste set historico = historico || %s::jsonb,
+                                        expira_em = now() + interval '2 hours'
+                                  where id=%s and expira_em > now()
+                              returning id, prospeccao_id, historico""",
+                              (json.dumps([{"quem": "cliente", "texto": (texto or "")[:1000]}],
+                                          ensure_ascii=False), aberto["id"])).fetchone()
             if not t:
+                # o lembrete comum, no máximo um a cada 6h; o "seu teste está no outro
+                # chip", um a cada 15 min (ele pode estar só respondendo um aviso aqui)
                 lembrou = c.execute("""select 1 from resgate_envios where conta_id=%s and tipo='lembrete'
-                                        and criado_em > now() - interval '6 hours'""",
-                                    (conta_id,)).fetchone()
+                                        and criado_em > now() - %s::interval""",
+                                    (conta_id, "15 minutes" if aberto else "6 hours")).fetchone()
+                onde = nome_do_chip(c, conta_id, aberto["chip"]) if aberto else ""
                 c.commit()
-                if not lembrou:
-                    supervisor(pool, conta_id, "Este é o número do supervisor do resgate. Pra conversar "
-                                               "com a IA como se fosse um cliente, use o botão \"Testar "
-                                               "comigo\" no cartão do Resgate.", tipo="lembrete", cfg=cfg)
+                if lembrou:
+                    pass
+                elif aberto:
+                    # o teste está em OUTRO chip: diz onde (é o engano que custa)
+                    supervisor(pool, conta_id, f"{TESTE_MARCA} Seu teste está aberto no {onde}. Pra "
+                                               "responder como o cliente, escreva lá.", tipo="lembrete",
+                               cfg=cfg, chip_id=aqui)
+                else:
+                    supervisor(pool, conta_id, f"{TESTE_MARCA} Este é o número do supervisor do resgate. "
+                                               "Pra conversar com a IA como se fosse um cliente, use o "
+                                               "botão \"Testar comigo\" no cartão do Resgate.",
+                               tipo="lembrete", cfg=cfg, chip_id=aqui)
                 return
             hist = list(t[2] or [])
             festa = _perfil_eventos(c, conta_id)
@@ -1826,7 +2011,8 @@ def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None
             c.execute("update resgate_teste set historico = historico || %s::jsonb where id=%s",
                       (json.dumps(novo, ensure_ascii=False), t[0]))
             c.commit()
-        supervisor(pool, conta_id, resposta, tipo="teste", lead=t[1], cfg=cfg)
+        supervisor(pool, conta_id, f"{TESTE_MARCA} {resposta}", tipo="teste", lead=t[1], cfg=cfg,
+                   chip_id=aqui)
     except Exception as e:  # noqa: BLE001
         _log.info("resgate.responder_supervisor falhou (conta=%s): %s", conta_id, e)
 
@@ -1928,4 +2114,6 @@ def tela(c, conta_id: int, agora: datetime | None = None) -> dict:
             "hoje": hoje, "com_ia": com_ia,
             "regra_ok": bool(regra and regra.get("ativa") and regra.get("ia_ligada")),
             "supervisor_mascara": (f"({sup[2:4]}) {sup[4:5]}····-{sup[-4:]}" if len(sup) >= 12 else ""),
-            "faixas": FAIXAS}
+            "faixas": FAIXAS,
+            # o "Testar comigo" em andamento: a faixa lilás no topo do cartão
+            "teste": teste_da_tela(c, conta_id) if cfg.get("modo") in ("ensaio", "ligado") else None}

@@ -92,7 +92,10 @@ def regra_da_conversa(c, conta_id: int, conversa_id: int) -> dict | None:
             cv = c.execute("""select cv.chip_id, p.vendedor_id,
                                      exists (select 1 from chip_regra_leads l
                                               where l.prospeccao_id = p.id and l.conta_id = cv.conta_id),
-                                     p.id
+                                     p.id,
+                                     (select l.criado_em from chip_regra_leads l
+                                       where l.prospeccao_id = p.id and l.conta_id = cv.conta_id),
+                                     cv.contato_ref
                                 from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                                where cv.id=%s and cv.conta_id=%s""",
                            (conversa_id, conta_id)).fetchone()
@@ -112,7 +115,53 @@ def regra_da_conversa(c, conta_id: int, conversa_id: int) -> dict | None:
     r = regra(c, conta_id, cv[0])
     if not r or not r["membro_id"] or cv[1] != r["membro_id"]:
         return None
+    # NA CONVERSA ANTIGA ADOTADA (o número do supervisor, `adotar_do_supervisor`), a
+    # regra olha a partir da adoção: o que a equipe falou antes não é "alguém
+    # respondeu" — senão a IA pausava na primeira mensagem. Só nela: no lead que a
+    # regra deu no primeiro "oi", o relógio é o da regra, como sempre foi.
+    if cv[4] and (not r.get("vale_desde") or cv[4] > r["vale_desde"]):
+        from finance import resgate as _rg
+        if _rg.e_o_supervisor(c, conta_id, cv[5]):
+            r = dict(r, vale_desde=cv[4])
     return r
+
+
+def adotar_do_supervisor(c, conta_id: int, prospeccao_id, conversa_id, chip_id) -> bool:
+    """O NÚMERO DO SUPERVISOR DO RESGATE escreveu pra um chip com regra e IA ligada
+    (27/09/2026, aprovado pelo dono no mockup docs/mockups/teste_resgate_chip_certo.html).
+
+    A regra só atende contato NOVO, e o número do dono já era lead desde os testes de
+    agosto — no chip Thiago, a IA ficaria calada. Pra ESTE número, a regra adota a
+    conversa antiga, desde que o lead já seja do dono da regra (ou não tenha dono): nada
+    é tirado de vendedor nenhum. Uma vez só (`chip_regra_leads`): depois disso, quem
+    desligar a IA na conversa decidiu, como em `atribuir`. Devolve se adotou agora."""
+    r = regra(c, conta_id, chip_id)
+    if not r or not r["membro_id"] or not r.get("ia_ligada") or not prospeccao_id:
+        return False
+    mid = r["membro_id"]
+    try:
+        with c.transaction():
+            p = c.execute("""select p.vendedor_id,
+                                    exists (select 1 from chip_regra_leads l where l.prospeccao_id = p.id)
+                               from prospeccao p where p.id=%s and p.conta_id=%s""",
+                          (prospeccao_id, conta_id)).fetchone()
+            if not p or p[1] or (p[0] is not None and p[0] != mid):
+                return False
+            if p[0] is None:
+                c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() "
+                          "where id=%s and conta_id=%s and vendedor_id is null",
+                          (mid, prospeccao_id, conta_id))
+            c.execute("""insert into chip_regra_leads (prospeccao_id, conta_id, chip_id, membro_id)
+                         values (%s,%s,%s,%s) on conflict (prospeccao_id) do nothing""",
+                      (prospeccao_id, conta_id, r["chip_id"], mid))
+            if conversa_id:
+                c.execute("""update conversas set responsavel_membro_id=%s,
+                                    agente_ativo = case when status <> 'pendente' then true
+                                                        else agente_ativo end
+                              where id=%s and conta_id=%s""", (mid, conversa_id, conta_id))
+    except Exception:  # noqa: BLE001 — sem as tabelas, a mensagem segue sem IA
+        return False
+    return True
 
 
 def membros_ia(c, conta_id: int) -> set[int]:

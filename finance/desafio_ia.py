@@ -129,6 +129,10 @@ def _por_lead(pool, conta_id: int, ini: date, fim: date) -> list[dict]:
                     " else p.vendedor_id end)")
     except Exception:  # noqa: BLE001 — banco sem a 396
         vend_sql = "p.vendedor_id"
+    # O NÚMERO DO SUPERVISOR não é cliente (27/09/2026): o teste dele não vira placar
+    from finance import resgate as _rg
+    with pool.connection() as c:
+        fora, fora_v = _rg.sql_fora_do_supervisor(c, conta_id)
     sql = f"""
         with l as (
           select p.id, {vend_sql} vendedor_id, {ia_sql} ia_membro, p.evento_em,
@@ -136,7 +140,7 @@ def _por_lead(pool, conta_id: int, ini: date, fim: date) -> list[dict]:
             from prospeccao p
            where p.conta_id=%s and {vend_sql} is not null
              and (p.criado_em at time zone '{_TZ}')::date >= %s
-             and (p.criado_em at time zone '{_TZ}')::date < %s),
+             and (p.criado_em at time zone '{_TZ}')::date < %s{fora}),
         cv as (
           select cv.id, cv.prospeccao_id lead from conversas cv join l on l.id = cv.prospeccao_id
            where cv.conta_id = %s and cv.canal = 'whatsapp'),
@@ -166,7 +170,7 @@ def _por_lead(pool, conta_id: int, ini: date, fim: date) -> list[dict]:
                           and {SQL_CT_VIVO})
           from l left join pin on pin.lead = l.id left join pout on pout.lead = l.id"""
     with pool.connection() as c:
-        rows = c.execute(sql, (conta_id, ini, fim, conta_id, conta_id, conta_id,
+        rows = c.execute(sql, (conta_id, ini, fim, *fora_v, conta_id, conta_id, conta_id,
                                conta_id)).fetchall()
     return [dict(zip(("id", "vendedor", "ia_membro", "t_in", "t_resp", "qualif", "visita",
                       "orc", "contrato"), r)) for r in rows]

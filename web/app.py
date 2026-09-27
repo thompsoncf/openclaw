@@ -639,6 +639,17 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — visitas da IA falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # As rotinas da visita (migração 414, funil novo de eventos parte 2a):
+                # a confirmação da visita da EQUIPE, o "veio?" pra quem recebeu, e o
+                # depois da visita. Só em conta que ligou (Funil › Régua).
+                from finance import visita_rotinas as _vrs
+                _vr = _vrs.rodar(pool)
+                if any(_vr.values()):
+                    log.info("poller: ciclo #%d — rotinas da visita: %s", ciclo, _vr)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — rotinas da visita falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # O orçamento que a IA montou (migração 392): a mensagem do sinal na
                 # aprovação, lembretes de 24h/48h, data liberada e data confirmada.
                 from finance import ia_orcamento as _iaos

@@ -450,9 +450,10 @@ def _pedido_retomada(lead: dict, regra: dict | None, festa: bool, historico: str
         4: "A conversa foi encerrada sem resposta dele. Retome com leveza, sem pressão, "
            "perguntando se ainda faz sentido.",
     }[faixa]
+    from finance import calendario as _cal
     return (
         f"Conversa com {lead['quem']} (a última fala da empresa foi há {dias_parado} dias):\n"
-        f"{historico}\n\n"
+        f"{historico}{_cal.bloco(historico)}\n\n"
         "RETOMADA: você vai escrever a PRIMEIRA mensagem sua pra este cliente, voltando a "
         "falar depois do silêncio.\n"
         + (f"- Apresente-se assim: \"{apres}\".\n" if apres else
@@ -493,6 +494,8 @@ def redigir(pool, conta_id: int, lead: dict, regra: dict | None,
         txt = "".join(getattr(b, "text", "") for b in resp.content
                       if getattr(b, "type", None) == "text").strip()
         msg = (ag._extrair_json(txt).get("mensagem") or "").strip()
+        from finance import calendario as _cal
+        msg = _cal.corrigir(msg)
     except Exception as e:  # noqa: BLE001
         _log.info("resgate.redigir: a IA não escreveu (conta=%s lead=%s): %s", conta_id, lead["id"], e)
         return None
@@ -1017,7 +1020,9 @@ def _pedido_toque(lead: dict, n: int, festa: bool, historico: str, dias: int) ->
         o_que = ("É o 3º e ÚLTIMO TOQUE: o cliente não respondeu às duas mensagens. Pergunte com "
                  "gentileza, em 1 ou 2 linhas, se ainda faz sentido continuar ou se pode encerrar o "
                  "atendimento — deixando a porta aberta pra quando ele quiser.")
-    return (f"Conversa com {lead['quem']} (a sua última mensagem foi há {dias} dias):\n{historico}\n\n"
+    from finance import calendario as _cal
+    return (f"Conversa com {lead['quem']} (a sua última mensagem foi há {dias} dias):\n{historico}"
+            f"{_cal.bloco(historico)}\n\n"
             f"{o_que}\n- Sem lista, sem link, no máximo 1 emoji. Não se apresente de novo.\n"
             'Retorne APENAS JSON: {"mensagem":"texto pra mandar ao cliente"}')
 
@@ -1044,6 +1049,8 @@ def redigir_toque(pool, conta_id: int, lead: dict, n: int, agora: datetime | Non
         txt = "".join(getattr(b, "text", "") for b in resp.content
                       if getattr(b, "type", None) == "text").strip()
         msg = (ag._extrair_json(txt).get("mensagem") or "").strip()
+        from finance import calendario as _cal
+        msg = _cal.corrigir(msg)
     except Exception as e:  # noqa: BLE001
         _log.info("resgate.redigir_toque: a IA não escreveu (conta=%s lead=%s): %s",
                   conta_id, lead["id"], e)
@@ -1435,8 +1442,9 @@ def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None
         agora_txt = "\n".join(("Cliente: " if h["quem"] == "cliente" else "Você: ") + h["texto"]
                               for h in hist)
         passo = "a visita ao espaço" if festa else "uma conversa com a equipe"
+        from finance import calendario as _cal
         pedido = (f"Conversa antiga com o cliente:\n{antes}\n\nA RETOMADA (você voltou a falar):\n"
-                  f"{agora_txt}\n\nResponda a última mensagem do cliente. Preço só o liberado, "
+                  f"{agora_txt}{_cal.bloco(antes, agora_txt)}\n\nResponda a última mensagem do cliente. Preço só o liberado, "
                   f"sempre \"a partir de\". O próximo passo é {passo}: pergunte o dia e o "
                   "horário de preferência e diga que a equipe confirma. Mensagem curta.\n"
                   'Retorne APENAS JSON: {"resposta":"texto"}')
@@ -1444,7 +1452,7 @@ def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None
         resp = brain.chamar(system=system, mensagens=[{"role": "user", "content": pedido}])
         txt = "".join(getattr(b, "text", "") for b in resp.content
                       if getattr(b, "type", None) == "text").strip()
-        resposta = (ag._extrair_json(txt).get("resposta") or "").strip()[:1200]
+        resposta = _cal.corrigir((ag._extrair_json(txt).get("resposta") or "").strip()[:1200])
         if not resposta:
             return
         with pool.connection() as c:

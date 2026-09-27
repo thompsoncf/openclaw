@@ -750,6 +750,8 @@ def test_a_data_que_abriu_vem_antes_de_tudo_no_responda_hoje(pool):
     with pool.connection() as c:
         c.execute("alter table contas add column if not exists festas_por_dia int")
         c.execute("alter table contas add column if not exists nicho_id bigint")
+        # a 160 (a pré-reserva): a lista de espera lê o prazo de quem segura a data
+        c.execute("alter table eventos_agenda add column if not exists pre_reserva_ate timestamptz")
         c.execute("""create table if not exists lista_espera_data (
                        id bigserial primary key, conta_id bigint, prospeccao_id bigint,
                        data date, entrou_em timestamptz default now(), saiu_em timestamptz,

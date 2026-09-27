@@ -347,7 +347,10 @@ select p.id, p.status, p.vendedor_id,
   left join marc  on marc.lead  = p.id
   left join adiam on adiam.lead = p.id
   left join membros mb on mb.id = p.vendedor_id
- where p.conta_id = %(conta)s and p.estagio = 'lead' and """ + fr.sql_encerradas_nao("p")
+ where p.conta_id = %(conta)s and p.estagio = 'lead'
+   -- A LISTA DE ESPERA (funil novo de eventos, parte 2b): quem aceitou esperar uma
+   -- data não é lead parado, é lead esperando — ninguém cobra
+   and p.status <> 'lista_espera' and """ + fr.sql_encerradas_nao("p")
 
 
 def leads(c, conta_id: int, perfil: dict | None = None,

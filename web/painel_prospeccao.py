@@ -1176,10 +1176,25 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             _cv.commit()
     except Exception:  # noqa: BLE001
         selo_visita = {}
+    # O SELO DA DATA (lista de espera no funil, parte 2b): "data ocupada" no card em
+    # jogo que pede uma data que outro cliente já tem; a posição na fila na coluna
+    # Lista de espera. Uma consulta pro quadro inteiro; sem a conta usar a lista
+    # (Empresa › festas por dia), nenhum selo.
+    selo_data: dict = {}
+    try:
+        from finance import lista_espera as _leq
+        with pool.connection() as _cl:
+            selo_data = _leq.selos(_cl, conta_id, [
+                {"id": x["id"], "status": x.get("status"), "evento_em": x.get("evento_em")}
+                for x in todos_cards + outros_vend])
+            _cl.commit()
+    except Exception:  # noqa: BLE001
+        selo_data = {}
     for cc in todos_cards + outros_vend:
         cc["tri"] = tri_por.get(cc["id"]) or {"trilha": "vend"}
         cc["sup"] = cc["id"] in sup_ids
         cc["selo_visita"] = selo_visita.get(cc["id"])
+        cc["selo_data"] = selo_data.get(cc["id"])
 
     def _no_quadro(cc, com_trilha=True):
         return (_visivel(cc) and _passa_mes(cc) and _busca_bate(cc, busca_n, busca_dig)
@@ -9072,6 +9087,29 @@ def regua_espelho(request: Request, espelho_de: str = Form(""), espelho_para: st
     return RedirectResponse("/painel/prospeccao/regua#espelho", status_code=303)
 
 
+@router.post("/painel/prospeccao/{lead_id}/lista-espera")
+def prospeccao_lista_espera(request: Request, lead_id: int):
+    """O cliente aceitou esperar a data que pediu (lista de espera no funil, parte
+    2b): o card vai pra coluna Lista de espera. A gestão, ou o dono do card."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    from finance import lista_espera as _le
+    pool = get_pool()
+    if not ctx["gerencia"]:
+        with pool.connection() as c:
+            dono = c.execute("select vendedor_id from prospeccao where id=%s and conta_id=%s",
+                             (lead_id, ctx["conta_id"])).fetchone()
+        if not dono or dono[0] != ctx.get("membro_id"):
+            request.session["prosp_aviso"] = "Esse card não é seu."
+            return RedirectResponse("/painel/prospeccao", status_code=303)
+    r = _le.aceitar(pool, ctx["conta_id"], lead_id, ctx.get("membro_id"))
+    request.session["prosp_aviso"] = (
+        f"Na lista de espera de {r['data']:%d/%m} ✓ O vendedor é avisado quando a data abrir."
+        if r.get("ok") else (r.get("erro") or "Não deu pra pôr na lista de espera."))
+    return RedirectResponse("/painel/prospeccao", status_code=303)
+
+
 @router.post("/painel/prospeccao/regua/rotinas-festa")
 def regua_rotinas_festa(request: Request, confirmar: str = Form(""),
                         perguntar_veio: str = Form(""), depois_visita: str = Form("")):
@@ -12231,6 +12269,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbvis.at{background:#241c0f;color:#f2c66e;border-color:#5a4520}
 .kbvis.bad{background:#241313;color:#f0a9a2;border-color:#5a2b2b}
 .kbvis.ia{background:#1a1422;color:#e3ccf2;border-color:#3e2e4e}
+.kbvis.nt{background:var(--bg);color:var(--txt-mut);border-color:var(--borda)}
 .kbcol-rsg{border-color:#5a4520}
 .kbrsg-modo{font-style:normal;font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;border:1px solid #5a4520;color:#f2c66e;border-radius:4px;padding:0 .3rem;margin-left:.3rem;font-weight:600}
 .kbrsg-fila{display:flex;flex-direction:column;gap:.08rem;border:1px dashed #5a4520;border-radius:9px;padding:.4rem .5rem;margin:.3rem 0;text-decoration:none;font-size:.68rem;color:#b8a27a}
@@ -13034,6 +13073,7 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
           {% elif _t.veio %}<div class="kbtri rsg veio">♻️ veio do Resgate{% if _t.era %} · era de {{ _t.era|e }}{% endif %}</div>{% endif %}
           {% if c.sup %}<div class="kbtri sup" title="É o número do supervisor do Resgate: não é {{ voc.cliente }} e não conta no Desafio nem no Raio-X">🧪 número do supervisor</div>{% endif %}
           {% if c.selo_visita %}<div class="kbvis {{ c.selo_visita[1] }}" title="A visita (rotinas da visita, Funil › Régua)">📍 {{ c.selo_visita[0] }}</div>{% endif %}
+          {% if c.selo_data %}<div class="kbvis {{ c.selo_data[1] }}" title="{% if c.selo_data[1] == 'bad' %}Outro {{ voc.cliente }} já tem esta data. Ofereça outra; se ele aceitar esperar, ponha na lista de espera{% else %}Lista de espera: o sistema avisa quando a data abrir{% endif %}">{{ c.selo_data[0] }}{% if c.selo_data[1] == 'bad' %}<form method="post" action="/painel/prospeccao/{{ c.id }}/lista-espera" style="display:inline;margin:0" onclick="event.stopPropagation()"><button type="submit" class="kbperg" title="O {{ voc.cliente }} aceita esperar esta data: o card vai pra Lista de espera">esperar</button></form>{% endif %}</div>{% endif %}
           <div class="kbl2">
           {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:

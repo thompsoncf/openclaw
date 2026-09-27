@@ -454,6 +454,9 @@ _ETAPAS_POR_PERFIL = {
         ("ganho", "Fechado", 900, True, True, True),
         # no dia seguinte à festa a venda volta, pro pós-festa (fase pós-venda)
         ("pos_festa", "Pós-festa", 905, False, False, False),
+        # quem ACEITOU esperar uma data que outro cliente já tem (parte 2b): antes do
+        # Perdido; quem tira o card é a data abrir (volta pra Proposta) ou passar
+        ("lista_espera", "Lista de espera", 908, False, False, False),
         ("perdido", "Perdido", 910, True, False, False),
     ),
     "recorrente": (

@@ -116,7 +116,7 @@ def test_eventos_tem_as_colunas_do_funil_novo_e_fechado_fora_do_quadro():
     colunas = [rot for _ch, rot, _o, _f, sai, _a in m if not sai]
     assert colunas == ["Novo", "Contatado", "Qualificado", "Visita marcada",
                        "Visita feita", "Proposta", "Data segurada", "Pós-festa",
-                       "Perdido"]
+                       "Lista de espera", "Perdido"]
     assert "Follow-up" not in [e[1] for e in m], "a tela Follow-up já faz esse papel"
     fechado = [e for e in m if e[0] == "ganho"][0]
     assert fechado[1] == "Fechado"
@@ -177,7 +177,8 @@ def test_ganho_e_perdido_ficam_depois_do_corte_da_pos_venda():
         m = {e[0]: e[2] for e in rxp.etapas_padrao(p)}
         assert m["ganho"] == 900 and m["perdido"] == 910, p
         # o Pós-festa fica entre os dois: é pós-venda (fase 'pos'), não miolo
-        miolo = [o for ch, o in m.items() if ch not in ("ganho", "perdido", "pos_festa")]
+        miolo = [o for ch, o in m.items()
+                 if ch not in ("ganho", "perdido", "pos_festa", "lista_espera")]
         assert max(miolo) < 900, p
     assert fm.FASE["pos_festa"] == "pos"
 
@@ -192,7 +193,7 @@ def test_conta_de_eventos_nasce_com_o_funil_de_eventos(limpo):
         c.commit()
     assert [r[1] for r in _etapas(limpo)] == [
         "Novo", "Contatado", "Qualificado", "Visita marcada", "Visita feita", "Proposta",
-        "Data segurada", "Fechado", "Pós-festa", "Perdido"]
+        "Data segurada", "Fechado", "Pós-festa", "Lista de espera", "Perdido"]
     # as colunas que andam sozinhas nascem com o gatilho, e o Pós-festa na fase pós
     with limpo.connection() as c:
         regua = dict((ch, (fase, gat, ativo)) for ch, fase, gat, ativo in c.execute(
@@ -209,7 +210,7 @@ def test_semear_duas_vezes_nao_duplica(limpo):
         fm.semear(c, CONTA, "eventos")
         assert fm.semear(c, CONTA, "eventos") == 0
         c.commit()
-    assert len(_etapas(limpo)) == len(rxp.etapas_padrao("eventos")) == 10
+    assert len(_etapas(limpo)) == len(rxp.etapas_padrao("eventos")) == 11
 
 
 def test_semear_nao_reescreve_o_rotulo_de_quem_ja_tem(limpo):

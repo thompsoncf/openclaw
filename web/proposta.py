@@ -497,6 +497,14 @@ def _carregar(token: str, pool=None):
     # serve pra nada). Fora do evento, segue os 15 dias de sempre.
     dia_evento = ag.parse_data(evento.get("data")) if evento else None
     validade = dia_evento if (modo == "evento" and dia_evento) else criado + timedelta(days=15)
+    # A VALIDADE DA CONTA (funil novo de eventos, parte 2b — migração 421): com o
+    # número na Régua, o evento vale N dias da emissão (nunca depois da festa), o mesmo
+    # que o card do funil mostra. Só pra proposta emitida depois do número existir:
+    # a que já foi pro cliente não passa a dizer "vencida" de uma vez.
+    if modo == "evento":
+        from finance import festa_rotinas as _frt
+        validade = (_frt.validade_do_orcamento(pool or get_pool(), conta_id, criado, dia_evento)
+                    or validade)
     return {
         "id": oid, "empresa": empresa or "Cliente", "contato": contato or "",
         "whats": _fone(whats), "segmento": segmento or "",

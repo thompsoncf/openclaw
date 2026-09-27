@@ -784,6 +784,17 @@ def sql_encerradas(alias: str = "p") -> str:
             "union all select 'ganho' union all select 'perdido')")
 
 
+def sql_nao_cobra(alias: str = "p") -> str:
+    """O CARD QUE ESPERA A EMPRESA, e não o cliente: a Lista de espera (aceitou esperar
+    a data) e a Data segurada (aprovou e espera o sinal, com prazo próprio). Nenhum
+    motor de cobrança chama nem fecha como "não respondeu" quem está nelas — o resgate
+    já não chamava na entrada, mas os toques, o perdido do resgate e a IA insiste
+    chamavam (revisão de 27/09/2026). Condição pronta pra um WHERE."""
+    return (f"({alias}.status <> 'lista_espera' and {alias}.status not in "
+            f"(select fe.chave from funil_etapas fe where fe.conta_id = {alias}.conta_id "
+            "and fe.gatilho = 'orcamento_aprovado' and fe.fase = 'venda'))")
+
+
 def sql_encerradas_nao(alias: str = "p") -> str:
     """Açúcar pra `<alias>.status not in <encerradas>` — o filtro de "ainda em jogo",
     que é o mais repetido do produto."""

@@ -1334,6 +1334,33 @@ def test_agendar_visita(pool):
     assert ics and "BEGIN:VEVENT" in ics and "BEGIN:VALARM" in ics and "Visita — Ana" in ics
 
 
+def test_agendar_visita_nunca_puxa_o_card_pra_tras(pool):
+    """Revisão de 27/09/2026: marcar visita num card em Proposta (ou Data segurada,
+    Lista de espera) o levava de volta pra "visita marcada", com motivo 'manual' — e
+    a TRAVA 3 não deixava os gatilhos devolverem. Agora só anda pra frente."""
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome) values ('C') returning id").fetchone()[0]
+        for chave, ordem in (("contatado", 10), ("qualificado", 30), ("proposta", 40)):
+            c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem) values (%s,%s,%s,%s)",
+                      (conta, chave, chave, ordem))
+        v = _membro(c, conta, email="pt1@x.com")
+        adiante = _lead(c, conta, v, "Na proposta")
+        atras = _lead(c, conta, v, "Contatado")
+        c.execute("update prospeccao set status='proposta' where id=%s", (adiante,))
+        c.execute("update prospeccao set status='contatado' where id=%s", (atras,))
+        c.commit()
+    for lead, dia in ((adiante, "2026-10-05"), (atras, "2026-10-06")):
+        assert ck.agendar_visita(pool, conta, v, lead, data=dia, hora="10:00",
+                                 avisar_cliente=False)["ok"]
+    with pool.connection() as c:
+        st = dict(c.execute("select id, status from prospeccao where id in (%s,%s)",
+                            (adiante, atras)).fetchall())
+        mov = c.execute("select count(*) from funil_movimentos where prospeccao_id=%s",
+                        (adiante,)).fetchone()[0]
+    assert st == {adiante: "proposta", atras: "qualificado"}
+    assert mov == 0                                            # nada andou, nada se anota
+
+
 # --------------------------------------- o que o lead sabe vai junto (13/09/2026)
 #
 # Pedido do dono: "convidados acho que precisa associar na marcação da visita".

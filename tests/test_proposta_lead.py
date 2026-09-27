@@ -474,6 +474,22 @@ def test_o_cliente_que_volta_nao_e_amarrado_a_venda_fechada(pool):
     assert r == ("evento_realizado", None)
 
 
+def test_quem_esta_na_lista_de_espera_nao_e_venda_fechada(pool):
+    """Revisão de 27/09/2026: a Lista de espera (908, acima do ganho) é fase de venda.
+    A proposta nova do mesmo cliente se amarra ao card dele — antes, a ordem a
+    tratava como venda fechada e o orçamento ficava "sem card"."""
+    _etapas(pool)
+    with pool.connection() as c:
+        c.execute("alter table funil_etapas add column if not exists fase text")
+        c.execute("insert into funil_etapas (conta_id, chave, ordem, fase) "
+                  "values (%s,'lista_espera',908,'venda')", (CONTA,))
+        c.commit()
+    lid = _lead(pool, empresa="Flora", whatsapp="86922221111", status="lista_espera")
+    oid = _orc(pool, empresa="Flora Dias", whatsapp="86922221111")
+    assert pl.garantir(pool, CONTA, oid) == {"lead_id": lid, "como": "ligado"}
+    assert _lead_do(pool, oid) == (lid, "lista_espera")         # e não sai da fila
+
+
 def test_o_cliente_perdido_que_volta_e_o_mesmo_cadastro(pool):
     """Perdido não é venda fechada: a proposta se amarra ao mesmo card (migração
     236), e é a assinatura que o leva ao fechamento (`funil_ganho`)."""

@@ -255,10 +255,11 @@ _COLS = ("evento_id", "conta_id", "lead", "da_ia", "ao_marcar_em", "vespera_em",
          "duas_horas_em", "confirmado_em", "pede_remarcar_em", "sem_resposta_em",
          "veio_1_em", "veio_2_em", "depois_em", "depois_acao", "falta_aviso_em",
          "inicio", "criado_em", "desfecho", "local", "membro_id", "hora_sugerida",
-         "vendedor_id", "quem", "tipo", "convidados")
+         "vendedor_id", "quem", "tipo", "convidados", "fechado")
 
 
 def _visitas(c, conta_id: int, agora: datetime) -> list[dict]:
+    from finance import funil_regua as fr
     rows = c.execute(
         """select v.evento_id, v.conta_id, v.prospeccao_id,
                   -- CALCULADO A CADA CICLO: a IA pode remarcar uma visita da equipe, e
@@ -271,7 +272,12 @@ def _visitas(c, conta_id: int, agora: datetime) -> list[dict]:
                   e.inicio, e.criado_em, e.desfecho, e.local, e.membro_id,
                   coalesce(e.hora_sugerida, false), p.vendedor_id,
                   coalesce(nullif(p.contato,''), nullif(p.empresa,''), ''),
-                  coalesce(p.evento_tipo, ''), p.evento_convidados
+                  coalesce(p.evento_tipo, ''), p.evento_convidados,
+                  -- O CARD SAIU DO JOGO (perdido, ganho, pós) OU ESPERA A DATA: nada
+                  -- mais sai pro cliente sobre esta visita (revisão de 27/09/2026 — a
+                  -- véspera ia pra lead perdido)
+                  coalesce(p.status in """ + fr.sql_encerradas("p") + """
+                           or p.status = 'lista_espera', false)
              from visita_rotinas v
              join eventos_agenda e on e.id = v.evento_id and e.conta_id = v.conta_id
              left join prospeccao p on p.id = v.prospeccao_id and p.conta_id = v.conta_id
@@ -348,11 +354,23 @@ def _acao(pool, evento_id: int, acao: str) -> None:
 
 
 def _ao_cliente(pool, conta_id: int, v: dict, conversa_id: int, coluna: str | None,
-                texto: str) -> bool:
+                texto: str, agora: datetime | None = None) -> bool:
     """Reivindica (se `coluna`) e manda pelo chip da conversa — o `_passo` do
-    `ia_visita`, na tabela desta rotina."""
+    `ia_visita`, na tabela desta rotina.
+
+    Passa pelo TETO DO CHIP (`finance.teto_chip`) antes: cheio, não reivindica e tenta
+    no próximo ciclo. E o PRAZO ESTOURADO conta como enviado — o provedor pode ter
+    aceitado e só demorado a responder; mandar a véspera duas vezes é pior que uma."""
     from finance import agente
+    from finance import festa_rotinas as _frt
     from finance import ia_visita as _iv
+    from finance import teto_chip as _tc
+    agora = agora or datetime.now(timezone.utc)
+    with pool.connection() as c:
+        pode = _tc.pode(c, conta_id, conversa_id, agora)
+        c.commit()
+    if not pode:
+        return False
     if coluna and not _reivindicar(pool, v["evento_id"], coluna):
         return False
     with pool.connection() as c:
@@ -361,10 +379,12 @@ def _ao_cliente(pool, conta_id: int, v: dict, conversa_id: int, coluna: str | No
         except Exception as e:  # noqa: BLE001
             _log.warning("visita_rotinas: envio falhou (evento %s): %s", v["evento_id"], e)
             c.rollback()
-            res = {"ok": False}
-        if res.get("ok"):
+            res = {"ok": False, "erro": str(e)}
+        if res.get("ok") or _frt.talvez_saiu(res):
+            _tc.registrar(c, conta_id, conversa_id, "visita", agora)
             try:
-                agente._add_bot_msg(c, conversa_id, "whatsapp", texto, res.get("sid"))
+                if res.get("ok"):
+                    agente._add_bot_msg(c, conversa_id, "whatsapp", texto, res.get("sid"))
                 c.execute("update visita_rotinas set envio_falhas=0, envio_falhou_em=null "
                           "where evento_id=%s", (v["evento_id"],))
                 c.commit()
@@ -386,8 +406,12 @@ def _ao_cliente(pool, conta_id: int, v: dict, conversa_id: int, coluna: str | No
 def ler_resposta(c, conta_id: int, v: dict, conversa_id: int) -> str | None:
     """O cliente respondeu ao "1 confirma, 2 remarca"? Olha as mensagens dele desde a
     PRIMEIRA pergunta, na ordem: a primeira que for resposta decide. Mesmas regras da
-    confirmação da clínica (`clinica_agenda.ler_respostas`): "15h" não é "1"; e
-    depois de a equipe falar de outra coisa, só o número puro ainda é resposta.
+    confirmação da clínica (`clinica_agenda.ler_respostas`): "15h" não é "1".
+
+    DEPOIS QUE A EQUIPE FALA, A LEITURA PARA. O "1" que vem depois de "prefere o
+    salão 1 ou 2?" responde o vendedor, não a véspera — antes, o número puro ainda
+    valia e confirmava (ou pedia remarcar) a visita sozinho (revisão de 27/09/2026).
+    Com a conversa nas mãos da equipe, quem confirma é ela, pelo app.
     Devolve 'confirmou', 'confirmou_e_mais', 'remarcar' ou None."""
     from finance.clinica_agenda import _RE_REMARCAR, _RE_SIM, _SO_NUMERO
     perguntas = [x for x in (v["vespera_em"], v["duas_horas_em"]) if x]
@@ -406,8 +430,8 @@ def ler_resposta(c, conta_id: int, v: dict, conversa_id: int) -> str | None:
                 order by m.criado_em, m.id limit 20""",
             (desde, conversa_id, conta_id, desde)).fetchall():
         t = (texto or "").strip()
-        if depois_de_outra and not _SO_NUMERO.match(t):
-            continue
+        if depois_de_outra:
+            break
         if _RE_SIM.search(t):
             curto = bool(_SO_NUMERO.match(t)) or (len(t) <= 25 and "?" not in t)
             return "confirmou" if curto else "confirmou_e_mais"
@@ -422,23 +446,46 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
                 esp: dict, out: dict) -> None:
     from finance.ia_visita import fmt, texto_duas_horas, texto_vespera, _momento_vespera
     from finance.voltar_a_chamar import primeiro_nome
+    from finance import chip_regra as _cr
     ini = v["inicio"]
     with pool.connection() as c:
         conversa_id, ia_na_conversa = _conversa(c, conta_id, v["lead"])
+        # O MEMBRO DA IA NÃO RECEBE AVISO: o WhatsApp dele é o do dono da conta (o
+        # "ZAQ SDR"), e "a visita das 15h veio?" ia pro celular errado. Quem responde
+        # por ela é gente: a anfitriã, quem está na agenda ou o vendedor — o primeiro
+        # que não for a IA; nenhum, e o aviso não sai (revisão de 27/09/2026).
+        ia = _cr.membros_ia(c, conta_id)
+        gente = [m for m in ((_anfitria(c, conta_id, conversa_id) if v["da_ia"] else None),
+                             v["membro_id"], v["vendedor_id"]) if m and m not in ia]
         # quem RECEBE a visita: na da IA, a anfitriã; na da equipe, quem está na agenda
-        recebe = (_anfitria(c, conta_id, conversa_id) if v["da_ia"] else None) \
-            or v["membro_id"] or v["vendedor_id"]
-        dono = v["vendedor_id"] or v["membro_id"]
+        recebe = gente[0] if gente else None
+        dono = next((m for m in (v["vendedor_id"], v["membro_id"]) if m and m not in ia),
+                    None) or recebe
         nome_recebe = _nome(recebe, c, conta_id)
         nome_dono = _nome(dono, c, conta_id)
+        # PEDIU PRA PARAR: a última mensagem dele diz "não quero mais", "pare"… — a
+        # rotina não escreve mais pra ele (a equipe continua sabendo da visita)
+        parou = False
+        if conversa_id:
+            r = c.execute("""select texto from mensagens where conversa_id=%s and direcao='in'
+                              order by criado_em desc, id desc limit 1""",
+                          (conversa_id,)).fetchone()
+            from finance.resgate import RE_PARAR
+            parou = bool(r and RE_PARAR.search(r[0] or ""))
         c.commit()
+    if v["fechado"] and ini > agora:
+        return                      # perdido, ganho ou na espera: a visita não se cobra
+
+    def _mandar_cli(coluna, texto):
+        return _ao_cliente(pool, conta_id, v, conversa_id, coluna, texto, agora)
     nome = primeiro_nome(v["quem"])
     nome = nome[:1].upper() + nome[1:].lower() if nome else ""
     quem = nome or "O cliente"
     link = f"/cockpit/lead/{v['lead']}"
     # a conversa da equipe: a confirmação é desta rotina; a da IA é do ia_visita
     da_equipe = (not v["da_ia"]) and conversa_id and not ia_na_conversa
-    cliente_ok = _dentro(agora, HORAS_CLIENTE) and out["enviadas"] < TETO_CICLO
+    cliente_ok = (_dentro(agora, HORAS_CLIENTE) and out["enviadas"] < TETO_CICLO
+                  and not parou and not v["fechado"])
     equipe_ok = _dentro(agora, HORAS_EQUIPE)
 
     # ---- antes da visita: confirmar (só a da equipe) --------------------------
@@ -452,14 +499,14 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
                 # o "sim, qual o endereço?" fica pro vendedor: responder só o "sim"
                 # por cima de uma pergunta seria a empresa ignorando o cliente
                 if resp == "confirmou" and cliente_ok:
-                    if _ao_cliente(pool, conta_id, v, conversa_id, None,
+                    if _mandar_cli(None,
                                    f"Confirmadíssimo! 🎉 Te esperamos {fmt(ini)}."):
                         out["enviadas"] += 1
             return
         if resp == "remarcar":
             if _reivindicar(pool, v["evento_id"], "pede_remarcar_em"):
                 out["remarcar"] += 1
-                if cliente_ok and _ao_cliente(pool, conta_id, v, conversa_id, None,
+                if cliente_ok and _mandar_cli(None,
                                               texto_remarcar(nome_dono)):
                     out["enviadas"] += 1
                 avisar(pool, conta_id, dono, f"🔁 {quem} pediu pra remarcar a visita",
@@ -481,7 +528,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
             if ja_avisado:
                 _reivindicar(pool, v["evento_id"], "ao_marcar_em")
                 return
-            if _ao_cliente(pool, conta_id, v, conversa_id, "ao_marcar_em",
+            if _mandar_cli("ao_marcar_em",
                            texto_ao_marcar(ini, nome, esp["nome"], nome_recebe,
                                            v["local"] or esp["endereco"] or "", agora)):
                 out["ao_marcar"] += 1
@@ -491,14 +538,14 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
         if (not v["vespera_em"] and not v["confirmado_em"] and agora >= momento
                 and marcada_em < momento and ini - agora > timedelta(hours=2, minutes=30)
                 and cliente_ok):
-            if _ao_cliente(pool, conta_id, v, conversa_id, "vespera_em",
+            if _mandar_cli("vespera_em",
                            texto_vespera(ini, nome, agora, esp["nome"])):
                 out["vesperas"] += 1
                 out["enviadas"] += 1
             return
         if (not v["duas_horas_em"] and ini - agora <= timedelta(hours=2)
                 and marcada_em < ini - timedelta(hours=2) and cliente_ok):
-            if _ao_cliente(pool, conta_id, v, conversa_id, "duas_horas_em",
+            if _mandar_cli("duas_horas_em",
                            texto_duas_horas(ini, esp["nome"],
                                             v["local"] or esp["endereco"] or esp["nome"],
                                             bool(v["confirmado_em"]))):
@@ -572,7 +619,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
         return
     if v["da_ia"]:
         if conversa_id and ia_na_conversa and cliente_ok:
-            if _ao_cliente(pool, conta_id, v, conversa_id, "depois_em",
+            if _mandar_cli("depois_em",
                            texto_agradecimento(nome, ini, agora, v["tipo"], v["convidados"])):
                 _acao(pool, v["evento_id"], "agradecimento")
                 out["agradecimentos"] += 1

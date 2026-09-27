@@ -20,6 +20,8 @@ from finance import lista_espera as le
 BRT = ZoneInfo("America/Sao_Paulo")
 MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 HOJE = date(2026, 9, 6)
+#: o ciclo do relógio numa hora de avisar (o aviso não sai de madrugada)
+MEIO_DIA = datetime(2026, 9, 6, 12, 0, tzinfo=BRT)
 
 _SQL = """
 create table nichos (id bigserial primary key, nome text, slug text unique, ativo boolean default true);
@@ -352,7 +354,7 @@ def test_rodar_cobre_so_as_contas_que_usam_a_lista(pool):
     _festa(pool, nao, dia)
     _lead(pool, usa, v, "Da Prime", dia)
     _lead(pool, nao, v2, "Da outra", dia)
-    r = le.rodar(pool, HOJE)
+    r = le.rodar(pool, HOJE, MEIO_DIA)
     assert r["entraram"] >= 1
     with pool.connection() as c:
         assert c.execute("select count(*) from lista_espera_data where conta_id=%s", (nao,)).fetchone()[0] == 0
@@ -404,7 +406,7 @@ def test_data_ocupada_ganha_o_selo_e_nao_muda_de_coluna_sozinho(pool):
     dia = date(2027, 2, 20)
     _festa(pool, conta, dia)
     lid = _lead(pool, conta, v, "Léo", dia, status="proposta")
-    le.rodar(pool, HOJE)
+    le.rodar(pool, HOJE, MEIO_DIA)
     assert _status(pool, lid) == "proposta"               # ninguém anda sozinho
     with pool.connection() as c:
         assert le.selos(c, conta, [{"id": lid, "status": "proposta", "evento_em": dia}], HOJE) == \
@@ -460,7 +462,7 @@ def test_a_data_abre_o_1o_da_fila_volta_pra_proposta_e_o_aviso_sai(pool, monkeyp
     from finance import cockpit as ck, notificar as nt
     monkeypatch.setattr(ck, "enviar_push", lambda pool_, conta_, m, t, corpo, *a_, **k: pushes.append((m, t)) or 1)
     monkeypatch.setattr(nt, "enviar_para_dono", lambda *a_, **k: True)
-    le.rodar(pool, HOJE)
+    le.rodar(pool, HOJE, MEIO_DIA)
     assert {m for m, _t in pushes} == {v1, v2}                 # os três avisados, cada um pro seu
     assert len(pushes) == 3
     assert _status(pool, a) == "proposta"                      # o 1º da fila volta
@@ -486,8 +488,8 @@ def test_o_2o_da_fila_continua_esperando_com_a_data_aberta(pool, monkeypatch):
     from finance import cockpit as ck, notificar as nt
     monkeypatch.setattr(ck, "enviar_push", lambda *a_, **k: 1)
     monkeypatch.setattr(nt, "enviar_para_dono", lambda *a_, **k: True)
-    le.rodar(pool, HOJE)
-    le.rodar(pool, HOJE)                                      # e o ciclo seguinte não o tira
+    le.rodar(pool, HOJE, MEIO_DIA)
+    le.rodar(pool, HOJE, MEIO_DIA)                                      # e o ciclo seguinte não o tira
     assert _status(pool, a) == "proposta" and _status(pool, b) == "lista_espera"
     assert le.esperando_por(pool, conta, b) == [dia]
 
@@ -503,7 +505,7 @@ def test_mudou_a_data_sai_da_coluna(pool):
     with pool.connection() as c:
         c.execute("update prospeccao set evento_em=%s where id=%s", (date(2027, 5, 22), lid))
         c.commit()
-    r = le.rodar(pool, HOJE)
+    r = le.rodar(pool, HOJE, MEIO_DIA)
     assert r["voltaram"] == 1 and _status(pool, lid) == "proposta"
 
 
@@ -538,3 +540,70 @@ def test_o_selo_e_o_botao_no_quadro_e_no_app():
     assert "_le.tomada_para(" in app and "/lista-espera" in app and "aceita esperar esta data" in app
     assert "_le.aceitar(pool, conta_id, lead_id, membro_id)" in inspect.getsource(pc.cockpit_lista_espera)
     pp._env.parse(pp._KANBAN_TPL)
+
+
+# ------------------------------------------------------------------ a revisão de 27/09/2026
+
+def test_de_madrugada_o_aviso_espera_as_8h_sem_perder_ninguem(pool, monkeypatch):
+    conta = _conta(pool, "Madrugada")
+    v = _vend(pool, conta)
+    dia = date(2027, 6, 12)
+    ev = _festa(pool, conta, dia)
+    a = _lead(pool, conta, v, "Noturna", dia)
+    le.sincronizar(pool, conta, HOJE)
+    _cancelar(pool, ev)
+    pushes = []
+    from finance import cockpit as ck, notificar as nt
+    monkeypatch.setattr(ck, "enviar_push", lambda pool_, conta_, m, t, *a_, **k: pushes.append(m) or 1)
+    monkeypatch.setattr(nt, "enviar_para_dono", lambda *a_, **k: True)
+    le.rodar(pool, HOJE, datetime(2026, 9, 6, 23, 30, tzinfo=BRT))
+    le.rodar(pool, HOJE, datetime(2026, 9, 7, 3, 0, tzinfo=BRT))
+    assert pushes == []
+    assert le.esperando_por(pool, conta, a) == [dia]          # a sincronização não o tirou
+    le.rodar(pool, HOJE, datetime(2026, 9, 7, 8, 2, tzinfo=BRT))
+    assert pushes == [v]
+
+
+def test_a_data_fecha_de_novo_e_o_2o_da_fila_volta_a_ser_avisado(pool, monkeypatch):
+    """O 1º voltou pra Proposta e segurou a data de novo (uma pré-reserva); ela venceu.
+    Antes, o 2º — marcado como avisado da primeira abertura — nunca mais era chamado."""
+    conta = _conta(pool, "Rearma")
+    _coluna(pool, conta)
+    v1, v2 = _vend(pool, conta, "Jacqueline"), _vend(pool, conta, "Pedro")
+    dia = date(2027, 7, 10)
+    ev = _festa(pool, conta, dia)
+    a = _lead(pool, conta, v1, "Primeiro", dia, status="proposta")
+    b = _lead(pool, conta, v2, "Segundo", dia, status="proposta")
+    le.aceitar(pool, conta, a, v1)
+    le.aceitar(pool, conta, b, v2)
+    _cancelar(pool, ev)
+    pushes = []
+    from finance import cockpit as ck, notificar as nt
+    monkeypatch.setattr(ck, "enviar_push", lambda pool_, conta_, m, t, *a_, **k: pushes.append(m) or 1)
+    monkeypatch.setattr(nt, "enviar_para_dono", lambda *a_, **k: True)
+    le.rodar(pool, HOJE, MEIO_DIA)
+    assert sorted(pushes) == sorted([v1, v2]) and _status(pool, a) == "proposta"
+    # o 1º segura a data (pré-reserva dele): pro 2º, ela está tomada de novo
+    reserva = _festa(pool, conta, dia, status="pre_reservado", lead=a)
+    le.rodar(pool, HOJE, MEIO_DIA)
+    # a reserva venceu sem sinal: a data abre de novo, e o 2º é avisado de novo
+    _cancelar(pool, reserva)
+    pushes.clear()
+    le.rodar(pool, HOJE, MEIO_DIA)
+    assert v2 in pushes
+
+
+def test_o_vendedor_que_e_a_ia_nao_recebe_push(pool, monkeypatch):
+    conta = _conta(pool, "IA")
+    ia = _vend(pool, conta, "ZAQ SDR")
+    from finance import chip_regra as cr
+    monkeypatch.setattr(cr, "membros_ia", lambda c, conta_id: {ia})
+    dia = date(2027, 8, 14)
+    ev = _festa(pool, conta, dia)
+    _lead(pool, conta, ia, "Da IA", dia)
+    le.sincronizar(pool, conta, HOJE)
+    _cancelar(pool, ev)
+    pushes, telegramas, push, telegram = _fake_avisos()
+    assert le.avisar(pool, conta, HOJE, push=push, telegram=telegram) == 1
+    assert pushes == []                                       # o aparelho do dono, não
+    assert len(telegramas) == 1                               # o dono sabe pelo resumo

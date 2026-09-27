@@ -83,7 +83,8 @@ def pool():
         c.execute(_SQL)
         c.execute("insert into contas (id, nome) values (%s,'Prime'), (%s,'Outra')", (PRIME, OUTRA))
         for m in ("388_regra_por_chip.sql", "401_ia_fora_da_esteira.sql",
-                  "414_visita_rotinas.sql", "421_festa_rotinas.sql"):
+                  "414_visita_rotinas.sql", "421_festa_rotinas.sql",
+                  "425_revisao_motores_parte1.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         # o marco do "daqui pra frente": a regra da Prime existe desde a semana passada
         c.execute("""update visita_rotinas_config set validade_desde=%s, pos_festa_desde=%s
@@ -368,3 +369,114 @@ def test_os_campos_na_regua_e_o_selo_no_card():
     assert '{% if c.selo_festa %}<div class="kbvis {{ c.selo_festa[1] }}"' in pp._KANBAN_TPL
     pp._env.parse(tpl)
     pp._env.parse(pp._KANBAN_TPL)
+
+
+# ══════════════════════════════════════════════ a revisão de 27/09/2026 (parte 1)
+
+def _ia_com_conversa(pool, nome_lead="Ana Paula"):
+    zaq = _membro(pool, "ZAQ SDR", "5586900000009")
+    with pool.connection() as c:
+        c.execute("""insert into chip_regra (conta_id, chip_id, ativa, membro_id, ia_ligada)
+                     values (%s,36,true,%s,true)""", (PRIME, zaq))
+        c.commit()
+    a = _lead(pool, zaq, "pos_festa", HOJE - timedelta(days=1), nome=nome_lead)
+    with pool.connection() as c:
+        conv = c.execute("""insert into conversas (conta_id, prospeccao_id, contato_ref, agente_ativo)
+                            values (%s,%s,'5586988887777',true) returning id""", (PRIME, a)).fetchone()[0]
+        c.commit()
+    return zaq, a, conv
+
+
+def test_pos_festa_que_falha_tenta_3_vezes_espacadas_e_desiste(pool, rec, monkeypatch):
+    """Antes, a falha apagava a linha e o relógio mandava de novo a cada ~2 min."""
+    _zaq, a, _conv = _ia_com_conversa(pool)
+    tentativas = []
+
+    def _falha(c, conta, canal, destino, texto, conversa_id=None):
+        tentativas.append(texto)
+        return {"ok": False, "erro": "chip fora do ar"}
+    monkeypatch.setattr(agente, "_mandar", _falha)
+    t = AGORA
+    for _ in range(12):                                     # 12 ciclos de 2 min
+        fx.rodar(pool, t)
+        t += timedelta(minutes=2)
+    assert len(tentativas) == 1                             # 30 min entre as tentativas
+    for i in range(1, 6):
+        fx.rodar(pool, AGORA + timedelta(minutes=31 * i))
+    assert len(tentativas) == fx.MAX_FALHAS                 # e desiste na terceira
+    with pool.connection() as c:
+        falhas, enviado = c.execute("select envio_falhas, enviado_em from pos_festa_envios "
+                                    "where prospeccao_id=%s", (a,)).fetchone()
+    assert falhas == fx.MAX_FALHAS and enviado is None
+
+
+def test_pos_festa_com_prazo_estourado_nao_sai_duas_vezes(pool, rec, monkeypatch):
+    _zaq, a, _conv = _ia_com_conversa(pool)
+    tentativas = []
+
+    def _lento(c, conta, canal, destino, texto, conversa_id=None):
+        tentativas.append(texto)
+        return {"ok": False, "erro": "Read timed out. (read timeout=15)"}
+    monkeypatch.setattr(agente, "_mandar", _lento)
+    fx.rodar(pool, AGORA)
+    fx.rodar(pool, AGORA + timedelta(hours=1))
+    assert len(tentativas) == 1
+    with pool.connection() as c:
+        assert c.execute("select enviado_em from pos_festa_envios where prospeccao_id=%s",
+                         (a,)).fetchone()[0] is not None
+
+
+def test_pos_festa_da_ia_sem_conversa_nao_avisa_o_numero_do_dono(pool, rec):
+    zaq = _membro(pool, "ZAQ SDR", "5586900000009")
+    with pool.connection() as c:
+        c.execute("""insert into chip_regra (conta_id, chip_id, ativa, membro_id, ia_ligada)
+                     values (%s,36,true,%s,true)""", (PRIME, zaq))
+        c.commit()
+    _lead(pool, zaq, "pos_festa", HOJE - timedelta(days=1), nome="Sem Conversa")
+    assert fx.rodar(pool, AGORA)["pos_festa"] == 0
+    assert not [z for z in rec["zap"] if z[0] == "5586900000009"]
+    assert rec["push"] == []
+
+
+def test_a_disputa_do_card_da_ia_nao_avisa_o_numero_do_dono(pool, rec):
+    zaq = _membro(pool, "ZAQ SDR", "5586900000009")
+    with pool.connection() as c:
+        c.execute("""insert into chip_regra (conta_id, chip_id, ativa, membro_id, ia_ligada)
+                     values (%s,36,true,%s,true)""", (PRIME, zaq))
+        c.commit()
+    dia = date(2027, 4, 3)
+    a = _lead(pool, zaq, "evento_realizado", dia)
+    _reserva(pool, a, dia, AGORA + timedelta(days=5))
+    _lead(pool, zaq, "proposta", dia, nome="Quer também")
+    assert fx.rodar(pool, AGORA)["disputas"] == 1           # a disputa fica registrada
+    assert not [z for z in rec["zap"] if z[0] == "5586900000009"]
+
+
+def test_o_teto_do_chip_segura_o_pos_festa_sem_gastar_tentativa(pool, rec):
+    from finance import teto_chip as tc
+    _zaq, a, _conv = _ia_com_conversa(pool)
+    with pool.connection() as c:
+        for _ in range(tc.POR_DIA):
+            c.execute("""insert into envios_automaticos (conta_id, chip_id, origem, criado_em)
+                         values (%s,null,'teste',%s)""", (PRIME, AGORA - timedelta(hours=2)))
+        c.commit()
+    assert fx.rodar(pool, AGORA)["pos_festa"] == 0
+    assert rec["cliente"] == []
+    with pool.connection() as c:
+        falhas, em = c.execute("select envio_falhas, envio_falhou_em from pos_festa_envios "
+                               "where prospeccao_id=%s", (a,)).fetchone()
+    assert falhas == 0 and em is None                       # livre pro próximo ciclo
+
+
+def test_a_migracao_425_marca_como_enviado_o_que_ja_saiu(pool):
+    with pool.connection() as c:
+        c.execute("alter table pos_festa_envios drop column envio_falhas, "
+                  "drop column envio_falhou_em, drop column enviado_em")
+        c.execute("insert into pos_festa_envios (prospeccao_id, conta_id, quem) values (9001,%s,'ia'), "
+                  "(9002,%s,'vendedor')", (PRIME, PRIME))
+        for _ in range(2):                                  # idempotente
+            c.execute((BASE / "425_revisao_motores_parte1.sql").read_text(encoding="utf-8"))
+        r = dict(c.execute("select prospeccao_id, enviado_em is not null from pos_festa_envios "
+                           "where prospeccao_id in (9001,9002)").fetchall())
+        c.commit()
+    assert r == {9001: True, 9002: False}

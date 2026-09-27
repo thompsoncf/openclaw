@@ -81,6 +81,15 @@ def _http():
     return httpx.Client(timeout=30)
 
 
+def _chamar(fn):
+    """A chamada ao provedor: sem resposta (rede, tempo) vira ErroPSC, com a mensagem."""
+    import httpx
+    try:
+        return fn()
+    except httpx.HTTPError as e:
+        raise ErroPSC("o provedor não respondeu, tente de novo") from e
+
+
 def _json(r) -> dict:
     try:
         j = r.json()
@@ -98,9 +107,9 @@ def token(chave: str, code: str, volta: str, verifier: str) -> str:
         raise ErroPSC("Este provedor não está ligado no Zaq.")
     url, cid, sec = conf
     with _http() as h:
-        j = _json(h.post(f"{url}/v0/oauth/token", data={
+        j = _json(_chamar(lambda: h.post(f"{url}/v0/oauth/token", data={
             "grant_type": "authorization_code", "client_id": cid, "client_secret": sec, "code": code,
-            "redirect_uri": volta, "code_verifier": verifier}))
+            "redirect_uri": volta, "code_verifier": verifier})))
     t = j.get("access_token")
     if not t:
         raise ErroPSC("O provedor não autorizou.")
@@ -113,17 +122,22 @@ def _der(txt: str) -> bytes:
     return base64.b64decode(t)
 
 
-def certificado(chave: str, tok: str) -> tuple[str, bytes, list[bytes]]:
-    """(alias, certificado DER, cadeia DER) do primeiro certificado do profissional."""
+def certificados(chave: str, tok: str) -> list[tuple[str, bytes, list[bytes]]]:
+    """[(alias, certificado DER, cadeia DER)] do profissional (quem escolhe é quem chama)."""
     url, _c, _s = _conf(chave) or ("", "", "")
     with _http() as h:
-        j = _json(h.get(f"{url}/v0/oauth/certificate-discovery", headers={"Authorization": f"Bearer {tok}"}))
-    certs = j.get("certificates") or []
-    if not certs:
+        j = _json(_chamar(lambda: h.get(f"{url}/v0/oauth/certificate-discovery",
+                                        headers={"Authorization": f"Bearer {tok}"})))
+    saida = []
+    for c0 in j.get("certificates") or []:
+        try:
+            cadeia = [_der(x) for x in (c0.get("certificate_chain") or c0.get("chain") or []) if x]
+            saida.append((str(c0.get("alias") or ""), _der(c0.get("certificate") or ""), cadeia))
+        except (ValueError, TypeError):
+            continue
+    if not saida:
         raise ErroPSC("O provedor não mostrou nenhum certificado.")
-    c0 = certs[0]
-    cadeia = [_der(x) for x in (c0.get("certificate_chain") or c0.get("chain") or []) if x]
-    return str(c0.get("alias") or ""), _der(c0.get("certificate") or ""), cadeia
+    return saida
 
 
 def assinar(chave: str, tok: str, alias: str, hashes: list[bytes]) -> list[bytes]:
@@ -133,7 +147,8 @@ def assinar(chave: str, tok: str, alias: str, hashes: list[bytes]) -> list[bytes
         {"id": str(i), "alias": f"item-{i}", "hash": base64.b64encode(h).decode(),
          "hash_algorithm": SHA256_OID, "signature_format": "RAW"} for i, h in enumerate(hashes)]}
     with _http() as h:
-        j = _json(h.post(f"{url}/v0/oauth/signature", json=corpo, headers={"Authorization": f"Bearer {tok}"}))
+        j = _json(_chamar(lambda: h.post(f"{url}/v0/oauth/signature", json=corpo,
+                                         headers={"Authorization": f"Bearer {tok}"})))
     por_id = {str(s.get("id")): s.get("raw_signature") for s in (j.get("signatures") or [])}
     if any(not por_id.get(str(i)) for i in range(len(hashes))):
         raise ErroPSC("O provedor não devolveu todas as assinaturas.")

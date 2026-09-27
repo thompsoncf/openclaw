@@ -568,7 +568,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <input type="hidden" name="volta" value="/painel/clinica/prontuario/{{ p.id }}"><input type="password" name="senha" placeholder="senha do certificado" autocomplete="off" required style="width:auto;margin:0">
       <button>Liberar até o fim do dia</button></form>
     {% elif cx.pendentes and (cx.tipo == 'a1' or cx.provedor_ligado) %}<form method="post" action="/painel/clinica/certificado/assinar" class="pr-acoes" style="margin:0">
-      <input type="hidden" name="volta" value="/painel/clinica/prontuario/{{ p.id }}"><button class="sec">{% if cx.tipo == 'nuvem' %}Assinar as {{ cx.pendentes|length }} no aplicativo{% else %}Assinar as {{ cx.pendentes|length }}{% endif %}</button></form>{% endif %}
+      <input type="hidden" name="volta" value="/painel/clinica/prontuario/{{ p.id }}"><button class="sec">{% if cx.tipo == 'nuvem' %}Assinar {{ cx.lote }} no aplicativo{% else %}Assinar {{ cx.lote }}{% endif %}</button></form>{% endif %}
     <a href="/painel/clinica/certificado" class="pr-m">configurar</a></div>{% endif %}
 
   <div class="pr-cx">

@@ -41,6 +41,7 @@ SENHA = "senha-do-cert"
 @pytest.fixture()
 def banco(_banco_ficha, monkeypatch):  # noqa: F811
     monkeypatch.setenv("PRONTUARIO_CHAVE", base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())
+    monkeypatch.setattr(cert, "_raizes", lambda: [AC[1]])          # a "raiz da ICP-Brasil" dos testes
     with _banco_ficha.connection() as c:
         c.execute((BASE / "442_clinica_certificado.sql").read_text(encoding="utf-8"))
         c.commit()
@@ -58,7 +59,7 @@ def _ac():
     return k, c
 
 
-def _ecpf(ac, *, icp=True, dias=300, nome="MANOEL TESTE:00000000000"):
+def _ecpf(ac, *, icp=True, dias=300, nome="MANOEL TESTE:00000000000", pf=True):
     ac_k, ac_c = ac
     k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     b = (x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, nome)]))
@@ -68,6 +69,9 @@ def _ecpf(ac, *, icp=True, dias=300, nome="MANOEL TESTE:00000000000"):
     if icp:
         b = b.add_extension(x509.CertificatePolicies([x509.PolicyInformation(
             x509.ObjectIdentifier("2.16.76.1.2.1.51"), None)]), critical=False)
+    if pf:                                   # o campo do e-CPF (data de nascimento, CPF…)
+        b = b.add_extension(x509.SubjectAlternativeName([x509.OtherName(
+            x509.ObjectIdentifier(cert.OID_DADOS_PF), b"\x04\x0b" + b"0" * 11)]), critical=False)
     c = b.sign(ac_k, hashes.SHA256())
     pfx = pkcs12.serialize_key_and_certificates(b"manoel", k, c, [ac_c],
                                                 serialization.BestAvailableEncryption(SENHA.encode()))
@@ -88,6 +92,9 @@ def _confere(pdf: bytes, ac_cert) -> bool:
     return (st.intact and st.valid and st.trusted
             and pol.native["sig_policy_id"] == cert.POLITICA_OID
             and "signing_certificate_v2" in attrs)
+
+
+AC = _ac()
 
 
 @pytest.fixture()
@@ -133,7 +140,7 @@ def _aviso(cli, url):
 
 
 def test_a1_guarda_libera_no_dia_e_assina_ao_finalizar(tela, banco, zap):  # noqa: F811
-    ac = _ac()
+    ac = AC
     kid, eid, _prof = _liberado(banco)
     tela.get("/_login/gestor/52")
     assert "Certificado digital" in tela.get("/painel/clinica/certificado").text
@@ -203,7 +210,7 @@ def test_a1_guarda_libera_no_dia_e_assina_ao_finalizar(tela, banco, zap):  # noq
 
 def test_receita_assinada_leva_metadados_do_iti_e_o_qr_da_farmacia(tela, banco, zap):  # noqa: F811
     import pymupdf
-    ac = _ac()
+    ac = AC
     kid, _eid, prof = _liberado(banco)
     _k, _c, pfx = _ecpf(ac)
     with banco.connection() as c:
@@ -249,7 +256,7 @@ def test_receita_assinada_leva_metadados_do_iti_e_o_qr_da_farmacia(tela, banco, 
 
 
 def test_nuvem_autoriza_no_aplicativo_e_assina_o_lote(tela, banco, zap, monkeypatch):  # noqa: F811
-    ac = _ac()
+    ac = AC
     k, c_, _pfx = _ecpf(ac)
     monkeypatch.setenv("PSC_BIRDID_CLIENT_ID", "zaq")
     monkeypatch.setenv("PSC_BIRDID_CLIENT_SECRET", "segredo")
@@ -281,7 +288,7 @@ def test_nuvem_autoriza_no_aplicativo_e_assina_o_lote(tela, banco, zap, monkeypa
     e1, e2 = _evolucao(banco, kid, eid), _evolucao(banco, kid, eid, "segunda")
     for e in (e1, e2):
         tela.post(f"/painel/clinica/prontuario/{kid}/evolucao/{e}/assinar")
-    assert "Assinar as 2 no aplicativo" in tela.get(f"/painel/clinica/prontuario/{kid}").text
+    assert "Assinar 2 no aplicativo" in tela.get(f"/painel/clinica/prontuario/{kid}").text
 
     def _pedir():
         r = tela.post("/painel/clinica/certificado/assinar", data={"volta": f"/painel/clinica/prontuario/{kid}"})
@@ -339,3 +346,64 @@ def test_antes_da_442(pool, zap):  # noqa: F811
         assert cert.pdf_assinado(c, CLINICA, "documento", 1) is None
         assert cert.pelo_qr(c, "x", "y", AGORA) is None
         assert cert.assinador_liberado(c, CLINICA, q, "abc", AGORA) is None
+
+
+def test_certificado_de_mentira_e_de_empresa_nao_passam(banco):  # noqa: F811
+    falsa = _ac()                                     # AC que não é a raiz: um .pfx "caseiro"
+    _k, c1, _p = _ecpf(falsa)
+    assert "raiz da ICP-Brasil" in cert.conferir(c1, AGORA, [falsa[1]])
+    _k, c2, _p = _ecpf(AC, pf=False)                  # e-CNPJ: sem os dados de pessoa física
+    assert "pessoa física" in cert.conferir(c2, AGORA, [AC[1]])
+    _k, c3, _p = _ecpf(AC)
+    assert cert.conferir(c3, AGORA, [AC[1]]) is None and cert.conferir(c3, AGORA, []) is None
+    # o endereço do emissor vem de dentro do certificado: nunca a rede interna
+    for url in ("http://127.0.0.1/ac.crt", "http://localhost/ac.crt", "http://10.0.0.5/x", "file:///etc/passwd",
+                "http://exemplo.com/ac.crt", "http://acraiz.icpbrasil.gov.br:8080/x"):
+        assert not cert._host_publico_br(url), url
+
+
+def test_o_qr_nao_devolve_o_endereco_pra_pagina(tela, banco, zap):  # noqa: F811
+    r = tela.get("/doc/x'><img src=x onerror=alert(1)>")
+    assert r.status_code == 404 and "onerror" not in r.text
+    r = tela.get("/doc/abcdefgh12345678")
+    assert r.status_code == 200 and "default-src 'none'" in r.headers["content-security-policy"]
+    assert "action='/doc/abcdefgh12345678/documento.pdf'" in r.text
+
+
+def test_trocar_de_tipo_nao_perde_o_que_esperava(tela, banco, zap):  # noqa: F811
+    kid, eid, _prof = _liberado(banco)
+    tela.get("/_login/gestor/52")
+    tela.post("/painel/clinica/certificado/nuvem", data={"provedor": "vidaas"})      # ainda não ligado
+    evo = _evolucao(banco, kid, eid)
+    tela.post(f"/painel/clinica/prontuario/{kid}/evolucao/{evo}/assinar")
+    _k, _c, pfx = _ecpf(AC)
+    tela.post("/painel/clinica/certificado/a1", files={"arquivo": ("c.pfx", pfx)}, data={"senha": SENHA})
+    tela.post("/painel/clinica/certificado/liberar", data={"senha": SENHA, "volta": f"/painel/clinica/prontuario/{kid}"})
+    assert "1 pendente assinada" in _aviso(tela, f"/painel/clinica/prontuario/{kid}")
+
+
+def test_fim_do_dia():
+    from finance import clinica_agenda as ca
+    meio_dia = ca.utc(datetime(2026, 9, 28).date(), datetime.min.time().replace(hour=12))
+    assert ca.local(cert.fim_do_dia(meio_dia)).strftime("%H:%M:%S") == "23:59:59"
+    quase = ca.utc(datetime(2026, 9, 28).date(), datetime.min.time().replace(hour=23, minute=59, second=30))
+    assert cert.fim_do_dia(quase) == quase + timedelta(hours=1)      # na virada, vale uma hora
+
+
+def test_uma_falha_depois_da_assinatura_simples_nao_derruba(tela, banco, zap, monkeypatch):  # noqa: F811
+    kid, eid, _prof = _liberado(banco)
+    tela.get("/_login/gestor/52")
+    _k, _c, pfx = _ecpf(AC)
+    tela.post("/painel/clinica/certificado/a1", files={"arquivo": ("c.pfx", pfx)}, data={"senha": SENHA})
+    tela.post("/painel/clinica/certificado/liberar", data={"senha": SENHA})
+
+    def _quebra(*a, **k):
+        raise RuntimeError("pdf")
+    monkeypatch.setattr(prt, "pdf_evolucao", _quebra)
+    evo = _evolucao(banco, kid, eid)
+    r = tela.post(f"/painel/clinica/prontuario/{kid}/evolucao/{evo}/assinar")
+    assert r.status_code == 303
+    aviso = _aviso(tela, f"/painel/clinica/prontuario/{kid}")
+    assert "Evolução assinada" in aviso and "não confere" in aviso
+    with banco.connection() as c:
+        assert prt.evolucao(c, CLINICA, kid, evo)["status"] == "assinado"

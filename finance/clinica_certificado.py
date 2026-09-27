@@ -39,8 +39,10 @@ _log = logging.getLogger("clinica.certificado")
 POLITICA_OID = "2.16.76.1.7.1.11.1.1"
 POLITICA_SHA256 = "95752d26ca974d46675ae7fb787b606a71ea941f26b59f6b6a321f97d63b9cb1"
 POLITICA_URI = "http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_1.der"
-#: as políticas de certificado da ICP-Brasil (A1 = 2.16.76.1.2.1.x, A3 = 2.16.76.1.2.3.x)
-ICP_CERTIFICADO = "2.16.76.1.2."
+#: as políticas de certificado de ASSINATURA da ICP-Brasil (A1, A3, A4)
+ICP_ASSINATURA = ("2.16.76.1.2.1.", "2.16.76.1.2.3.", "2.16.76.1.2.4.")
+#: o e-CPF traz os dados da pessoa física neste campo (o e-CNPJ traz outro)
+OID_DADOS_PF = "2.16.76.1.3.1"
 #: o validar.iti.gov.br reconhece o documento de saúde por estes metadados
 OID_DOCUMENTO = {"receita": ("2.16.76.1.12.1.1", "Prescrição de medicamento"),
                  "receita_controle": ("2.16.76.1.12.1.1", "Prescrição de medicamento"),
@@ -49,7 +51,7 @@ OID_DOCUMENTO = {"receita": ("2.16.76.1.12.1.1", "Prescrição de medicamento"),
                  "laudo": ("2.16.76.1.12.1.4", "Laudo")}
 OID_CRM, OID_CRM_UF = "2.16.76.1.4.2.2.1", "2.16.76.1.4.2.2.2"
 TETO_PFX = 64 * 1024
-LOTE_MAX = 60             # por autorização (o token da nuvem vale 10 minutos)
+LOTE_MAX = 60             # por rodada (o token da nuvem vale 10 minutos)
 QR_DIAS = 365             # o QR da farmácia abre por um ano
 
 
@@ -75,8 +77,24 @@ def info(cert) -> dict:
             "emissor": (ecn[0].value if ecn else "")[:200], "validade": cert.not_valid_after_utc}
 
 
-def conferir(cert, agora: datetime) -> str | None:
-    """O certificado serve pra assinar documento de saúde: ICP-Brasil, RSA, no prazo."""
+_RAIZES: list | None = None
+
+
+def _raizes() -> list:
+    """As raízes da ICP-Brasil em vigor (finance/icp_raizes/raizes.pem, baixadas de
+    acraiz.icpbrasil.gov.br; a v5 confere com a que vem dentro da política AD-RB)."""
+    global _RAIZES
+    if _RAIZES is None:
+        from pathlib import Path
+
+        from cryptography import x509
+        _RAIZES = x509.load_pem_x509_certificates((Path(__file__).parent / "icp_raizes" / "raizes.pem").read_bytes())
+    return _RAIZES
+
+
+def conferir(cert, agora: datetime, extras: list | None = None) -> str | None:
+    """O certificado serve pra assinar documento de saúde: e-CPF da ICP-Brasil (a cadeia
+    fecha numa raiz da ICP-Brasil, conferindo cada assinatura), RSA, no prazo."""
     from cryptography import x509
     from cryptography.hazmat.primitives.asymmetric import rsa
     if cert.not_valid_after_utc <= agora:
@@ -87,43 +105,94 @@ def conferir(cert, agora: datetime) -> str | None:
         pols = cert.extensions.get_extension_for_class(x509.CertificatePolicies).value
     except x509.ExtensionNotFound:
         pols = []
-    if not any(p.policy_identifier.dotted_string.startswith(ICP_CERTIFICADO) for p in pols):
-        return "Este não é um certificado ICP-Brasil de pessoa (e-CPF A1 ou A3)."
+    if not any(p.policy_identifier.dotted_string.startswith(ICP_ASSINATURA) for p in pols):
+        return "Este não é um certificado ICP-Brasil de assinatura (e-CPF A1 ou A3)."
+    try:
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        pf = any(isinstance(n, x509.OtherName) and n.type_id.dotted_string == OID_DADOS_PF for n in san)
+    except x509.ExtensionNotFound:
+        pf = False
+    if not pf:
+        return "Este certificado não é de pessoa física (e-CPF): o da empresa (e-CNPJ) não assina prontuário."
     if not isinstance(cert.public_key(), rsa.RSAPublicKey):
         return "O Zaq assina com certificado RSA (o padrão da ICP-Brasil); este é de outro tipo."
+    if cadeia_icp(cert, extras or [], agora) is None:
+        return "A cadeia deste certificado não chega a uma raiz da ICP-Brasil: não é um certificado ICP-Brasil válido."
     return None
 
 
-def _cadeia_por_aia(cert, ja: list) -> list:
-    """Completa a cadeia pelo endereço do emissor que o próprio certificado traz (AIA):
-    o validador do ITI confere o caminho até a raiz."""
+def cadeia_icp(cert, extras: list, agora: datetime) -> list | None:
+    """Os emissores do certificado até a raiz da ICP-Brasil (inclusive), cada assinatura
+    conferida; None se não fecha. Falta um elo? Busca pelo endereço do emissor (AIA)."""
+    raizes = _raizes()
+    der_raizes = {_der(r) for r in raizes}
+    conhecidos = list(extras) + list(raizes)
+    caminho, atual = [], cert
+    for _ in range(6):
+        if _der(atual) in der_raizes:
+            return caminho
+        candidatos = [c for c in conhecidos if c.subject == atual.issuer]
+        if not candidatos:
+            baixado = _emissor_por_aia(atual)
+            candidatos = [baixado] if baixado is not None else []
+        emissor = None
+        for c in candidatos:
+            try:
+                atual.verify_directly_issued_by(c)
+            except Exception:  # noqa: BLE001
+                continue
+            if c.not_valid_before_utc <= agora <= c.not_valid_after_utc or _der(c) in der_raizes:
+                emissor = c
+                break
+        if emissor is None:
+            return None
+        caminho.append(emissor)
+        atual = emissor
+    return None
+
+
+def _host_publico_br(url: str) -> bool:
+    """Só busca emissor em endereço público no Brasil (.br): o endereço vem de dentro do
+    certificado enviado, e não pode apontar pra rede interna do servidor."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+    u = urlparse(url)
+    if u.scheme not in ("http", "https") or not u.hostname or not u.hostname.endswith(".br") \
+            or (u.port not in (None, 80, 443)):
+        return False
+    try:
+        ips = {i[4][0] for i in socket.getaddrinfo(u.hostname, u.port or 80, proto=socket.IPPROTO_TCP)}
+    except OSError:
+        return False
+    return bool(ips) and all(ipaddress.ip_address(ip).is_global for ip in ips)
+
+
+def _emissor_por_aia(cert):
     from cryptography import x509
     from cryptography.x509.oid import AuthorityInformationAccessOID
-    cadeia, atual = list(ja), cert
-    for _ in range(5):
-        if atual.issuer == atual.subject:                 # chegou na raiz
-            break
-        emissor = next((c for c in cadeia if c.subject == atual.issuer), None)
-        if emissor is None:
-            try:
-                aia = atual.extensions.get_extension_for_class(x509.AuthorityInformationAccess).value
-                url = next(d.access_location.value for d in aia
-                           if d.access_method == AuthorityInformationAccessOID.CA_ISSUERS
-                           and str(d.access_location.value).startswith("http"))
-                import httpx
-                r = httpx.get(url, timeout=10)
-                r.raise_for_status()
-                try:
-                    emissor = x509.load_der_x509_certificate(r.content)
-                except ValueError:
-                    from cryptography.hazmat.primitives.serialization import pkcs7
-                    emissor = next(c for c in pkcs7.load_der_pkcs7_certificates(r.content)
-                                   if c.subject == atual.issuer)
-            except Exception:  # noqa: BLE001 — sem a cadeia completa, assina assim mesmo
-                break
-            cadeia.append(emissor)
-        atual = emissor
-    return cadeia
+    try:
+        aia = cert.extensions.get_extension_for_class(x509.AuthorityInformationAccess).value
+        url = next(str(d.access_location.value) for d in aia
+                   if d.access_method == AuthorityInformationAccessOID.CA_ISSUERS
+                   and str(d.access_location.value).startswith("http"))
+    except Exception:  # noqa: BLE001
+        return None
+    if not _host_publico_br(url):
+        return None
+    try:
+        import httpx
+        with httpx.Client(timeout=8, follow_redirects=False) as h:
+            r = h.get(url)
+        if r.status_code != 200 or len(r.content) > 64 * 1024:
+            return None
+        try:
+            return x509.load_der_x509_certificate(r.content)
+        except ValueError:
+            from cryptography.hazmat.primitives.serialization import pkcs7
+            return next((c for c in pkcs7.load_der_pkcs7_certificates(r.content) if c.subject == cert.issuer), None)
+    except Exception:  # noqa: BLE001 — sem o emissor, a cadeia não fecha
+        return None
 
 
 # ------------------------------------------------------------------ quem assina
@@ -216,7 +285,7 @@ async def _assinar_pdfs(assinador: Assinador, pdfs: list[bytes], motivo: str) ->
         sig = await ext.async_sign_prescribed_attributes("sha256", signed_attrs=sa)
         await PdfTBSDocument.async_finish_signing(out, prep, sig, post_sign_instr=tbs.post_sign_instructions)
         saida.append(out.getvalue())
-    raizes = [ax.Certificate.load(_der(c)) for c in assinador.cadeia if c.issuer == c.subject]
+    raizes = [ax.Certificate.load(_der(c)) for c in _raizes()]
     for dados in saida:                      # a assinatura confere antes de guardar
         if not await _confere(dados, raizes):
             raise ValueError("a assinatura não conferiu")
@@ -286,7 +355,7 @@ def guardar_a1(c, conta_id: int, prof_id: int, dados: bytes, senha: str, quem: s
         return "A senha não abre este arquivo (ou ele não é um certificado .pfx/.p12)."
     if chave is None or cert is None or not isinstance(chave, rsa.RSAPrivateKey):
         return "O arquivo não traz a chave do certificado."
-    erro = conferir(cert, agora)
+    erro = conferir(cert, agora, list(_extra or []))
     if erro:
         return erro
     i = info(cert)
@@ -299,17 +368,18 @@ def guardar_a1(c, conta_id: int, prof_id: int, dados: bytes, senha: str, quem: s
               (prof_id, conta_id, parq.cifrar(dados, _ctx(conta_id, prof_id, "a1")), i["titular"], i["serial"],
                i["emissor"], i["validade"], quem[:120]))
     _escolher(c, conta_id, prof_id, "a1", None)
-    c.execute("delete from clinica_certificado_liberado where profissional_id=%s", (prof_id,))
+    c.execute("delete from clinica_certificado_liberado where profissional_id=%s and conta_id=%s", (prof_id, conta_id))
     return None
 
 
 def _escolher(c, conta_id: int, prof_id: int, tipo: str, provedor: str | None) -> None:
-    # "desde" só muda quando o tipo muda: trocar o A1 vencido pelo novo não perde pendências
+    # "desde" só começa quando SAI do "nenhum": trocar de A1 pra nuvem (ou o A1 vencido
+    # pelo novo) não perde o que estava esperando o certificado
     c.execute("""update clinica_profissionais
-                    set certificado_desde = case when certificado = %s and certificado_desde is not null
+                    set certificado_desde = case when certificado <> 'nenhum' and certificado_desde is not null
                                                  then certificado_desde else now() end,
                         certificado=%s, certificado_provedor=%s
-                  where id=%s and conta_id=%s""", (tipo, tipo, provedor, prof_id, conta_id))
+                  where id=%s and conta_id=%s""", (tipo, provedor, prof_id, conta_id))
 
 
 def escolher_nuvem(c, conta_id: int, prof_id: int, provedor: str) -> str | None:
@@ -317,7 +387,7 @@ def escolher_nuvem(c, conta_id: int, prof_id: int, provedor: str) -> str | None:
     if provedor not in psc.PROVEDORES:
         return "Escolha o provedor."
     _escolher(c, conta_id, prof_id, "nuvem", provedor)
-    c.execute("delete from clinica_certificado_liberado where profissional_id=%s", (prof_id,))
+    c.execute("delete from clinica_certificado_liberado where profissional_id=%s and conta_id=%s", (prof_id, conta_id))
     return None
 
 
@@ -343,7 +413,9 @@ def tirar(c, conta_id: int, prof_id: int) -> None:
 # ------------------------------------------------------------------ A1: liberar no dia
 
 def fim_do_dia(agora: datetime) -> datetime:
-    return min(ca.utc(ca.local(agora).date(), time(23, 59)), agora + timedelta(hours=16))
+    """Até 23:59:59 de hoje (hora de Brasília); liberado na virada, vale uma hora."""
+    fim = ca.utc(ca.local(agora).date(), time(23, 59, 59))
+    return fim if fim > agora + timedelta(minutes=30) else agora + timedelta(hours=1)
 
 
 def liberar_a1(c, conta_id: int, q: dict, senha: str, agora: datetime) -> tuple[str | None, str | None]:
@@ -368,15 +440,15 @@ def liberar_a1(c, conta_id: int, q: dict, senha: str, agora: datetime) -> tuple[
         chave, cert, extra = pkcs12.load_key_and_certificates(pfx, senha.encode("utf-8"))
     except Exception:  # noqa: BLE001
         return None, "Senha do certificado errada."
-    erro = conferir(cert, agora)
+    erro = conferir(cert, agora, list(extra or []))
     if erro:
         return None, erro
+    caminho = cadeia_icp(cert, list(extra or []), agora) or []
     k = secrets.token_bytes(32)
     nonce = secrets.token_bytes(12)
     corpo = json.dumps({"chave": base64.b64encode(chave.private_bytes(
         serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())).decode(),
-        "certs": [base64.b64encode(_der(x)).decode() for x in [cert, *_cadeia_por_aia(cert, list(extra or []))]]
-    }).encode()
+        "certs": [base64.b64encode(_der(x)).decode() for x in [cert, *caminho]]}).encode()
     blob = parq.cifrar(nonce + AESGCM(k).encrypt(nonce, corpo, _ctx(conta_id, pid, "dia").encode()),
                        _ctx(conta_id, pid, "liberado"))
     c.execute("""insert into clinica_certificado_liberado (profissional_id, conta_id, membro_id, chave, expira_em)
@@ -418,7 +490,7 @@ def assinador_liberado(c, conta_id: int, q: dict, chave_sessao: str | None, agor
         certs = [_x509(base64.b64decode(x)) for x in corpo["certs"]]
     except Exception:  # noqa: BLE001 — outra sessão, chave trocada: não serve
         return None
-    if conferir(certs[0], agora):
+    if conferir(certs[0], agora, certs[1:]):
         return None
     return assinador_a1(chave, certs[0], certs[1:])
 
@@ -444,7 +516,7 @@ def pendentes(c, conta_id: int, q: dict) -> list[dict]:
                     where d.conta_id=%s and d.profissional_id = any(%s) and d.status='assinado' and d.assinado_em >= %s
                       and d.tipo <> 'notificacao'
                       and not exists (select 1 from clinica_assinaturas_icp a where a.alvo='documento' and a.alvo_id=d.id)
-                   order by 4 limit 500""", (conta_id, cad, desde[0], conta_id, cad, desde[0])).fetchall()
+                   order by 4 desc limit 500""", (conta_id, cad, desde[0], conta_id, cad, desde[0])).fetchall()
     except Exception:  # noqa: BLE001 — base sem a 442
         return []
     return [{"alvo": r[0], "id": r[1], "cliente_id": r[2], "quando": r[3]} for r in rows]
@@ -463,10 +535,9 @@ def _crm(conselho: str) -> dict[str, str]:
 
 def assinar_itens(c, conta_id: int, assinador: Assinador, itens: list[dict],
                   agora: datetime) -> tuple[list[dict], str | None]:
-    """Gera o PDF de cada item, assina todos numa rodada e guarda. (os assinados, erro)."""
-    from finance import clinica_documentos as cdoc
+    """Gera o PDF de cada item, assina todos numa rodada e guarda. (os assinados, erro).
+    Um item que não gera PDF (conteúdo que não confere) fica de fora, e o erro diz."""
     from finance import clinica_planos
-    from finance import clinica_prontuario as prt
     from finance import clinica_prontuario_arquivos as parq
     itens = itens[:LOTE_MAX]
     if not itens:
@@ -477,30 +548,19 @@ def assinar_itens(c, conta_id: int, assinador: Assinador, itens: list[dict],
     base = clinica_planos._app_url()
     prontos = []                                  # (item, profissional, pdf, publico, codigo)
     for it in itens:
-        publico = codigo = None
-        if it["alvo"] == "evolucao":
-            e = prt.evolucao(c, conta_id, it["cliente_id"], it["id"])
-            if not e or not prt.integra(c, conta_id, it["cliente_id"], it["id"]):
-                continue                          # mexida no banco: não se assina por cima
-            prof = e["profissional_id"]
-            pdf = prt.pdf_evolucao(c, conta_id, it["cliente_id"], e, {"titular": titular, "quando": agora})
-            meta = {}
-        else:
-            d = cdoc.documento(c, conta_id, it["cliente_id"], it["id"])
-            if not d or not cdoc.integro(d, it["cliente_id"], conta_id):
-                continue
-            prof = d["profissional_id"]
-            if d["tipo"] in OID_DOCUMENTO and base:
-                publico, codigo = secrets.token_urlsafe(12), _codigo()
-            pdf = cdoc.pdf(c, conta_id, it["cliente_id"], d, assinatura={
-                "titular": titular, "quando": agora, "codigo": codigo,
-                "url": f"{base}/doc/{publico}" if publico else None})
-            meta = dict([OID_DOCUMENTO[d["tipo"]]]) if d["tipo"] in OID_DOCUMENTO else {}
-            meta.update(_crm(d["conselho"]))
-        if pdf:
-            prontos.append((it, prof, _metadados(pdf, meta), publico, codigo))
+        try:
+            pronto = _preparar(c, conta_id, it, titular, base, agora)
+        except Exception:  # noqa: BLE001 — um item com problema não segura os outros
+            _log.warning("certificado: não gerou o PDF (conta %s, %s %s)", conta_id, it["alvo"], it["id"],
+                         exc_info=True)
+            pronto = None
+        if pronto:
+            prontos.append(pronto)
+    fora = len(itens) - len(prontos)
+    aviso_fora = (f"{fora} não {'pôde' if fora == 1 else 'puderam'} ser assinada{'s' if fora > 1 else ''} "
+                  "(o conteúdo não confere): avise o suporte.") if fora else None
     if not prontos:
-        return [], None
+        return [], aviso_fora
     try:
         assinados = assinar_pdfs(assinador, [p[2] for p in prontos])
     except Exception as e:  # noqa: BLE001
@@ -508,6 +568,38 @@ def assinar_itens(c, conta_id: int, assinador: Assinador, itens: list[dict],
         _log.warning("certificado: não assinou (conta %s)", conta_id, exc_info=True)
         return [], (f"O provedor do certificado recusou: {e}" if isinstance(e, psc.ErroPSC)
                     else "Não deu pra assinar com o certificado agora.")
+    return _gravar(c, conta_id, assinador, prontos, assinados), aviso_fora
+
+
+def _preparar(c, conta_id: int, it: dict, titular: str, base: str, agora: datetime):
+    """(item, profissional, PDF a assinar, endereço do QR, código) ou None."""
+    from finance import clinica_documentos as cdoc
+    from finance import clinica_prontuario as prt
+    publico = codigo = None
+    if it["alvo"] == "evolucao":
+        e = prt.evolucao(c, conta_id, it["cliente_id"], it["id"])
+        if not e or not prt.integra(c, conta_id, it["cliente_id"], it["id"]):
+            return None                           # mexida no banco: não se assina por cima
+        prof = e["profissional_id"]
+        pdf = prt.pdf_evolucao(c, conta_id, it["cliente_id"], e, {"titular": titular, "quando": agora})
+        meta = {}
+    else:
+        d = cdoc.documento(c, conta_id, it["cliente_id"], it["id"])
+        if not d or not cdoc.integro(d, it["cliente_id"], conta_id):
+            return None
+        prof = d["profissional_id"]
+        if d["tipo"] in OID_DOCUMENTO and base:
+            publico, codigo = secrets.token_urlsafe(12), _codigo()
+        pdf = cdoc.pdf(c, conta_id, it["cliente_id"], d, assinatura={
+            "titular": titular, "quando": agora, "codigo": codigo,
+            "url": f"{base}/doc/{publico}" if publico else None})
+        meta = dict([OID_DOCUMENTO[d["tipo"]]]) if d["tipo"] in OID_DOCUMENTO else {}
+        meta.update(_crm(d["conselho"]))
+    return (it, prof, _metadados(pdf, meta), publico, codigo) if pdf else None
+
+
+def _gravar(c, conta_id: int, assinador: Assinador, prontos: list, assinados: list) -> list[dict]:
+    from finance import clinica_prontuario_arquivos as parq
     i = info(assinador.cert)
     feitos = []
     for (it, prof, _pdf, publico, codigo), pdf in zip(prontos, assinados):
@@ -522,7 +614,7 @@ def assinar_itens(c, conta_id: int, assinador: Assinador, itens: list[dict],
              hashlib.sha256(codigo.encode()).hexdigest() if codigo else None)).fetchone()
         if r:
             feitos.append(it)
-    return feitos, None
+    return feitos
 
 
 def _ctx_pdf(conta_id: int, alvo: str, alvo_id: int) -> str:

@@ -15,6 +15,8 @@ certificado: o dono não sobe o certificado de ninguém nem digita a senha de ni
 """
 from __future__ import annotations
 
+import logging
+import re
 import secrets
 from datetime import datetime, timezone
 
@@ -32,6 +34,8 @@ from web.portal import _env, _render
 router = APIRouter()
 router_publico = APIRouter()
 URL = "/painel/clinica/certificado"
+_log = logging.getLogger("clinica.certificado")
+_PUBLICO = re.compile(r"[A-Za-z0-9_-]{8,40}")
 _SESSAO = "certificado_dia"          # {"p": profissional, "k": a chave do A1 liberado}
 _NUVEM = "certificado_nuvem"         # {"state", "verifier", "p", "volta"} enquanto o provedor autoriza
 
@@ -76,6 +80,7 @@ def contexto(request: Request, c, conta_id: int, q: dict, agora: datetime) -> di
     if e["liberado_ate"] and not _chave_sessao(request, q):
         e["liberado_ate"] = None                   # liberado em outro aparelho: aqui não vale
     e["pendentes"] = cert.pendentes(c, conta_id, q) if e["tipo"] != "nenhum" else []
+    e["lote"] = min(len(e["pendentes"]), cert.LOTE_MAX)       # o que uma rodada assina
     return e
 
 
@@ -92,7 +97,20 @@ def _assinar(request: Request, c, conta_id: int, q: dict, assinador, itens: list
 
 def depois_de_assinar(request: Request, c, conta_id: int, q: dict) -> str:
     """Chamado logo depois da assinatura simples (evolução, adendo, documento): com o A1
-    liberado nesta sessão, põe a assinatura ICP na hora. Devolve o complemento do aviso."""
+    liberado nesta sessão, põe a assinatura ICP na hora. Devolve o complemento do aviso.
+    A assinatura simples JÁ foi gravada: nada aqui pode derrubar a resposta."""
+    try:
+        return _depois_de_assinar(request, c, conta_id, q)
+    except Exception:  # noqa: BLE001
+        _log.warning("certificado: falhou depois da assinatura simples (conta %s)", conta_id, exc_info=True)
+        try:
+            c.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return " O certificado não assinou agora: fica pendente."
+
+
+def _depois_de_assinar(request: Request, c, conta_id: int, q: dict) -> str:
     agora = datetime.now(timezone.utc)
     e = cert.estado(c, conta_id, q["profissional_id"], agora)
     if e["tipo"] == "nenhum":
@@ -216,11 +234,16 @@ def _liberar(request: Request, senha: str, volta: str):
         c.commit()
         request.session[_SESSAO] = {"p": q["profissional_id"], "k": k}
         e = cert.estado(c, conta[0], q["profissional_id"], agora)
-        pend = cert.pendentes(c, conta[0], q)
         n, erro = 0, None
-        if pend:
-            a = cert.assinador_liberado(c, conta[0], q, k, agora)
-            n, erro = _assinar(request, c, conta[0], q, a, pend, agora) if a else (0, "tente de novo")
+        try:                                  # a liberação já valeu: as pendentes são um extra
+            pend = cert.pendentes(c, conta[0], q)
+            if pend:
+                a = cert.assinador_liberado(c, conta[0], q, k, agora)
+                n, erro = _assinar(request, c, conta[0], q, a, pend, agora) if a else (0, "tente de novo")
+        except Exception:  # noqa: BLE001
+            _log.warning("certificado: liberou, mas não assinou as pendentes (conta %s)", conta[0], exc_info=True)
+            c.rollback()
+            n, erro = 0, "tente de novo pelo botão"
     ate = e["liberado_ate"].strftime("%H:%M") if e["liberado_ate"] else ""
     aviso = f"Certificado liberado até {ate}: o Zaq assina ao finalizar, sem perguntar de novo."
     if n:
@@ -307,17 +330,25 @@ def volta(request: Request):
         if q["profissional_id"] != pedido.get("p") or e["tipo"] != "nuvem" or e["provedor"] != pedido.get("provedor"):
             return _ir(request, destino, erro="O certificado mudou no meio: comece de novo.")
         c.commit()
+        prov = pedido["provedor"]
         try:
-            prov = pedido["provedor"]
             tok = psc.token(prov, code, _endereco_volta(), pedido["verifier"])
-            alias, der, cadeia_der = psc.certificado(prov, tok)
-            x = cert._x509(der)
-        except (psc.ErroPSC, ValueError) as ex:
+            opcoes = psc.certificados(prov, tok)
+        except psc.ErroPSC as ex:
             return _ir(request, destino, erro=f"O provedor do certificado recusou: {ex}")
-        erro = cert.conferir(x, agora)
-        if erro:
-            return _ir(request, destino, erro=erro)
-        cadeia = cert._cadeia_por_aia(x, [cert._x509(d) for d in cadeia_der])
+        escolhido, erro = None, None
+        for alias, der, cadeia_der in opcoes:        # o primeiro e-CPF ICP-Brasil válido
+            try:
+                x, extras = cert._x509(der), [cert._x509(d) for d in cadeia_der]
+            except ValueError:
+                continue
+            erro = cert.conferir(x, agora, extras)
+            if not erro:
+                escolhido = (alias, x, cert.cadeia_icp(x, extras, agora) or [])
+                break
+        if not escolhido:
+            return _ir(request, destino, erro=erro or "O provedor não mostrou um certificado válido.")
+        alias, x, cadeia = escolhido
         cert.lembrar_nuvem(c, conta[0], q["profissional_id"], x)
         n, erro = _assinar(request, c, conta[0], q, cert.assinador_nuvem(prov, tok, alias, x, cadeia),
                            cert.pendentes(c, conta[0], q), agora)
@@ -333,15 +364,19 @@ _FORMATO_ITI = "application/validador-iti+json"
 def doc_qr(request: Request, publico: str):
     """O validador do ITI chama com ?_format=application/validador-iti+json&_secretCode=…
     e recebe onde baixar o PDF. Uma pessoa (a farmácia pelo celular) vê o pedido do código."""
+    if not _PUBLICO.fullmatch(publico):         # só o formato que o Zaq cria (vai pra dentro da página)
+        return Response("Documento não encontrado.", status_code=404, headers={"Cache-Control": "no-store"})
     codigo = request.query_params.get("_secretCode") or ""
     if request.query_params.get("_format") == _FORMATO_ITI:
         achou = _qr(publico, codigo)
         if not achou:
             return JSONResponse({"erro": "documento não encontrado"}, status_code=404,
                                 headers={"Cache-Control": "no-store"})
+        from urllib.parse import urlencode
+
         from finance import clinica_planos
         return JSONResponse({"version": "1.0.0", "prescription": {"signatureFiles": [
-            {"url": f"{clinica_planos._app_url()}/doc/{publico}/documento.pdf?_secretCode={codigo}"}]}},
+            {"url": f"{clinica_planos._app_url()}/doc/{publico}/documento.pdf?{urlencode({'_secretCode': codigo})}"}]}},
             headers={"Cache-Control": "no-store"})
     html = ("<!doctype html><html lang=pt-BR><meta charset=utf-8><meta name=viewport content='width=device-width'>"
             "<title>Documento de saúde</title><body style='font-family:sans-serif;max-width:28rem;margin:2rem auto;"
@@ -350,7 +385,9 @@ def doc_qr(request: Request, publico: str):
             f"<form method=get action='/doc/{publico}/documento.pdf'><input name=_secretCode maxlength=64 "
             "autocomplete=off style='font-size:1.2rem;padding:.4rem;width:100%;box-sizing:border-box'>"
             "<button style='margin-top:.6rem;font-size:1rem;padding:.5rem 1rem'>Abrir</button></form></body></html>")
-    return HTMLResponse(html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    return HTMLResponse(html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                                       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
+                                                                  "form-action 'self'"})
 
 
 def _qr(publico: str, codigo: str):
@@ -363,6 +400,8 @@ def _qr(publico: str, codigo: str):
 
 @router_publico.get("/doc/{publico}/documento.pdf")
 def doc_qr_pdf(request: Request, publico: str):
+    if not _PUBLICO.fullmatch(publico):
+        return Response("Código não confere.", status_code=404, headers={"Cache-Control": "no-store"})
     codigo = request.query_params.get("_secretCode") or ""
     agora = datetime.now(timezone.utc)
     with get_pool().connection() as c:
@@ -404,14 +443,14 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     {% endif %}
     {% if e.pendentes %}<div style="margin-top:.5rem">{{ e.pendentes|length }} esperando o certificado.</div>
       {% if e.tipo == 'a1' and not e.liberado_ate %}
-      {% else %}<form method="post" action="/painel/clinica/certificado/assinar" style="margin-top:.4rem"><button>{% if e.tipo == 'nuvem' %}Assinar as {{ e.pendentes|length }} no aplicativo{% else %}Assinar as {{ e.pendentes|length }} agora{% endif %}</button></form>{% endif %}
+      {% else %}<form method="post" action="/painel/clinica/certificado/assinar" style="margin-top:.4rem"><button>{% if e.tipo == 'nuvem' %}Assinar {{ e.lote }} no aplicativo{% else %}Assinar {{ e.lote }} agora{% endif %}</button>{% if e.pendentes|length > e.lote %} <span class="ce-m">(as outras {{ e.pendentes|length - e.lote }} na próxima rodada)</span>{% endif %}</form>{% endif %}
     {% endif %}
     {% if e.tipo == 'a1' %}
       {% if e.liberado_ate %}<form method="post" action="/painel/clinica/certificado/encerrar" style="margin-top:.5rem"><button class="sec">Encerrar a liberação agora</button></form>
       {% else %}<form method="post" action="/painel/clinica/certificado/liberar" style="margin-top:.5rem">
         <label>Senha do certificado<input type="password" name="senha" autocomplete="off" required></label>
         <button>Liberar a assinatura até o fim do dia</button>
-        <div class="ce-m">A senha abre o certificado agora e é esquecida. Ele fica liberado só neste aparelho, até 23:59.</div></form>{% endif %}
+        <div class="ce-m">A senha abre o certificado agora e é esquecida. Ele fica liberado só neste aparelho, até 23:59 de hoje.</div></form>{% endif %}
     {% endif %}
   </div>
 

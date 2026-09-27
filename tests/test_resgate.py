@@ -92,6 +92,7 @@ def pool():
         c.execute((BASE / "388_regra_por_chip.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "396_resgate_ia.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "398_resgate_toques.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "401_ia_fora_da_esteira.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos')")
         c.execute("insert into contas (id, nome, chip_de, nicho_id) values "
                   "(%s,'Prime',null,1),(%s,'CP Thiago',%s,null),(%s,'Outra',null,1)",
@@ -954,3 +955,188 @@ def test_o_toque_que_falha_volta_a_contagem(pool, equipe, duble):
     with pool.connection() as c:
         assert c.execute("select toques from resgate_leads").fetchone()[0] == 1
         assert c.execute("select ok from resgate_envios where tipo='toque'").fetchone()[0] is False
+
+
+# ══════════════════════════════════════════════ a IA do número insiste (migração 401)
+# Decisão do dono em 27/09/2026: cada trilha com a sua regra. O lead que a IA atende
+# desde o primeiro "oi" não é cobrado de ninguém — a própria IA insiste, com a regra
+# dos toques do resgate (finance/ia_insiste.py).
+
+from finance import ia_insiste as ii  # noqa: E402
+
+
+def _insiste(c, equipe, ligada=True):
+    r = cr.salvar(c, EMPRESA, CHIP2, {"ativa": True, "membro_id": equipe["ZAQ"], "ia_ligada": True,
+                                      "ia_horario": "24h", "ia_insiste": ligada})
+    assert r["ok"], r
+    c.commit()
+
+
+def _lead_da_ia(c, equipe, *, dias=4, quem="Bia", numero="5586988880001", ultimo="bot",
+                texto_in="quero saber de festa de 15 anos"):
+    """O contato novo do chip da IA: ele escreveu, a IA respondeu há `dias` dias."""
+    quando = datetime.now(timezone.utc) - timedelta(days=dias)
+    lid = c.execute("""insert into prospeccao (conta_id, vendedor_id, contato, whatsapp, criado_em)
+                       values (%s,%s,%s,%s,%s) returning id""",
+                    (EMPRESA, equipe["ZAQ"], quem, numero, quando - timedelta(hours=2))).fetchone()[0]
+    c.execute("insert into chip_regra_leads (prospeccao_id, conta_id, chip_id, membro_id) "
+              "values (%s,%s,%s,%s)", (lid, EMPRESA, CHIP2, equipe["ZAQ"]))
+    cv = c.execute("""insert into conversas (conta_id, prospeccao_id, contato_ref, chip_id,
+                                             agente_ativo, responsavel_membro_id, ultima_msg_em)
+                      values (%s,%s,%s,%s,true,%s,%s) returning id""",
+                   (EMPRESA, lid, numero, CHIP2, equipe["ZAQ"], quando)).fetchone()[0]
+    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em)
+                 values (%s,'whatsapp','in','lead',%s,%s)""", (cv, texto_in, quando - timedelta(hours=1)))
+    if ultimo == "bot":
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em)
+                     values (%s,'whatsapp','out','bot','Oi! Pra quantos convidados?',%s)""", (cv, quando))
+    c.commit()
+    return lid, cv
+
+
+@pytest.fixture()
+def expediente(monkeypatch):
+    """A hora do teste é a do relógio; o horário (9h–19h, seg–sáb) é conferido à parte."""
+    monkeypatch.setattr(ii, "pode_agora", lambda agora: True)
+
+
+def _toques(c, lid):
+    return c.execute("select toques, toque_em is not null, perdido_em is not null "
+                     "from chip_regra_leads where prospeccao_id=%s", (lid,)).fetchone()
+
+
+def test_a_ia_so_insiste_com_a_chave_ligada(pool, equipe, duble, expediente):
+    with pool.connection() as c:
+        lid, _ = _lead_da_ia(c, equipe, dias=4)
+        assert ii.devidos(c, EMPRESA) == []                     # a chave nasce desligada
+        _insiste(c, equipe)
+        assert [x["passo"] for x in ii.devidos(c, EMPRESA)] == [1]
+    assert ii.rodar(pool)["toques"] == 1
+    assert duble["saiu"] == [{"numero": "5586988880001", "texto": "Toque 2 pra Bia", "chip": CHIP2}]
+    with pool.connection() as c:
+        assert _toques(c, lid) == (1, True, False)
+        assert c.execute("select autor from mensagens where texto='Toque 2 pra Bia'").fetchone()[0] == "bot"
+
+
+def test_a_chave_so_grava_com_a_ia_ligada(pool, equipe):
+    with pool.connection() as c:
+        r = cr.salvar(c, EMPRESA, CHIP2, {"ativa": True, "membro_id": equipe["ZAQ"], "ia_ligada": False,
+                                          "ia_insiste": True})
+        assert r["ok"]
+        c.commit()
+        assert cr.regra(c, EMPRESA, CHIP2)["ia_insiste"] is False
+
+
+def test_antes_do_dia_3_a_ia_espera(pool, equipe, duble, expediente):
+    with pool.connection() as c:
+        _insiste(c, equipe)
+        _lead_da_ia(c, equipe, dias=2)
+    assert ii.rodar(pool)["toques"] == 0 and duble["saiu"] == []
+
+
+def test_a_ultima_chamada_no_dia_7_e_o_perdido_no_10(pool, equipe, duble, expediente):
+    with pool.connection() as c:
+        _insiste(c, equipe)
+        lid, cv = _lead_da_ia(c, equipe, dias=4)
+    ii.rodar(pool)
+    with pool.connection() as c:
+        assert ii.devidos(c, EMPRESA) == []                    # o lembrete acabou de sair
+        c.execute("update chip_regra_leads set toque_em = now() - interval '5 days'")
+        c.execute("update resgate_envios set criado_em = now() - interval '5 days'")
+        c.commit()
+        assert [x["passo"] for x in ii.devidos(c, EMPRESA)] == [2]
+    ii.rodar(pool)
+    assert duble["saiu"][-1]["texto"] == "Toque 3 pra Bia"
+    with pool.connection() as c:
+        assert _toques(c, lid)[0] == 2
+        c.execute("update chip_regra_leads set toque_em = now() - interval '4 days'")
+        c.commit()
+    assert ii.rodar(pool)["perdidos"] == 1
+    with pool.connection() as c:
+        assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "perdido"
+        assert _toques(c, lid)[2] is True
+    assert len(duble["saiu"]) == 2                             # o perdido não manda nada
+
+
+def test_o_cliente_que_volta_a_falar_zera_a_conta(pool, equipe, duble, expediente):
+    with pool.connection() as c:
+        _insiste(c, equipe)
+        lid, cv = _lead_da_ia(c, equipe, dias=10)
+    ii.rodar(pool)
+    with pool.connection() as c:
+        # o lembrete saiu há 7 dias; ele respondeu, a IA respondeu, e ele sumiu de novo
+        c.execute("update mensagens set criado_em = now() - interval '7 days' "
+                  "where texto='Toque 2 pra Bia'")
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em)
+                     values (%s,'whatsapp','in','lead','ainda estou vendo',now() - interval '5 days'),
+                            (%s,'whatsapp','out','bot','Fico no aguardo!',now() - interval '4 days')""",
+                  (cv, cv))
+        c.execute("update chip_regra_leads set toque_em = now() - interval '7 days'")
+        c.execute("update resgate_envios set criado_em = now() - interval '7 days'")
+        c.commit()
+        x = ii.devidos(c, EMPRESA)
+        assert [(y["passo"], y["toques"]) for y in x] == [(1, 0)]   # recomeça no lembrete
+
+
+@pytest.mark.parametrize("caso", ["cliente_por_ultimo", "gente_assumiu", "pediu_pra_parar",
+                                  "visita_marcada", "fechado", "de_outro_vendedor"])
+def test_quando_a_ia_nao_insiste(pool, equipe, duble, expediente, caso):
+    with pool.connection() as c:
+        _insiste(c, equipe)
+        lid, cv = _lead_da_ia(c, equipe, dias=5,
+                              ultimo="lead" if caso == "cliente_por_ultimo" else "bot",
+                              texto_in="não tenho mais interesse" if caso == "pediu_pra_parar"
+                              else "quero saber de festa")
+        if caso == "gente_assumiu":
+            c.execute("update conversas set agente_ativo=false, status='pendente' where id=%s", (cv,))
+        if caso == "visita_marcada":
+            c.execute("insert into eventos_agenda (conta_id, titulo, inicio, prospeccao_id) "
+                      "values (%s,'Visita — Bia',now() + interval '2 days',%s)", (EMPRESA, lid))
+        if caso == "fechado":
+            c.execute("update prospeccao set status='fechado' where id=%s", (lid,))
+        if caso == "de_outro_vendedor":
+            c.execute("update prospeccao set vendedor_id=%s where id=%s", (equipe["PEDRO"], lid))
+        c.commit()
+        assert ii.devidos(c, EMPRESA) == []
+
+
+def test_o_toque_que_falha_volta_a_conta_e_o_numero_espera(pool, equipe, duble, expediente):
+    duble["estado"]["ok"] = False
+    with pool.connection() as c:
+        _insiste(c, equipe)
+        lid, _ = _lead_da_ia(c, equipe, dias=4)
+    assert ii.rodar(pool)["toques"] == 0
+    with pool.connection() as c:
+        assert _toques(c, lid) == (0, False, False)
+        assert c.execute("select ok from resgate_envios where tipo='toque_ia'").fetchone()[0] is False
+    duble["estado"]["ok"] = True
+    ii.rodar(pool)
+    assert len(duble["saiu"]) == 1                             # não tenta de novo por 7 dias
+
+
+def test_o_teto_e_o_espaco_entre_dois_toques(pool, equipe, duble, expediente):
+    with pool.connection() as c:
+        _insiste(c, equipe)
+        _lead_da_ia(c, equipe, dias=4)
+        _lead_da_ia(c, equipe, dias=5, quem="Cris", numero="5586988880002")
+    ii.rodar(pool)
+    ii.rodar(pool)
+    assert [x["texto"] for x in duble["saiu"]] == ["Toque 2 pra Cris"]   # o silêncio mais antigo 1º
+
+
+def test_o_horario_da_ia_que_insiste():
+    brt = timezone(timedelta(hours=-3))
+    assert ii.pode_agora(datetime(2026, 9, 28, 9, 0, tzinfo=brt))           # segunda 9h
+    assert not ii.pode_agora(datetime(2026, 9, 28, 19, 0, tzinfo=brt))      # 19h já fechou
+    assert not ii.pode_agora(datetime(2026, 9, 27, 12, 0, tzinfo=brt))      # domingo
+
+
+def test_quem_e_a_ia(pool, equipe):
+    with pool.connection() as c:
+        assert cr.membros_ia(c, EMPRESA) == {equipe["ZAQ"]}
+        # o chip do Pedro, com o Pedro atendendo, não faz dele a IA
+        c.execute("insert into contas (id, nome, chip_de) values (37,'Chip do Pedro',%s)", (EMPRESA,))
+        cr.salvar(c, EMPRESA, 37, {"ativa": True, "membro_id": equipe["PEDRO"], "ia_ligada": False})
+        c.commit()
+        assert cr.membros_ia(c, EMPRESA) == {equipe["ZAQ"]}
+        assert cr.membros_ia(c, OUTRA) == set()

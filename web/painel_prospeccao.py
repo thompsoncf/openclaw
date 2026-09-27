@@ -4451,6 +4451,7 @@ async def comunicacao_regra_chip(request: Request):
              "ia_dias": f.getlist("ia_dias"), "ia_hora_ini": f.get("ia_hora_ini"),
              "ia_hora_fim": f.get("ia_hora_fim"), "ia_fora_texto": f.get("ia_fora_texto"),
              "ia_apresentacao": f.get("ia_apresentacao"),
+             "ia_insiste": sim("ia_insiste"),
              "aviso_agenda_membro_id": f.get("aviso_agenda_membro_id"),
              "aviso_dono_membro_id": f.get("aviso_dono_membro_id"),
              # a visita que a IA marca (migração 390) — só o cartão de quem vende festa
@@ -14622,6 +14623,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
         <div class="agrow" style="margin-top:.5rem"><div class="lab"><b>A IA atende as conversas deste dono, neste número</b><div>Só os contatos novos que caírem na regra. A chave geral do agente não muda.</div></div>
           <label class="sw"><input type="checkbox" name="ia_ligada" {% if r and r.ia_ligada %}checked{% endif %}><span></span></label></div>
+        <div class="agrow" style="margin-top:.5rem"><div class="lab"><b>A IA insiste quando o {{ voc.cliente }} some</b><div>Se ele para de responder, a IA manda um lembrete no 3º dia, a última chamada no 7º e, sem resposta, marca como perdido no 10º. Não insiste com quem pediu pra parar, com quem tem {{ 'visita' if regra_eventos else 'reunião' }} marcada, nem na conversa que alguém da equipe assumiu. Os {{ voc.leads }} deste dono não entram na esteira de cobrança dos vendedores.</div></div>
+          <label class="sw"><input type="checkbox" name="ia_insiste" {% if r and r.ia_insiste %}checked{% endif %}><span></span></label></div>
         <div class="agfield" style="margin-top:.4rem"><label>Horário da IA</label>
           <span class="ag-seg">
             <input type="radio" id="rgh24-{{ ch.id }}" name="ia_horario" value="24h" {% if not r or r.ia_horario != 'proprio' %}checked{% endif %}><label for="rgh24-{{ ch.id }}">24 horas</label>

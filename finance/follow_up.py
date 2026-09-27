@@ -377,14 +377,19 @@ def leads(c, conta_id: int, perfil: dict | None = None,
     out = []
     # O LEAD DO RESGATE É DA IA (migração 396): quem chama o cliente são os toques do
     # resgate, e o dono do card é o membro IA, que não tem celular pra receber cobrança
+    from finance import chip_regra as _cr
     from finance import resgate as _rg
     da_ia = _rg.leads_da_ia(c, conta_id)
+    # e o lead que a IA atende desde o primeiro "oi" (regra por número, 27/09/2026):
+    # o dono dele é o membro IA, que não é cobrado — a IA insiste sozinha
+    # (finance/ia_insiste.py)
+    ia = _cr.membros_ia(c, conta_id)
     for r in c.execute(_SQL_LEADS, {"conta": conta_id}).fetchall():
         (lid, status, vend, quem, temperatura, evento_em, ev_tipo, ev_conv, criado,
          na_etapa, saiu_na_etapa,
          ult_in, ult_out, tent, m_prazo, m_acao, m_em, adiados, vend_nome, m_por,
          msg_txt, msg_em, msg_dir, msg_id, visto, conversa_id, canal) = r
-        if lid in da_ia:
+        if lid in da_ia or vend in ia:
             continue
         ult = max([x for x in (ult_in, ult_out) if x], default=None)
         # festa que já passou e o lead segue aberto: não há o que propor

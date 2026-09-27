@@ -793,10 +793,12 @@ def avaliar_cobranca(c, conta_id: int, agora: datetime | None = None) -> dict:
              from prospeccao where conta_id=%s and estagio='lead'""", (conta_id,)).fetchall()
     out = dict(fora, pendentes=[])
     # o lead do resgate é do membro IA (migração 396): não há vendedor pra cobrar
+    from finance import chip_regra as _cr
     from finance import resgate as _rg
     da_ia = _rg.leads_da_ia(c, conta_id)
+    ia = _cr.membros_ia(c, conta_id)       # e o lead da IA do número (27/09/2026)
     for lead_id, status, vendedor_id, empresa in leads:
-        if status in encerradas or lead_id in da_ia:
+        if status in encerradas or lead_id in da_ia or vendedor_id in ia:
             continue
         estado, ref = bolas.get(lead_id, (None, None))
         prazo = prazo_do_estado(estado, cfg) if estado else None

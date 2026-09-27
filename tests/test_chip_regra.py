@@ -78,6 +78,7 @@ def pool():
     with p.connection() as c:
         c.execute(_SQL)
         c.execute((BASE / "388_regra_por_chip.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "401_ia_fora_da_esteira.sql").read_text(encoding="utf-8"))
         c.execute("insert into contas (id, nome, chip_de) values (%s,'Prime',null),"
                   "(%s,'CP Thiago',%s),(%s,'Outra',null)", (EMPRESA, CHIP2, EMPRESA, OUTRA))
         c.commit()

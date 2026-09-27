@@ -14,9 +14,11 @@ Regra combinada: a comissão é sobre o RECEBIDO. Lead ganho sem contrato não
 conta — é previsão, não dinheiro.
 """
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
+
+from tests.relogio_fixo import HOJE as _HOJE_BR
 from psycopg_pool import ConnectionPool
 
 from finance import comissao as com
@@ -63,7 +65,11 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   sinal_centavos int, sinal_pago_em timestamptz);   -- 161: o sinal do evento
 """
 
-HOJE = date.today()
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()`, e falhava no CI
+# das 21h à meia-noite.
+HOJE = _HOJE_BR
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 INI, FIM = HOJE - timedelta(days=30), HOJE
 
 

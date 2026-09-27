@@ -158,3 +158,8 @@ def _esquema_runtime_limpo():
     esquema_runtime.esquecer()
     yield
     esquema_runtime.esquecer()
+
+
+# O relógio fixo às 23h de Brasília (ver tests/relogio_fixo.py). Registrado aqui
+# para qualquer arquivo poder pedir com `usefixtures("servidor_as_23h")`.
+from tests.relogio_fixo import servidor_as_23h  # noqa: E402,F401

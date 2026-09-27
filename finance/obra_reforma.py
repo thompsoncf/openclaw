@@ -37,9 +37,10 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import date, timedelta
+from datetime import timedelta
 
 from . import obras as _ob
+from . import relogio
 
 TIPOS_ITEM = {"mao_de_obra": "Mão de obra", "material": "Material",
               "equipamento": "Equipamento"}
@@ -178,7 +179,7 @@ def por_token(pool, token: str) -> dict | None:
         p["etapa_nome"] = etapas.get(p.get("etapa"))
     o.update(conta_id=conta_id, obra_nome=obra[0] if obra else "",
              obra_endereco=obra[1] if obra else "", empresa=emp[0] if emp else "")
-    o["vencido"] = bool(o["validade_ate"] and o["validade_ate"] < date.today()
+    o["vencido"] = bool(o["validade_ate"] and o["validade_ate"] < relogio.hoje()
                         and o["status"] == "enviado")
     o["clausulas"] = clausulas(o)
     try:
@@ -303,7 +304,9 @@ def enviar(pool, conta_id: int, orcamento_id: int) -> dict:
         c.execute("""update obra_orcamentos set status='enviado', token=%s,
                             validade_ate=%s, atualizado_em=now()
                       where id=%s and conta_id=%s""",
-                  (token, date.today() + timedelta(days=VALIDADE_DIAS), orcamento_id, conta_id))
+                  # 10 dias contados do dia de BRASÍLIA: com `date.today()` o link
+                  # mandado às 22h ganhava um dia a mais (CI do #876, 27/09/2026)
+                  (token, relogio.hoje() + timedelta(days=VALIDADE_DIAS), orcamento_id, conta_id))
         c.commit()
     from . import obra_lead as _ol          # o card do lead da reforma vai pra Proposta
     _ol.orcamento_enviado(pool, conta_id, r[0])
@@ -332,9 +335,12 @@ def aceitar(pool, token: str, nome: str, doc: str, ip: str) -> bool:
                   set status='aceito', aceito_em=now(), aceito_nome=%s, aceito_doc=%s,
                       aceito_ip=%s, atualizado_em=now()
                 where token=%s and status='enviado'
-                  and (validade_ate is null or validade_ate >= current_date)
+                  and (validade_ate is null or validade_ate >= %s)
             returning id, conta_id, obra_id, versao, parcelas, prazo_dias, total_centavos""",
-            (nome[:120], (doc or "").strip()[:40] or None, (ip or "")[:60], token)).fetchone()
+            # a validade vence no fim do dia de BRASÍLIA; o `current_date` do banco é
+            # UTC e fechava o link às 21h do último dia
+            (nome[:120], (doc or "").strip()[:40] or None, (ip or "")[:60], token,
+             relogio.hoje())).fetchone()
         c.commit()
     if not r:
         return False
@@ -366,7 +372,7 @@ def _titulos_do_aceite(pool, conta_id: int, obra_id: int, orcamento_id: int, ver
     except Exception:  # noqa: BLE001 — sem a base de clientes, o título vai sem a ficha
         cliente_id = None
     plano = _plano(pool, "1.1.02")
-    hoje = date.today()
+    hoje = relogio.hoje()
     fim = hoje + timedelta(days=prazo or 30)
     ids = []
     rotulo_v = "" if versao == 1 else f" (aditivo {versao - 1})"

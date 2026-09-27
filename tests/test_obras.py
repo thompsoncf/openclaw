@@ -15,7 +15,6 @@ casa nenhuma; se entrassem, o âmbar do "Sem obra" nunca apagaria.
 `test_uma_conta_nao_ve_a_obra_da_outra` — multi-tenant.
 """
 import os
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -25,6 +24,12 @@ from db.conexao import init_schema
 from finance import empresa as emp
 from finance import obras as ob
 from finance.livro_caixa import LivroCaixa
+from tests.relogio_fixo import HOJE
+
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. A etapa concluída ganha o dia de
+# Brasília (`finance.relogio`), e `date.today()` aqui falhava das 21h à meia-noite.
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "057_natureza_lancamento.sql", "132_plano_contas_centros_custo.sql",
@@ -74,7 +79,7 @@ def _lanc(pool, conta, valor, *, tipo="despesa", categoria="Insumos", natureza="
             """insert into lancamentos (conta_id, tipo, valor_centavos, categoria, descricao,
                                         data, natureza, centro_custo_id, plano_conta_id)
                     values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
-            (conta, tipo, valor, categoria, descricao, quando or date.today(), natureza,
+            (conta, tipo, valor, categoria, descricao, quando or HOJE, natureza,
              centro, plano)).fetchone()[0]
         c.commit()
     return lid
@@ -258,7 +263,7 @@ def test_a_dre_por_centro_ve_a_parte_de_cada_obra(pool, conta):
     casas = _tres_casas(pool, conta)
     lid = _lanc(pool, conta, 90_000, plano=_plano(pool, "3.1.03"))
     ob.dividir(pool, conta, lid, [c["id"] for c in casas])
-    hoje = date.today()
+    hoje = HOJE
     d = emp.dre_por_centro(pool, conta, hoje.year, hoje.month)
     custos = next(li for li in d["linhas"] if "Custos" in li["nome"])
     for casa in casas:
@@ -317,7 +322,7 @@ def test_todas_feitas_a_casa_fica_pronta_e_desmarcar_volta(pool, conta):
     for e in o["etapas"]:
         r = ob.marcar_etapa(pool, conta, o["id"], e["id"])
     assert r["pct"] == 100 and r["status"] == "pronta"
-    assert ob.obter_obra(pool, conta, o["id"])["concluida_em"] == date.today()
+    assert ob.obter_obra(pool, conta, o["id"])["concluida_em"] == HOJE
     r = ob.marcar_etapa(pool, conta, o["id"], o["etapas"][0]["id"], concluida=False)
     assert r["status"] == "em_obra"
     assert ob.obter_obra(pool, conta, o["id"])["concluida_em"] is None
@@ -329,7 +334,7 @@ def test_salvar_etapas_guarda_a_data_de_quem_continua(pool, conta):
     linhas = [(e["chave"], e["nome"], e["peso"]) for e in o["etapas"] if e["chave"] != "pintura"]
     etapas = ob.salvar_etapas(pool, conta, o["id"], linhas + [(None, "Muro", 3)])
     por = {e["chave"]: e for e in etapas}
-    assert por["estrutura"]["concluida_em"] == date.today()
+    assert por["estrutura"]["concluida_em"] == HOJE
     assert "pintura" not in por and por["muro"]["nome"] == "Muro"
 
 

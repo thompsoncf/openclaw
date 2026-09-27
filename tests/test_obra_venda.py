@@ -17,10 +17,12 @@ ainda cai; depois dela, andar a venda de novo não pode duplicar a cobrança.
 receita no centro da obra, e é isso que fecha a margem da casa.
 """
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
+
+from tests.relogio_fixo import HOJE as _HOJE_BR
 from psycopg_pool import ConnectionPool
 
 from db.conexao import init_schema
@@ -39,7 +41,11 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "325_tipo_despesa.sql", "336_plano_fardamentos.sql", "349_plano_obras.sql",
               "351_obras.sql", "353_obra_venda_documentos.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
-HOJE = date.today()
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()`, e falhava no CI
+# das 21h à meia-noite.
+HOJE = _HOJE_BR
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 
 
 @pytest.fixture(scope="module")

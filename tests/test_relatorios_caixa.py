@@ -36,9 +36,11 @@ O que este teste protege:
 """
 import os
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
+
+from tests.relogio_fixo import HOJE as _HOJE_BR
 from psycopg_pool import ConnectionPool
 
 import web.painel_relatorios as rel
@@ -55,7 +57,11 @@ create table titulos (id bigserial primary key, conta_id bigint, lancamento_id b
   descricao text, tipo text, status text);
 """
 
-HOJE = date.today()
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()`: o período da aba
+# corta no dia de Brasília, e o teste falhava no CI das 21h à meia-noite.
+HOJE = _HOJE_BR
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 
 
 @pytest.fixture(scope="module")

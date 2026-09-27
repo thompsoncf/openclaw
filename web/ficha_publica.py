@@ -149,6 +149,8 @@ def ficha(request: Request, tok: str):
         # a cópia dos termos só pra quem provou a data (ou está no balcão)
         # a cópia dos termos só pra quem provou a data (no tablet do balcão, não: a sessão fecha)
         aceitos = cfl.termos_aceitos(c, f["conta_id"], f["id"]) if nivel == "data" else []
+        from finance import clinica_documentos as cdoc
+        documentos = cdoc.no_link(c, f["conta_id"], f["id"], agora) if nivel == "data" else []
         c.commit()
     passo = int(q["passo"]) if re.fullmatch(r"[1-4]", q.get("passo") or "") else None
     if not liberado:
@@ -164,7 +166,7 @@ def ficha(request: Request, tok: str):
         empresa=empresa, tok=tok, passo=passo, PASSOS=_PASSOS, erro=erro, aviso=aviso, s=s, d=dados,
         nome=f["nome"], liberado=liberado, menor=bool(s.get("menor")), curta=curta,
         perguntas=cpc.perguntas(curta), GRAVIDEZ=cpc.GRAVIDEZ, COMO=cfl.COMO_CONHECEU, IMAGEM=cfl.IMAGEM,
-        termos=termos, aceitos=aceitos, versoes=cfl.versoes_vistas(termos),
+        termos=termos, aceitos=aceitos, versoes=cfl.versoes_vistas(termos), documentos=documentos,
         ev=ev, quando=(f"{ca.dia_txt(ev['inicio'])} às {ev['hora']}" if ev else ""),
         prof=prof))
 
@@ -196,6 +198,27 @@ def _balcao(request: Request, tok: str, form: dict):
     # ---- 2: o tablet fica só com ESTA ficha: a de quem parou no meio sai daqui
     request.session["fichas_ok"] = {tok: [_time.time(), "balcao"]}
     return _ir(request, tok)
+
+
+@router.get("/ficha/{tok}/documento/{doc_id}.pdf")
+def documento_pdf(request: Request, tok: str, doc_id: int):
+    """O documento que a clínica mandou (30 dias), pra quem provou a data de nascimento."""
+    if _nivel(request, tok) != "data":
+        return _ir(request, tok)
+    from fastapi.responses import Response
+    from finance import clinica_documentos as cdoc
+    with get_pool().connection() as c:
+        f = _aberta(c, tok)
+        if not f:
+            return _nao_achou()
+        d = next((x for x in cdoc.no_link(c, f["conta_id"], f["id"], datetime.now(timezone.utc)) if x["id"] == doc_id),
+                 None)
+        doc = cdoc.pdf(c, f["conta_id"], f["id"], d) if d else None
+    if not doc:
+        return _nao_achou()
+    return Response(doc, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="documento-{doc_id}.pdf"',
+                             "Cache-Control": "no-store, max-age=0", "Content-Security-Policy": "sandbox"})
 
 
 @router.get("/ficha/{tok}/termo/{aceite_id}.pdf")
@@ -433,6 +456,7 @@ _TPL_PASSOS = r"""<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   {% if ev %}<div style="margin-top:.3rem">Sua consulta: {{ quando }}{% if prof %} com {{ prof }}{% endif %}.</div>{% endif %}
   {% if s.falta %}<div class="mut" style="margin-top:.3rem">Ainda falta: {{ s.falta|join(', ') }}. <a href="/ficha/{{ tok }}?passo=1">Completar</a></div>{% endif %}
 </div>
+{% if documentos %}<div class="cx"><b>Documentos da consulta</b>{% for x in documentos %}<div style="margin-top:.3rem"><a href="/ficha/{{ tok }}/documento/{{ x.id }}.pdf">{{ x.titulo }} (PDF)</a> <span class="mut">· {{ x.assinado_em.strftime('%d/%m/%Y') }}</span></div>{% endfor %}</div>{% endif %}
 {% if aceitos %}<div class="cx"><b>Seus termos</b>{% for a in aceitos %}<div style="margin-top:.3rem"><a href="/ficha/{{ tok }}/termo/{{ a.id }}.pdf">{{ a.titulo }} (PDF)</a> <span class="mut">· {{ a.quando.strftime('%d/%m/%Y') }}</span></div>{% endfor %}</div>{% endif %}
 {% if balcao %}<div class="cx"><b>Pode devolver o tablet à recepção.</b> Obrigado!</div>
 {% else %}<p class="mut">Precisa mudar algo? Abra o mesmo link ou fale com a clínica pelo WhatsApp.</p>{% endif %}

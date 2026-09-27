@@ -25,6 +25,7 @@ from finance import clinica_agenda as ca
 from finance import clinica_pacientes as cpa
 from finance import clinica_preconsulta as cpc
 from finance import clinica_prontuario as prt
+from finance import clinica_documentos as cdoc
 from finance import clinica_prontuario_arquivos as parq
 from web.painel_clinica_agenda import _acesso, _int
 from web.portal import _env, _render
@@ -89,6 +90,9 @@ def prontuario(request: Request, cliente_id: int):
         pre = cpc.ultima(c, conta[0], cliente_id)
         evos = prt.historia(c, conta[0], cliente_id, q)
         arquivos = parq.listar(c, conta[0], cliente_id)
+        docs = cdoc.listar(c, conta[0], cliente_id, q)
+        for d in docs:
+            d["integro"] = cdoc.integro(d, cliente_id) if d["status"] == "assinado" else None
         imagem_op, imagem_txt = parq.autorizacao_de_imagem(c, conta[0], cliente_id)
         ev = ca.evento(c, conta[0], evento) if evento else None
         if ev and cpa_do_evento(c, conta[0], evento) != cliente_id:
@@ -97,6 +101,7 @@ def prontuario(request: Request, cliente_id: int):
     return _render("clinica_prontuario.html", request, titulo=f"Prontuário · {p['nome']}", secao_ativa="pacientes",
                    p=p, fc=fc, pre=pre, evos=evos, q=q, ev=ev, MODELOS=prt.MODELOS,
                    arquivos=arquivos, cofre=parq.configurado(), imagem_op=imagem_op, imagem_txt=imagem_txt,
+                   docs=docs, TIPOS_DOC=cdoc.TIPOS,
                    aviso=request.session.pop("prontuario_aviso", ""), erro=request.session.pop("prontuario_erro", ""))
 
 
@@ -186,6 +191,124 @@ def arquivo(request: Request, cliente_id: int, arquivo_id: int):
                     headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache",
                              "Content-Security-Policy": "sandbox",
                              "Content-Disposition": f'inline; filename="prontuario-{arquivo_id}"'})
+
+
+# ------------------------------------------------------------------ documentos (fase 5)
+
+@router.post(URL + "/{cliente_id}/documento/novo")
+async def documento_novo(request: Request, cliente_id: int):
+    form = dict(await request.form())
+    return await run_in_threadpool(_documento_novo, request, cliente_id, form)
+
+
+def _documento_novo(request: Request, cliente_id: int, form: dict):
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, q = ok
+        agora = datetime.now(timezone.utc)
+        p = cpa.ficha(c, conta[0], cliente_id, agora)
+        did = cdoc.novo(c, conta[0], cliente_id, q, str(form.get("tipo") or ""), p["nome"] if p else "", agora,
+                        _int(form.get("evento")))
+        c.commit()
+    if not did:
+        return _ir(request, cliente_id, erro="Tipo de documento inválido.")
+    return RedirectResponse(f"{URL}/{cliente_id}/documento/{did}", status_code=303)
+
+
+@router.get(URL + "/{cliente_id}/documento/{doc_id}", response_class=HTMLResponse)
+def documento(request: Request, cliente_id: int, doc_id: int):
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, q = ok
+        d = cdoc.documento(c, conta[0], cliente_id, doc_id)
+        if not d or d["profissional_id"] != q["profissional_id"] or d["status"] != "rascunho":
+            return _ir(request, cliente_id)
+        try:
+            acc.ler(c, conta[0], request.session, cliente_id, f"abriu o rascunho do documento #{doc_id}", _ip(request))
+        except acc.SemRegistro:
+            return _ir(request, cliente_id, erro="Não foi possível abrir agora.")
+        p = cpa.ficha(c, conta[0], cliente_id, datetime.now(timezone.utc))
+        c.commit()
+    return _render("clinica_documento.html", request, titulo=f"{d['titulo']} · {p['nome']}", secao_ativa="pacientes",
+                   p=p, d=d, erro=request.session.pop("prontuario_erro", ""))
+
+
+@router.post(URL + "/{cliente_id}/documento/{doc_id}/salvar")
+async def documento_salvar(request: Request, cliente_id: int, doc_id: int):
+    form = dict(await request.form())
+    return await run_in_threadpool(_documento_salvar, request, cliente_id, doc_id, form)
+
+
+def _documento_salvar(request: Request, cliente_id: int, doc_id: int, form: dict):
+    emitir = form.get("acao") == "emitir"
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, q = ok
+        erro = cdoc.salvar(c, conta[0], cliente_id, doc_id, q, form)
+        if not erro and emitir:
+            erro = cdoc.emitir(c, conta[0], cliente_id, doc_id, q)
+        if erro:
+            c.rollback()
+            request.session["prontuario_erro"] = erro
+            return RedirectResponse(f"{URL}/{cliente_id}/documento/{doc_id}", status_code=303)
+        if emitir:
+            acc.registrar(c, conta[0], q, cliente_id, f"emitiu o documento #{doc_id}", _ip(request))
+        c.commit()
+    if emitir:
+        return _ir(request, cliente_id, "Documento emitido.")
+    return RedirectResponse(f"{URL}/{cliente_id}/documento/{doc_id}", status_code=303)
+
+
+@router.get(URL + "/{cliente_id}/documento/{doc_id}/pdf")
+def documento_pdf(request: Request, cliente_id: int, doc_id: int):
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, _q = ok
+        d = cdoc.documento(c, conta[0], cliente_id, doc_id)
+        if not d or d["status"] != "assinado":
+            return Response("Documento não encontrado.", status_code=404)
+        try:
+            if not acc.ler(c, conta[0], request.session, cliente_id, f"abriu o documento #{doc_id}", _ip(request)):
+                return _volta_ficha(cliente_id)
+        except acc.SemRegistro:
+            return Response("Não foi possível abrir agora.", status_code=503)
+        doc = cdoc.pdf(c, conta[0], cliente_id, d)
+        c.commit()
+    if not doc:
+        return Response("Este documento não tem PDF (fica no talão).", status_code=404)
+    return Response(doc, media_type="application/pdf",
+                    headers={"Cache-Control": "no-store, max-age=0", "Content-Security-Policy": "sandbox",
+                             "Content-Disposition": f'inline; filename="documento-{doc_id}.pdf"'})
+
+
+@router.post(URL + "/{cliente_id}/documentos/enviar")
+async def documentos_enviar(request: Request, cliente_id: int):
+    form = await request.form()
+    ids = [x for x in (_int(v) for v in form.getlist("doc")) if x]
+    return await run_in_threadpool(_documentos_enviar, request, cliente_id, ids)
+
+
+def _documentos_enviar(request: Request, cliente_id: int, ids: list[int]):
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, q = ok
+        erro = cdoc.enviar(c, conta[0], cliente_id, ids, request.session.get("membro_id"))
+        if erro:
+            c.rollback()
+            return _ir(request, cliente_id, erro=erro)
+        acc.registrar(c, conta[0], q, cliente_id, f"mandou o link dos documentos {ids}", _ip(request))
+        c.commit()
+    return _ir(request, cliente_id, "Link dos documentos enviado no WhatsApp.")
 
 
 @router.get(URL + "/{cliente_id}/comparar", response_class=HTMLResponse)
@@ -443,6 +566,22 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     </form>{% else %}<div class="pr-m" style="margin-top:.5rem">O cofre das fotos ainda não está ligado nesta instalação.</div>{% endif %}
   </div>
 
+  <div class="pr-cx" id="documentos"><b>Documentos</b> <span class="pr-m">· receita, atestado, pedido de exame, laudo…</span>
+    {% if docs %}<form method="post" action="/painel/clinica/prontuario/{{ p.id }}/documentos/enviar">
+    {% for d in docs %}<div style="margin-top:.35rem">
+      {% if d.status == 'assinado' and d.tipo != 'notificacao' %}<input type="checkbox" name="doc" value="{{ d.id }}" style="width:auto">{% endif %}
+      <b>{{ d.titulo }}</b> <span class="pr-m">· {{ d.criado_em.strftime('%d/%m/%Y') }}{% if d.tipo == 'notificacao' %} · talão nº {{ d.numero_talao }}{% endif %}</span>
+      {% if d.status == 'rascunho' %}<span class="pr-tag y">rascunho</span> <a href="/painel/clinica/prontuario/{{ p.id }}/documento/{{ d.id }}">continuar</a>
+      {% else %}{% if d.integro %}<span class="pr-tag g">emitido · íntegro</span>{% else %}<span class="pr-tag r">ALTERADO</span>{% endif %}
+        {% if d.tipo != 'notificacao' %}<a href="/painel/clinica/prontuario/{{ p.id }}/documento/{{ d.id }}/pdf" target="_blank" rel="noopener">PDF</a>{% endif %}
+        {% if d.enviado_em %}<span class="pr-m">· enviado {{ d.enviado_em.strftime('%d/%m %H:%M') }}</span>{% endif %}{% endif %}</div>{% endfor %}
+      <div class="pr-acoes"><button class="sec">Mandar os marcados no WhatsApp (link com a data de nascimento)</button></div></form>{% endif %}
+    <form method="post" action="/painel/clinica/prontuario/{{ p.id }}/documento/novo" class="pr-acoes">
+      {% if ev %}<input type="hidden" name="evento" value="{{ ev.id }}">{% endif %}
+      <select name="tipo" style="width:auto;margin:0">{% for k, t in TIPOS_DOC.items() %}<option value="{{ k }}">{{ t[0] }}</option>{% endfor %}</select>
+      <button>Novo documento</button></form>
+  </div>
+
   <div class="pr-cx"><b>Nova evolução</b>{% if ev %} <span class="pr-m">· do atendimento de {{ ev.hora }} ({{ ev.tipo }})</span>{% endif %}
     <form method="post" action="/painel/clinica/prontuario/{{ p.id }}/evolucao/nova" class="pr-acoes">
       {% if ev %}<input type="hidden" name="evento" value="{{ ev.id }}">{% endif %}
@@ -504,6 +643,24 @@ _TPL_COMPARAR = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 </div>
 {% endblock %}"""
 
+_TPL_DOC = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
+<div class="pr-pag">
+  <div class="pr-topo"><div><h2>{{ d.titulo }} · {{ p.nome_social or p.nome }}</h2><div class="pr-m">rascunho · só você vê</div></div>
+    <div class="pr-acoes"><a href="/painel/clinica/prontuario/{{ p.id }}#documentos">‹ Prontuário</a></div></div>
+  {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
+  <form class="pr-cx" method="post" action="/painel/clinica/prontuario/{{ p.id }}/documento/{{ d.id }}/salvar">
+    <label>Título<input name="titulo" maxlength="120" value="{{ d.titulo }}"></label>
+    {% if d.tipo == 'notificacao' %}<label>Número do talão (receita amarela ou azul)<input name="numero_talao" maxlength="40" value="{{ d.numero_talao }}"></label>
+    <div class="pr-m">A notificação continua no talão de papel da vigilância: aqui fica só o registro.</div>{% endif %}
+    <label>{{ 'Medicamento' if d.tipo == 'notificacao' else 'Texto' }}<textarea name="corpo" style="min-height:14rem">{{ d.corpo }}</textarea></label>
+    <div class="pr-acoes"><button class="sec" name="acao" value="salvar">Salvar rascunho</button>
+      <button name="acao" value="emitir" onclick="return confirm('Emitir? Depois de emitido, o documento não muda.')">Emitir</button></div>
+    <div class="pr-m">Troque os ___ antes de emitir. Emitido, leva a hora, seu conselho e o código de conferência; sem certificado digital, o PDF sai pra imprimir e assinar.</div>
+  </form>
+</div>
+{% endblock %}"""
+
 _env.loader.mapping["clinica_prontuario.html"] = _TPL
+_env.loader.mapping["clinica_documento.html"] = _TPL_DOC
 _env.loader.mapping["clinica_comparar.html"] = _TPL_COMPARAR
 _env.loader.mapping["clinica_evolucao.html"] = _TPL_EVO

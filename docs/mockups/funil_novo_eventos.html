@@ -87,14 +87,31 @@ b{font-weight:600}
 
 /* o quadro de verdade */
 .palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
-.tela{width:1240px;padding:18px;display:flex;flex-direction:column;gap:10px}
+.tela{width:1560px;padding:18px;display:flex;flex-direction:column;gap:10px}
 .tb{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
 .tb h3{font-size:1.15rem}
 .tb .num{font-size:.78rem;color:var(--dim)}
 .seg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;padding:2px;background:var(--bg);gap:2px}
 .seg span{font-size:.72rem;padding:.2rem .55rem;border-radius:6px;color:var(--dim)}
 .seg span.on{background:var(--neon);color:#062312;font-weight:600}
-.cols{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:7px}
+.cols{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:7px}
+.cl.rsg{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.cl.esp{border-style:dashed;border-color:var(--ambar-borda)}
+.cl.perd{border-style:dashed;border-color:var(--coral-borda)}
+.fila{border:1px dashed var(--ambar-borda);border-radius:8px;padding:.3rem .4rem;font-size:.6rem;color:var(--ambar-2);display:flex;flex-direction:column;gap:.1rem}
+.fila b{font-size:.66rem;color:var(--text)}
+.tr{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.tc{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:1rem 1.05rem;display:flex;flex-direction:column;gap:.55rem;font-size:.84rem;color:var(--dim)}
+.tc.r{border-color:var(--ambar-borda)} .tc.e{border-color:var(--ambar-borda);border-style:dashed} .tc.p{border-color:var(--coral-borda)}
+.tc h3{font-size:1.05rem;color:var(--text);display:flex;gap:.5rem;align-items:center}
+.tc .onde{font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.tc dl{margin:0;display:flex;flex-direction:column;gap:.45rem}
+.tc dt{font-size:.7rem;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;font-family:var(--mono)}
+.tc dd{margin:0}
+.tc dd b{color:var(--text)}
+.tc .muda{border-top:1px dashed var(--line-2);padding-top:.5rem;color:var(--ia-2)}
+.tc .muda b{color:var(--ia-2)}
+@media (max-width:820px){.tr{grid-template-columns:1fr}}
 .cl{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.4rem;display:flex;flex-direction:column;gap:6px;min-height:250px}
 .cl.nova{border-color:var(--ia-borda)}
 .cl h4{margin:0;font-family:var(--display);font-size:.72rem;display:flex;justify-content:space-between;gap:.25rem}
@@ -200,7 +217,7 @@ b{font-weight:600}
     <div class="et"><span class="n">8</span><h3>Fechado</h3><span class="tag igual">igual</span><span class="g">Contrato assinado. Sai do quadro até a festa.</span><span class="hoje">hoje: Fechado</span></div>
     <div class="et nova"><span class="n">9</span><h3>Pós-festa</h3><span class="tag novo">nova</span><span class="g">Volta <b>no dia seguinte à festa</b>: agradecer, avaliação, indicação.</span><span class="hoje">não existe</span></div>
   </div></div>
-  <div class="lado"><span class="pl fu"><b>Perdido</b> com motivo, igual</span><span class="pl at"><b>Lista de espera</b> nova: data ocupada não vira perdido</span><span class="pl at"><b>Resgate</b> igual: a coluna que já existe</span><span class="pl"><b>Follow-up</b> (a coluna) sai: está vazia, e a tela Follow-up já faz esse papel</span></div>
+  <div class="lado"><span class="pl at"><b>♻️ Resgate</b> igual ao que fizemos, na frente do quadro</span><span class="pl at"><b>⏳ Lista de espera</b> nova, antes do Perdido</span><span class="pl fu"><b>Perdido</b> igual, no fim</span><span class="pl"><b>Follow-up</b> (a coluna) sai: está vazia, e a tela Follow-up já faz esse papel</span></div>
 </section>
 
 <section class="sec">
@@ -246,10 +263,13 @@ b{font-weight:600}
 
 <section class="sec">
   <header><h2>Como fica o quadro</h2>
-    <p>O funil de sempre, com as colunas novas. O selo mostra quem atende: 👤 vendedor, 🤖 ZAQ SDR, ♻️ Resgate.</p></header>
+    <p>O funil de sempre, com as colunas novas. O <b>Resgate</b> continua na frente, como hoje; a <b>Lista de espera</b> e o <b>Perdido</b> ficam no fim. O selo mostra quem atende: 👤 vendedor, 🤖 ZAQ SDR, ♻️ Resgate.</p></header>
   <div class="palco"><div class="tela">
     <div class="tb"><h3>Funil</h3><span class="seg"><span class="on">Vendas</span><span>Atendimento</span></span><span class="seg"><span class="on">todos</span><span>🤖 IA</span><span>👤 equipe</span></span><span class="num">Prime Eventos · 512 no quadro</span></div>
     <div class="cols">
+      <div class="cl rsg"><h4>♻️ Resgate <span>4</span></h4>
+        <div class="cd"><span class="who rsg">♻️ era do Pedro</span><b>Gabriela</b><span class="m">veio do follow-up · 9 dias parado</span><span class="sel rel">etapa: Proposta</span></div>
+        <div class="fila"><span>os próximos que a IA chamaria</span><b>Rafa</b><span>Contatado · 8 dias</span></div></div>
       <div class="cl"><h4>Novo <span>3</span></h4>
         <div class="cd"><span class="who">👤 Jacqueline</span><b>Renata</b><span class="m">CP Zarb · agora</span></div></div>
       <div class="cl"><h4>Contatado <span>240</span></h4>
@@ -270,14 +290,43 @@ b{font-weight:600}
         <div class="cd"><span class="who">👤 Jacqueline</span><b>Sofia</b><span class="m">casamento · 07/03</span></div></div>
       <div class="cl nova"><h4>Pós-festa <span>2</span></h4>
         <div class="cd"><span class="who">👤 Thiago</span><b>Ana</b><span class="m">festa ontem</span><span class="sel rel">pedir avaliação</span></div></div>
-    </div>
-    <div class="faixa">
-      <div class="cl rsg"><h4>♻️ Resgate <span>4</span></h4><div class="cd"><span class="who rsg">♻️ era do Pedro</span><b>Gabriela</b><span class="m">7 dias sem mensagem · IA retoma</span></div></div>
-      <div class="cl esp"><h4>⏳ Lista de espera <span>3</span></h4><div class="cd"><span class="who">👤 Jacqueline</span><b>Léo</b><span class="m">quer sáb 13/02 · 2º da fila</span></div></div>
-      <div class="cl perd"><h4>Perdido <span>70</span></h4><div class="cd"><span class="who">👤 Pedro</span><b>Diego</b><span class="m">fechou com outro</span></div></div>
+      <div class="cl esp"><h4>⏳ Lista de espera <span>3</span></h4>
+        <div class="cd"><span class="who">👤 Jacqueline</span><b>Léo</b><span class="m">quer sáb 13/02 · 1º da fila</span><span class="sel rel">data segurada por outro · vence em 41h</span></div></div>
+      <div class="cl perd"><h4>Perdido <span>70</span></h4>
+        <div class="cd"><span class="who">👤 Pedro</span><b>Diego</b><span class="m">fechou com outro</span><span class="sel bad">o Resgate não chama</span></div></div>
     </div>
   </div></div>
   <p class="nota"><i>ler</i> <span>Os números são ilustrativos, a partir do quadro de hoje. Os nomes são de exemplo.</span></p>
+</section>
+
+
+<section class="sec" id="laterais">
+  <header><h2>Resgate, Lista de espera e Perdido</h2>
+    <p>As três colunas que não são etapa de venda: uma pra quem <b>parou</b>, uma pra quem está <b>esperando</b> e
+    uma pra quem <b>saiu</b>. O Resgate fica exatamente como fizemos; em lilás, o pouco que o funil novo muda nele.</p></header>
+  <div class="tr">
+    <div class="tc r"><span class="onde">na frente do quadro · como hoje</span><h3>♻️ Resgate</h3>
+      <dl>
+        <dt>quem entra</dt><dd>Lead do <b>modelo 1</b> com <b>7 dias sem mensagem nossa</b> (14 se já teve visita ou orçamento); o perdido do vendedor, conforme o motivo; e o perdido da IA do número, <b>uma vez</b>, 30 dias depois.</dd>
+        <dt>o card</dt><dd>Continua na etapa dele (o selo diz "etapa: Proposta"). A IA lê a conversa, faz o resumo e retoma. Se o cliente responde e marca visita, o card anda pelas colunas de sempre.</dd>
+        <dt>igual</dt><dd>Ensaio e Ligado, teto por dia, horário, aviso ao vendedor 2 dias antes, segurar com justificativa, toques no 3º e 7º dia, perdido no 10º, e "os próximos que a IA chamaria" embaixo da coluna.</dd>
+      </dl>
+      <span class="muda">O que muda: o "esquentado" (14 dias) passa a ler as colunas novas, <b>Visita feita</b> ou <b>Proposta</b>. E quem está em <b>Data segurada</b>, <b>Lista de espera</b> ou <b>Pós-festa</b> não entra no Resgate.</span></div>
+    <div class="tc e"><span class="onde">no fim, antes do Perdido · nova</span><h3>⏳ Lista de espera</h3>
+      <dl>
+        <dt>quem entra</dt><dd>O cliente quer uma data que <b>outro já segurou ou fechou</b>, e aceita esperar. Hoje ele vira perdido "data indisponível".</dd>
+        <dt>enquanto espera</dt><dd>Ninguém cobra: fica fora da esteira, do Follow-up e do Resgate. Não é lead parado, é lead esperando. O card mostra a posição na fila e quando a reserva do outro vence.</dd>
+        <dt>quando sai</dt><dd><b>A data vagou</b> (a reserva venceu sem sinal, ou cancelaram): o primeiro da fila volta pra <b>Proposta</b> e quem atende é avisado (no modelo 2, a IA chama). <b>A data passou</b>: vai sozinho pra Perdido, "data indisponível".</dd>
+      </dl>
+      <span class="muda">Se o cliente não quer esperar, vai pra Perdido como hoje.</span></div>
+    <div class="tc p"><span class="onde">no fim · igual</span><h3>Perdido</h3>
+      <dl>
+        <dt>como hoje</dt><dd>Motivo obrigatório. Se o cliente voltar a escrever, reabre em Contatado.</dd>
+        <dt>o Resgate e os motivos</dt><dd><b>Nunca chama</b>: fechou com outro, ficou com o atual, fora do que a Prime faz, desistiu da festa, sem interesse, localização. <b>Uma vez só</b>: não respondeu. <b>Data indisponível</b>: só se a festa está a mais de 30 dias, oferecendo outra data.</dd>
+        <dt>modelo 2</dt><dd>O perdido da IA (10º dia sem resposta) volta uma vez pelo Resgate depois de 30 dias.</dd>
+      </dl>
+      <span class="muda">O que muda: a <b>Data segurada que vence sem sinal não vira perdido</b>: volta pra Proposta com o selo "reserva venceu", e a data vai pro primeiro da Lista de espera.</span></div>
+  </div>
 </section>
 
 <section class="sec">

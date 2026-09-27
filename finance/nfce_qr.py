@@ -34,6 +34,40 @@ def _grande_demais(dados: bytes) -> bool:
     return bool(dados) and len(dados) > _MAX_QR_BYTES
 
 
+# O teto em BYTES acima nao basta: em 27/09/2026 um PDF de poucos KB com a
+# pagina grande (foto convertida em PDF, pagina do tamanho da foto) derrubou o
+# painel por memoria (>2 GB) — a pagina renderizada a 200 DPI e as ampliacoes
+# x2..x5 da cascata crescem com o tamanho em PIXELS, nao com o do arquivo.
+# Medido: PDF de 11 KB com pagina 2000x1500 pt -> pico de 3,2 GB. Os dois tetos
+# abaixo limitam em pixels; foto de cupom tipica (~1300 px, comprimida pelo
+# WhatsApp/Telegram) passa por eles sem mudar nada.
+_MAX_LADO_PX = 2000             # maior lado da imagem que entra na cascata
+_MAX_PX_AMPLIADO = 16_000_000   # teto de pixels de cada ampliacao da cascata
+
+
+def _zoom_pagina(largura_pt: float, altura_pt: float) -> float:
+    """Zoom do render da pagina: 200 DPI, mas nunca passando de _MAX_LADO_PX no
+    maior lado (pagina A4 sai a ~170 DPI, legivel; pagina gigante encolhe)."""
+    maior = max(largura_pt, altura_pt, 1.0)
+    return min(200 / 72, _MAX_LADO_PX / maior)
+
+
+def _cabe(img, fx: float) -> bool:
+    """A ampliacao de `img` por `fx` fica dentro do teto de pixels?"""
+    h, w = img.shape[:2]
+    return h * w * fx * fx <= _MAX_PX_AMPLIADO
+
+
+def _reduzir(cv2, arr):
+    """Encolhe a imagem ate _MAX_LADO_PX no maior lado (so' encolhe)."""
+    h, w = arr.shape[:2]
+    maior = max(h, w)
+    if maior <= _MAX_LADO_PX:
+        return arr
+    f = _MAX_LADO_PX / maior
+    return cv2.resize(arr, None, fx=f, fy=f, interpolation=cv2.INTER_AREA)
+
+
 def deve_mandar_dica_qr(dica_qr: bool, chave_nfce, tools_usadas) -> bool:
     """A dica de QR ('deixe o QR visivel') so' faz sentido em CUPOM FISCAL - que
     tem QR. Comprovante de Pix/banco NAO tem QR, entao nao deve receber a dica
@@ -215,6 +249,7 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
         arr = cv2.imdecode(np.frombuffer(imagem_bytes, np.uint8), cv2.IMREAD_COLOR)
         if arr is None:
             return None
+        arr = _reduzir(cv2, arr)
     except Exception:  # noqa: BLE001
         return None
 
@@ -248,7 +283,7 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
     if (ch := _le(arr)):
         return ch
     try:
-        if (ch := _le(cv2.resize(arr, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC))):
+        if _cabe(arr, 2) and (ch := _le(cv2.resize(arr, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC))):
             return ch
     except Exception:  # noqa: BLE001
         pass
@@ -263,6 +298,8 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
             if corte.size == 0:
                 continue
             for fx in (3, 4, 5):
+                if not _cabe(corte, fx):
+                    break
                 grande = cv2.resize(corte, None, fx=fx, fy=fx, interpolation=cv2.INTER_CUBIC)
                 if (ch := _le(grande)):
                     return ch
@@ -277,7 +314,7 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
             if (ch := _le(var)):
                 return ch
             try:
-                if (ch := _le(cv2.resize(var, None, fx=2, fy=2,
+                if _cabe(var, 2) and (ch := _le(cv2.resize(var, None, fx=2, fy=2,
                                          interpolation=cv2.INTER_CUBIC))):
                     return ch
             except Exception:  # noqa: BLE001
@@ -287,6 +324,8 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
                 corte_v = var[int(hv * 0.40):, int(wv * 0.10):int(wv * 0.90)]
                 if corte_v.size:
                     for fx in (3, 4):
+                        if not _cabe(corte_v, fx):
+                            break
                         gv = cv2.resize(corte_v, None, fx=fx, fy=fx,
                                         interpolation=cv2.INTER_CUBIC)
                         if (ch := _le(gv)):
@@ -339,7 +378,9 @@ def ler_chave_de_pdf(pdf_bytes: bytes, max_paginas: int = 3) -> str | None:
             return None
         for i in range(min(max_paginas, doc.page_count)):
             try:
-                png = doc[i].get_pixmap(dpi=200).tobytes("png")
+                pg = doc[i]
+                z = _zoom_pagina(pg.rect.width, pg.rect.height)
+                png = pg.get_pixmap(matrix=fitz.Matrix(z, z)).tobytes("png")
             except Exception:  # noqa: BLE001
                 continue
             chave = ler_chave_da_imagem(png)

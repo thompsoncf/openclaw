@@ -27,6 +27,11 @@ from finance.agente_financeiro import criar_agente_financeiro
 from core.transcribe import transcritor_se_configurado
 
 logging.basicConfig(level=logging.INFO)
+# O httpx loga em INFO o endereço inteiro de cada chamada — e o da API do
+# Telegram leva a chave do bot no caminho (/bot<token>/sendMessage). Em
+# 27/09/2026 a chave estava escrita em cada linha do log do Render. Em WARNING
+# o httpx só fala de erro, sem a URL de cada chamada.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 load_dotenv()
 
 MSG_NAO_CADASTRADO = (

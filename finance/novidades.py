@@ -215,6 +215,21 @@ def _resgate_ligado(pool, conta_id: int) -> bool:
         return False
 
 
+def _resgate_ativo(pool, conta_id: int) -> bool:
+    """O RESGATE DA IA fora do 'off' — em Ensaio OU Ligado (migração 410)? É quando o
+    supervisor tem o "Testar comigo" e o número dele é tratado à parte. O
+    `resgate_ligado` deixaria de fora quem ainda testa em Ensaio. Mesmo portão do
+    botão (`resgate.config`). Falha fechada."""
+    try:
+        from finance import resgate as _rg
+        with pool.connection() as c:
+            return _rg.config(c, conta_id).get("modo") in ("ensaio", "ligado")
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ver o resgate da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
 def _resgate_eventos(pool, conta_id: int) -> bool:
     """Resgate LIGADO e vende festa (migração 399): é quem vê a aba Resgate, que mora
     na tela do Desafio — e o Desafio só existe pra quem vende festa (a rota manda os
@@ -277,6 +292,7 @@ PUBLICOS_CONTA = {
     "resgate_ligado": _resgate_ligado,
     "resgate_eventos": _resgate_eventos,
     "esteira_ligada": _esteira_ligada,
+    "resgate_ativo": _resgate_ativo,
 }
 
 # A lista completa — é ela que o check da migração espelha.

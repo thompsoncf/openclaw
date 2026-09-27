@@ -70,7 +70,7 @@ create table funil_movimentos (id bigserial primary key, conta_id bigint, prospe
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
 create table funil_etapas (conta_id bigint, chave text, fase text);
 create table canais_config (conta_id bigint, canal text, provedor text, ativo boolean,
-  desconectado_em timestamptz);
+  desconectado_em timestamptz, rotulo text);
 """
 
 
@@ -94,6 +94,7 @@ def pool():
         c.execute((BASE / "398_resgate_toques.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "401_ia_fora_da_esteira.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "403_resgate_origem_e_espelho.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "409_resgate_teste_chip.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos')")
         c.execute("insert into contas (id, nome, chip_de, nicho_id) values "
                   "(%s,'Prime',null,1),(%s,'CP Thiago',%s,null),(%s,'Outra',null,1)",
@@ -1446,7 +1447,7 @@ def test_a_letra_escolhida_confirma_sem_gravar_nada(pool, equipe, duble, monkeyp
     rg.responder_supervisor(pool, EMPRESA, "quero visitar", "M1")
     rg.responder_supervisor(pool, EMPRESA, "B", "M2")
     txt = duble["saiu"][-1]["texto"]
-    assert txt.startswith("Prontinho! Sua visita ficou marcada pra quarta 30/09 às 10h ✅")
+    assert txt.startswith("🧪 Prontinho! Sua visita ficou marcada pra quarta 30/09 às 10h ✅")
     assert "Nada foi gravado" in txt
     assert len(pedidos) == 1                                # a letra não chama a IA
     with pool.connection() as c:
@@ -1458,7 +1459,193 @@ def test_o_horario_que_o_cliente_diz_e_conferido_na_agenda(pool, equipe, duble, 
         '{"resposta": "", "visita": {"data": "2026-09-29", "hora": "15:00"}}',
         '{"resposta": "Te espero lá!", "visita": {"data": "2026-09-29", "hora": "09:00"}}'])
     rg.responder_supervisor(pool, EMPRESA, "amanhã às 15h", "M1")
-    assert duble["saiu"][-1]["texto"].startswith("Esse horário não está livre 😕 Tenho estes:\nA) terça 29/09 às 9h")
+    assert duble["saiu"][-1]["texto"].startswith("🧪 Esse horário não está livre 😕 Tenho estes:\nA) terça 29/09 às 9h")
     rg.responder_supervisor(pool, EMPRESA, "então terça 9h", "M2")
     txt = duble["saiu"][-1]["texto"]
     assert "marcada pra terça 29/09 às 9h ✅" in txt and "Te espero lá!" in txt
+
+
+# ══════════════════════════════════════════════ o teste no chip certo
+# 27/09/2026, o dono: "mandei mensagem pro chip Thiago e o CP Zarb respondeu pro meu
+# número". Era o teste do resgate, ainda aberto: pegava a mensagem do supervisor em
+# QUALQUER chip e respondia sempre pelo principal. Mockup aprovado:
+# docs/mockups/teste_resgate_chip_certo.html.
+
+def test_o_supervisor_so_e_desviado_no_chip_do_teste_e_no_principal(pool, equipe, duble):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        sup = "55" + SUPERVISOR
+        # sem teste: o principal segura (é por onde saem os avisos), o outro chip não
+        assert rg.e_do_supervisor(c, EMPRESA, sup, EMPRESA)
+        assert not rg.e_do_supervisor(c, EMPRESA, sup, CHIP2)
+        assert rg.e_do_supervisor(c, EMPRESA, sup)            # sem chip: o de antes, todos
+        # teste aberto no chip 2: lá o supervisor é o "cliente do teste"
+        _lead(c, equipe["PEDRO"], dias=10, chip=CHIP2)
+    assert rg.testar(pool, EMPRESA)["ok"]
+    with pool.connection() as c:
+        assert rg.e_do_supervisor(c, EMPRESA, sup, CHIP2)
+        assert rg.e_do_supervisor(c, EMPRESA, sup, EMPRESA)
+        assert not rg.e_do_supervisor(c, EMPRESA, "5586999990009", CHIP2)
+
+
+def test_o_teste_fala_pelo_chip_da_conversa_e_com_o_tubo(pool, equipe, duble):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        c.execute("update canais_config set rotulo='CP Thiago' where conta_id=%s", (CHIP2,))
+        _lead(c, equipe["PEDRO"], dias=10, chip=CHIP2)
+        c.commit()
+    assert rg.testar(pool, EMPRESA)["ok"]
+    assert [x["chip"] for x in duble["saiu"]] == [CHIP2, CHIP2]
+    assert all(x["texto"].startswith("🧪") for x in duble["saiu"])
+    assert "pelo CP Thiago" in duble["saiu"][0]["texto"]
+    with pool.connection() as c:
+        assert c.execute("select chip_id from resgate_teste").fetchone()[0] == CHIP2
+
+
+def test_o_teste_do_principal_sai_pelo_principal(pool, equipe, duble):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10)
+    assert rg.testar(pool, EMPRESA)["ok"]
+    assert [x["chip"] for x in duble["saiu"]] == [None, None]     # nulo = o da empresa
+    with pool.connection() as c:
+        assert c.execute("select chip_id from resgate_teste").fetchone()[0] is None
+
+
+def test_o_teste_que_nao_sai_diz_por_qual_chip(pool, equipe, duble):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10, chip=CHIP2)
+    duble["estado"]["ok"] = False
+    r = rg.testar(pool, EMPRESA)
+    assert not r["ok"] and "conectado" in r["erro"]
+
+
+def _com_teste_no_chip2(pool, equipe, monkeypatch):
+    monkeypatch.setattr(rg, "_system", lambda *a, **k: "sistema")
+    monkeypatch.setattr(rg, "_teste_visita", lambda *a, **k: None)
+    from finance import ia_uso
+    monkeypatch.setattr(ia_uso, "registrar", lambda *a, **k: None)
+    import core.brain as cb
+
+    class _B:
+        model = "fake"
+
+        def chamar(self, system, mensagens, **k):
+            return _Resp('{"resposta": "Oi! Pra quando é a festa?"}')
+    monkeypatch.setattr(cb, "Brain", _B)
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10, chip=CHIP2)
+    assert rg.testar(pool, EMPRESA)["ok"]
+
+
+def test_a_resposta_do_teste_sai_pelo_chip_onde_ele_escreveu(pool, equipe, duble, monkeypatch):
+    _com_teste_no_chip2(pool, equipe, monkeypatch)
+    rg.responder_supervisor(pool, EMPRESA, "oi, quero saber mais", "M1", CHIP2)
+    assert duble["saiu"][-1] == {"numero": duble["saiu"][-1]["numero"], "chip": CHIP2,
+                                 "texto": "🧪 Oi! Pra quando é a festa?"}
+    with pool.connection() as c:
+        hist = c.execute("select historico from resgate_teste").fetchone()[0]
+    assert {"quem": "cliente", "texto": "oi, quero saber mais"} in hist
+
+
+def test_no_principal_com_o_teste_em_outro_chip_ele_ouve_onde_o_teste_esta(pool, equipe, duble,
+                                                                           monkeypatch):
+    _com_teste_no_chip2(pool, equipe, monkeypatch)
+    with pool.connection() as c:
+        c.execute("update canais_config set rotulo='CP Thiago' where conta_id=%s", (CHIP2,))
+        c.commit()
+    n = len(duble["saiu"])
+    rg.responder_supervisor(pool, EMPRESA, "ok, vi o aviso", "M1", EMPRESA)
+    rg.responder_supervisor(pool, EMPRESA, "valeu", "M2", EMPRESA)      # não repete em 15 min
+    assert len(duble["saiu"]) == n + 1
+    ult = duble["saiu"][-1]
+    assert ult["chip"] is None and "Seu teste está aberto no CP Thiago" in ult["texto"]
+    with pool.connection() as c:
+        hist = c.execute("select historico from resgate_teste").fetchone()[0]
+    assert all(h.get("quem") != "cliente" for h in hist), "a resposta ao aviso não é fala do cliente"
+
+
+def test_encerrar_o_teste_vence_na_hora_e_avisa_pelo_chip_do_teste(pool, equipe, duble):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10, chip=CHIP2, quem="Gabriela Souza")
+    assert rg.testar(pool, EMPRESA)["ok"]
+    with pool.connection() as c:
+        tela = rg.teste_da_tela(c, EMPRESA)
+    assert tela["quem"] == "Gabriela" and tela["n"] == 1 and tela["expira_txt"]
+    assert rg.encerrar_teste(pool, EMPRESA)["ok"]
+    fim = duble["saiu"][-1]
+    assert fim["chip"] == CHIP2 and fim["texto"].startswith("🧪 Teste encerrado (Gabriela")
+    with pool.connection() as c:
+        assert rg.teste_aberto(c, EMPRESA) is None
+        assert rg.teste_da_tela(c, EMPRESA) is None
+        # nada apagado: a linha e o histórico ficam
+        assert c.execute("select count(*) from resgate_teste").fetchone()[0] == 1
+        assert not rg.e_do_supervisor(c, EMPRESA, "55" + SUPERVISOR, CHIP2)
+    assert not rg.encerrar_teste(pool, EMPRESA)["ok"]
+
+
+def test_o_cartao_leva_o_teste_aberto(pool, equipe, duble):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10)
+        assert rg.tela(c, EMPRESA)["teste"] is None
+    assert rg.testar(pool, EMPRESA)["ok"]
+    with pool.connection() as c:
+        assert rg.tela(c, EMPRESA)["teste"]["lead"]
+
+
+def test_os_leads_do_numero_do_supervisor(pool, equipe):
+    with pool.connection() as c:
+        dele, _ = _lead(c, equipe["ZAQ"], numero="5511987654321")
+        sem_nove, _ = _lead(c, equipe["ZAQ"], numero="551187654321")
+        outro_ddd, _ = _lead(c, equipe["PEDRO"], numero="5586987654321")
+        cliente, _ = _lead(c, equipe["PEDRO"], numero="5586999990001")
+        assert rg.leads_do_supervisor(c, EMPRESA) == set()           # resgate desligado
+        assert rg.sql_fora_do_supervisor(c, EMPRESA) == ("", [])
+        _cfg(c, equipe)
+        assert rg.leads_do_supervisor(c, EMPRESA) == {dele, sem_nove}
+        fora, v = rg.sql_fora_do_supervisor(c, EMPRESA)
+        ids = {r[0] for r in c.execute(
+            f"select p.id from prospeccao p where p.conta_id=%s{fora}", [EMPRESA, *v]).fetchall()}
+        assert ids == {outro_ddd, cliente}
+        assert rg.leads_do_supervisor(c, OUTRA) == set()
+
+
+# ══════════════════════════════════════════════ a regra do chip adota o supervisor
+
+def test_a_regra_adota_a_conversa_antiga_do_supervisor(pool, equipe):
+    """O número do dono já era lead desde os testes de agosto (#760, do ZAQ SDR, no
+    chip Thiago). A regra só atende contato novo: sem a adoção, a IA ficava calada."""
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        c.execute("update chip_regra set vale_desde = now() - interval '30 days'")
+        lid, cv = _lead(c, equipe["ZAQ"], chip=CHIP2, numero="55" + SUPERVISOR)
+        assert cr.regra_da_conversa(c, EMPRESA, cv) is None
+        assert cr.adotar_do_supervisor(c, EMPRESA, lid, cv, CHIP2)
+        c.commit()
+        assert c.execute("select agente_ativo, responsavel_membro_id from conversas where id=%s",
+                         (cv,)).fetchone() == (True, equipe["ZAQ"])
+        r = cr.regra_da_conversa(c, EMPRESA, cv)
+        assert r and r["membro_id"] == equipe["ZAQ"]
+        # a regra olha a conversa a partir da adoção: o que a equipe falou antes não pausa
+        assert r["vale_desde"] > datetime.now(timezone.utc) - timedelta(minutes=5)
+        assert not cr.adotar_do_supervisor(c, EMPRESA, lid, cv, CHIP2)     # uma vez só
+        # o lead que a regra deu no primeiro "oi" segue o relógio da regra
+        outro, cv2 = _lead(c, None, chip=CHIP2, numero="5586999990077")
+        cr.atribuir(c, EMPRESA, outro, cv2, cr.regra(c, EMPRESA, CHIP2))
+        assert cr.regra_da_conversa(c, EMPRESA, cv2)["vale_desde"] < \
+            datetime.now(timezone.utc) - timedelta(days=29)
+
+
+def test_a_regra_nao_tira_o_lead_de_vendedor(pool, equipe):
+    with pool.connection() as c:
+        lid, cv = _lead(c, equipe["PEDRO"], chip=CHIP2, numero="55" + SUPERVISOR)
+        assert not cr.adotar_do_supervisor(c, EMPRESA, lid, cv, CHIP2)
+        assert c.execute("select vendedor_id from prospeccao where id=%s", (lid,)).fetchone()[0] \
+            == equipe["PEDRO"]
+        # e sem regra com IA no chip, nada
+        lid2, cv2 = _lead(c, None, numero="55" + SUPERVISOR)
+        assert not cr.adotar_do_supervisor(c, EMPRESA, lid2, cv2, None)

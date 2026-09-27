@@ -1,0 +1,219 @@
+<title>IA diz o preço na lista</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde). Tema único de propósito:
+   o painel não tem modo claro, e o mockup mostra a tela como ela vai ficar. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:2.6rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:80ch}
+.head h1{font-size:clamp(1.6rem,4.2vw,2.2rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:80ch}
+.sec h2{font-size:1.2rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:84ch}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota b{color:var(--text)}
+.palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
+.tela{min-width:760px;padding:20px}
+.card{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:16px 18px}
+.cab{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.cab h3{font-size:1.1rem;margin-right:auto}
+.chip{font-size:.78rem;border:1px solid var(--line-2);border-radius:999px;padding:.25rem .7rem;color:var(--dim);white-space:nowrap}
+.chip b{color:var(--text)}
+.chip.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.bt{border:1px solid var(--line-2);background:var(--bg-2);border-radius:9px;padding:.4rem .8rem;font-size:.82rem;color:var(--text);font:inherit;font-size:.82rem}
+.bt.lk{border:none;background:none;color:var(--ia-2);padding:.2rem .3rem;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.barra{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:12px;border:1px dashed var(--ia-borda);background:var(--ia-fundo);border-radius:10px;padding:.55rem .75rem;font-size:.8rem;color:var(--ia-2)}
+.barra .sp{margin-left:auto}
+.linha{display:grid;grid-template-columns:auto 1fr 110px 150px auto;gap:.7rem;align-items:center;padding:.65rem 0;border-bottom:1px solid var(--line)}
+.linha:last-child{border-bottom:0}
+.tog{width:42px;height:24px;border-radius:99px;background:#2a3550;position:relative;flex:none}
+.tog::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#8FA197}
+.tog.on{background:var(--neon)}
+.tog.on::after{left:21px;background:#062312}
+.nome{display:flex;gap:.6rem;align-items:center;min-width:0}
+.ico{width:34px;height:34px;border-radius:9px;border:1px solid var(--line-2);display:grid;place-items:center;flex:none;color:var(--dim);font-size:.95rem}
+.nome b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nome .d{font-size:.76rem;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.val{font-size:.72rem;color:var(--faint);text-align:right}
+.val span{display:block;font-size:.9rem;color:var(--text);font-variant-numeric:tabular-nums}
+.ia-pill{display:inline-flex;align-items:center;gap:.35rem;justify-self:start;font-size:.76rem;border-radius:999px;padding:.28rem .7rem;border:1px dashed var(--line-2);color:var(--faint);background:transparent;white-space:nowrap;cursor:pointer}
+.ia-pill::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.ia-pill.on{border:1px solid var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.ia-pill.on::before{background:var(--ia)}
+.ia-pill.salvando{opacity:.6}
+.acts{display:flex;gap:.35rem}
+.ic{width:30px;height:30px;border-radius:8px;border:1px solid var(--line-2);display:grid;place-items:center;color:var(--dim);font-size:.85rem}
+.toast{margin-top:10px;font-size:.78rem;color:var(--neon-2)}
+.dois{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.antes img{width:100%;border-radius:10px;border:1px solid var(--line)}
+.caixa{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:.55rem;font-size:.84rem}
+.caixa h3{font-size:.95rem}
+.caixa .mut{color:var(--dim)}
+.caixa.ruim{border-color:var(--coral-borda)}
+.caixa.bom{border-color:var(--neon-borda)}
+.st{font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;border-radius:4px;padding:.08rem .35rem;margin-right:.35rem}
+.st.no{background:var(--coral);color:#1b0707}
+.st.ok{background:var(--neon);color:#062312}
+.form{display:grid;grid-template-columns:110px 110px 1fr;gap:10px 14px;align-items:end}
+.campo{display:flex;flex-direction:column;gap:.25rem;font-size:.78rem;color:var(--dim)}
+.inp{border:1px solid var(--line-2);background:var(--bg);border-radius:9px;padding:.5rem .6rem;color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+.sw{grid-column:1/-1;display:flex;align-items:center;gap:.7rem;border:1px solid var(--ia-borda);background:var(--ia-fundo);border-radius:10px;padding:.6rem .75rem}
+.sw .tog.on{background:var(--ia)}
+.sw .tog.on::after{background:#1a1422}
+.sw b{color:var(--ia-2);font-size:.86rem}
+.sw span{display:block;font-size:.76rem;color:var(--dim)}
+.dec{display:flex;flex-direction:column;gap:10px}
+.q2{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem}
+.q2 .qn{font-family:var(--mono);font-size:.75rem;color:var(--neon);grid-row:span 3;padding-top:.15rem}
+.q2 h3{font-size:.95rem}
+.q2 p{margin:0;color:var(--dim);font-size:.85rem}
+.rec{font-size:.84rem;color:var(--neon-2)}
+.rec::before{content:"Recomendo: ";color:var(--faint)}
+@media (max-width:640px){.form{grid-template-columns:1fr 1fr}}
+</style>
+<div class="wrap">
+
+<header class="head">
+  <span class="k">Mockup · pra aprovação · 27/09/2026</span>
+  <h1>"A IA pode dizer este preço" direto na lista de serviços</h1>
+  <p>Hoje a chave só aparece <b>dentro do formulário de editar</b>, como uma caixinha cinza solta
+  embaixo do valor, sem rótulo ao lado. Pra liberar os 40 serviços da Prime seriam
+  <b>40 vezes abrir, marcar e salvar</b>. A proposta: a chave vira um botão em cada linha da
+  lista, que salva no toque, com um contador e o "liberar todos" no topo.</p>
+</header>
+
+<section class="sec">
+  <header><h2>Hoje</h2></header>
+  <div class="dois">
+    <div class="caixa ruim">
+      <h3><span class="st no">problema</span> Escondida no formulário</h3>
+      <div class="mut">A caixinha fica sozinha embaixo do "Custo", longe do texto que explica o que ela
+      faz (lá do outro lado, embaixo do botão Salvar). Não parece um controle, e só aparece depois de
+      clicar no lápis de cada serviço.</div>
+    </div>
+    <div class="caixa ruim">
+      <h3><span class="st no">problema</span> Não dá pra ver o todo</h3>
+      <div class="mut">Na lista não há sinal de quais serviços a IA pode citar. Hoje são <b>0 de 40</b>
+      na Prime, e a IA do CP Thiago já está atendendo: sem nenhum liberado, ela não diz valor nenhum.</div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <header>
+    <h2>A proposta: a lista</h2>
+    <p>Um botão por linha, <b>"IA diz o preço"</b>, ao lado do valor. Toque liga ou desliga e já salva, sem
+    abrir o serviço. Lilás é a cor da IA no painel (a mesma do Desafio e das regras por número), pra não
+    confundir com a chave verde da esquerda, que é "está na proposta".</p>
+  </header>
+  <div class="palco"><div class="tela"><div class="card">
+    <div class="cab">
+      <h3>Meus serviços</h3>
+      <span class="chip"><b>0</b> de 40 na proposta</span>
+      <span class="chip ia">🤖 <b>3</b> de 40 com preço liberado pra IA</span>
+      <span class="bt">+ Adicionar serviço</span>
+      <span class="bt">Modo margem</span>
+    </div>
+    <div class="barra">
+      <span>🤖 A IA só diz o valor dos serviços com o botão lilás ligado, sempre como "a partir de".
+      Os outros ela não cita: convida pra visita e o orçamento sai conferido.</span>
+      <span class="sp"></span>
+      <span class="bt lk">Liberar todos</span><span class="bt lk">Nenhum</span>
+    </div>
+    <div style="margin-top:8px">
+      <div class="linha">
+        <span class="tog"></span>
+        <div class="nome"><span class="ico">⌂</span><div style="min-width:0"><b>Pacote Sábado 2026</b><div class="d">Salão, buffet completo e 5h de festa</div></div></div>
+        <div class="val">Valor<span>R$ 7.200,00</span></div>
+        <span class="ia-pill on">IA diz o preço</span>
+        <div class="acts"><span class="ic">✎</span><span class="ic">⊘</span></div>
+      </div>
+      <div class="linha">
+        <span class="tog"></span>
+        <div class="nome"><span class="ico">⌂</span><div style="min-width:0"><b>Pacote Segunda a Quinta 2026</b><div class="d">Salão, buffet completo e 5h de festa</div></div></div>
+        <div class="val">Valor<span>R$ 5.760,00</span></div>
+        <span class="ia-pill on">IA diz o preço</span>
+        <div class="acts"><span class="ic">✎</span><span class="ic">⊘</span></div>
+      </div>
+      <div class="linha">
+        <span class="tog"></span>
+        <div class="nome"><span class="ico">⏱</span><div style="min-width:0"><b>Adicional hora extra (6h01 até 6h30)</b><div class="d">6h01 até 6h30 · R$ 300,00 adicionais</div></div></div>
+        <div class="val">Valor<span>R$ 300,00</span></div>
+        <span class="ia-pill on salvando">Salvando…</span>
+        <div class="acts"><span class="ic">✎</span><span class="ic">⊘</span></div>
+      </div>
+      <div class="linha">
+        <span class="tog"></span>
+        <div class="nome"><span class="ico">🍸</span><div style="min-width:0"><b>Open bar de drinks</b><div class="d">Bartender e 6 drinks da carta</div></div></div>
+        <div class="val">Valor<span>R$ 1.800,00</span></div>
+        <span class="ia-pill">IA não diz</span>
+        <div class="acts"><span class="ic">✎</span><span class="ic">⊘</span></div>
+      </div>
+      <div class="linha">
+        <span class="tog"></span>
+        <div class="nome"><span class="ico">♫</span><div style="min-width:0"><b>DJ e iluminação</b><div class="d">5h de som com pista</div></div></div>
+        <div class="val">Valor<span>R$ 1.200,00</span></div>
+        <span class="ia-pill">IA não diz</span>
+        <div class="acts"><span class="ic">✎</span><span class="ic">⊘</span></div>
+      </div>
+    </div>
+    <div class="toast">✓ Hora extra: a IA pode dizer este preço</div>
+  </div></div></div>
+  <p class="nota"><i>Como</i><span>O toque salva na hora e mostra "Salvando…" até o banco confirmar. Se falhar,
+  o botão volta como estava e aparece o erro. "Liberar todos" pergunta antes ("A IA vai poder dizer o
+  preço dos 40 serviços. Confirma?"). Os nomes e valores acima são de exemplo.</span></p>
+</section>
+
+<section class="sec">
+  <header>
+    <h2>E no formulário de editar</h2>
+    <p>A caixinha solta vira a mesma chave, numa faixa própria embaixo do valor, com o texto colado nela.</p>
+  </header>
+  <div class="palco"><div class="tela"><div class="card">
+    <div class="form">
+      <div class="campo">Valor (R$)<div class="inp">300,00</div></div>
+      <div class="campo">Custo (R$)<div class="inp">0,00</div></div>
+      <div></div>
+      <div class="sw"><span class="tog on"></span><div><b>A IA pode dizer este preço no WhatsApp</b>
+        <span>Desligado, ela não cita o valor: convida pra visita e o orçamento sai conferido por alguém da equipe.</span></div></div>
+    </div>
+  </div></div></div>
+</section>
+
+<section class="sec">
+  <header><h2>Quem vê</h2></header>
+  <p class="nota"><i>Igual hoje</i><span>O botão, o contador e a faixa só aparecem pra empresa com dois
+  chips ou mais (onde existe a regra por número com a IA). Pra quem não tem, a lista fica como está.
+  Muda a tela do dono e do gestor, então sai com o aviso de novidade (CLAUDE.md §5), pro mesmo público.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>Uma pergunta</h2></header>
+  <div class="dec">
+    <div class="q2"><span class="qn">1</span><h3>O "Liberar todos" entra?</h3>
+      <p>Ele acelera, mas libera de uma vez preços que talvez você não queira que a IA diga (um item
+      que só vale com desconto, por exemplo).</p>
+      <p class="rec">sim, com a confirmação. Dá pra desligar um por um depois.</p></div>
+  </div>
+</section>
+
+</div>

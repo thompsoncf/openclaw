@@ -612,7 +612,8 @@ def _atender(pool, conta_id, conversa_id):
         gemeo_nota = _nota_gemeo(c, conta_id, conv)
 
         pedir = (
-            f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{visita_txt}{seguros_txt}\n\n"
+            f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{_cal_bloco(historico)}{visita_txt}"
+            f"{seguros_txt}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
             + ('{"acao":"responder' + ("|visita" if vcfg else "") + ("|orcamento" if ocfg else "")
                + '","resposta":"texto pra mandar ao cliente",' if (vcfg or ocfg) else
@@ -992,9 +993,19 @@ def _nota_gemeo(c, conta_id, conv) -> str:
             "com a equipe e NÃO feche nada por conta própria.")
 
 
+def _cal_bloco(historico: str) -> str:
+    """As datas da conversa com o dia da semana conferido (finance/calendario.py)."""
+    from finance import calendario as _cal
+    return _cal.bloco(historico)
+
+
 def _enviar(c, conta_id, conversa_id, canal, destino, texto, status=None):
     if not texto:
         return
+    # o dia da semana colado a uma data sai CONFERIDO (finance/calendario.py): o modelo
+    # escreveu "06/07/2028 (sábado)" pra uma quinta, e o dia escolhe o pacote
+    from finance import calendario as _cal
+    texto = _cal.corrigir(texto)
     res = _mandar(c, conta_id, canal, destino, texto, conversa_id)
     _add_bot_msg(c, conversa_id, canal, texto, res.get("sid") if res.get("ok") else None,
                  status=status)

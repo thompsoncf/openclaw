@@ -162,6 +162,8 @@ def pool():
         c.execute((BASE / "397_novidade_resgate_ia.sql").read_text(encoding="utf-8"))
         # 399 amplia pela décima, com `resgate_eventos` (resgate ligado e vende festa)
         c.execute((BASE / "399_novidade_resgate_toques.sql").read_text(encoding="utf-8"))
+        # 400: o aviso da chave "IA diz o preço" na lista (portão da 389)
+        c.execute((BASE / "400_novidade_ia_preco_na_lista.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1387,3 +1389,10 @@ def test_o_aviso_dos_toques_mira_quem_ve_a_aba_do_desafio(pool):
     assert r[:2] == ("resgate_eventos", ["dono", "gestor"]) and r[2]
     assert r[3] == "/painel/prospeccao/desafio-ia"
     assert nv.alcanca("resgate_eventos", "eventos", pool, 1) is False     # banco sem a 396
+
+
+def test_o_aviso_da_chave_na_lista_mira_quem_tem_dois_chips(pool):
+    with pool.connection() as c:
+        r = c.execute("""select publico, pra_quem, resumo, link from novidades
+                          where chave='ia-preco-na-lista'""").fetchone()
+    assert r[:2] == ("mais_de_um_chip", ["dono", "gestor"]) and r[2] and r[3] == "/painel/servicos"

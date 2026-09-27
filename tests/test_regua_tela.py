@@ -385,17 +385,21 @@ def test_tempo_por_etapa_fica_vazio_sem_historico(monkeypatch, pool):
 # aqui, nos dois estados que existem: com plano e sem plano.
 
 def _html_modelo(modelo):
-    """Renderiza SÓ o bloco do modelo, com o resto da tela no mínimo que ela pede."""
+    """Renderiza SÓ o bloco do modelo, com o resto da tela no mínimo que ela pede.
+
+    Desde 27/09/2026 o modelo mora no cabeçalho das etapas: igual ao modelo, vira um
+    selo no título; com diferença, o formulário aparece antes da primeira linha."""
     from web.portal import _env
     tpl = pp._REGUA_TPL
-    ini = tpl.index("<!-- ---------------- o modelo do ramo")
-    fim = tpl.index("<!-- ---------------- etapas ---------------- -->")
-    return _env.from_string(tpl[ini:fim]).render(modelo=modelo, rot_ramo="eventos")
+    ini = tpl.index('<div class="fsec" id="etapas"')
+    fim = tpl.index('<div class="rg-cab">')
+    return _env.from_string(tpl[ini:fim] + "</div>").render(modelo=modelo, rot_ramo="eventos")
 
 
 def test_bloco_do_modelo_diz_quando_nao_ha_o_que_mudar():
     html = _html_modelo({"itens": [], "colunas": ["Novo", "Contatado"], "fora": ["Fechado"]})
-    assert "já está igual ao modelo" in html
+    assert "igual ao modelo de eventos ✓" in html
+    assert 'title="Novo · Contatado"' in html, "as colunas do modelo ficam na dica do selo"
     assert "Adotar o que marquei" not in html, "botão de aplicar sem nada a aplicar"
 
 
@@ -500,11 +504,11 @@ def test_salvar_a_etapa_sem_mexer_na_fase_nao_reordena(monkeypatch, pool):
 
 
 def test_a_fase_so_aparece_pra_quem_pode_mudar():
-    """O seletor não existe nas fixas. A chave, desde 27/09/2026, fica na dica do
-    nome em todas (a âncora deste teste) em vez de impressa ao lado dele."""
-    tpl = pp._REGUA_TPL
+    """O seletor não existe nas fixas. Desde 27/09/2026 a linha de cada etapa é um
+    template próprio (`regua_etapa_linha`) e a fase mora em "mais regras"."""
+    tpl = pp._REGUA_ETAPA_TPL
     assert 'name="fase"' in tpl and "já vendido · pós-venda" in tpl
-    ini = tpl.index('title="chave interna: {{ e.chave }}"')
+    ini = tpl.index("{% if e.fixa %}")
     trecho = tpl[ini:ini + 900]
     assert "{% if e.fixa %}" in trecho and "{% else %}" in trecho, \
         "o seletor de fase não está atrás do portão das fixas"
@@ -593,3 +597,101 @@ def test_o_aviso_da_temperatura_so_com_ela_desligada():
                                temperatura_modo="off", janela_abre=time(8),
                                janela_fecha=time(19)))
     assert "carimbado quente" in desligada
+
+
+# ----------------------------------------------------------------- a régua reorganizada
+#
+# Mockup docs/mockups/regua_funil_reorganizada.html, aprovado em 27/09/2026. A tela
+# mudou de ordem e recolheu o que quase ninguém usa. O risco de uma reorganização
+# assim é um campo sair do formulário: aí salvar grava "desligado" nele, que é o
+# mesmo defeito do Perdido e do Fechado. Estes testes fixam que tudo continua indo.
+
+def _etapa_tela(chave, rotulo, **k):
+    e = {"id": abs(hash(chave)) % 1000, "chave": chave, "rotulo": rotulo, "fase": "venda",
+         "fixa": False, "prazo_n": "", "prazo_u": "h", "n": 0, "gatilho": None,
+         "gatilho_ativo": False, "teto_dias": None, "renovacoes_max": 0, "teto_total": 0,
+         "exige_justificativa": True, "saidas_lista": [], "toques_dias": None,
+         "exige_motivo": False, "sai_do_quadro": False, "agenda_ao_entrar": False,
+         "reativa_para": None}
+    e.update(k)
+    return e
+
+
+def _etapas_prime():
+    return [_etapa_tela("contatado", "Contatado", n=213, teto_dias=7, renovacoes_max=2,
+                        teto_total=21, gatilho_ativo=True, gatilho="resposta_nossa"),
+            _etapa_tela("follow_up", "Follow-up", sai_do_quadro=True),
+            _etapa_tela("ganho", "Fechado", fase="fechamento", fixa=True, n=12,
+                        sai_do_quadro=True, agenda_ao_entrar=True),
+            _etapa_tela("perdido", "Perdido", fase="fechamento", fixa=True, n=70,
+                        exige_motivo=True, reativa_para="contatado")]
+
+
+def _forms(html):
+    """{action: [trecho de cada <form> com essa action]} — a régua não aninha form."""
+    out = {}
+    for pedaco in html.split("<form")[1:]:
+        corpo = pedaco[:pedaco.index("</form>")]
+        acao = corpo.split('action="', 1)[1].split('"', 1)[0]
+        out.setdefault(acao, []).append(corpo)
+    return out
+
+
+def test_recolher_nao_tira_campo_de_nenhum_formulario():
+    html = _tela(etapas=_etapas_prime(), conv=[
+        {"chave": "sem_resposta", "rotulo": "Sem resposta", "n": "", "u": "h", "ph": "2", "herda": True}],
+        unidades=[("min", "min"), ("h", "horas"), ("d", "dias")],
+        est_por_dia=10, est_dias_txt="1, 3 e 7", fu_ligado=True)
+    f = _forms(html)
+    config = f["/painel/prospeccao/regua/config"][0]
+    for campo in ("gatilhos_modo", "cobranca_modo", "teto_modo", "perdido_modo", "esteira_modo",
+                  "temperatura_modo", "fila_modo", "sem_resposta_n", "sem_resposta_u",
+                  "escala_n", "escala_u", 'name="teto"', "fu_proposta_dias", "fu_toques_dias",
+                  "fu_festa_dias", "fu_teto_dia", "temp_quente_h", "temp_morno_dias",
+                  "temp_frio_tentativas", 'name="dias"', 'name="abre"', 'name="fecha"'):
+        assert campo in config, f"{campo} saiu do formulário das automações"
+    assert "follow_up_modo" not in config, "a chave do follow-up voltou pra Régua"
+    # o espelho mora no cartão da Esteira, mas salva no formulário dele
+    assert f["/painel/prospeccao/regua/espelho"] == [' method="post" action="/painel/prospeccao/regua/espelho" id="f-espelho">']
+    assert 'name="espelho_de" form="f-espelho"' in html and 'name="espelho_para" form="f-espelho"' in html
+    # a etapa comum: tudo o que "mais regras" recolhe continua no formulário dela
+    contatado = [x for x in f.values() for x in x if 'value="Contatado"' in x][0]
+    for campo in ("rotulo", "gatilho_ativo", "gatilho", "teto_dias", "renovacoes_max",
+                  "exige_justificativa", "toques_dias", "exige_motivo", "agenda_ao_entrar",
+                  "sai_do_quadro", "reativa_para", "saidas", "fase", "prazo_n", "prazo_u"):
+        assert f'name="{campo}"' in contatado, f"{campo} saiu do formulário da etapa"
+
+
+def test_perdido_e_fechado_mostram_as_regras_e_o_fechado_fica_fora_do_quadro():
+    html = _tela(etapas=_etapas_prime(), unidades=[("h", "horas")])
+    assert "pede motivo" in html and "reabre em Contatado se voltar a falar" in html
+    assert "cria compromisso" in html
+    fora = html[html.index('<details class="rg-fora">'):]
+    assert "Fechado (12)" in fora and "Follow-up (0)" in fora
+    # e o Perdido, de resultado, não ganha "mais regras" (o servidor mantém as dele)
+    perdido = [x for x in _forms(html).values() for x in x if 'value="Perdido"' in x][0]
+    assert "rg-mais" not in perdido and 'name="reativa_para"' not in perdido
+
+
+def test_numeros_de_motor_desligado_ficam_recolhidos_mas_no_formulario():
+    html = _tela(conv=[{"chave": "bola_nossa", "rotulo": "Bola com você", "n": "", "u": "h",
+                        "ph": "4", "herda": True}], unidades=[("h", "horas")])
+    cobr = html[html.index("<h5>Cobrança por prazo</h5>"):]
+    cobr = cobr[:cobr.index("</details>")]
+    assert '<details class="rg-num" >' in cobr, "cobrança desligada tinha que vir recolhida"
+    assert 'name="bola_nossa_n"' in cobr and "bola com você 4 horas" in cobr
+
+
+def test_quem_nao_vende_festa_nao_ve_festa():
+    """§6: a ZAQ (recorrente) vê a mesma régua sem nenhum bloco ou palavra de festa."""
+    from finance import raio_x_perfil as rxp
+    html = _tela(rotinas_festa=None, festa_cfg=None, raio_x_perfil=rxp.perfil("recorrente"),
+                 fup={"proposta": {"v": "", "ph": "3", "herda": True},
+                      "toques": {"v": "", "ph": "1,3,7", "herda": True},
+                      "festa": {"v": "", "ph": "—", "herda": True, "tem": False},
+                      "teto": {"v": "", "ph": "10", "herda": True}},
+                 rot_ramo="serviço recorrente")
+    assert "Rotinas de festa" not in html and "#rotinas" not in html
+    import re
+    visivel = re.sub(r"<!--.*?-->", "", html, flags=re.S).lower()
+    assert "festa" not in visivel

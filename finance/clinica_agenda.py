@@ -201,6 +201,9 @@ def dia(c, conta_id: int, data: date, agora: datetime, local_id: int | None = No
         faixas[p["id"]] = [f for f in fs if not local_id or f["local_id"] == local_id]
     if local_id:
         evs = [e for e in evs if e["local_id"] in (None, local_id)]
+    # a ficha de cada paciente do dia: a recepção vê o que falta antes da consulta
+    from finance import clinica_ficha_link as cfl
+    cfl.dos_eventos(c, conta_id, evs, agora)
     # só aparece coluna de quem atende hoje (ou tem agendamento hoje)
     colunas = [p for p in profs if faixas[p["id"]] or any(e["profissional_id"] == p["id"] for e in evs)]
     linhas = _linhas({p["id"]: faixas[p["id"]] for p in colunas}, evs)
@@ -630,7 +633,15 @@ def texto_marcado(c, conta_id: int, ev: dict, promete_lembrete: bool = False) ->
     return (f"Prontinho!! ✅ {n + ', ' + art.lower() if n else art} {palavra} com {_prof_nome(c, conta_id, ev)} "
             f"está marcad{fim} para {dia_txt(ev['inicio'])} às {ev['hora']}{_onde(c, conta_id, ev)}."
             + (" Na véspera eu te mando um lembrete 😊" if promete_lembrete
-               else " Qualquer coisa, é só responder por aqui 😊"))
+               else " Qualquer coisa, é só responder por aqui 😊")
+            + _link_da_ficha(c, conta_id, ev, "marcado"))
+
+
+def _link_da_ficha(c, conta_id: int, ev: dict, qual: str, agora: datetime | None = None) -> str:
+    """"Complete sua ficha antes da consulta" (finance/clinica_ficha_link.py): só com o
+    link ligado e a ficha incompleta."""
+    from finance import clinica_ficha_link as cfl
+    return cfl.linha_da_mensagem(c, conta_id, ev, qual, agora)
 
 
 def texto_vespera(c, conta_id: int, ev: dict, agora: datetime | None = None) -> str:
@@ -639,7 +650,8 @@ def texto_vespera(c, conta_id: int, ev: dict, agora: datetime | None = None) -> 
     quando = _quando(ev["inicio"], agora or datetime.now(timezone.utc))
     return (f"Oi{', ' + n if n else ''}! {quando} você tem {_palavra(ev)} às {ev['hora']} com "
             f"{_prof_nome(c, conta_id, ev)}{_onde(c, conta_id, ev)}. Confirma? "
-            "Responda 1 para confirmar ou 2 se precisar remarcar.")
+            "Responda 1 para confirmar ou 2 se precisar remarcar."
+            + _link_da_ficha(c, conta_id, ev, "vespera", agora))
 
 
 def _conversa(c, conta_id: int, ev: dict) -> int | None:

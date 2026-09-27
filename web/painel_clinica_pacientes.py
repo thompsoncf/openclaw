@@ -20,7 +20,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from db.conexao import get_pool
 from finance import clinica_agenda as ca
 from finance import clinica_config as cc
+from finance import clinica_ficha_link as cfl
 from finance import clinica_pacientes as cpa
+from finance import clinica_preconsulta as cpc
 from web.painel_clinica_agenda import _acesso
 from web.portal import _env, _render
 
@@ -28,7 +30,8 @@ router = APIRouter()
 URL = "/painel/clinica/pacientes"
 ABAS = (("resumo", "Resumo"), ("agenda", "Agenda"), ("tratamento", "Plano e pacotes"),
         ("financeiro", "Financeiro"), ("produtos", "Produtos"), ("cadastro", "Cadastro"))
-_AVISOS = {"salvo": "Cadastro salvo.", "criado": "Paciente cadastrado."}
+_AVISOS = {"salvo": "Cadastro salvo.", "criado": "Paciente cadastrado.",
+           "link": "Link da ficha enviado no WhatsApp.", "link_novo": "Link novo gerado: o antigo não abre mais."}
 
 
 def _ir(request: Request, url: str, aviso: str = "", erro: str = "") -> RedirectResponse:
@@ -102,10 +105,59 @@ def ver(request: Request, cliente_id: int):
         opcoes = list(p["mesmo_card"])
         if p["responsavel"] and all(o["id"] != p["responsavel"]["id"] for o in opcoes):
             opcoes.append(p["responsavel"])
+        # a pré-consulta é conteúdo clínico: só o profissional de saúde lê (seção 01)
+        pode_ler = cpc.pode_ler(c, conta[0], request.session.get("membro_id"))
+        abas = ABAS + ((("pre", "Pré-consulta"),) if pode_ler else ())
+        aba = aba if aba in dict(abas) else "resumo"
+        pre = cpc.ultima(c, conta[0], cliente_id) if pode_ler and aba == "pre" else None
+        ligado = cfl.ligado(c, conta[0])
+        link = cfl.link(cfl.token(c, conta[0], cliente_id)) if ligado and p["falta"] else ""
+        c.commit()
     return _render("clinica_paciente.html", request, titulo=p["nome"], secao_ativa="pacientes",
                    aviso=_AVISOS.get(request.query_params.get("aviso") or "", ""),
-                   erro=request.session.pop("pacientes_erro", ""), p=p, aba=aba if aba in dict(ABAS) else "resumo",
-                   abas=ABAS, opcoes_resp=opcoes, brl=cc.reais, gerencia=gerencia, hoje=ca.hoje_br(agora))
+                   erro=request.session.pop("pacientes_erro", ""), p=p, aba=aba,
+                   abas=abas, opcoes_resp=opcoes, brl=cc.reais, gerencia=gerencia, hoje=ca.hoje_br(agora),
+                   pre=pre, ficha_ligado=ligado, link_ficha=link)
+
+
+@router.post(URL + "/{cliente_id}/link/novo")
+def link_novo(request: Request, cliente_id: int):
+    """Troca o link da ficha (foi pro número errado): o antigo para de abrir."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    with get_pool().connection() as c:
+        if not cpa.ficha(c, conta[0], cliente_id, datetime.now(timezone.utc)):
+            return RedirectResponse(URL, status_code=303)
+        cfl.novo_token(c, conta[0], cliente_id)
+        c.commit()
+    return _ir(request, f"{URL}/{cliente_id}", "link_novo")
+
+
+@router.post(URL + "/{cliente_id}/link")
+def mandar_link(request: Request, cliente_id: int):
+    """A recepção manda o link "complete sua ficha" pelo WhatsApp do paciente (ou do
+    responsável: a mãe que marcou pro filho)."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    volta = f"{URL}/{cliente_id}"
+    agora = datetime.now(timezone.utc)
+    with get_pool().connection() as c:
+        p = cpa.ficha(c, conta[0], cliente_id, agora)
+        if not p or not cfl.ligado(c, conta[0]):
+            return _ir(request, volta, erro="O link da ficha está desligado (Agenda › Link da ficha).")
+        texto = cfl.texto_manual(c, conta[0], cliente_id)
+        fone = p["fone"]
+        if p["responsavel"] and not ca._digitos(fone):
+            r = cpa.ficha(c, conta[0], p["responsavel"]["id"], agora)
+            fone = r["fone"] if r else ""
+        res = ca.enviar(c, conta[0], {"id": None, "lead": p["lead"], "fone": fone}, texto or "", autor="humano",
+                        membro_id=request.session.get("membro_id")) if texto else {"ok": False}
+        c.commit()
+    if not res.get("ok"):
+        return _ir(request, volta, erro="Não deu pra mandar: confira o celular da ficha ou mande pela conversa.")
+    return _ir(request, volta, "link")
 
 
 @router.post(URL + "/{cliente_id}/cadastro")
@@ -173,7 +225,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <td>{% if p.tipo == 'contato' %}<span class="pc-tag">novo contato{% if p.ultima_msg %} · escreveu {{ p.ultima_msg.strftime('%d/%m') }}{% endif %}</span>{% endif %}
       {% if p.proximo %}<span class="pc-tag g">com horário</span>{% endif %}{% if p.em_tratamento %}<span class="pc-tag g">em tratamento</span>{% endif %}
       {% if p.retorno_vencido %}<span class="pc-tag y">retorno vencido</span>{% endif %}{% if p.assinante %}<span class="pc-tag g">assinante</span>{% endif %}
-      {% if p.inativo %}<span class="pc-tag">sem vir há 6 meses</span>{% endif %}{% if p.tipo == 'paciente' and p.novo %}<span class="pc-tag">ainda não veio</span>{% endif %}</td>
+      {% if p.inativo %}<span class="pc-tag">sem vir há 6 meses</span>{% endif %}{% if p.tipo == 'paciente' and p.novo %}<span class="pc-tag">ainda não veio</span>{% endif %}
+      {% if p.ficha and not p.ficha.completa %}<span class="pc-tag y">{{ p.ficha_txt }}</span>{% endif %}</td>
     <td><div class="pc-acoes"><a href="/painel/clinica/agenda/novo?{% if p.id %}cliente={{ p.id }}{% else %}lead={{ p.lead or '' }}{% endif %}" title="Agendar">📅</a>{% if p.id %}<a href="/painel/clinica/pacientes/{{ p.id }}" title="Ficha">Ficha</a>{% endif %}</div></td>
   </tr>{% endfor %}</table>
   {% if d.total > d.pacientes|length %}<div class="pc-m" style="margin-top:.5rem">Mostrando {{ d.pacientes|length }} de {{ d.total }}: use a busca ou um filtro.</div>{% endif %}
@@ -197,7 +250,13 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="pc-acoes"><a href="/painel/clinica/pacientes">‹ Pacientes</a><a href="/painel/clinica/agenda/novo?cliente={{ p.id }}">Agendar</a>{% if p.conversa_id %}<a href="/painel/prospeccao/comunicacao?abrir={{ p.conversa_id }}">WhatsApp</a>{% endif %}</div></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
-  {% if p.falta %}<div class="alerta" style="margin-top:.8rem">Ficha incompleta: falta {{ p.falta|join(', ') }}. <a href="/painel/clinica/pacientes/{{ p.id }}?aba=cadastro">Completar</a></div>{% endif %}
+  {% if p.falta %}<div class="alerta" style="margin-top:.8rem">{{ p.ficha_txt|capitalize }}. <a href="/painel/clinica/pacientes/{{ p.id }}?aba=cadastro">Completar aqui</a>
+    {% if link_ficha %}<div class="pc-acoes" style="margin-top:.5rem"><input readonly value="{{ link_ficha }}" onclick="this.select()" style="min-width:260px;margin:0">
+      <form method="post" action="/painel/clinica/pacientes/{{ p.id }}/link" style="margin:0"><button class="sec" onclick="this.disabled=true;this.form.submit()">Mandar o link no WhatsApp</button></form>
+      <form method="post" action="/painel/clinica/pacientes/{{ p.id }}/link/novo" style="margin:0" onsubmit="return confirm('Gerar outro link? O antigo para de abrir.')"><button class="sec">Gerar outro link</button></form></div>
+    <div class="pc-m" style="margin-top:.3rem">O paciente abre com a data de nascimento e preenche cadastro, pré-consulta e termos.</div>{% endif %}</div>
+  {% elif p.situacao %}<div class="pc-m" style="margin-top:.6rem">✓ Ficha completa{% if p.situacao.pre_em %} · pré-consulta respondida em {{ p.situacao.pre_em.strftime('%d/%m') }}{% endif %}</div>{% endif %}
+  {% if p.situacao and p.situacao.alergia %}<div style="margin-top:.5rem"><span class="pc-tag y">⚠ informou alergia na pré-consulta</span></div>{% endif %}
   <div class="pc-abas">{% for k, r in abas %}<a class="{% if aba == k %}on{% endif %}" href="/painel/clinica/pacientes/{{ p.id }}?aba={{ k }}">{{ r }}</a>{% endfor %}</div>
 
   {% if aba == 'resumo' %}
@@ -248,6 +307,15 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="pc-m" style="margin-top:.5rem">O responsável é escolhido entre quem usa o mesmo WhatsApp. O CPF é o que vai na nota fiscal.</div>
     <div class="pc-acoes" style="margin-top:.6rem"><button>Salvar</button></div>
   </form>
+  <div class="pc-cx"><b>Termos</b>
+    {% for t in p.termos %}<div class="pc-m" style="margin-top:.3rem">{{ t.titulo }}: aceito por {{ t.por }}{% if t.papel == 'responsavel' %} (responsável){% endif %} em {{ t.quando.strftime('%d/%m/%Y %H:%M') }}{% if t.opcao_txt %}<br>{{ t.opcao_txt }}{% endif %}</div>
+    {% else %}<div class="pc-m" style="margin-top:.3rem">Nenhum termo aceito ainda. O paciente aceita pelo link da ficha.</div>{% endfor %}</div>
+
+  {% elif aba == 'pre' and pre %}
+  <div class="pc-cx" style="margin-top:0"><b>Contado pelo {{ 'responsável' if pre.por == 'responsavel' else 'paciente' }} em {{ pre.quando.strftime('%d/%m/%Y') }}</b>{% if pre.curta %} · retorno{% endif %}
+    {% for pergunta, resposta in pre.linhas %}<div style="margin-top:.5rem"><div class="pc-m">{{ pergunta }}</div><div>{{ resposta }}</div></div>{% endfor %}
+    <div class="pc-m" style="margin-top:.7rem">Só os profissionais de saúde da clínica veem estas respostas. Confira na consulta.</div></div>
+  {% elif aba == 'pre' %}<div class="pc-m">O paciente ainda não respondeu a pré-consulta.</div>
   {% endif %}
 </div>
 {% endblock %}"""

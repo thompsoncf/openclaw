@@ -7746,6 +7746,10 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   <div class="abas" id="rel-abas">
     {% for k, r in tipos.items() %}<a class="aba{% if k==tipo %} ativa{% endif %}"
      href="/painel/relatorios?tipo={{ k }}&periodo={{ periodo }}" style="text-decoration:none">{{ r.label }}</a>{% endfor %}
+    {#- o DESAFIO IA × equipe mora no funil, mas é relatório: o único caminho até ele
+        era um botão em Comunicação › Agente (27/09/2026). Só pra quem vende festa e
+        tem um número com a IA atendendo (`desafio_ia.tem_desafio`). -#}
+    {% if tem_desafio %}<a class="aba" href="/painel/prospeccao/desafio-ia" style="text-decoration:none">🏁 Desafio IA × equipe</a>{% endif %}
   </div>
   <script>
     // com 8 abas o trilho rola de lado (ver .abas) — sem isto a aba ativa podia

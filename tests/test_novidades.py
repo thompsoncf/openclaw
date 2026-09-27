@@ -173,6 +173,10 @@ def pool():
         # aviso dela sai logo: é conferido em `test_o_aviso_do_teste_no_chip_certo`
         c.execute((BASE / "410_novidade_teste_resgate_chip.sql").read_text(encoding="utf-8"))
         c.execute("delete from novidades where chave='teste-resgate-no-chip-certo'")
+        # 411 amplia pela 13ª, com `funil_atendimento` (eventos e recorrente). O aviso
+        # sai logo: conferido em `test_o_aviso_do_funil_atendimento`
+        c.execute((BASE / "411_novidade_funil_atendimento.sql").read_text(encoding="utf-8"))
+        c.execute("delete from novidades where chave='funil-atendimento'")
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1348,7 +1352,7 @@ def test_os_avisos_da_391(pool):
         # o `esteira_ligada` da 402: os avisos delas saem antes, senão o check recusa
         # a tabela
         c.execute("delete from novidades where publico in ('resgate_ligado','resgate_eventos',"
-                  "'esteira_ligada','resgate_ativo')")
+                  "'esteira_ligada','resgate_ativo','funil_atendimento')")
         c.execute((BASE / "391_novidade_ia_marca_visita.sql").read_text(encoding="utf-8"))
         rows = {r[0]: r[1:] for r in c.execute(
             """select chave, publico, pra_quem, resumo, link from novidades
@@ -1480,3 +1484,22 @@ def test_o_aviso_do_teste_no_chip_certo(pool):
     assert "festa" not in (r[3] + r[5]).lower(), "o resgate não é só de quem vende festa"
     # sem o resgate (a tabela nem existe aqui), o portão fecha
     assert nv.alcanca("resgate_ativo", "eventos", pool, 1) is False
+
+
+def test_o_aviso_do_funil_atendimento(pool):
+    """A 411: a vista Atendimento. Mira `funil_atendimento` — eventos e recorrente, os
+    perfis que têm a vista (`servico` pegaria clínica, corretora e obras, que não têm)
+    — e só a gerência (decisão 2 do mockup)."""
+    with pool.connection() as c:
+        c.execute((BASE / "411_novidade_funil_atendimento.sql").read_text(encoding="utf-8"))
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, corpo from novidades
+                          where chave='funil-atendimento'""").fetchone()
+        c.execute("delete from novidades where chave='funil-atendimento'")
+        c.commit()
+    assert r[:3] == ("novidade", "funil_atendimento", ["dono", "gestor"])
+    assert r[3] and r[4] == "/painel/prospeccao/atendimento"
+    assert "festa" not in (r[3] + r[5]).lower(), "o aviso vai pra quem vende festa E serviço"
+    assert "saudação automática" in r[5]
+    assert nv.alcanca("funil_atendimento", "eventos") is True
+    assert nv.alcanca("funil_atendimento", "consultoria") is True
+    assert nv.alcanca("funil_atendimento", "hortifruti") is False

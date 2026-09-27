@@ -1288,6 +1288,12 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     busca_limpa = _kb_url()
     tri_urls = {k: _kb_url(trilha=("" if filtro_tri == k else k)) for k in _tri.TRILHAS}
     tri_urls["todas"] = _kb_url(trilha="")
+    # A PÍLULA "QUEM ATENDE" (docs/mockups/funil_atendimento.html, decisão 3): o mesmo
+    # filtro das trilhas, curto, no cabeçalho — IA do número × equipe
+    quem_urls = {"": _kb_url(trilha=""), "ia": _kb_url(trilha="ia"), "vend": _kb_url(trilha="vend")}
+    # A VISTA ATENDIMENTO (a chave Vendas | Atendimento): dono e gestor, e só nos
+    # nichos que têm funil de atendimento (§6)
+    atend_ok = bool(ctx["gerencia"] and _perfil_atendimento(pool, conta_id))
     fora_urls = {k: _kb_url(fora=",".join(sorted((set(fora_on) ^ {k}))) or "") for k in ("esperando", "festa30")}
     # `fora=` vazio precisa chegar na URL pra limpar — o urlencode acima o descarta
     for k, u in fora_urls.items():
@@ -1343,6 +1349,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    empresa_nome=empresa_nome,
                    vend_cont=vend_cont, vend_total=vend_total, criticos=criticos,
                    tri_barra=tri_barra, tri_urls=tri_urls, filtro_tri=filtro_tri,
+                   quem_urls=quem_urls, atend_ok=atend_ok,
                    tri_det=tri_det, rsg_col=rsg_col, rsg_mostra=rsg_mostra, rsg_fila=rsg_fila,
                    mes_vazio=mes_vazio,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
@@ -4482,6 +4489,45 @@ def _salvar_regra_chip(conta_id: int, chip_id: int, dados: dict) -> dict:
         else:
             c.rollback()
     return r
+
+
+def _perfil_atendimento(pool, conta_id: int) -> str | None:
+    """O perfil da conta, se ele tem a vista Atendimento (§6: eventos e recorrente)."""
+    try:
+        from finance import atendimento as _at
+        from finance.raio_x_perfil import perfil_da_conta
+        chave = (perfil_da_conta(pool, conta_id) or {}).get("chave")
+        return chave if chave in _at.PERFIS else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@router.get("/painel/prospeccao/atendimento", response_class=HTMLResponse)
+def prospeccao_atendimento(request: Request, periodo: str = "mes", quem: str = "", chip: str = ""):
+    """A VISTA ATENDIMENTO do funil (docs/mockups/funil_atendimento.html): o começo da
+    conversa em etapas que ninguém arrasta, com quem atende em cada card e a régua IA ×
+    equipe no topo (finance/atendimento.py). Dono e gestor (decisão 2 do mockup); só
+    pra quem vende festa ou serviço recorrente (§6)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    pool = get_pool()
+    perfil = _perfil_atendimento(pool, ctx["conta_id"])
+    if not perfil:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    from finance import atendimento as _at
+    from finance import desafio_ia as _dia
+    quem = quem if quem in ("ia", "equipe") else ""
+    d = _at.dados(pool, ctx["conta_id"], perfil, periodo=periodo, quem=quem,
+                  chip=chip if chip.isdigit() else "")
+    with pool.connection() as c:
+        status_tpl = _jl.lista_de_status(_etapas(c, ctx["conta_id"]))
+    return _render("prospeccao_atendimento", request, titulo="Funil · Atendimento",
+                   secao_ativa="prospeccao", gerencia=True, d=d, status=status_tpl,
+                   modo_evento=(perfil == "eventos"),
+                   tem_desafio=_dia.tem_desafio(pool, ctx["conta_id"]))
 
 
 @router.get("/painel/prospeccao/desafio-ia", response_class=HTMLResponse)
@@ -12598,6 +12644,12 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
           placeholder="Buscar nome ou telefone" aria-label="Buscar {{ voc.lead }} por nome ou telefone" value="{{ (busca or '')|e }}"
           oninput="kbBuscaFiltra()" onkeydown="kbBuscaTecla(event)"><kbd>/</kbd></label>
       <button type="button" class="kbbt kbico-busca" onclick="kbBuscaAbre()" aria-label="Buscar">🔍</button>
+      {% if atend_ok %}<div class="vseg kbvista" title="Vendas: as etapas que a equipe move · Atendimento: o começo da conversa, IA × equipe">
+        <a class="on" href="/painel/prospeccao" aria-current="page">Vendas</a><a href="/painel/prospeccao/atendimento">Atendimento</a>
+      </div>{% endif %}
+      {% if tri_barra and tri_barra.ia.nome %}<div class="vseg kbquem" title="Quem atende: a IA do número ou a equipe">
+        <a class="{{ 'on' if not filtro_tri }}" href="{{ quem_urls['']|e }}">todos</a><a class="{{ 'on' if filtro_tri == 'ia' }}" href="{{ quem_urls.ia|e }}">🤖 IA</a><a class="{{ 'on' if filtro_tri == 'vend' }}" href="{{ quem_urls.vend|e }}">👤 equipe</a>
+      </div>{% endif %}
       {% if modo_evento %}<div class="vseg" title="Colunas por etapa do funil, ou por mês da festa">
         <a class="{% if not vista_mes %}on{% endif %}" href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">Por etapa</a><a class="{% if vista_mes %}on{% endif %}" href="/painel/prospeccao?vista=mes{% if filtro_vend %}&amp;vendedor={{ filtro_vend }}{% endif %}">Por mês do evento</a>
       </div>{% endif %}
@@ -18629,3 +18681,95 @@ _DESAFIO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 {% endblock %}"""
 
 _env.loader.mapping["prospeccao_desafio_ia"] = _DESAFIO_TPL
+
+
+# A VISTA ATENDIMENTO (docs/mockups/funil_atendimento.html). As etapas vêm de
+# finance/atendimento.py; aqui só o desenho. Os cards não arrastam: quem move é o
+# sistema, lendo a conversa, a ficha e a agenda.
+_ATENDIMENTO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+.at-tt{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
+.at-seg{display:inline-flex;border:1px solid var(--borda);border-radius:999px;padding:2px}
+.at-seg a{font-size:.8rem;padding:.25rem .85rem;border-radius:999px;color:var(--txt-mut);text-decoration:none}
+.at-seg a.on{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.at-num{font-size:.82rem;color:var(--txt-mut)}
+.at-fil{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;font-size:.78rem;color:var(--txt-mut);margin-top:.7rem}
+.at-fil a{border:1px solid var(--borda);border-radius:999px;padding:.12rem .6rem;color:var(--txt-mut);text-decoration:none;white-space:nowrap}
+.at-fil a.on{border-color:#1e4a3a;background:#10241a;color:#46f58a}
+.at-fil a.ia.on{border-color:#3e2e4e;background:#1a1422;color:#e3ccf2}
+.at-fil .sp{width:.6rem}
+.at-regua{overflow-x:auto;margin-top:.8rem;background:var(--card);border:1px solid var(--borda);border-radius:12px}
+.at-regua table{width:100%;border-collapse:collapse;font-size:.8rem;min-width:640px}
+.at-regua th,.at-regua td{padding:.45rem .6rem;border-top:1px solid var(--borda);text-align:left;white-space:nowrap}
+.at-regua th{border-top:0;color:var(--txt-mut);font-weight:600;font-size:.68rem;text-transform:uppercase;letter-spacing:.04em}
+.at-regua td.q{font-weight:700}
+.at-regua tr.ia td.q{color:#e3ccf2}
+.at-regua small{color:var(--txt-mut);margin-left:.25rem}
+.at-bar{height:5px;border-radius:4px;background:#1e2a23;margin-top:.25rem;overflow:hidden;max-width:120px}
+.at-bar i{display:block;height:100%;background:var(--verde)}
+.at-regua tr.ia .at-bar i{background:#c9a3e0}
+.at-cols{display:grid;grid-template-columns:repeat(6,minmax(170px,1fr));gap:8px;margin-top:.9rem;overflow-x:auto;padding-bottom:.4rem}
+.at-col{border:1px solid var(--borda);border-radius:10px;background:var(--card);padding:.45rem;display:flex;flex-direction:column;gap:6px;min-height:200px}
+.at-col.parou{background:transparent;border-style:dashed}
+.at-col h4{margin:0;font-size:.82rem;display:flex;justify-content:space-between;gap:.3rem}
+.at-col h4 span{color:var(--txt-mut);font-weight:400}
+.at-col .sub{font-size:.68rem;color:var(--txt-mut);margin-top:-.25rem}
+.at-card{border:1px solid var(--borda);border-radius:8px;background:var(--bg);padding:.4rem .5rem;font-size:.72rem;display:flex;flex-direction:column;gap:.15rem;cursor:pointer}
+.at-card b{font-size:.8rem}
+.at-card .m{color:var(--txt-mut)}
+.at-who{align-self:flex-start;font-size:.64rem;border-radius:999px;padding:0 .45rem;border:1px solid #1e4a3a;background:#10241a;color:#46f58a}
+.at-who.ia{border-color:#3e2e4e;background:#1a1422;color:#e3ccf2}
+.at-tempo{font-size:.66rem;color:var(--txt-mut)}
+.at-tempo.lento{color:#f2c66e}
+.at-vazio{font-size:.72rem;color:var(--txt-mut);padding:.3rem}
+@media (max-width:760px){.at-cols{grid-template-columns:repeat(6,minmax(78vw,1fr));scroll-snap-type:x mandatory}.at-col{scroll-snap-align:start}}
+</style>
+<div class="pw">
+""" + _navbar('funil') + """
+  {%- set _q = '&periodo=' ~ d.periodo ~ ('&chip=' ~ d.chip if d.chip else '') %}
+  <div class="at-tt">
+    <h2 class="tt">Funil</h2>
+    <span class="at-seg" role="tablist"><a href="/painel/prospeccao">Vendas</a><a class="on" href="/painel/prospeccao/atendimento" aria-current="page">Atendimento</a></span>
+    <span class="at-num">{{ d.total }} chegaram · {{ d.periodo_rot }}</span>
+    {% if tem_desafio %}<a class="pbtn ghost" href="/painel/prospeccao/desafio-ia" style="margin-left:auto">🏁 ver o Desafio completo →</a>{% endif %}
+  </div>
+  <div class="at-fil">Quem atende:
+    <a class="{{ 'on' if not d.quem }}" href="?quem={{ _q }}">todos</a>
+    <a class="ia{{ ' on' if d.quem == 'ia' }}" href="?quem=ia{{ _q }}">🤖 IA</a>
+    <a class="{{ 'on' if d.quem == 'equipe' }}" href="?quem=equipe{{ _q }}">👤 equipe</a>
+    {% if d.chips|length > 1 %}<span class="sp"></span>Chip:
+      <a class="{{ 'on' if not d.chip }}" href="?quem={{ d.quem }}&periodo={{ d.periodo }}">todos</a>
+      {% for cid, nome in d.chips %}<a class="{{ 'on' if d.chip == cid|string }}" href="?quem={{ d.quem }}&periodo={{ d.periodo }}&chip={{ cid }}">{{ nome }}</a>{% endfor %}{% endif %}
+    <span class="sp"></span>Período:
+    {% for k, rot in d.periodos %}<a class="{{ 'on' if d.periodo == k }}" href="?quem={{ d.quem }}&periodo={{ k }}{{ ('&chip=' ~ d.chip) if d.chip }}">{{ rot }}</a>{% endfor %}
+  </div>
+  <div class="at-regua"><table>
+    <thead><tr><th>quem</th><th>chegou</th>{% for c in d.colunas[1:5] %}<th>{{ c.titulo|lower }}</th>{% endfor %}<th>1ª resposta</th></tr></thead>
+    <tbody>{% for r in d.regua %}<tr class="{{ 'ia' if r.ia }}"><td class="q">{{ '🤖 ' if r.ia else '👤 ' }}{{ r.quem }}</td><td>{{ r.chegou }}</td>
+      {% for e in ['respondido', 'qualificado', 'ofertada', 'marcada'] %}<td>{{ r[e] }}{% if r[e ~ '_pct'] is not none %}<small>{{ r[e ~ '_pct'] }}%</small><div class="at-bar"><i style="width:{{ r[e ~ '_pct'] }}%"></i></div>{% endif %}</td>{% endfor %}
+      <td>{{ (('%.1f' % r.resp_min).replace('.', ',') ~ ' min') if r.resp_min is not none else '—' }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if not d.tem_ia %}<div class="distnote" style="margin-top:.7rem">Nenhum número está com a IA atendendo: a régua mostra só a equipe. Ligue em <b>Comunicação › Agente › Regras por número</b>.</div>{% endif %}
+  <div class="at-cols">
+    {% for col in d.colunas %}<section class="at-col{{ ' parou' if col.chave == 'parou' }}" aria-label="{{ col.titulo }}">
+      <h4>{{ col.titulo }} <span>{{ col.n }}</span></h4><span class="sub">{{ col.sub }}</span>
+      {% for x in col.cards[:60] %}<div class="at-card" tabindex="0" onclick="if(window.kbAbrirLead)kbAbrirLead(event,{{ x.id }},this)" onkeydown="if(event.key==='Enter'&&window.kbAbrirLead)kbAbrirLead(event,{{ x.id }},this)">
+        <span class="at-who{{ ' ia' if x.ia }}">{{ '🤖 ' if x.ia else '👤 ' }}{{ x.quem }}</span>
+        <b>{{ x.nome }}</b><span class="m">{{ x.chip_nome }}{% if col.chave == 'parou' %} · parou em {{ d.rot_parou[x.etapa][0]|lower }}{% endif %}</span>
+        <span class="at-tempo{{ ' lento' if x.lento and col.chave == 'chegou' }}">{{ x.tempo }}</span></div>
+      {% else %}<div class="at-vazio">ninguém aqui</div>{% endfor %}
+      {% if col.n > 60 %}<div class="at-vazio">e mais {{ col.n - 60 }}</div>{% endif %}
+    </section>{% endfor %}
+  </div>
+  <p class="mut" style="font-size:.78rem;margin-top:.6rem;max-width:84ch;line-height:1.5">Ninguém arrasta card aqui: a etapa vem da conversa, da ficha e da agenda. A régua conta, das que chegaram, quantas passaram por cada etapa. <b>Parou</b> é perdido, ou 3 dias sem mensagem do {{ voc.cliente }} antes de marcar. A saudação automática do celular não conta como resposta.</p>
+</div>
+{#- a janela do lead: a MESMA do funil e do Follow-up (web/janela_lead.py) -#}
+<style>{{ balao_css }}</style>
+<style>{{ janela_css }}</style>
+<script>{{ balao_js }}</script>
+<script>var _KB_STATUS={{ (status or [])|tojson }};
+{% if modo_evento %}{{ janela_evento_js }}{% endif %}</script>
+<script>{{ janela_js }}</script>
+{% endblock %}"""
+
+_env.loader.mapping["prospeccao_atendimento"] = _ATENDIMENTO_TPL

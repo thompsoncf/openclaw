@@ -71,6 +71,16 @@ def _recorrente(slug) -> bool:
     return _n.vende_servico(slug) and modo_por_nicho(slug) != "evento"
 
 
+def _funil_atendimento(slug) -> bool:
+    """Quem tem a vista ATENDIMENTO do funil (migração 411, finance/atendimento.py):
+    os perfis `eventos` e `recorrente` — o mesmo `raio_x_perfil` que a rota lê. O
+    `servico` alcançaria clínica, corretora e obras, que não têm a vista (§5: aviso
+    de tela que a pessoa não tem, nunca)."""
+    from finance.atendimento import PERFIS
+    from finance.raio_x_perfil import perfil_por_nicho
+    return perfil_por_nicho(slug) in PERFIS
+
+
 def _eventos(slug) -> bool:
     from finance.contrato import tem_contrato
     return tem_contrato(slug)
@@ -282,6 +292,7 @@ PUBLICOS_NICHO = {
     "suplementos": _suplementos,
     "clinica": _clinica,
     "construcao": _construcao,
+    "funil_atendimento": _funil_atendimento,
 }
 
 PUBLICOS_CONTA = {

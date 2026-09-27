@@ -2144,7 +2144,21 @@ def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "me
                    # deu certo — e numa tela de dinheiro isso é pior que o erro.
                    aviso=request.session.pop("aviso", None),
                    erro=request.session.pop("erro", None),
-                   de=de or "", ate=ate or "", dados=dados)
+                   de=de or "", ate=ate or "", dados=dados,
+                   tem_desafio=_tem_desafio(request, conta[0]))
+
+
+def _tem_desafio(request: Request, conta_id: int) -> bool:
+    """A aba que leva ao Desafio IA × equipe: a MESMA gerência da tela dele (dono e
+    gestor) e o mesmo portão (`desafio_ia.tem_desafio`). Tolerante: sem resposta,
+    sem a aba — a tela de relatórios nunca cai por causa de um link."""
+    if request.session.get("papel", "dono") not in ("dono", "gestor"):
+        return False
+    try:
+        from finance import desafio_ia as _dia
+        return _dia.tem_desafio(get_pool(), conta_id)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 @router.get("/painel/relatorios/pdf", response_class=HTMLResponse)

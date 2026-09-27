@@ -621,8 +621,8 @@ def _passar(c, conta_id: int, lead: dict, membro_ia: int) -> bool:
                   where id=%s and conta_id=%s""", (membro_ia, lead["conversa_id"], conta_id))
     antes = ""
     if lead["vendedor_id"]:
-        r = c.execute("select coalesce(nullif(nome,''), email) from membros where id=%s",
-                      (lead["vendedor_id"],)).fetchone()
+        r = c.execute("select coalesce(nullif(nome,''), email) from membros "
+                      "where id=%s and conta_id=%s", (lead["vendedor_id"], conta_id)).fetchone()
         antes = f" Era de {r[0]}." if r else ""
     dias = max(1, (datetime.now(timezone.utc) - lead["desde"]).days)
     c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao)
@@ -682,11 +682,11 @@ def _primeiro(nome: str) -> str:
     return (str(nome or "Cliente").strip().split() or ["Cliente"])[0].title()
 
 
-def _nome(c, membro_id) -> str:
+def _nome(c, conta_id: int, membro_id) -> str:
     if not membro_id:
         return "ninguém"
-    r = c.execute("select coalesce(nullif(nome,''), email) from membros where id=%s",
-                  (membro_id,)).fetchone()
+    r = c.execute("select coalesce(nullif(nome,''), email) from membros where id=%s and conta_id=%s",
+                  (membro_id, conta_id)).fetchone()
     return _primeiro(r[0]) if r and r[0] else "ninguém"
 
 
@@ -867,7 +867,7 @@ def resumo(c, conta_id: int, cfg: dict, agora: datetime) -> str:
         """select coalesce(nullif(m.nome,''), m.email), a.descricao
              from prospeccao_atividades a
              join prospeccao p on p.id = a.prospeccao_id and p.conta_id = %s
-             join membros m on m.id = a.membro_id
+             join membros m on m.id = a.membro_id and m.conta_id = p.conta_id
             where a.criado_em >= %s and a.membro_id = p.vendedor_id
               and length(trim(coalesce(a.descricao,''))) > 0
               and exists (select 1 from resgate_envios e where e.prospeccao_id = a.prospeccao_id
@@ -951,7 +951,7 @@ def _um_envio(pool, conta_id: int, cfg: dict, regra, todos: list[dict], agora: d
                            cfg=cfg)
             return
         n_hoje = _contagem_hoje(c, conta_id, ("previa", "retomada"), agora) + 1
-        vendedor = _nome(c, candidato["vendedor_id"])
+        vendedor = _nome(c, conta_id, candidato["vendedor_id"])
         c.commit()
     texto = redigir(pool, conta_id, candidato, regra, agora)
     if not texto:
@@ -1186,6 +1186,7 @@ def tela(c, conta_id: int, agora: datetime | None = None) -> dict:
             membros = [{"id": r[0], "nome": r[1]} for r in c.execute(
                 """select distinct m.id, coalesce(nullif(m.nome,''), m.email)
                      from chip_regra r join membros m on m.id = r.membro_id and m.ativo
+                                           and m.conta_id = r.conta_id
                     where r.conta_id=%s""", (conta_id,)).fetchall()]
     except Exception:  # noqa: BLE001
         pass

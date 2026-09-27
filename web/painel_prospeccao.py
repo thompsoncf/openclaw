@@ -4512,6 +4512,11 @@ async def comunicacao_resgate(request: Request):
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
+def _testar_resgate(conta_id: int) -> dict:
+    from finance import resgate as _rg
+    return _rg.testar(get_pool(), conta_id)
+
+
 @router.post("/painel/prospeccao/comunicacao/resgate/testar")
 async def comunicacao_resgate_testar(request: Request):
     """"Testar comigo": a IA manda a retomada do primeiro da fila pro WhatsApp do
@@ -4521,8 +4526,7 @@ async def comunicacao_resgate_testar(request: Request):
         return redir
     if not ctx["gerencia"]:
         return RedirectResponse(_AG_DESTINO, status_code=303)
-    from finance import resgate as _rg
-    r = await run_in_threadpool(_rg.testar, get_pool(), ctx["conta_id"])
+    r = await run_in_threadpool(_testar_resgate, ctx["conta_id"])
     request.session["prosp_aviso"] = ("Mandei o teste pro seu WhatsApp ✓ Responda lá como se fosse o cliente."
                                       if r.get("ok") else r.get("erro") or "Não consegui testar agora.")
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -14699,7 +14703,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <form class="rgcorpo" method="post" action="/painel/prospeccao/comunicacao/resgate">
         {% if rg.pausado_em %}<div class="distalerta">🛑 <b>Pausado pelo freio:</b> {{ rg.pausado_motivo }}. Nada sai até você retomar.
           <label style="display:inline-flex;gap:.3rem;align-items:center;margin-left:.4rem"><input type="checkbox" name="retomar" value="1"> retomar ao salvar</label></div>{% endif %}
-        <div class="distnote">No {{ '%d' % (rg.dias + 1) }}º dia sem mensagem nossa, o {{ voc.lead }} passa para a IA, que volta a chamar o {{ voc.cliente }} com as regras dela. O vendedor só fica com ele mandando mensagem ou escrevendo o motivo no histórico da ficha ("Segurar este lead", no app).</div>
+        <div class="distnote">No {{ '%d' % (rg.dias + 1) }}º dia sem mensagem nossa, o {{ voc.lead }} passa para a IA, que volta a chamar o {{ voc.cliente }} com as regras dela. O vendedor só fica com ele mandando mensagem ou escrevendo o motivo no histórico da ficha ("Segurar este {{ voc.lead }}", no app).</div>
         <div class="agrow"><div class="lab"><b>Situação</b><div><b>Ensaio</b>: nada vai pro {{ voc.cliente }} e nenhum {{ voc.lead }} muda de dono — a IA manda a prévia pro seu WhatsApp. <b>Ligado</b>: o {{ voc.lead }} passa pra IA e a mensagem sai.</div></div>
           <select class="fld" name="modo" style="max-width:10rem">
             {% for k, rot in [('off','Desligado'),('ensaio','Ensaio'),('ligado','Ligado')] %}<option value="{{ k }}" {% if rg.modo == k %}selected{% endif %}>{{ rot }}</option>{% endfor %}

@@ -68,7 +68,7 @@ create table contratos (id bigserial primary key, conta_id bigint, orcamento_id 
   substitui_id bigint, assinado_em timestamptz, status text);
 create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
-create table funil_etapas (conta_id bigint, chave text, fase text);
+create table funil_etapas (conta_id bigint, chave text, fase text, gatilho text);
 create table canais_config (conta_id bigint, canal text, provedor text, ativo boolean,
   desconectado_em timestamptz, rotulo text);
 """
@@ -101,7 +101,7 @@ def pool():
                   (EMPRESA, CHIP2, EMPRESA, OUTRA))
         c.execute("insert into canais_config values (%s,'whatsapp','qr',true,null),"
                   "(%s,'whatsapp','qr',true,null)", (EMPRESA, CHIP2))
-        c.execute("insert into funil_etapas values (%s,'fechado','fechamento')", (EMPRESA,))
+        c.execute("insert into funil_etapas (conta_id, chave, fase) values (%s,'fechado','fechamento')", (EMPRESA,))
         c.commit()
     yield p
     p.close()

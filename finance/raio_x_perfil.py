@@ -435,14 +435,25 @@ ETAPAS_GENERICAS = (
 )
 
 _ETAPAS_POR_PERFIL = {
+    # O FUNIL NOVO DE EVENTOS (docs/mockups/funil_novo_eventos.html, aprovado em
+    # 27/09/2026). As chaves são as da Prime, que o desenho saiu dela: 'qualificado'
+    # continua sendo a VISITA MARCADA (é o que está gravado em `prospeccao.status`
+    # desde sempre), e 'evento_realizado' é a DATA SEGURADA (a aprovação esperando o
+    # sinal). A coluna "Follow-up" saiu: a tela Follow-up já faz esse papel.
     "eventos": (
         ("novo", "Novo", 0, True, False, False),
         ("contatado", "Contatado", 10, False, False, False),
-        ("follow_up", "Follow-up", 20, False, False, False),
-        ("qualificado", "Agendado Visita", 30, False, False, False),
+        ("ficha_completa", "Qualificado", 20, False, False, False),
+        ("qualificado", "Visita marcada", 30, False, False, False),
+        ("visita_feita", "Visita feita", 35, False, False, False),
         ("proposta", "Proposta", 40, False, False, False),
+        # aprovou no link: a data fica segura esperando o sinal, e a festa já vai
+        # pra agenda (quem olha a agenda vê que a data não está livre)
+        ("evento_realizado", "Data segurada", 70, False, False, True),
         # a festa fechada sai do quadro E entra na agenda, nesta ordem
         ("ganho", "Fechado", 900, True, True, True),
+        # no dia seguinte à festa a venda volta, pro pós-festa (fase pós-venda)
+        ("pos_festa", "Pós-festa", 905, False, False, False),
         ("perdido", "Perdido", 910, True, False, False),
     ),
     "recorrente": (

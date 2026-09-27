@@ -344,6 +344,11 @@ def _sql_leads(festa: bool) -> str:
                and not exists (select 1 from resgate_leads r2
                                 where r2.prospeccao_id = p.id and r2.origem = 'ia_numero')))
          and p.status not in {fr.sql_fechadas('p')}
+         -- A DATA SEGURADA (funil novo de eventos): aprovou e espera o sinal, não
+         -- está parado — a reserva tem prazo próprio. O resgate não chama.
+         and p.status not in (select fe.chave from funil_etapas fe
+                               where fe.conta_id = p.conta_id and fe.gatilho = 'orcamento_aprovado'
+                                 and fe.fase = 'venda')
          and (%(perdidos)s or p.status <> 'perdido')
          -- O PERDIDO CONFORME O MOTIVO (seção 4 do mockup): quem fechou com outro,
          -- desistiu ou não cabe no que a empresa faz não é chamado; a data

@@ -1,0 +1,399 @@
+<title>Funil novo de eventos</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde, lilás pra IA). Tema único de
+   propósito: o painel não tem modo claro, e o mockup mostra a tela como ela vai ficar. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:82ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:82ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:88ch;margin:0}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota b{color:var(--text)}
+
+/* os dois modelos */
+.modelos{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.mod{border:1px solid var(--neon-borda);border-radius:14px;background:var(--surface);padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.55rem}
+.mod.ia{border-color:var(--ia-borda)}
+.mod .ch{font-family:var(--mono);font-size:.66rem;letter-spacing:.07em;text-transform:uppercase;color:var(--neon-2)}
+.mod.ia .ch{color:var(--ia-2)}
+.mod h3{font-size:1.08rem}
+.mod p{margin:0;color:var(--dim);font-size:.86rem}
+.mod p b{color:var(--text)}
+.passos{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.74rem}
+.passos span{border:1px solid var(--line-2);border-radius:999px;padding:.1rem .55rem;color:var(--dim);white-space:nowrap}
+.passos i{font-style:normal;color:var(--faint)}
+.mod .passos span.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.mod.ia .passos span.on{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.passos span.rsg{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+
+/* as colunas */
+.trilho{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--bg-2)}
+.etapas{display:grid;grid-template-columns:repeat(9,minmax(120px,1fr));min-width:1100px}
+.et{padding:.7rem .75rem;border-left:1px solid var(--line);display:flex;flex-direction:column;gap:.3rem;font-size:.76rem}
+.et:first-child{border-left:0}
+.et .n{font-family:var(--mono);font-size:.62rem;color:var(--faint)}
+.et h3{font-size:.92rem}
+.et .g{color:var(--dim)}
+.et .g b{color:var(--text);font-weight:500}
+.et .hoje{font-family:var(--mono);font-size:.6rem;color:var(--faint);border-top:1px dashed var(--line-2);padding-top:.3rem;margin-top:auto}
+.et.nova{background:var(--ia-fundo)}
+.tag{align-self:flex-start;font-size:.6rem;border-radius:4px;padding:.02rem .35rem;font-family:var(--mono);letter-spacing:.04em}
+.tag.igual{background:var(--surface-2);color:var(--dim);border:1px solid var(--line-2)}
+.tag.muda{background:var(--ambar-fundo);color:var(--ambar-2);border:1px solid var(--ambar-borda)}
+.tag.novo{background:var(--ia-fundo);color:var(--ia-2);border:1px solid var(--ia-borda)}
+.lado{display:flex;flex-wrap:wrap;gap:.5rem}
+.pl{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line-2);border-radius:999px;padding:.25rem .75rem;font-size:.78rem;color:var(--dim)}
+.pl b{color:var(--text)}
+.pl.fu{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.pl.at{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.pl.nv{border-color:var(--ia-borda);background:var(--ia-fundo)}
+
+/* cada coluna nos dois modelos */
+.quadro{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-2)}
+.lin{display:grid;grid-template-columns:10rem 1fr 1fr;border-top:1px solid var(--line)}
+.lin:first-child{border-top:0}
+.lin>div{padding:.7rem .85rem;min-width:0;font-size:.83rem;color:var(--dim)}
+.lin>div+div{border-left:1px solid var(--line)}
+.lin.cab>div{background:var(--surface-2);font-family:var(--mono);font-size:.64rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);padding-block:.55rem}
+.lin.cab .v{color:var(--neon-2)} .lin.cab .i{color:var(--ia-2)}
+.lin .col{font-family:var(--display);font-weight:600;font-size:.95rem;color:var(--text)}
+.lin .col small{display:block;font-family:var(--mono);font-weight:400;font-size:.6rem;color:var(--faint)}
+.lin p{margin:0}
+.lin p b{color:var(--text)}
+.lin .novo-r{color:var(--ia-2)}
+
+/* o quadro de verdade */
+.palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
+.tela{width:1560px;padding:18px;display:flex;flex-direction:column;gap:10px}
+.tb{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
+.tb h3{font-size:1.15rem}
+.tb .num{font-size:.78rem;color:var(--dim)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;padding:2px;background:var(--bg);gap:2px}
+.seg span{font-size:.72rem;padding:.2rem .55rem;border-radius:6px;color:var(--dim)}
+.seg span.on{background:var(--neon);color:#062312;font-weight:600}
+.cols{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:7px}
+.cl.rsg{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.cl.esp{border-style:dashed;border-color:var(--ambar-borda)}
+.cl.perd{border-style:dashed;border-color:var(--coral-borda)}
+.fila{border:1px dashed var(--ambar-borda);border-radius:8px;padding:.3rem .4rem;font-size:.6rem;color:var(--ambar-2);display:flex;flex-direction:column;gap:.1rem}
+.fila b{font-size:.66rem;color:var(--text)}
+.tr{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.tc{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:1rem 1.05rem;display:flex;flex-direction:column;gap:.55rem;font-size:.84rem;color:var(--dim)}
+.tc.r{border-color:var(--ambar-borda)} .tc.e{border-color:var(--ambar-borda);border-style:dashed} .tc.p{border-color:var(--coral-borda)}
+.tc h3{font-size:1.05rem;color:var(--text);display:flex;gap:.5rem;align-items:center}
+.tc .onde{font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.tc dl{margin:0;display:flex;flex-direction:column;gap:.45rem}
+.tc dt{font-size:.7rem;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;font-family:var(--mono)}
+.tc dd{margin:0}
+.tc dd b{color:var(--text)}
+.tc .muda{border-top:1px dashed var(--line-2);padding-top:.5rem;color:var(--ia-2)}
+.tc .muda b{color:var(--ia-2)}
+@media (max-width:820px){.tr{grid-template-columns:1fr}}
+.cl{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.4rem;display:flex;flex-direction:column;gap:6px;min-height:250px}
+.cl.nova{border-color:var(--ia-borda)}
+.cl h4{margin:0;font-family:var(--display);font-size:.72rem;display:flex;justify-content:space-between;gap:.25rem}
+.cl h4 span{color:var(--faint);font-family:var(--mono);font-weight:400}
+.cd{border:1px solid var(--line-2);border-radius:8px;background:var(--bg);padding:.35rem .4rem;font-size:.64rem;display:flex;flex-direction:column;gap:.12rem}
+.cd b{font-size:.72rem}
+.cd .m{color:var(--dim)}
+.who{align-self:flex-start;font-size:.56rem;border-radius:999px;padding:0 .4rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.who.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.who.rsg{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+.sel{align-self:flex-start;font-size:.56rem;border-radius:4px;padding:0 .35rem;font-family:var(--mono)}
+.sel.rel{background:var(--ambar-fundo);color:var(--ambar-2);border:1px solid var(--ambar-borda)}
+.sel.bad{background:var(--coral-fundo);color:var(--coral-2);border:1px solid var(--coral-borda)}
+.sel.ok{background:var(--neon-fundo);color:var(--neon-2);border:1px solid var(--neon-borda)}
+.faixa{display:flex;gap:7px}
+.faixa .cl{min-height:auto;flex:1}
+.faixa .cl.esp{border-style:dashed;border-color:var(--ambar-borda)}
+.faixa .cl.perd{border-style:dashed;border-color:var(--coral-borda)}
+.faixa .cl.rsg{border-color:var(--ambar-borda)}
+
+/* o bastão */
+.bastao{border:1px solid var(--ia-borda);border-radius:14px;background:var(--surface);padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.8rem}
+.bastao .top{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
+.bastao .top b{font-family:var(--display);font-size:1rem}
+.opcs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.op{border:1px solid var(--line-2);border-radius:10px;padding:.7rem .8rem;font-size:.82rem;color:var(--dim);display:flex;flex-direction:column;gap:.35rem;background:var(--bg)}
+.op.on{border-color:var(--ia);background:var(--ia-fundo)}
+.op h4{margin:0;font-family:var(--display);font-size:.9rem;color:var(--text);display:flex;gap:.45rem;align-items:center}
+.op h4 .r{width:12px;height:12px;border-radius:50%;border:2px solid var(--line-2);flex:none}
+.op.on h4 .r{border-color:var(--ia);background:radial-gradient(var(--ia) 45%,transparent 50%)}
+.op p{margin:0}
+.op p b{color:var(--text)}
+.op .hoje{font-family:var(--mono);font-size:.6rem;color:var(--ia-2)}
+
+.dec{display:flex;flex-direction:column;gap:10px}
+.q2{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem}
+.q2 .qn{font-family:var(--mono);font-size:.75rem;color:var(--neon);grid-row:span 3;padding-top:.15rem}
+.q2 h3{font-size:.95rem}
+.q2 p{margin:0;color:var(--dim);font-size:.85rem}
+.q2 p b{color:var(--text)}
+.rec{font-size:.84rem;color:var(--neon-2)}
+.rec::before{content:"Recomendo: ";color:var(--faint)}
+
+.mig{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-2)}
+.mr{display:grid;grid-template-columns:1.2fr 5rem 1.4fr 2fr;border-top:1px solid var(--line);font-size:.82rem}
+.mr:first-child{border-top:0}
+.mr>div{padding:.55rem .8rem;color:var(--dim);min-width:0}
+.mr>div+div{border-left:1px solid var(--line)}
+.mr.cab>div{background:var(--surface-2);font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+.mr .q{font-family:var(--mono);color:var(--text);text-align:right}
+.mr b{color:var(--text)}
+
+@media (max-width:820px){
+  .modelos,.opcs{grid-template-columns:1fr}
+  .lin{grid-template-columns:1fr}
+  .lin>div+div{border-left:0;border-top:1px dashed var(--line)}
+  .lin.cab{display:none}
+  .lin .m1::before{content:"👤 modelo 1 · CP Zarb · ";font-family:var(--mono);font-size:.62rem;color:var(--neon-2)}
+  .lin .m2::before{content:"🤖 modelo 2 · chip Thiago · ";font-family:var(--mono);font-size:.62rem;color:var(--ia-2)}
+  .mr{grid-template-columns:1fr 4rem}
+  .mr>div:nth-child(3),.mr>div:nth-child(4){grid-column:1/-1;border-left:0;border-top:1px dashed var(--line)}
+}
+</style>
+
+<div class="wrap">
+
+<header class="head">
+  <span class="k">Mockup pra aprovação · 27/09/2026 · Prime Eventos</span>
+  <h1>O funil novo de eventos, com os dois modelos</h1>
+  <p>O funil proposto na pesquisa (<b>docs: o funil que mais fecha festa</b>), encaixado nos dois jeitos de
+  atender que a Prime tem hoje. As colunas são <b>as mesmas pros dois</b>; o que muda é quem move o card e
+  o que acontece quando o cliente some. Só pra quem vende festa (§6): o funil de serviço recorrente não muda.</p>
+</header>
+
+<section class="sec">
+  <header><h2>Os dois modelos</h2></header>
+  <div class="modelos">
+    <div class="mod"><span class="ch">👤 modelo 1 · CP Zarb</span><h3>Os vendedores atendem; o sistema acompanha junto</h3>
+      <p>O rodízio escolhe o vendedor. Por <b>7 dias</b> o sistema faz o follow-up junto com ele (toques no 1º, 3º e
+      7º dia, a esteira cobrando todo dia). Passados 7 dias sem mensagem nossa, o lead vai pro <b>Resgate</b> e a IA
+      tenta de novo.</p>
+      <div class="passos"><span class="on">vendedor atende</span><i>→</i><span class="on">7 dias de follow-up junto</span><i>→</i><span class="rsg">Resgate da IA</span></div></div>
+    <div class="mod ia"><span class="ch">🤖 modelo 2 · chip Thiago</span><h3>A IA atende 100%, supervisionada por você</h3>
+      <p>O ZAQ SDR responde, qualifica, marca a visita e monta o orçamento. Você supervisiona: recebe os avisos e
+      confere os orçamentos. <b>Em validação.</b> Quando você decidir, <b>passa o bastão</b> e o lead segue com a
+      equipe, no modelo 1.</p>
+      <div class="passos"><span class="on">IA atende</span><i>→</i><span class="on">você supervisiona</span><i>→</i><span>depois: passa o bastão</span></div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>As colunas do funil novo</h2>
+    <p>Nove colunas, todas andando <b>sozinhas</b>: ninguém precisa arrastar card pra ele estar no lugar certo.
+    Arrastar continua possível, como hoje.</p></header>
+  <div class="trilho"><div class="etapas">
+    <div class="et"><span class="n">1</span><h3>Novo</h3><span class="tag igual">igual</span><span class="g">O cliente escreveu.</span><span class="hoje">hoje: Novo</span></div>
+    <div class="et"><span class="n">2</span><h3>Contatado</h3><span class="tag igual">igual</span><span class="g">Na <b>1ª resposta nossa</b> (gente ou IA).</span><span class="hoje">hoje: Contatado</span></div>
+    <div class="et nova"><span class="n">3</span><h3>Qualificado</h3><span class="tag novo">nova</span><span class="g">Quando a ficha tem <b>festa, data e convidados</b> (o leitor de conversa preenche).</span><span class="hoje">não existe</span></div>
+    <div class="et"><span class="n">4</span><h3>Visita marcada</h3><span class="tag muda">renomeia</span><span class="g">Visita na agenda. <b>Confirmação 3 vezes</b>: ao marcar, na véspera e no dia.</span><span class="hoje">hoje: Agendado Visita</span></div>
+    <div class="et nova"><span class="n">5</span><h3>Visita feita</h3><span class="tag novo">nova</span><span class="g">Quem recebeu marca <b>veio</b> ou <b>faltou</b>. Faltou volta pra Qualificado, com "remarcar".</span><span class="hoje">não existe</span></div>
+    <div class="et"><span class="n">6</span><h3>Proposta</h3><span class="tag igual">igual</span><span class="g">Orçamento enviado. <b>Validade de 7 dias</b> no card.</span><span class="hoje">hoje: Proposta</span></div>
+    <div class="et nova"><span class="n">7</span><h3>Data segurada</h3><span class="tag muda">substitui</span><span class="g">Aprovou no link: a data fica presa <b>esperando o sinal</b>, com contagem regressiva.</span><span class="hoje">hoje: Orçamento Assinado</span></div>
+    <div class="et"><span class="n">8</span><h3>Fechado</h3><span class="tag igual">igual</span><span class="g">Contrato assinado. Sai do quadro até a festa.</span><span class="hoje">hoje: Fechado</span></div>
+    <div class="et nova"><span class="n">9</span><h3>Pós-festa</h3><span class="tag novo">nova</span><span class="g">Volta <b>no dia seguinte à festa</b>: agradecer, avaliação, indicação.</span><span class="hoje">não existe</span></div>
+  </div></div>
+  <div class="lado"><span class="pl at"><b>♻️ Resgate</b> igual ao que fizemos, na frente do quadro</span><span class="pl at"><b>⏳ Lista de espera</b> nova, antes do Perdido</span><span class="pl fu"><b>Perdido</b> igual, no fim</span><span class="pl"><b>Follow-up</b> (a coluna) sai: está vazia, e a tela Follow-up já faz esse papel</span></div>
+</section>
+
+<section class="sec">
+  <header><h2>Cada coluna nos dois modelos</h2>
+    <p>O que acontece em cada coluna, de um lado e do outro. Em lilás, o que é novo.</p></header>
+  <div class="quadro">
+    <div class="lin cab"><div>coluna</div><div class="v">👤 modelo 1 · vendedor · CP Zarb</div><div class="i">🤖 modelo 2 · IA · chip Thiago</div></div>
+    <div class="lin"><div class="col">Novo</div>
+      <div class="m1"><p>O rodízio escolhe o vendedor; push de lead novo; já nasce com retorno agendado.</p></div>
+      <div class="m2"><p>O lead é do ZAQ SDR pela regra do número. Ninguém recebe push: a IA responde na hora, 24h.</p></div></div>
+    <div class="lin"><div class="col">Contatado</div>
+      <div class="m1"><p>Vendedor respondeu. <b>Começam os 7 dias</b>: se o cliente some, toques no 1º, 3º e 7º dia e a esteira cobrando.</p></div>
+      <div class="m2"><p>A IA respondeu (a saudação do celular não conta). Se o cliente some, <b class="novo-r">a IA insiste no 3º e no 7º dia e marca perdido no 10º</b>: os mesmos 7 dias do modelo 1, feitos pela IA.</p></div></div>
+    <div class="lin"><div class="col">Qualificado<small>nova</small></div>
+      <div class="m1"><p class="novo-r">Anda sozinho quando a ficha completa. O vendedor vê no card o que falta: "falta a data".</p></div>
+      <div class="m2"><p class="novo-r">Anda sozinho igual. A IA já pergunta festa, data e convidados antes de oferecer a visita.</p></div></div>
+    <div class="lin"><div class="col">Visita marcada</div>
+      <div class="m1"><p>O vendedor marca na agenda. <b class="novo-r">O sistema passa a confirmar a visita dele também</b>, pelo número da conversa: ao marcar, na véspera às 18h e no dia.</p></div>
+      <div class="m2"><p>A IA oferece a grade, marca e confirma (como hoje). A anfitriã recebe o aviso.</p></div></div>
+    <div class="lin"><div class="col">Visita feita<small>nova</small></div>
+      <div class="m1"><p class="novo-r">1h depois do horário, quem recebeu responde no app: veio ou faltou. <b>Veio</b>: o vendedor é lembrado de falar com o cliente em até 2h. <b>Faltou</b>: volta pra Qualificado com "remarcar".</p></div>
+      <div class="m2"><p class="novo-r">A anfitriã responde veio ou faltou. <b>Veio</b>: a IA manda o agradecimento em 2h. <b>Faltou</b>: a IA oferece novos horários.</p></div></div>
+    <div class="lin"><div class="col">Proposta</div>
+      <div class="m1"><p>Orçamento enviado. Follow-up da proposta em 3 dias. <b class="novo-r">A validade de 7 dias aparece no card</b> e no link do cliente.</p></div>
+      <div class="m2"><p>A IA monta; <b>você confere</b> antes de sair (fase de validação). Validade de 7 dias, como hoje.</p></div></div>
+    <div class="lin"><div class="col">Data segurada<small>substitui</small></div>
+      <div class="m1"><p class="novo-r">O cliente aprovou no link: a data fica presa esperando o sinal, com prazo e contagem no card. Se outro cliente pedir a mesma data, o vendedor é avisado.</p></div>
+      <div class="m2"><p>Hoje a IA já segura 72h esperando o sinal. <b class="novo-r">Ganha a coluna, a contagem e o aviso de data disputada.</b></p></div></div>
+    <div class="lin"><div class="col">Fechado</div>
+      <div class="m1"><p>Contrato assinado. Sai do quadro, igual.</p></div>
+      <div class="m2"><p>Igual. Enquanto você não passar o bastão, a venda fica em nome do ZAQ SDR.</p></div></div>
+    <div class="lin"><div class="col">Pós-festa<small>nova</small></div>
+      <div class="m1"><p class="novo-r">No dia seguinte à festa, o card volta pro vendedor: agradecer e pedir avaliação e indicação.</p></div>
+      <div class="m2"><p class="novo-r">A IA manda o agradecimento e o pedido de avaliação; indicação que chegar entra como lead novo, com a origem "indicação".</p></div></div>
+    <div class="lin"><div class="col">Se o cliente some</div>
+      <div class="m1"><p><b>7 dias</b> sem mensagem nossa (14 com visita ou orçamento): vai pro <b>Resgate</b>, e a IA retoma a conversa.</p></div>
+      <div class="m2"><p>Perdido no 10º dia pela insistência da IA; passados 30 dias, <b>volta uma vez</b> pelo Resgate.</p></div></div>
+    <div class="lin"><div class="col">Data ocupada<small>nova</small></div>
+      <div class="m1"><p class="novo-r">Em vez de perdido, vai pra Lista de espera daquela data. Se a data vagar, o vendedor é avisado de quem estava esperando.</p></div>
+      <div class="m2"><p class="novo-r">A IA oferece outra data; se o cliente só quer aquela, entra na lista de espera e a IA chama quando vagar.</p></div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>Como fica o quadro</h2>
+    <p>O funil de sempre, com as colunas novas. O <b>Resgate</b> continua na frente, como hoje; a <b>Lista de espera</b> e o <b>Perdido</b> ficam no fim. O selo mostra quem atende: 👤 vendedor, 🤖 ZAQ SDR, ♻️ Resgate.</p></header>
+  <div class="palco"><div class="tela">
+    <div class="tb"><h3>Funil</h3><span class="seg"><span class="on">Vendas</span><span>Atendimento</span></span><span class="seg"><span class="on">todos</span><span>🤖 IA</span><span>👤 equipe</span></span><span class="num">Prime Eventos · 512 no quadro</span></div>
+    <div class="cols">
+      <div class="cl rsg"><h4>♻️ Resgate <span>4</span></h4>
+        <div class="cd"><span class="who rsg">♻️ era do Pedro</span><b>Gabriela</b><span class="m">veio do follow-up · 9 dias parado</span><span class="sel rel">etapa: Proposta</span></div>
+        <div class="fila"><span>os próximos que a IA chamaria</span><b>Rafa</b><span>Contatado · 8 dias</span></div></div>
+      <div class="cl"><h4>Novo <span>3</span></h4>
+        <div class="cd"><span class="who">👤 Jacqueline</span><b>Renata</b><span class="m">CP Zarb · agora</span></div></div>
+      <div class="cl"><h4>Contatado <span>240</span></h4>
+        <div class="cd"><span class="who">👤 Pedro</span><b>Carlos</b><span class="m">casamento</span><span class="sel rel">follow-up · dia 3 de 7</span></div>
+        <div class="cd"><span class="who ia">🤖 ZAQ SDR</span><b>Luana</b><span class="m">15 anos · data ?</span><span class="sel rel">IA insiste · 2º toque</span></div></div>
+      <div class="cl nova"><h4>Qualificado <span>18</span></h4>
+        <div class="cd"><span class="who ia">🤖 ZAQ SDR</span><b>Mariana</b><span class="m">15 anos · 14/03 · 150</span></div>
+        <div class="cd"><span class="who">👤 Thiago</span><b>Nina</b><span class="m">infantil · 20/11 · 80</span><span class="sel bad">faltou · remarcar</span></div></div>
+      <div class="cl"><h4>Visita marcada <span>6</span></h4>
+        <div class="cd"><span class="who">👤 Jacqueline</span><b>Hana</b><span class="m">qua 30/09 10h</span><span class="sel ok">confirmada ✓</span></div></div>
+      <div class="cl nova"><h4>Visita feita <span>8</span></h4>
+        <div class="cd"><span class="who ia">🤖 ZAQ SDR</span><b>Paula</b><span class="m">veio ontem</span><span class="sel rel">agradecimento em 2h</span></div></div>
+      <div class="cl"><h4>Proposta <span>160</span></h4>
+        <div class="cd"><span class="who">👤 Pedro</span><b>Bruno</b><span class="m">R$ 18.400</span><span class="sel rel">vale até 02/10</span></div></div>
+      <div class="cl nova"><h4>Data segurada <span>2</span></h4>
+        <div class="cd"><span class="who ia">🤖 ZAQ SDR</span><b>Iara</b><span class="m">sáb 13/02 · sinal R$ 5.520</span><span class="sel rel">⏳ 41h pro sinal</span><span class="sel bad">outro cliente pediu a data</span></div></div>
+      <div class="cl"><h4>Fechado <span>12</span></h4>
+        <div class="cd"><span class="who">👤 Jacqueline</span><b>Sofia</b><span class="m">casamento · 07/03</span></div></div>
+      <div class="cl nova"><h4>Pós-festa <span>2</span></h4>
+        <div class="cd"><span class="who">👤 Thiago</span><b>Ana</b><span class="m">festa ontem</span><span class="sel rel">pedir avaliação</span></div></div>
+      <div class="cl esp"><h4>⏳ Lista de espera <span>3</span></h4>
+        <div class="cd"><span class="who">👤 Jacqueline</span><b>Léo</b><span class="m">quer sáb 13/02 · 1º da fila</span><span class="sel rel">data segurada por outro · vence em 41h</span></div></div>
+      <div class="cl perd"><h4>Perdido <span>70</span></h4>
+        <div class="cd"><span class="who">👤 Pedro</span><b>Diego</b><span class="m">fechou com outro</span><span class="sel bad">o Resgate não chama</span></div></div>
+    </div>
+  </div></div>
+  <p class="nota"><i>ler</i> <span>Os números são ilustrativos, a partir do quadro de hoje. Os nomes são de exemplo.</span></p>
+</section>
+
+
+<section class="sec" id="laterais">
+  <header><h2>Resgate, Lista de espera e Perdido</h2>
+    <p>As três colunas que não são etapa de venda: uma pra quem <b>parou</b>, uma pra quem está <b>esperando</b> e
+    uma pra quem <b>saiu</b>. O Resgate fica exatamente como fizemos; em lilás, o pouco que o funil novo muda nele.</p></header>
+  <div class="tr">
+    <div class="tc r"><span class="onde">na frente do quadro · como hoje</span><h3>♻️ Resgate</h3>
+      <dl>
+        <dt>quem entra</dt><dd>Lead do <b>modelo 1</b> com <b>7 dias sem mensagem nossa</b> (14 se já teve visita ou orçamento); o perdido do vendedor, conforme o motivo; e o perdido da IA do número, <b>uma vez</b>, 30 dias depois.</dd>
+        <dt>o card</dt><dd>Continua na etapa dele (o selo diz "etapa: Proposta"). A IA lê a conversa, faz o resumo e retoma. Se o cliente responde e marca visita, o card anda pelas colunas de sempre.</dd>
+        <dt>igual</dt><dd>Ensaio e Ligado, teto por dia, horário, aviso ao vendedor 2 dias antes, segurar com justificativa, toques no 3º e 7º dia, perdido no 10º, e "os próximos que a IA chamaria" embaixo da coluna.</dd>
+      </dl>
+      <span class="muda">O que muda: o "esquentado" (14 dias) passa a ler as colunas novas, <b>Visita feita</b> ou <b>Proposta</b>. E quem está em <b>Data segurada</b>, <b>Lista de espera</b> ou <b>Pós-festa</b> não entra no Resgate.</span></div>
+    <div class="tc e"><span class="onde">no fim, antes do Perdido · nova</span><h3>⏳ Lista de espera</h3>
+      <dl>
+        <dt>quem entra</dt><dd>O cliente quer uma data que <b>outro já segurou ou fechou</b>, e aceita esperar. Hoje ele vira perdido "data indisponível".</dd>
+        <dt>enquanto espera</dt><dd>Ninguém cobra: fica fora da esteira, do Follow-up e do Resgate. Não é lead parado, é lead esperando. O card mostra a posição na fila e quando a reserva do outro vence.</dd>
+        <dt>quando sai</dt><dd><b>A data vagou</b> (a reserva venceu sem sinal, ou cancelaram): o primeiro da fila volta pra <b>Proposta</b> e quem atende é avisado (no modelo 2, a IA chama). <b>A data passou</b>: vai sozinho pra Perdido, "data indisponível".</dd>
+      </dl>
+      <span class="muda">Se o cliente não quer esperar, vai pra Perdido como hoje.</span></div>
+    <div class="tc p"><span class="onde">no fim · igual</span><h3>Perdido</h3>
+      <dl>
+        <dt>como hoje</dt><dd>Motivo obrigatório. Se o cliente voltar a escrever, reabre em Contatado.</dd>
+        <dt>o Resgate e os motivos</dt><dd><b>Nunca chama</b>: fechou com outro, ficou com o atual, fora do que a Prime faz, desistiu da festa, sem interesse, localização. <b>Uma vez só</b>: não respondeu. <b>Data indisponível</b>: só se a festa está a mais de 30 dias, oferecendo outra data.</dd>
+        <dt>modelo 2</dt><dd>O perdido da IA (10º dia sem resposta) volta uma vez pelo Resgate depois de 30 dias.</dd>
+      </dl>
+      <span class="muda">O que muda: a <b>Data segurada que vence sem sinal não vira perdido</b>: volta pra Proposta com o selo "reserva venceu", e a data vai pro primeiro da Lista de espera.</span></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>O bastão do modelo 2</h2>
+    <p>No cartão do chip Thiago (Comunicação › Agente › Regras por número), uma escolha só decide até onde vai a
+    IA. Hoje é a primeira: você valida. Quando decidir, troca aqui e nada mais precisa mudar.</p></header>
+  <div class="bastao">
+    <div class="top"><b>🤖 chip Thiago · até onde a IA vai</b></div>
+    <div class="opcs">
+      <div class="op on"><h4><span class="r"></span>Validação: tudo comigo</h4><span class="hoje">é como está hoje</span>
+        <p>A IA atende do "oi" ao contrato. <b>Você</b> recebe os avisos de agenda e desconto e confere os orçamentos. O card fica do ZAQ SDR.</p></div>
+      <div class="op"><h4><span class="r"></span>Passa na visita feita</h4>
+        <p>A IA atende até a visita. Quando a anfitriã marca <b>veio</b>, o card passa pra ela e segue o <b>modelo 1</b>: proposta, follow-up de 7 dias e Resgate.</p></div>
+      <div class="op"><h4><span class="r"></span>Passa quando alguém assume</h4>
+        <p>A IA atende até alguém da equipe responder o cliente. Quem respondeu fica com o card, no <b>modelo 1</b>.</p></div>
+    </div>
+    <p class="nota" style="margin:0"><i>desafio</i> <span>Em qualquer escolha, o Desafio IA × equipe continua contando a IA como quem trouxe o lead e marcou a visita. O que passa é quem segue a venda.</span></p>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>Os cards de hoje: nenhum se perde</h2>
+    <p>As colunas antigas mudam de nome ou ganham vizinhas; nenhum card é apagado nem muda de dono.</p></header>
+  <div class="mig">
+    <div class="mr cab"><div>coluna de hoje</div><div>cards</div><div>vira</div><div>o que acontece</div></div>
+    <div class="mr"><div><b>Contatado</b></div><div class="q">246</div><div>Contatado</div><div>Fica. Os que já têm festa, data e convidados andam pra Qualificado na próxima mensagem.</div></div>
+    <div class="mr"><div><b>Follow-up</b> (a coluna)</div><div class="q">0</div><div>sai</div><div>Está vazia. A tela Follow-up continua igual.</div></div>
+    <div class="mr"><div><b>Agendado Visita</b></div><div class="q">13</div><div>Visita marcada</div><div>Só troca o nome. Os 8 com visita já feita na agenda passam pra Visita feita.</div></div>
+    <div class="mr"><div><b>Proposta</b></div><div class="q">163</div><div>Proposta</div><div>Fica. A validade aparece nos que têm orçamento com data.</div></div>
+    <div class="mr"><div><b>Orçamento Assinado</b></div><div class="q">0</div><div>Data segurada</div><div>Hoje está vazia (o card sai do quadro na aprovação). Daqui pra frente, a aprovação para em Data segurada até o sinal.</div></div>
+    <div class="mr"><div><b>Fechado</b></div><div class="q">12</div><div>Fechado</div><div>Igual. Os de festa já passada recebem o Pós-festa só daqui pra frente.</div></div>
+    <div class="mr"><div><b>Perdido</b></div><div class="q">70</div><div>Perdido</div><div>Igual.</div></div>
+  </div>
+  <p class="nota"><i>§0</i> <span>A troca de colunas é configuração da conta (etapas), feita por migração no deploy, com a sua autorização. Não mexe em conversa, mensagem, conexão nem chip.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>Pra você decidir</h2></header>
+  <div class="dec">
+    <div class="q2"><span class="qn">1</span><h3>Quanto tempo a data fica segurada esperando o sinal?</h3>
+      <p>Hoje a IA usa 72h. O setor usa até 14 dias, com 24–48h pra confirmar se outro cliente pedir a mesma data.</p>
+      <span class="rec">72h pros dois modelos, com o aviso de data disputada. Dá pra aumentar depois no cartão.</span></div>
+    <div class="q2"><span class="qn">2</span><h3>O sistema confirma também a visita que o vendedor marca?</h3>
+      <p>Hoje só a da IA recebe confirmação. A pesquisa mostra até 40% menos faltas com três lembretes.</p>
+      <span class="rec">sim, pelo número da conversa, com o texto da empresa.</span></div>
+    <div class="q2"><span class="qn">3</span><h3>A "IA insiste" liga já no chip Thiago?</h3>
+      <p>Sem ela, o lead da IA que some fica parado pra sempre (é o furo 1). Com ela, a IA faz os mesmos 7 dias do vendedor.</p>
+      <span class="rec">ligar junto com o funil novo.</span></div>
+    <div class="q2"><span class="qn">4</span><h3>Degustação entra como coluna?</h3>
+      <p>Se a Prime faz degustação antes do contrato, ela entra entre Visita feita e Proposta. Se não faz, fica de fora.</p>
+      <span class="rec">fora por enquanto, até você dizer como funciona na Prime.</span></div>
+    <div class="q2"><span class="qn">5</span><h3>Pós-festa: e depois?</h3>
+      <p>Além de avaliação e indicação, dá pra chamar de novo perto do próximo aniversário (infantil) ou de irmãos (15 anos).</p>
+      <span class="rec">começar com agradecimento, avaliação e indicação; a recompra vem num segundo passo.</span></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>Como seria construído</h2></header>
+  <div class="quadro">
+    <div class="lin"><div class="col">1 · Colunas</div><div style="grid-column:span 2"><p>Migração nas etapas da Prime: Qualificado, Visita feita, Data segurada e Pós-festa, cada uma com o seu gatilho; "Agendado Visita" vira "Visita marcada"; a coluna Follow-up sai. O modelo de eventos das contas novas ganha o mesmo desenho.</p></div></div>
+    <div class="lin"><div class="col">2 · Gatilhos novos</div><div style="grid-column:span 2"><p>Ficha completa → Qualificado; visita "realizada" na agenda → Visita feita; "faltou" → volta com remarcar; festa passada → Pós-festa; data pedida por dois clientes → aviso.</p></div></div>
+    <div class="lin"><div class="col">3 · Rotinas</div><div style="grid-column:span 2"><p>Pergunta "veio?" pra quem recebeu a visita; lembrete de falar em 2h depois da visita; confirmação da visita do vendedor; Lista de espera.</p></div></div>
+    <div class="lin"><div class="col">4 · O bastão</div><div style="grid-column:span 2"><p>A escolha no cartão do chip, e a troca de dono do card quando ela manda.</p></div></div>
+    <div class="lin"><div class="col">5 · Novidade</div><div style="grid-column:span 2"><p>Aviso pra dono, gestor e vendedor das contas que vendem festa (portão <b>eventos</b>): o vendedor ganha coluna e rotina nova.</p></div></div>
+  </div>
+  <p class="nota"><i>ordem</i> <span>É grande pra um PR só. Proposta: 1 e 2 primeiro (as colunas andando sozinhas), depois 3, depois 4. Cada um com o seu aviso.</span></p>
+</section>
+
+</div>

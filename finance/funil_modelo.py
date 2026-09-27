@@ -46,6 +46,37 @@ from finance import raio_x_perfil as _rxp
 #: o que o modelo pode mudar numa etapa que já existe. Ordem = ordem na tela.
 ACOES = ("criar", "rotulo", "ordem", "quadro", "agenda")
 
+#: a FASE das etapas que não são de venda. As tuplas do modelo não a carregam; sem
+#: isto, o Pós-festa do funil novo de eventos nasceria como 'venda' e deixaria de
+#: contar como venda fechada (`funil_regua.chaves_fechadas`).
+FASE = {"ganho": "fechamento", "perdido": "fechamento", "pos_festa": "pos"}
+
+#: o GATILHO das colunas novas do funil de eventos. Coluna que nasce sem gatilho
+#: nunca enche sozinha — e estas três só existem pra andar sozinhas. Quem decide se
+#: anda de verdade continua sendo a régua da conta (`gatilhos_modo`: off, ensaio,
+#: ligado); o gatilho da etapa só diz O QUE a traz.
+GATILHO = {"ficha_completa": "ficha_completa", "visita_feita": "compromisso_feito",
+           "pos_festa": "festa_passou"}
+
+
+def _regua_da_nova(c, conta_id: int, chaves) -> None:
+    """Fase e gatilho da etapa que o modelo ACABOU de criar (nunca de uma que a conta
+    já tinha: `on conflict do nothing` lá em cima, e aqui só as chaves criadas agora).
+    À parte do insert e tolerante: banco sem a régua (migração 177) cria a etapa igual,
+    só sem fase nem gatilho."""
+    for chave in chaves:
+        if chave not in FASE and chave not in GATILHO:
+            continue
+        try:
+            with c.transaction():
+                c.execute("""update funil_etapas set fase=%s, gatilho=%s, gatilho_ativo=%s
+                              where conta_id=%s and chave=%s""",
+                          (FASE.get(chave, "venda"), GATILHO.get(chave), chave in GATILHO,
+                           conta_id, chave))
+        except Exception:  # noqa: BLE001 — banco sem a 177
+            return
+
+
 _COLS = ("id", "chave", "rotulo", "ordem", "fixa", "sai_do_quadro", "agenda_ao_entrar",
          "semeado_de")
 
@@ -75,7 +106,7 @@ def semear(c, conta_id: int, chave_perfil: str) -> int:
     adivinhava por comparação de texto e errava em toda conta semeada por um perfil
     diferente do atual (a Liberal, conta 37, em 14/09/2026).
     """
-    n = 0
+    n, antes, criadas = 0, 0, []
     for chave, rotulo, ordem, fixa, sai, agenda in _rxp.etapas_padrao(chave_perfil):
         n += c.execute(
             """insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa,
@@ -83,6 +114,10 @@ def semear(c, conta_id: int, chave_perfil: str) -> int:
                     values (%s,%s,%s,%s,%s,%s,%s,%s)
                on conflict (conta_id, chave) do nothing""",
             (conta_id, chave, rotulo, ordem, fixa, sai, agenda, chave_perfil)).rowcount
+        if n > antes:
+            criadas.append(chave)
+        antes = n
+    _regua_da_nova(c, conta_id, criadas)
     return n
 
 
@@ -272,12 +307,13 @@ def aplicar(c, conta_id: int, chave_perfil: str, aceitas) -> dict:
         acao, chave = it["acao"], it["chave"]
         if acao == "criar":
             m = next(x for x in _rxp.etapas_padrao(chave_perfil) if x[0] == chave)
-            c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa,
-                                                   sai_do_quadro, agenda_ao_entrar,
-                                                   semeado_de)
-                              values (%s,%s,%s,%s,%s,%s,%s,%s)
-                         on conflict (conta_id, chave) do nothing""",
-                      (conta_id, m[0], m[1], m[2], m[3], m[4], m[5], chave_perfil))
+            if c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa,
+                                                      sai_do_quadro, agenda_ao_entrar,
+                                                      semeado_de)
+                                 values (%s,%s,%s,%s,%s,%s,%s,%s)
+                            on conflict (conta_id, chave) do nothing""",
+                         (conta_id, m[0], m[1], m[2], m[3], m[4], m[5], chave_perfil)).rowcount:
+                _regua_da_nova(c, conta_id, [m[0]])
         elif acao == "rotulo":
             # re-carimba: o nome passou a ser o do modelo, não mais o que estava
             c.execute("""update funil_etapas set rotulo=%s, semeado_de=%s

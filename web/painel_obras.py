@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
@@ -36,6 +36,7 @@ from finance import obra_reforma as orf
 from finance import obra_venda as ov
 from finance import obras as ob
 from finance import raio_x_perfil as rxp
+from finance import relogio
 from web.portal import _env, _render, conta_logada, nicho_da_conta
 
 router = APIRouter()
@@ -130,7 +131,7 @@ def painel_obras(request: Request):
         parado=ov.parado_em_casas(pool, conta[0], abertas), avisos=avisos,
         sem=ob.sem_obra(pool, conta[0]),
         escolhas=[o for o in abertas if o["status"] != "entregue"],
-        tipos=ob.ROTULO_TIPO, hoje=date.today(),
+        tipos=ob.ROTULO_TIPO, hoje=relogio.hoje(),
         erro=(request.query_params.get("erro") or "").strip())
 
 

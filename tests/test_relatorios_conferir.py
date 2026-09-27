@@ -36,9 +36,11 @@ vem antes do fornecedor, a CATEGORIA não gasta mais uma coluna, e o aviso mora
 dentro do Status.
 """
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
+
+from tests.relogio_fixo import HOJE as _HOJE_BR
 from psycopg_pool import ConnectionPool
 
 import web.painel_relatorios as rel
@@ -74,7 +76,11 @@ create table membros (id bigserial primary key, conta_id bigint,
   nome text, email text);
 """
 
-HOJE = date.today()
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()`: o período da aba
+# corta no dia de Brasília, e o teste falhava no CI das 21h à meia-noite.
+HOJE = _HOJE_BR
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 
 
 @pytest.fixture(scope="module")

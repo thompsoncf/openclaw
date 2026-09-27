@@ -178,6 +178,9 @@ TABELAS: dict[str, tuple[str, ...]] = {
     "clinica_evolucoes": ('conta_id',),  # 423: a evolução de cada atendimento
     "clinica_prontuario_arquivos": ('conta_id',),  # 430: fotos e anexos, cifrados
     "clinica_documentos": ('conta_id',),  # 440: receita, atestado, pedido de exame…
+    "clinica_certificados": ('conta_id',),  # 442: o certificado A1 (cifrado) ou o da nuvem
+    "clinica_certificado_liberado": ('conta_id',),  # 442: o A1 liberado no dia
+    "clinica_assinaturas_icp": ('conta_id',),  # 442: o PDF assinado com o certificado
     "clinica_pacotes": ('conta_id',),       # 381: o saldo de sessões
     "clinica_pacote_consumos": ('conta_id',),
     "clinica_retornos": ('conta_id',),

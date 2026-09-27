@@ -519,7 +519,9 @@ def test_o_bloco_da_regua_so_pra_quem_vende_festa_e_a_rota_salva_as_tres():
     from web import painel_prospeccao as pp
     tpl = pp._REGUA_TPL
     bloco = tpl[tpl.index('{% if rotinas_festa is defined and rotinas_festa is not none %}'):]
-    bloco = bloco[:bloco.index("{% endif %}\n\n  <form method=\"post\" action=\"/painel/prospeccao/regua/config\">")]
+    # desde 27/09/2026 (a régua reorganizada) as rotinas vêm depois das automações,
+    # logo antes dos motivos de perda
+    bloco = bloco[:bloco.index("{% endif %}\n\n  <!-- ---------------- motivos de perda")]
     assert 'action="/painel/prospeccao/regua/rotinas-festa"' in bloco
     for k in vr.CHAVES:
         assert f"('{k}'," in bloco

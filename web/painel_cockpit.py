@@ -2963,6 +2963,19 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
     eventos = [v for v in eventos if not v.get("precisa_resposta")]
     cont = ck.contagem_agenda(pool, conta_id, membro_id, so_meus=so_meus)
     hoje = [v for v in eventos if v["hoje"]]
+    # AS ROTINAS DA VISITA (migração 414): com a confirmação ligada, a visita futura
+    # ganha o "✓ Cliente já confirmou" — quem confirmou pelo próprio celular para as
+    # mensagens do sistema. Tolerante: sem a 414, a agenda abre igual.
+    conf_on, selo_lead = False, {}
+    try:
+        from finance import visita_rotinas as _vrt
+        with pool.connection() as _c:
+            conf_on = _vrt.config(_c, conta_id)["confirmar"]
+            if conf_on:
+                selo_lead = _vrt.selos(_c, conta_id, [v["lead_id"] for v in eventos if v["lead_id"]])
+            _c.commit()
+    except Exception:  # noqa: BLE001
+        conf_on, selo_lead = False, {}
 
     _TAG = {"visita": ("visita", "var(--azul)", "var(--azul-borda)", "#0d1b23"),
             "pre": ("pré-reserva", "var(--ambar)", "#5a4520", "#241c0f"),
@@ -2987,6 +3000,15 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
             # só o mesmo limite do Remarcar (só visita, só a posse).
             acoes.append(f"<a class=acao-apagar href='{_BASE}/agenda/{v['id']}/excluir'>"
                          "🗑 Excluir</a>")
+            if conf_on and v["lead_id"] and not v.get("precisa_resposta"):
+                sl = selo_lead.get(v["lead_id"])
+                if sl and sl[0].startswith("confirmada"):
+                    acoes.append("<span style='color:var(--neon)'>✓ confirmada</span>")
+                else:
+                    acoes.append(f"<form method=post action='{_BASE}/agenda/{v['id']}/confirmada' "
+                                 "style='display:inline'><button class=acao-forte "
+                                 "style='background:none;border:0;cursor:pointer;font:inherit'>"
+                                 "✓ " + _p('cliente').capitalize() + " já confirmou</button></form>")
         if v["ics_url"]:
             acoes.append(f"<a href='{esc(v['ics_url'])}'>{_ic('agenda', 'ic p')} Calendário</a>")
         rot, cor, borda, fundo = _TAG[v["tipo_ev"]]
@@ -3418,6 +3440,26 @@ def cockpit_excluir_tela(request: Request, ev_id: int):
                "data-busy='⏳ Excluindo…'>Excluir de vez</button></div>"
              + "</form>")
     return _page("Excluir visita", corpo)
+
+
+@router.post("/cockpit/agenda/{ev_id}/confirmada")
+def cockpit_visita_confirmada(request: Request, ev_id: int):
+    """O vendedor já confirmou a visita pelo celular dele: as mensagens de
+    confirmação do sistema param (rotinas da visita, migração 414)."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    from finance import visita_rotinas as _vrt
+    with get_pool().connection() as c:
+        ok = _vrt.marcar_confirmada(c, conta_id, ev_id, membro_id, gestao=bool(g))
+        c.commit()
+    if ok:
+        request.session["ck_ok"] = "Visita confirmada ✓ O sistema não pergunta mais."
+    else:
+        request.session["ck_err"] = "Não deu pra marcar: a visita não é sua ou já passou."
+    return RedirectResponse(f"{_BASE}/agenda", status_code=303)
 
 
 @router.post("/cockpit/agenda/{ev_id}/excluir")

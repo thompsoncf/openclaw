@@ -80,10 +80,18 @@ def test_card_que_muda_de_coluna_entra_no_topo():
 
 
 def test_o_reload_nao_fecha_a_janela_nem_o_menu_e_volta_onde_estava():
-    ciclo = FONTE.split("setInterval(function(){\n  if(document.hidden) return;")[1][:900]
-    for freio in (".leadpop", "perdapop", ".etcfg[open]", ".kbpop:not([hidden])"):
-        assert freio in ciclo, freio
-    assert ciclo.index("kbGuardaTela();") < ciclo.index("location.reload();")
+    """Desde 27/09/2026 a atualização troca só os dados, no lugar (o funil sem
+    piscar, docs/mockups/funil_atualizacao.html). Os freios são os mesmos, num lugar
+    só (`_kbFreado`), e a troca devolve a rolagem, as dobras e a aba (`_kbVolta`). O
+    recarregamento de antes ficou só pro caso de a troca falhar — e continua
+    guardando a tela antes."""
+    freios = FONTE.split("function _kbFreado(){")[1][:1200]
+    for freio in (".leadpop", "perdapop", ".etcfg[open]", ".kbpop:not([hidden])", ".chatpop"):
+        assert freio in freios, freio
+    troca = FONTE.split("function kbAtualiza(forcar){")[1][:2400]
+    assert troca.count("_kbFreado()") == 2, "o freio vale antes de buscar E antes de trocar"
+    assert troca.index("kbGuardaTela();") < troca.index("location.reload();")
+    assert "setInterval(function(){kbAtualiza(false);}, 60000);" in FONTE
     assert "sessionStorage.getItem('kb_tela')" in FONTE
 
 
@@ -106,3 +114,23 @@ def test_o_submenu_mover_para_nao_fecha_no_proprio_clique():
     assert "e.target.closest('.kbpop')" not in FONTE, "voltou o closest do alvo, que falha com nó solto"
     mover = FONTE.split("function kbMenuMover(")[1][:700]
     assert "pop.innerHTML=h" in mover, "se o submenu parar de trocar o innerHTML, reveja este teste"
+
+
+def test_o_visual_do_quadro_vem_antes_do_quadro():
+    """27/09/2026, o print do dono: a cada atualização o funil aparecia desmontado —
+    links roxos, botões da largura da tela. O CSS do quadro morava depois dos cards,
+    e o navegador desenhava a página sem ele até chegar lá. Ele vem antes agora."""
+    assert TPL.index(".kbtit{display:flex") < TPL.index('id="kbtit"')
+    assert TPL.index(".kbrow .kbcard{") < TPL.index('id="kbrow"')
+    assert "location.reload();\n}, 60000);" not in FONTE, "voltou o recarregamento da página inteira"
+
+
+def test_o_selo_e_o_fio_da_atualizacao():
+    assert 'id="kbsync"' in TPL and 'onclick="kbAtualiza(true)"' in TPL
+    assert 'id="kbfio"' in TPL
+    troca = FONTE.split("function kbAtualiza(forcar){")[1][:2400]
+    for pedaco in ("'kbcritw','kbtri','kbtabs','foco'", "el.innerHTML=novo.innerHTML", "_kbVolta(f)"):
+        assert pedaco in troca, pedaco
+    # as quatro regiões trocadas existem SEMPRE no template (com ou sem conteúdo)
+    for id_ in ('id="kbcritw"', 'id="kbtri"', 'id="kbtabs"', 'id="foco"'):
+        assert id_ in TPL, id_

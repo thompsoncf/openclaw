@@ -121,6 +121,23 @@ def ver(request: Request, cliente_id: int):
                    pre=pre, ficha_ligado=ligado, link_ficha=link, SEXO=cpa.SEXO)
 
 
+@router.get(URL + "/{cliente_id}/termos/{aceite_id}.pdf")
+def termo_pdf(request: Request, cliente_id: int, aceite_id: int):
+    """A cópia em PDF do termo que o paciente aceitou (o texto exato, quem, quando)."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    from fastapi.responses import Response
+    from finance import clinica_termos as ct
+    with get_pool().connection() as c:
+        doc = ct.pdf(c, conta[0], cliente_id, aceite_id)
+    if not doc:
+        return RedirectResponse(f"{URL}/{cliente_id}?aba=cadastro", status_code=303)
+    return Response(doc, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="termo-{aceite_id}.pdf"',
+                             "Cache-Control": "no-store, max-age=0"})
+
+
 @router.post(URL + "/{cliente_id}/balcao", response_class=HTMLResponse)
 def balcao(request: Request, cliente_id: int):
     """Check-in no balcão: um QR e um link que valem uma vez, por 15 minutos. O paciente
@@ -349,7 +366,7 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="pc-acoes" style="margin-top:.6rem"><button>Salvar</button></div>
   </form>
   <div class="pc-cx"><b>Termos</b>
-    {% for t in p.termos %}<div class="pc-m" style="margin-top:.3rem">{{ t.titulo }}: aceito por {{ t.por }}{% if t.papel == 'responsavel' %} (responsável){% endif %} em {{ t.quando.strftime('%d/%m/%Y %H:%M') }}{% if t.opcao_txt %}<br>{{ t.opcao_txt }}{% endif %}</div>
+    {% for t in p.termos %}<div class="pc-m" style="margin-top:.3rem">{{ t.titulo }}: aceito por {{ t.por }}{% if t.papel == 'responsavel' %} (responsável){% endif %} em {{ t.quando.strftime('%d/%m/%Y %H:%M') }}{% if t.opcao_txt %}<br>{{ t.opcao_txt }}{% endif %} · <a href="/painel/clinica/pacientes/{{ p.id }}/termos/{{ t.id }}.pdf">PDF</a></div>
     {% else %}<div class="pc-m" style="margin-top:.3rem">Nenhum termo aceito ainda. O paciente aceita pelo link da ficha.</div>{% endfor %}</div>
 
   {% elif aba == 'pre' and pre %}

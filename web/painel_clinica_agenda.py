@@ -107,7 +107,8 @@ def agenda(request: Request):
         from finance import clinica_ficha_link as _cfl
         cfg["ficha_link"] = "ligado" if _cfl.ligado(c, conta_id) else "off"
         _emp = c.execute("select coalesce(nome,'') from contas where id=%s", (conta_id,)).fetchone()
-        termos_padrao = _cfl.textos_dos_termos(_emp[0] if _emp else "", "", False)
+        _t = _cfl.textos_dos_termos(c, conta_id, _emp[0] if _emp else "", "o paciente", False)
+        termos_padrao = {k: (_t[k]["titulo"], _t[k]["texto"]) for k in ("lgpd", "imagem")}
         from finance import clinica_vagas as cvg
         vagas_esperando = cvg.esperando(c, conta_id)
         prof_id = _int(q.get("prof")) or (profs[0]["id"] if profs else None)
@@ -554,6 +555,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="mut" style="margin:.2rem 0 .5rem">A confirmação do horário leva o link "complete sua ficha antes da consulta"; a véspera lembra dele se faltar algo. O paciente abre com a data de nascimento e preenche cadastro (com o CPF da nota), a pré-consulta (só o profissional lê) e os termos de uso de dados e de imagem. <b>Leia os termos antes de ligar.</b></div>
     <details class="mut" style="margin-bottom:.5rem"><summary>Ler os termos</summary>{% for t, par in termos_padrao.items() %}<div style="margin-top:.4rem"><b>{{ par[0] }}</b><div style="white-space:pre-wrap">{{ par[1] }}</div></div>{% endfor %}
       <div style="margin-top:.4rem">Opções das fotos: {% for k, r in imagem_opcoes %}<div>• {{ r }}</div>{% endfor %}</div></details>
+    <div style="margin-bottom:.5rem"><a href="/painel/clinica/termos">Editar os termos da clínica e os termos por procedimento</a></div>
     <div class="ag-form"><label>Link da ficha<select name="ficha"><option value="off" {% if cfg.ficha_link != 'ligado' %}selected{% endif %}>Desligado</option><option value="ligado" {% if cfg.ficha_link == 'ligado' %}selected{% endif %}>Ligado: vai na confirmação e na véspera</option></select></label></div>
     <div class="ag-acoes"><button>Salvar</button></div>
   </form>

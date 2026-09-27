@@ -26,6 +26,7 @@ from datetime import date, datetime, timedelta, timezone
 from finance import clinica_agenda as ca
 from finance import clinica_pacientes as cpa
 from finance import clinica_preconsulta as cpc
+from finance import clinica_termos as ct
 
 _log = logging.getLogger("clinica.ficha_link")
 
@@ -37,12 +38,8 @@ CAMPOS_LINK = ("nome_social", "sexo", "profissao", "numero", "complemento", "bai
                "contato_emergencia", "fone_emergencia")
 MAIORIDADE = 18
 COMO_CONHECEU = ("Instagram", "Indicação de alguém", "Google", "Anúncio", "Passei na frente", "Outro")
-IMAGEM = (("clinico", "Autorizo as fotos só para o meu tratamento: ficam no prontuário, e só os profissionais "
-                      "de saúde da clínica veem."),
-          ("divulgacao", "Autorizo as fotos para o meu tratamento e também para divulgação da clínica (redes "
-                         "sociais e site). Posso retirar essa autorização quando quiser, pelo WhatsApp."),
-          ("nao", "Não autorizo fotos."))
-VERSAO_TERMOS = "zaq-2026-09-27"
+IMAGEM = ct.IMAGEM
+VERSAO_TERMOS = ct.VERSAO_PADRAO
 
 
 def _falta_migracao(e: Exception) -> bool:
@@ -223,7 +220,8 @@ def situacoes(c, conta_id: int, cliente_ids, agora: datetime) -> dict[int, dict]
              left join clientes rk on rk.id = k.responsavel_id and rk.dono_id = k.dono_id and rk.ativo
              left join pessoas rp on rp.id = rk.pessoa_id
             where k.dono_id=%s and k.id = any(%s)""", (conta_id, ids)).fetchall()
-    ultimo, termos = {}, {}
+    ultimo, termos, proc_ok, prox_serv = {}, {}, set(), {}
+    com_termo = ct.servicos_com_termo(c, conta_id) if pelo_link else set()
     try:
         with c.transaction():
             # a pré-consulta vale pra próxima consulta se veio DEPOIS da última terminar
@@ -236,8 +234,20 @@ def situacoes(c, conta_id: int, cliente_ids, agora: datetime) -> dict[int, dict]
                     """select distinct cliente_id, termo from clinica_termos_aceites
                         where conta_id=%s and cliente_id = any(%s)""", (conta_id, ids)).fetchall():
                 termos.setdefault(kid, set()).add(termo)
+            if com_termo:
+                prox_serv = dict(c.execute(
+                    """select distinct on (cliente_id) cliente_id, servico_id from eventos_agenda
+                        where conta_id=%s and cliente_id = any(%s)
+                          and situacao in ('agendado','confirmado','presente','atendimento')
+                          and coalesce(status, '') <> 'cancelado' and inicio >= %s
+                        order by cliente_id, inicio, id""", (conta_id, ids, agora - timedelta(hours=3))).fetchall())
+                versao_de = ct.versoes_procedimento(c, conta_id)
+                proc_ok = {(r[0], r[1]) for r in c.execute(
+                    """select distinct cliente_id, servico_id, versao from clinica_termos_aceites
+                        where conta_id=%s and cliente_id = any(%s) and termo='procedimento'""",
+                    (conta_id, ids)).fetchall() if versao_de.get(r[1]) == r[2]}
     except Exception as e:  # noqa: BLE001
-        if not _falta_migracao(e):
+        if not _falta_migracao(e) and "servico_id" not in str(e):
             raise
     pre = cpc.resumo(c, conta_id, ids)
     out = {}
@@ -247,6 +257,10 @@ def situacoes(c, conta_id: int, cliente_ids, agora: datetime) -> dict[int, dict]
         cpf_ok = bool(resp and resp_cpf) if menor else bool(cpf)
         pre_ok = cpc.respondida_desde(pre.get(kid), ultimo.get(kid))
         termos_ok = {"lgpd", "imagem"} <= termos.get(kid, set())
+        # o termo do procedimento do próximo agendamento, se a clínica escreveu um
+        sv = prox_serv.get(kid)
+        if termos_ok and sv in com_termo and (kid, sv) not in proc_ok:
+            termos_ok = False
         itens = [("nome completo", len((nome or "").split()) >= 2), ("data de nascimento", bool(nasc))]
         if menor:
             itens.append(("responsável", bool(resp)))
@@ -315,9 +329,10 @@ def proximo_evento(c, conta_id: int, cliente_id: int, agora: datetime) -> int | 
         with c.transaction():
             r = c.execute(
                 """select id from eventos_agenda
-                    where conta_id=%s and cliente_id=%s and situacao in ('agendado','confirmado')
+                    where conta_id=%s and cliente_id=%s
+                      and situacao in ('agendado','confirmado','presente','atendimento')
                       and coalesce(status, '') <> 'cancelado' and inicio >= %s
-                    order by inicio limit 1""", (conta_id, cliente_id, agora - timedelta(hours=3))).fetchone()
+                    order by inicio, id limit 1""", (conta_id, cliente_id, agora - timedelta(hours=3))).fetchone()
     except Exception:  # noqa: BLE001
         return None
     return r[0] if r else None
@@ -513,17 +528,27 @@ def salvar_cadastro(pool, f: dict, form: dict, agora: datetime,
     return None, aviso
 
 
-def textos_dos_termos(empresa: str, paciente: str, menor: bool) -> dict:
-    """O texto padrão do Zaq. A clínica lê antes de ligar o link."""
-    de = f"os dados de {paciente}, de quem sou responsável legal," if menor else "os meus dados"
-    lgpd = (f"Autorizo {empresa or 'a clínica'} a guardar e usar {de} pessoais e de saúde (cadastro, respostas "
-            "da pré-consulta, prontuário, fotos clínicas e documentos) para o atendimento, para marcar e lembrar "
-            "consultas pelo WhatsApp e para emitir nota fiscal e recibos. Os dados de saúde ficam no prontuário, "
-            "que só os profissionais de saúde da clínica leem, e são guardados pelo prazo que as normas de saúde "
-            "exigem. Posso pedir uma cópia, corrigir os dados ou tirar dúvidas pelo WhatsApp da clínica.")
-    imagem = ("Fotos clínicas (antes, durante e depois do tratamento) ajudam o profissional a acompanhar o "
-              "resultado. Elas ficam no prontuário, guardadas com sigilo.")
-    return {"lgpd": ("Uso de dados (LGPD)", lgpd), "imagem": ("Uso de imagem", imagem)}
+def textos_dos_termos(c, conta_id: int, empresa: str, paciente: str, menor: bool,
+                      servico_id: int | None = None) -> dict:
+    """Os textos que o paciente lê no passo 3 (finance/clinica_termos: o da clínica ou o
+    padrão do Zaq, e o do procedimento do próximo agendamento)."""
+    return ct.textos(c, conta_id, empresa, paciente, menor, servico_id)
+
+
+def versoes_vistas(textos: dict) -> str:
+    """A assinatura do que está na tela (as versões e o procedimento), pro aceite conferir."""
+    p = textos.get("procedimento")
+    return "|".join([textos["lgpd"]["versao"], textos["imagem"]["versao"],
+                     f"{p['servico_id']}:{p['versao']}" if p else "-"])
+
+
+def servico_do_proximo(c, conta_id: int, cliente_id: int, agora: datetime) -> tuple[int | None, int | None]:
+    """(evento_id, servico_id) do próximo agendamento."""
+    eid = proximo_evento(c, conta_id, cliente_id, agora)
+    if not eid:
+        return None, None
+    r = c.execute("select servico_id from eventos_agenda where id=%s and conta_id=%s", (eid, conta_id)).fetchone()
+    return eid, (r[0] if r else None)
 
 
 def salvar_termos(c, f: dict, form: dict, *, empresa: str, ip: str, user_agent: str, agora: datetime) -> str | None:
@@ -539,29 +564,26 @@ def salvar_termos(c, f: dict, form: dict, *, empresa: str, ip: str, user_agent: 
     r = c.execute("select k.aniversario, coalesce(p.nome, k.nome) from clientes k left join pessoas p "
                   "on p.id = k.pessoa_id where k.id=%s and k.dono_id=%s", (kid, conta_id)).fetchone()
     menor = bool(r and r[0] and (_idade(r[0], ca.hoje_br(agora)) or 0) < MAIORIDADE)
-    textos = textos_dos_termos(empresa, r[1] if r else "", menor)
+    eid, serv = servico_do_proximo(c, conta_id, kid, agora)
+    textos = textos_dos_termos(c, conta_id, empresa, r[1] if r else "", menor, serv)
+    # o que a pessoa leu tem que ser o que vai ser gravado: se a clínica editou o termo
+    # (ou o agendamento mudou) enquanto ela lia, ela lê de novo
+    visto = str(form.get("versoes") or "")
+    if visto and visto != versoes_vistas(textos):
+        return "Os termos mudaram enquanto você lia. Leia de novo e aceite."
+    if textos["procedimento"] and str(form.get("procedimento") or "") != "1":
+        return "Para seguir, é preciso aceitar o termo do procedimento."
     papel = "responsavel" if menor else "paciente"
-    for termo, op in (("lgpd", None), ("imagem", opcao)):
-        titulo, texto = textos[termo]
-        if op:
-            texto = texto + "\n\n" + dict(IMAGEM)[op]
-        c.execute("""insert into clinica_termos_aceites (conta_id, cliente_id, termo, opcao, titulo, texto, versao,
-                                                         aceito_por_nome, papel, ip, user_agent)
-                     values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                  (conta_id, kid, termo, op, titulo, texto, VERSAO_TERMOS, quem, papel, (ip or "")[:60],
-                   (user_agent or "")[:300]))
+    ct.gravar_aceite(c, conta_id, kid, "lgpd", textos["lgpd"], opcao=None, quem=quem, papel=papel, ip=ip,
+                     user_agent=user_agent)
+    ct.gravar_aceite(c, conta_id, kid, "imagem", textos["imagem"], opcao=opcao, quem=quem, papel=papel, ip=ip,
+                     user_agent=user_agent)
+    if textos["procedimento"]:
+        ct.gravar_aceite(c, conta_id, kid, "procedimento", textos["procedimento"], opcao=None, quem=quem,
+                         papel=papel, ip=ip, user_agent=user_agent, evento_id=eid)
     return None
 
 
 def termos_aceitos(c, conta_id: int, cliente_id: int) -> list[dict]:
-    """O último aceite de cada termo (a ficha mostra; a recepção pode ver)."""
-    try:
-        with c.transaction():
-            rows = c.execute(
-                """select distinct on (termo) termo, opcao, titulo, aceito_por_nome, papel, aceito_em
-                     from clinica_termos_aceites where conta_id=%s and cliente_id=%s
-                    order by termo, aceito_em desc""", (conta_id, cliente_id)).fetchall()
-    except Exception:  # noqa: BLE001
-        return []
-    return [{"termo": r[0], "opcao": r[1], "opcao_txt": dict(IMAGEM).get(r[1], "") if r[1] else "",
-             "titulo": r[2], "por": r[3], "papel": r[4], "quando": ca.local(r[5])} for r in rows]
+    """O último aceite de cada termo (a ficha mostra, com o PDF)."""
+    return ct.aceitos(c, conta_id, cliente_id)

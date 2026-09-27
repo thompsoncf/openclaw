@@ -144,6 +144,11 @@ def ficha(request: Request, tok: str):
         eid = cfl.proximo_evento(c, f["conta_id"], f["id"], agora)
         ev = ca.evento(c, f["conta_id"], eid) if eid else None
         prof = ca._prof_nome(c, f["conta_id"], ev) if ev else ""
+        termos = cfl.textos_dos_termos(c, f["conta_id"], empresa, f["nome"], bool(s.get("menor")),
+                                       ev["servico_id"] if ev else None)
+        # a cópia dos termos só pra quem provou a data (ou está no balcão)
+        # a cópia dos termos só pra quem provou a data (no tablet do balcão, não: a sessão fecha)
+        aceitos = cfl.termos_aceitos(c, f["conta_id"], f["id"]) if nivel == "data" else []
         c.commit()
     passo = int(q["passo"]) if re.fullmatch(r"[1-4]", q.get("passo") or "") else None
     if not liberado:
@@ -159,7 +164,7 @@ def ficha(request: Request, tok: str):
         empresa=empresa, tok=tok, passo=passo, PASSOS=_PASSOS, erro=erro, aviso=aviso, s=s, d=dados,
         nome=f["nome"], liberado=liberado, menor=bool(s.get("menor")), curta=curta,
         perguntas=cpc.perguntas(curta), GRAVIDEZ=cpc.GRAVIDEZ, COMO=cfl.COMO_CONHECEU, IMAGEM=cfl.IMAGEM,
-        termos=cfl.textos_dos_termos(empresa, f["nome"], bool(s.get("menor"))),
+        termos=termos, aceitos=aceitos, versoes=cfl.versoes_vistas(termos),
         ev=ev, quando=(f"{ca.dia_txt(ev['inicio'])} às {ev['hora']}" if ev else ""),
         prof=prof))
 
@@ -191,6 +196,25 @@ def _balcao(request: Request, tok: str, form: dict):
     # ---- 2: o tablet fica só com ESTA ficha: a de quem parou no meio sai daqui
     request.session["fichas_ok"] = {tok: [_time.time(), "balcao"]}
     return _ir(request, tok)
+
+
+@router.get("/ficha/{tok}/termo/{aceite_id}.pdf")
+def termo_pdf(request: Request, tok: str, aceite_id: int):
+    """A cópia do termo aceito, pra quem está com a ficha aberta neste aparelho."""
+    if _nivel(request, tok) != "data":
+        return _ir(request, tok)
+    from finance import clinica_termos as ct
+    from fastapi.responses import Response
+    with get_pool().connection() as c:
+        f = _aberta(c, tok)
+        if not f:
+            return _nao_achou()
+        doc = ct.pdf(c, f["conta_id"], f["id"], aceite_id)
+    if not doc:
+        return _nao_achou()
+    return Response(doc, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="termo-{aceite_id}.pdf"',
+                             "Cache-Control": "no-store, max-age=0"})
 
 
 @router.post("/ficha/{tok}/entrar")
@@ -391,10 +415,13 @@ _TPL_PASSOS = r"""<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 
 {% elif passo == 3 %}
 <form class="cx" method="post" action="/ficha/{{ tok }}/termos">
-  <b>{{ termos.lgpd[0] }}</b><div class="termo">{{ termos.lgpd[1] }}</div>
+  <input type="hidden" name="versoes" value="{{ versoes }}">
+  <b>{{ termos.lgpd.titulo }}</b><div class="termo">{{ termos.lgpd.texto }}</div>
   <div class="op"><input type="checkbox" name="lgpd" value="1" id="lg" required><label for="lg" style="margin:0;font-weight:400">Li e aceito</label></div>
-  <b style="display:block;margin-top:1rem">{{ termos.imagem[0] }}</b><div class="termo">{{ termos.imagem[1] }}</div>
+  <b style="display:block;margin-top:1rem">{{ termos.imagem.titulo }}</b><div class="termo">{{ termos.imagem.texto }}</div>
   {% for v, r in IMAGEM %}<div class="op"><input type="radio" name="imagem" value="{{ v }}" id="im{{ v }}" required><label for="im{{ v }}" style="margin:0;font-weight:400">{{ r }}</label></div>{% endfor %}
+  {% if termos.procedimento %}<b style="display:block;margin-top:1rem">{{ termos.procedimento.titulo }}</b><div class="termo">{{ termos.procedimento.texto }}</div>
+  <div class="op"><input type="checkbox" name="procedimento" value="1" id="pr" required><label for="pr" style="margin:0;font-weight:400">Li e aceito</label></div>{% endif %}
   <label for="qn">{% if menor %}Nome completo do responsável{% else %}Seu nome completo{% endif %}</label>
   <input type="text" id="qn" name="nome" required value="{{ (d.responsavel.nome if menor and d and d.responsavel else (d.nome if d and not menor else '')) }}">
   <button>Aceitar</button>
@@ -406,6 +433,7 @@ _TPL_PASSOS = r"""<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   {% if ev %}<div style="margin-top:.3rem">Sua consulta: {{ quando }}{% if prof %} com {{ prof }}{% endif %}.</div>{% endif %}
   {% if s.falta %}<div class="mut" style="margin-top:.3rem">Ainda falta: {{ s.falta|join(', ') }}. <a href="/ficha/{{ tok }}?passo=1">Completar</a></div>{% endif %}
 </div>
+{% if aceitos %}<div class="cx"><b>Seus termos</b>{% for a in aceitos %}<div style="margin-top:.3rem"><a href="/ficha/{{ tok }}/termo/{{ a.id }}.pdf">{{ a.titulo }} (PDF)</a> <span class="mut">· {{ a.quando.strftime('%d/%m/%Y') }}</span></div>{% endfor %}</div>{% endif %}
 {% if balcao %}<div class="cx"><b>Pode devolver o tablet à recepção.</b> Obrigado!</div>
 {% else %}<p class="mut">Precisa mudar algo? Abra o mesmo link ou fale com a clínica pelo WhatsApp.</p>{% endif %}
 {% endif %}

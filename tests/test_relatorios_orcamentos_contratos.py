@@ -10,9 +10,11 @@ páginas públicas que orçamento e contrato já têm.
 """
 import os
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
+
+from tests.relogio_fixo import HOJE as _HOJE_BR
 from psycopg_pool import ConnectionPool
 
 import web.painel_relatorios as rel
@@ -34,7 +36,11 @@ create table prospeccao (id bigserial primary key, conta_id bigint, empresa text
   orcamento_id bigint, status text default 'novo');
 """
 
-HOJE = date.today()
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()`, e falhava no CI
+# das 21h à meia-noite.
+HOJE = _HOJE_BR
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 
 
 @pytest.fixture(scope="module")
@@ -416,8 +422,10 @@ def _cenario_datas(pool, cen):
     from zoneinfo import ZoneInfo
     # MEIO-DIA de hoje em Brasília (15h UTC): a mesma data nos dois fusos. Com
     # "agora", o teste quebrava na virada do mês — no CI (UTC), à 01h do dia 1º a
-    # data em Brasília ainda é o mês anterior.
-    hoje = datetime.combine(date.today(), time(12), ZoneInfo("America/Sao_Paulo"))
+    # data em Brasília ainda é o mês anterior. E o dia é o de BRASÍLIA (`HOJE`),
+    # que é o que o período da aba usa: com `date.today()` o contrato nascia
+    # amanhã das 21h à meia-noite e ficava fora do mês (CI do #876, 27/09/2026).
+    hoje = datetime.combine(HOJE, time(12), ZoneInfo("America/Sao_Paulo"))
     # criado há 70 dias e assinado hoje: é venda DESTE mês
     velho = _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Criado antes"),
                       status="assinado", valor=300000, assinado_em=hoje)

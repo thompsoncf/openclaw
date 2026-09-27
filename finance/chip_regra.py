@@ -90,16 +90,24 @@ def regra_da_conversa(c, conta_id: int, conversa_id: int) -> dict | None:
         with c.transaction():
             cv = c.execute("""select cv.chip_id, p.vendedor_id,
                                      exists (select 1 from chip_regra_leads l
-                                              where l.prospeccao_id = p.id and l.conta_id = cv.conta_id)
+                                              where l.prospeccao_id = p.id and l.conta_id = cv.conta_id),
+                                     p.id
                                 from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                                where cv.id=%s and cv.conta_id=%s""",
                            (conversa_id, conta_id)).fetchone()
     except Exception:  # noqa: BLE001
         return None
-    # só o lead que a REGRA deu (chip_regra_leads): o lead antigo do mesmo dono, ou um
-    # que o gestor moveu pra ele, segue o atendimento de sempre
-    if not cv or not cv[2]:
+    if not cv:
         return None
+    # só o lead que a REGRA deu (chip_regra_leads): o lead antigo do mesmo dono, ou um
+    # que o gestor moveu pra ele, segue o atendimento de sempre — MENOS o que o
+    # RESGATE deu (migração 396, finance/resgate.py): esse chegou pela conversa antiga,
+    # no chip onde ela estava, e quem responde é a regra do membro IA
+    if not cv[2]:
+        if not cv[3]:
+            return None
+        from finance import resgate as _rg
+        return _rg.regra_do_lead(c, conta_id, cv[3])
     r = regra(c, conta_id, cv[0])
     if not r or not r["membro_id"] or cv[1] != r["membro_id"]:
         return None
@@ -125,12 +133,13 @@ def ia_pode_falar(r: dict, agora: datetime | None = None) -> bool:
     agora = (agora or datetime.now(timezone.utc)).astimezone(_BRT)
     if agora.weekday() not in (r.get("ia_dias") or []):
         return False
-    return int(r.get("ia_hora_ini") or 0) <= agora.hour < int(r.get("ia_hora_fim") or 24)
+    ini, fim = r.get("ia_hora_ini"), r.get("ia_hora_fim")
+    return int(0 if ini is None else ini) <= agora.hour < int(24 if fim is None else fim)
 
 
 def texto_fora(r: dict) -> str:
     return (r.get("ia_fora_texto") or "").strip() or FORA_PADRAO.format(
-        hora=int(r.get("ia_hora_ini") or 8))
+        hora=int(8 if r.get("ia_hora_ini") is None else r.get("ia_hora_ini")))
 
 
 def dono_do_contato_novo(c, conta_id: int, chip_id, *, contato_novo: bool) -> dict | None:
@@ -273,17 +282,27 @@ def pendentes_da_abertura(c, conta_id: int, limite: int = 5) -> list[int]:
                 f"select {_COLS} from chip_regra where conta_id=%s and ativa and ia_ligada "
                 "and ia_horario='proprio' and membro_id is not null", (conta_id,)).fetchall()]
             saida = []
+            # o lead que o RESGATE deu (migração 396) também espera a abertura — a
+            # conversa dele fica no chip onde já estava, não no chip da regra
+            tem_resgate = bool(c.execute("select to_regclass('public.resgate_leads')").fetchone()[0])
+            do_resgate = ("""or exists (select 1 from resgate_leads rl
+                                         where rl.prospeccao_id = p.id and rl.ativo
+                                           and rl.membro_id = p.vendedor_id)"""
+                          if tem_resgate else "")
             for r in regras:
                 if not ia_pode_falar(r):
                     continue
                 saida += [x[0] for x in c.execute(
                     """select cv.id from conversas cv
                          join prospeccao p on p.id = cv.prospeccao_id
-                        where cv.conta_id=%s and coalesce(cv.chip_id, cv.conta_id)=%s
+                        where cv.conta_id=%s
                           and p.vendedor_id=%s and cv.agente_ativo
                           and cv.status <> 'pendente'
                           and cv.ultima_msg_em > now() - interval '3 days'
-                          and exists (select 1 from chip_regra_leads l where l.prospeccao_id = p.id)
+                          and ((coalesce(cv.chip_id, cv.conta_id)=%s
+                                and exists (select 1 from chip_regra_leads l
+                                             where l.prospeccao_id = p.id))
+                               """ + do_resgate + """)
                           -- recebeu o recado de fora do horário…
                           and exists (select 1 from mensagens f where f.conversa_id=cv.id
                                          and f.autor='bot' and f.status=%s
@@ -295,7 +314,7 @@ def pendentes_da_abertura(c, conta_id: int, limite: int = 5) -> list[int]:
                                  from mensagens m where m.conversa_id=cv.id
                                 order by m.criado_em desc, m.id desc limit 1)
                         order by cv.ultima_msg_em limit %s""",
-                    (conta_id, r["chip_id"], r["membro_id"], STATUS_FORA, STATUS_FORA,
+                    (conta_id, r["membro_id"], r["chip_id"], STATUS_FORA, STATUS_FORA,
                      limite)).fetchall()]
             return saida[:limite]
     except Exception:  # noqa: BLE001
@@ -395,9 +414,13 @@ def salvar(c, conta_id: int, chip_id: int, f: dict) -> dict:
         return {"ok": False, "erro": "Escolha quem recebe os leads deste número."}
     horario = f.get("ia_horario") if f.get("ia_horario") in HORARIOS else "24h"
     dias = sorted({int(d) for d in (f.get("ia_dias") or []) if str(d).isdigit() and 0 <= int(d) <= 6})
+    # 0h é hora de verdade (a IA que começa à meia-noite): o `or 8` antigo lia o 0 como
+    # "vazio" e gravava 8h — a IA ficava calada da meia-noite às 8h sem ninguém saber
+    def _hora(v, padrao):
+        return padrao if v is None or str(v).strip() == "" else int(v)
     try:
-        ini = max(0, min(23, int(f.get("ia_hora_ini") or 8)))
-        fim = max(1, min(24, int(f.get("ia_hora_fim") or 22)))
+        ini = max(0, min(23, _hora(f.get("ia_hora_ini"), 8)))
+        fim = max(1, min(24, _hora(f.get("ia_hora_fim"), 22)))
     except (TypeError, ValueError):
         ini, fim = 8, 22
     if horario == "proprio" and (not dias or ini >= fim):
@@ -470,11 +493,15 @@ def avisar(pool, conta_id: int, r: dict, motivo: str, *, prospeccao_id=None,
         _log.warning("chip_regra.avisar: não registrou o aviso (conta=%s, motivo=%s): %s",
                      conta_id, motivo, e)
         return None
-    if not m:
-        return None
     quem = (lead or "").strip() or "Um cliente"
     titulo = f"🤖 A IA precisa de você · {rotulo}"
     corpo = f"{quem}: {(resumo or '').strip() or rotulo}"
+    if (r or {}).get("resgate") and prospeccao_id:
+        # o lead veio do RESGATE: o supervisor fica sabendo também (finance/resgate.py)
+        from finance import resgate as _rg
+        _rg.avisar_supervisor(pool, conta_id, prospeccao_id, titulo, corpo)
+    if not m:
+        return None
     url = f"/cockpit/lead/{prospeccao_id}" if prospeccao_id else "/cockpit"
     _enviar_aviso(pool, conta_id, mid, m, titulo, corpo, url)
     return mid

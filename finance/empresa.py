@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
+from . import relogio
 from .livro_caixa import LivroCaixa
 from .models import Lancamento, Tipo
 
@@ -283,7 +284,7 @@ def acrescimo_sugerido(valor_centavos: int, vencimento: date,
     não precisa de dois caminhos. `dias` é o atraso corrido; pagamento no dia do
     vencimento (ou antes) não gera nada.
     """
-    pago_em = pago_em or date.today()
+    pago_em = pago_em or relogio.hoje()
     zero = {"dias": 0, "multa_centavos": 0, "juros_centavos": 0, "centavos": 0}
     if not vencimento or not pago_em or pago_em <= vencimento:
         return zero
@@ -592,8 +593,7 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
                  order by {ordem} limit %s""",
             (*args, limite),
         ).fetchall()
-    from finance import relogio as _relogio
-    hoje = _relogio.hoje()      # "vencida" e "vence hoje" no dia de Brasília
+    hoje = relogio.hoje()      # "vencida" e "vence hoje" no dia de Brasília
     out = []
     for r in rows:
         venc = r[5]
@@ -677,7 +677,7 @@ def resumo_carteira(pool, conta_id: int) -> dict:
 
 def resumo_titulos(pool, conta_id: int, dias: int = 7) -> dict:
     """Cards da visão geral: a pagar/receber nos próximos N dias + atrasados."""
-    hoje = date.today()
+    hoje = relogio.hoje()
     fim = hoje + timedelta(days=dias)
     with pool.connection() as c:
         rows = c.execute(
@@ -765,7 +765,10 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
     fica ao lado — "quanto era" e "quanto saiu" seguem sendo duas perguntas com
     duas respostas.
     """
-    data_pagto = data_pagto or date.today()
+    # O dia da baixa é o de BRASÍLIA: com `date.today()` (UTC no servidor) a baixa
+    # das 21h à meia-noite caía no dia seguinte — no último dia do mês, a comissão
+    # ia pro mês seguinte e o atraso ganhava um dia (CI do #876, 27/09/2026).
+    data_pagto = data_pagto or relogio.hoje()
     acrescimo_centavos = int(acrescimo_centavos or 0)
     # Baixa ATÔMICA numa ÚNICA transação/conexão: o status vira num UPDATE ...
     # WHERE status='aberto' RETURNING e, na MESMA conexão, o lançamento entra
@@ -1887,8 +1890,9 @@ def definir_salario(pool, conta_id: int, funcionario_id: int,
         # mostra e que serve de reserva pra quem não tem linha nenhuma.
         c.execute(
             """update funcionarios set salario_centavos=%s
-                where id=%s and conta_id=%s and %s <= current_date""",
-            (int(salario_centavos), funcionario_id, conta_id, vigencia_de),
+                where id=%s and conta_id=%s and %s <= %s""",
+            # "já começou" no dia de Brasília, não no `current_date` (UTC) do banco
+            (int(salario_centavos), funcionario_id, conta_id, vigencia_de, relogio.hoje()),
         )
         c.commit()
     return True
@@ -2375,7 +2379,7 @@ def pagar_folha(pool, conta_id: int, ano: int, mes: int,
 
 
 def _competencia(d: date | None) -> date:
-    d = d or date.today()
+    d = d or relogio.hoje()
     return date(d.year, d.month, 1)
 
 
@@ -2385,7 +2389,7 @@ def _competencia(d: date | None) -> date:
 def fluxo_projetado(pool, conta_id: int, semanas: int = 4) -> dict:
     """Saldo atual (livro-caixa) + títulos abertos → saldo projetado semanal."""
     saldo = LivroCaixa(pool, conta_id).saldo_centavos()
-    hoje = date.today()
+    hoje = relogio.hoje()
     fim = hoje + timedelta(days=7 * semanas)
     with pool.connection() as c:
         rows = c.execute(

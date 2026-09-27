@@ -927,6 +927,9 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .le .liv a{font:600 .68rem var(--mono);border:1px dashed var(--neon-borda);color:var(--neon-bright);
   border-radius:8px;padding:.25rem .5rem;text-decoration:none}
 .le form{margin:0}
+.le form.rgsegura{display:flex;gap:.35rem}
+.le form.rgsegura input{flex:1;min-width:0;font:inherit;font-size:.74rem;background:var(--bg);
+  color:var(--text);border:1px solid var(--line);border-radius:8px;padding:.35rem .5rem}
 .le button{width:auto;margin:0;font:600 .66rem var(--mono);background:transparent;color:var(--text-dim);
   border:1px solid var(--line);border-radius:999px;padding:.25rem .6rem}
 .faixa{margin:.2rem .8rem .5rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);
@@ -6462,13 +6465,43 @@ def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
         return ""
 
 
+def _bloco_resgate(request: Request, lead_id: int) -> str:
+    """O lead está a caminho do RESGATE DA IA (finance/resgate.py)? Diz quando, e dá
+    o jeito de segurar: escrever o motivo, que vai pro histórico da ficha como nota do
+    vendedor. Só com o resgate ligado. Best-effort: a conversa nunca cai por isto."""
+    try:
+        from finance import resgate as _rg
+        conta_id = request.session.get("conta_id")
+        if not conta_id:
+            return ""
+        with get_pool().connection() as c:
+            st = _rg.situacao_do_lead(c, conta_id, lead_id)
+            c.commit()
+        if not st:
+            return ""
+        quando = ("já pode passar pra IA a qualquer momento" if st["vencido"]
+                  else "passa pra IA amanhã" if st["dias"] <= 1
+                  else f"passa pra IA em {st['dias']} dias")
+        return ("<div class=le>"
+                f"<span>🤖 <b>Sem mensagem sua há dias:</b> este lead {quando}. Pra ficar com ele, "
+                "mande uma mensagem ou escreva o motivo.</span>"
+                f"<form method=post action='{_BASE}/lead/{lead_id}/segurar' class=rgsegura>"
+                "<input name=motivo maxlength=400 required minlength=5 "
+                "placeholder='Motivo (vai pro histórico da ficha)'>"
+                "<button type=submit>Segurar este lead</button></form></div>")
+    except Exception as e:  # noqa: BLE001
+        _log.info("resgate na tela do lead: %s: %s", type(e).__name__, e)
+        return ""
+
+
 def _lead_vendedor(request: Request, lead_id: int, d: dict,
                    pode_voz: bool = False, saida_wa: bool = True) -> HTMLResponse:
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
     # o evento na frente de tudo: é o que se precisa ver antes de responder (197)
     if d.get("evento_fmt"):
         sub = d["evento_fmt"] + (" · " + sub if sub else "")
-    espera = _bloco_visita(request, lead_id) + _bloco_espera(request, lead_id, d)
+    espera = (_bloco_resgate(request, lead_id) + _bloco_visita(request, lead_id)
+              + _bloco_espera(request, lead_id, d))
 
     bolhas = []
     # (o _midia_html mora fora daqui pra o polling do JS desenhar igual — ver cxMid)
@@ -8430,6 +8463,19 @@ def cockpit_assumir(request: Request, lead_id: int):
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.assumir(p, c, m, l), "msg": "Você assumiu a conversa ✓"},
                  f"{_BASE}/lead/{lead_id}")
+
+
+@router.post("/cockpit/lead/{lead_id}/segurar")
+def cockpit_segurar(request: Request, lead_id: int, motivo: str = Form("")):
+    """"Segurar este lead" (finance/resgate.py): o motivo vai pro histórico da ficha
+    como nota do vendedor, e o relógio do resgate recomeça dele."""
+    def _fn(pool, conta_id, membro_id, lid):
+        from finance import resgate as _rg
+        with pool.connection() as c:
+            r = _rg.justificar(c, conta_id, lid, membro_id, motivo)
+            c.commit()
+        return {**r, "msg": "Lead segurado ✓ O motivo ficou no histórico da ficha."}
+    return _agir(request, lead_id, _fn, f"{_BASE}/lead/{lead_id}")
 
 
 @router.post("/cockpit/lead/{lead_id}/devolver")

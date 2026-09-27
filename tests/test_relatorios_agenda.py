@@ -7,9 +7,12 @@ nenhuma coluna nova no banco — `status`, `desfecho`, `tipo`, `tipo_evento`,
 """
 import json
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 import pytest
+
+from tests.relogio_fixo import AGORA
+from tests.relogio_fixo import HOJE as _HOJE_BR
 from psycopg_pool import ConnectionPool
 
 import web.painel_relatorios as rel
@@ -37,7 +40,11 @@ create table clientes (id bigserial primary key, dono_id bigint, pessoa_id bigin
   nome text, ativo boolean not null default true);
 """
 
-HOJE = date.today()
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()`: o período da aba
+# corta no dia de Brasília, e o teste falhava no CI das 21h à meia-noite.
+HOJE = _HOJE_BR
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 
 
 @pytest.fixture(scope="module")
@@ -74,7 +81,7 @@ def cen(pool):
 def _evento(pool, conta, *, titulo="Compromisso", inicio=None, tipo="pessoal",
            tipo_evento=None, status="ativo", desfecho=None, convidados=None,
            sinal=None, membro_id=None, prospeccao_id=None):
-    inicio = inicio or datetime.now(timezone.utc)
+    inicio = inicio or AGORA
     with pool.connection() as c:
         eid = c.execute(
             """insert into eventos_agenda (conta_id, membro_id, titulo, inicio, tipo,
@@ -311,7 +318,7 @@ def test_busca_por_cliente_do_orcamento_vinculado(pool, cen):
 
 
 def test_periodo_filtra_por_data_de_inicio_do_evento(pool, cen):
-    dentro = datetime.now(timezone.utc)
+    dentro = AGORA
     fora = dentro - timedelta(days=200)
     _evento(pool, cen["conta"], inicio=dentro)
     _evento(pool, cen["conta"], inicio=fora)

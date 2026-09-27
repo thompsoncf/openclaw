@@ -14,10 +14,12 @@ cobrar o que o cliente não aceitou.
 `test_o_link_publico_escapa_o_que_foi_digitado` — a página é pública.
 """
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
+
+from tests.relogio_fixo import HOJE as _HOJE_BR
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
@@ -43,7 +45,11 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "353_obra_venda_documentos.sql", "355_reforma_orcamento.sql",
               "367_pix_da_empresa.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
-HOJE = date.today()
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()`, e falhava no CI
+# das 21h à meia-noite.
+HOJE = _HOJE_BR
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 ITENS = [
     {"servico": "Demolição do piso antigo", "tipo": "mao_de_obra", "unidade": "m2",
      "quantidade": 20, "valor_unit_centavos": 2_500},

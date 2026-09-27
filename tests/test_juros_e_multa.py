@@ -37,12 +37,18 @@ import subprocess
 from datetime import date, timedelta
 
 import pytest
+
+from tests.relogio_fixo import HOJE as _HOJE_BR
 from psycopg_pool import ConnectionPool
 
 from finance import empresa as emp
 from web import portal as pt
 
-HOJE = date.today()
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()`, e falhava no CI
+# das 21h à meia-noite.
+HOJE = _HOJE_BR
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 
 _BASE_SQL = """
 create table contas (id bigserial primary key, tipo text, nome text);

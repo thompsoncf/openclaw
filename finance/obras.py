@@ -36,6 +36,8 @@ from __future__ import annotations
 import unicodedata
 from datetime import date
 
+from . import relogio
+
 TIPOS = ("casa", "reforma")
 ROTULO_TIPO = {"casa": "Casa pra vender", "reforma": "Reforma"}
 STATUS = ("em_obra", "pronta", "vendida", "entregue", "arquivada")
@@ -413,7 +415,7 @@ def marcar_etapa(pool, conta_id: int, obra_id: int, etapa_ref, *,
     if not e:
         nomes = ", ".join(x["nome"] for x in o["etapas"])
         raise ValueError(f"Não achei essa etapa em {o['nome']}. As etapas são: {nomes}.")
-    quando = (quando or date.today()) if concluida else None
+    quando = (quando or relogio.hoje()) if concluida else None
     with pool.connection() as c:
         c.execute("update obra_etapas set concluida_em=%s where id=%s and conta_id=%s",
                   (quando, e["id"], conta_id))
@@ -423,7 +425,7 @@ def marcar_etapa(pool, conta_id: int, obra_id: int, etapa_ref, *,
         if pct == 100 and status == "em_obra":
             status = "pronta"
             c.execute("update obras set status='pronta', concluida_em=%s, atualizado_em=now() "
-                      "where id=%s and conta_id=%s", (quando or date.today(), obra_id, conta_id))
+                      "where id=%s and conta_id=%s", (quando or relogio.hoje(), obra_id, conta_id))
         elif pct < 100 and status == "pronta":
             status = "em_obra"
             c.execute("update obras set status='em_obra', concluida_em=null, atualizado_em=now() "

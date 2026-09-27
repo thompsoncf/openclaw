@@ -24,6 +24,7 @@ from __future__ import annotations
 from datetime import date
 
 from . import obras as _ob
+from . import relogio
 
 _COLS = ("id", "etapa_id", "lancamento_id", "valor_centavos", "pago_em", "obs")
 
@@ -100,7 +101,7 @@ def pagar_etapas(pool, conta_id: int, obra_id: int, etapas_ref: list, *,
                 """insert into obra_etapa_pagamentos (conta_id, obra_id, etapa_id, lancamento_id,
                                                       valor_centavos, pago_em, obs)
                    values (%s,%s,%s,%s,%s,%s,%s)""",
-                (conta_id, obra_id, e["id"], lancamento_id, v, quando or date.today(),
+                (conta_id, obra_id, e["id"], lancamento_id, v, quando or relogio.hoje(),
                  (obs or "").strip()[:200]))
         c.commit()
     return {"obra": obra["nome"],

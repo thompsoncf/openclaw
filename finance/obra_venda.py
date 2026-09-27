@@ -43,6 +43,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from . import obras as _ob
+from . import relogio
 
 # ─────────────────────────────────────────────────────────────── os papéis
 DOCUMENTOS = (
@@ -188,7 +189,7 @@ def marcar_documento(pool, conta_id: int, obra_id: int, tipo: str, *,
             "obs": atual["obs"] if obs is None else obs.strip(),
         }
     if status == "ok" and not novo["emitido_em"]:
-        novo["emitido_em"] = date.today()
+        novo["emitido_em"] = relogio.hoje()
     with pool.connection() as c:
         if not _obra_da_conta(c, conta_id, obra_id):
             raise ValueError("Obra não encontrada.")
@@ -336,7 +337,7 @@ def andar_venda(pool, conta_id: int, obra_id: int, situacao: str,
     v = venda(pool, conta_id, obra_id)
     if not v:
         raise ValueError("Cadastre a venda primeiro — comprador e valores — na ficha da obra.")
-    quando = quando or date.today()
+    quando = quando or relogio.hoje()
     with pool.connection() as c:
         obra = _obra_da_conta(c, conta_id, obra_id)
         sets, vals = ["situacao=%s"], [situacao]
@@ -408,7 +409,9 @@ def caminho(obra: dict, docs: list[dict], v: dict | None) -> list[dict]:
 
 def alertas(obra: dict, docs: list[dict], v: dict | None, hoje: date | None = None) -> list[str]:
     """Os avisos de prazo da casa — ver a escolha 4. Cada um é uma frase pronta."""
-    hoje = hoje or date.today()
+    # os prazos contam no dia de BRASÍLIA: com `date.today()` o CNO e o alvará
+    # "venciam" um dia antes das 21h à meia-noite (CI do #876, 27/09/2026)
+    hoje = hoje or relogio.hoje()
     d = {doc["tipo"]: doc for doc in docs}
     out = []
     cno = d["cno"]

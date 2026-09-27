@@ -1190,11 +1190,22 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             _cl.commit()
     except Exception:  # noqa: BLE001
         selo_data = {}
+    # O SELO DA PROPOSTA E DA DATA SEGURADA (migração 421): "vale até", "venceu",
+    # "reserva venceu", "⏳ 41h pro sinal". Tolerante como os outros.
+    selo_festa: dict = {}
+    try:
+        from finance import festa_rotinas as _frq
+        with pool.connection() as _cf:
+            selo_festa = _frq.selos(_cf, conta_id, [{"id": x["id"]} for x in todos_cards + outros_vend])
+            _cf.commit()
+    except Exception:  # noqa: BLE001
+        selo_festa = {}
     for cc in todos_cards + outros_vend:
         cc["tri"] = tri_por.get(cc["id"]) or {"trilha": "vend"}
         cc["sup"] = cc["id"] in sup_ids
         cc["selo_visita"] = selo_visita.get(cc["id"])
         cc["selo_data"] = selo_data.get(cc["id"])
+        cc["selo_festa"] = selo_festa.get(cc["id"])
 
     def _no_quadro(cc, com_trilha=True):
         return (_visivel(cc) and _passa_mes(cc) and _busca_bate(cc, busca_n, busca_dig)
@@ -8985,9 +8996,14 @@ def regua_pagina(request: Request):
         # AS ROTINAS DA VISITA (migração 414): só pra quem vende festa (§6) — o bloco
         # fala de visita ao espaço, e o recorrente marca reunião
         rotinas_festa = None
+        festa_cfg = None
         if perfil_chave == "eventos":
             from finance import visita_rotinas as _vrt
+            from finance import festa_rotinas as _frt
             rotinas_festa = _vrt.config(c, ctx["conta_id"])
+            # a proposta, a data segurada e o pós-festa (migração 421): os números
+            # que o dono muda sem deploy
+            festa_cfg = _frt.config(c, ctx["conta_id"])
         # o perdido automático (migração 282) também tem config própria, e pelo
         # mesmo motivo: a config da régua não conhece as colunas novas. O savepoint
         # é o que impede um deploy pela metade de derrubar a tela inteira.
@@ -9063,7 +9079,7 @@ def regua_pagina(request: Request):
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    espelho=espelho, equipe_espelho=_vendedores(get_pool(), ctx["conta_id"]),
-                   rotinas_festa=rotinas_festa,
+                   rotinas_festa=rotinas_festa, festa_cfg=festa_cfg,
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -9112,7 +9128,9 @@ def prospeccao_lista_espera(request: Request, lead_id: int):
 
 @router.post("/painel/prospeccao/regua/rotinas-festa")
 def regua_rotinas_festa(request: Request, confirmar: str = Form(""),
-                        perguntar_veio: str = Form(""), depois_visita: str = Form("")):
+                        perguntar_veio: str = Form(""), depois_visita: str = Form(""),
+                        validade_dias: str = Form(""), disputada_h: str = Form(""),
+                        pos_festa: str = Form(""), avaliacao_link: str = Form("")):
     """AS ROTINAS DA VISITA (mockup docs/mockups/funil_novo_rotinas.html, aprovado em
     27/09/2026): três chaves, cada uma uma família de rotinas. Só pra conta que vende
     festa — as outras nem veem o bloco. Síncrona: o FastAPI a joga pra threadpool, e o
@@ -9129,8 +9147,17 @@ def regua_rotinas_festa(request: Request, confirmar: str = Form(""),
         if _fr.perfil_da_conta(c, ctx["conta_id"]) != "eventos":
             return RedirectResponse("/painel/prospeccao/regua", status_code=303)
         _vrt.salvar_config(c, ctx["conta_id"], valores)
+        # a proposta, a data segurada e o pós-festa (migração 421)
+        from finance import festa_rotinas as _frt
+        erro = _frt.salvar_config(c, ctx["conta_id"], validade_dias=validade_dias,
+                                  disputada_h=disputada_h, pos_festa=(pos_festa == "1"),
+                                  avaliacao_link=avaliacao_link)
+        if erro:
+            c.rollback()
+            request.session["prosp_aviso"] = erro
+            return RedirectResponse("/painel/prospeccao/regua#rotinas", status_code=303)
         c.commit()
-    request.session["prosp_aviso"] = "Rotinas da visita salvas ✓"
+    request.session["prosp_aviso"] = "Rotinas de festa salvas ✓"
     return RedirectResponse("/painel/prospeccao/regua#rotinas", status_code=303)
 
 
@@ -13073,6 +13100,7 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
           {% elif _t.veio %}<div class="kbtri rsg veio">♻️ veio do Resgate{% if _t.era %} · era de {{ _t.era|e }}{% endif %}</div>{% endif %}
           {% if c.sup %}<div class="kbtri sup" title="É o número do supervisor do Resgate: não é {{ voc.cliente }} e não conta no Desafio nem no Raio-X">🧪 número do supervisor</div>{% endif %}
           {% if c.selo_visita %}<div class="kbvis {{ c.selo_visita[1] }}" title="A visita (rotinas da visita, Funil › Régua)">📍 {{ c.selo_visita[0] }}</div>{% endif %}
+          {% if c.selo_festa %}<div class="kbvis {{ c.selo_festa[1] }}" title="A proposta e a data segurada (rotinas de festa, Funil › Régua)">{{ c.selo_festa[0] }}</div>{% endif %}
           {% if c.selo_data %}<div class="kbvis {{ c.selo_data[1] }}" title="{% if c.selo_data[1] == 'bad' %}Outro {{ voc.cliente }} já tem esta data. Ofereça outra; se ele aceitar esperar, ponha na lista de espera{% else %}Lista de espera: o sistema avisa quando a data abrir{% endif %}">{{ c.selo_data[0] }}{% if c.selo_data[1] == 'bad' %}<form method="post" action="/painel/prospeccao/{{ c.id }}/lista-espera" style="display:inline;margin:0" onclick="event.stopPropagation()"><button type="submit" class="kbperg" title="O {{ voc.cliente }} aceita esperar esta data: o card vai pra Lista de espera">esperar</button></form>{% endif %}</div>{% endif %}
           <div class="kbl2">
           {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
@@ -18164,7 +18192,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       conversa dele; os avisos à equipe, pelo WhatsApp de avisos e pelo push. -#}
   {% if rotinas_festa is defined and rotinas_festa is not none %}
   <form method="post" action="/painel/prospeccao/regua/rotinas-festa" class="fsec" id="rotinas" style="margin-top:1rem">
-    <div class="sh"><b>📍 Rotinas da visita</b><span class="mut" style="font-size:.76rem">a visita ao espaço, do marcar ao depois</span></div>
+    <div class="sh"><b>📍 Rotinas de festa</b><span class="mut" style="font-size:.76rem">a visita, a proposta, a data segurada e o pós-festa</span></div>
     <p class="mut" style="font-size:.8rem;line-height:1.55;margin:.2rem 0 .4rem">As mensagens ao {{ voc.cliente }} saem pelo número da conversa dele, das 8h às 20h. Os avisos à equipe vão pelo WhatsApp de avisos e pelo app, das 8h às 21h.</p>
     {% for campo, nome, desc in [
         ('confirmar', 'Confirmar as visitas da equipe', 'Ao marcar, na véspera às 18h e 2h antes, em nome da empresa (as da IA a IA já confirma). Se o ' ~ voc.cliente ~ ' pedir pra remarcar, quem atende é avisado. Ninguém confirmou até 1h30 antes: quem recebe é avisado.'),
@@ -18176,6 +18204,30 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <span class="mut" style="font-size:.79rem;line-height:1.5">{{ desc }}</span></span>
     </label>
     {% endfor %}
+    {#- A PROPOSTA, A DATA SEGURADA E O PÓS-FESTA (migração 421): os números que o
+        dono muda aqui, sem deploy. -#}
+    {% if festa_cfg is defined and festa_cfg is not none %}
+    <div style="padding:.75rem 0;border-top:1px solid var(--borda);display:grid;gap:.7rem">
+      <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap">
+        <span style="flex:1;min-width:220px"><span style="font-size:.9rem;font-weight:600;display:block">Validade da proposta</span>
+          <span class="mut" style="font-size:.79rem;line-height:1.5">Aparece no card e no link do {{ voc.cliente }}: "vale até", "vence amanhã", "venceu". Vale pras propostas emitidas daqui pra frente. Em branco: o link mostra a data da festa, como antes.</span></span>
+        <span><input class="fld" id="rf_validade" name="validade_dias" inputmode="numeric" style="width:5rem" value="{{ festa_cfg.proposta_validade_dias or '' }}" placeholder="—"> dias</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap">
+        <span style="flex:1;min-width:220px"><span style="font-size:.9rem;font-weight:600;display:block">Data segurada disputada</span>
+          <span class="mut" style="font-size:.79rem;line-height:1.5">Se outro {{ voc.cliente }} pedir a mesma data, a reserva passa a vencer em tantas horas e quem segura é avisado. Em branco ou 0: não encurta (o aviso sai igual).</span></span>
+        <span><input class="fld" id="rf_disputada" name="disputada_h" inputmode="numeric" style="width:5rem" value="{{ festa_cfg.reserva_disputada_h or '' }}" placeholder="—"> horas</span>
+      </div>
+      <label style="display:flex;align-items:flex-start;gap:.8rem;cursor:pointer">
+        <input type="checkbox" id="rf_pos_festa" name="pos_festa" value="1" {% if festa_cfg.pos_festa %}checked{% endif %} style="margin-top:.2rem">
+        <span style="flex:1"><span style="font-size:.9rem;font-weight:600;display:block">Pós-festa</span>
+          <span class="mut" style="font-size:.79rem;line-height:1.5">No dia seguinte à festa: o vendedor recebe o texto pronto pra agradecer e pedir a avaliação e a indicação; no {{ voc.cliente }} da IA, a IA manda.</span></span>
+      </label>
+      <div><label class="lbl" for="rf_link">Link de avaliação do Google</label>
+        <input class="fld" id="rf_link" name="avaliacao_link" value="{{ festa_cfg.avaliacao_link }}" placeholder="https://g.page/r/... (no Google: Perfil da empresa › Pedir avaliações)" style="width:100%">
+        <div class="mut" style="font-size:.76rem;margin-top:.25rem">Sem o link, a mensagem sai só com o agradecimento e o pedido de indicação. O Google não deixa pedir avaliação só pra quem gostou: a mensagem vai pra todos.</div></div>
+    </div>
+    {% endif %}
     <div style="display:flex;justify-content:flex-end;margin-top:.4rem"><button class="pbtn">Salvar as rotinas</button></div>
   </form>
   {% endif %}

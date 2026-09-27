@@ -659,6 +659,17 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — rotinas da visita falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # A proposta, a data segurada e o pós-festa (migração 421, parte 2b):
+                # a reserva disputada encolhe e avisa, a vencida devolve o card pra
+                # Proposta, e o dia seguinte à festa. Só em conta que ligou.
+                from finance import festa_rotinas as _frs
+                _fx = _frs.rodar(pool)
+                if any(_fx.values()):
+                    log.info("poller: ciclo #%d — rotinas de festa: %s", ciclo, _fx)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — rotinas de festa falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # O orçamento que a IA montou (migração 392): a mensagem do sinal na
                 # aprovação, lembretes de 24h/48h, data liberada e data confirmada.
                 from finance import ia_orcamento as _iaos

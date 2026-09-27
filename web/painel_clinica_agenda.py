@@ -47,6 +47,11 @@ def _acesso(request: Request):
     return conta, papel in ("dono", "gestor"), None
 
 
+def _ip_req(request: Request) -> str:
+    xf = request.headers.get("x-forwarded-for", "")
+    return (xf.split(",")[-1].strip() if xf else (request.client.host if request.client else ""))[:60]
+
+
 def _int(txt) -> int | None:
     try:
         return int(str(txt).strip()) if str(txt or "").strip() else None
@@ -335,8 +340,15 @@ def ver_evento(request: Request, evento_id: int):
         from finance import clinica_preconsulta as _cpc
         kid = _cfl.cliente_do_evento(c, conta_id, evento_id)
         ficha = _cfl.situacao(c, conta_id, kid, agora) if kid else None
-        pre = (_cpc.ultima(c, conta_id, kid)
-               if kid and _cpc.pode_ler(c, conta_id, request.session.get("membro_id")) else None)
+        from finance import clinica_acesso_clinico as _acc
+        pre = None
+        if kid and _acc.leitor(c, conta_id, request.session) and _cpc.resumo(c, conta_id, [kid]):
+            try:
+                if _acc.ler(c, conta_id, request.session, kid, "pré-consulta (pelo agendamento)",
+                            _ip_req(request)):
+                    pre = _cpc.ultima(c, conta_id, kid)
+            except _acc.SemRegistro:
+                pre = None
         # produto no fim do atendimento (fase 7c): a reposição do paciente e o que vence logo
         prod = None
         if ev["situacao"] in ("presente", "atendimento", "finalizado"):

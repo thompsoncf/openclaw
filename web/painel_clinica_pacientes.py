@@ -60,6 +60,11 @@ def lista(request: Request):
                    cidade=q.get("cidade") or "", etiqueta=q.get("etiqueta") or "")
 
 
+def _ip(request: Request) -> str:
+    xf = request.headers.get("x-forwarded-for", "")
+    return (xf.split(",")[-1].strip() if xf else (request.client.host if request.client else ""))[:60]
+
+
 @router.post(URL + "/buscar")
 async def buscar(request: Request):
     form = dict(await request.form())
@@ -107,10 +112,18 @@ def ver(request: Request, cliente_id: int):
         if p["responsavel"] and all(o["id"] != p["responsavel"]["id"] for o in opcoes):
             opcoes.append(p["responsavel"])
         # a pré-consulta é conteúdo clínico: só o profissional de saúde lê (seção 01)
-        pode_ler = cpc.pode_ler(c, conta[0], request.session.get("membro_id"))
+        from finance import clinica_acesso_clinico as acc
+        pode_ler = acc.leitor(c, conta[0], request.session) is not None
         abas = ABAS + ((("pre", "Pré-consulta"),) if pode_ler else ())
         aba = aba if aba in dict(abas) else "resumo"
-        pre = cpc.ultima(c, conta[0], cliente_id) if pode_ler and aba == "pre" else None
+        pre, pre_erro = None, False
+        if pode_ler and aba == "pre" and cpc.resumo(c, conta[0], [cliente_id]):
+            try:
+                if acc.ler(c, conta[0], request.session, cliente_id, "pré-consulta", _ip(request)):
+                    pre = cpc.ultima(c, conta[0], cliente_id)
+            except acc.SemRegistro:
+                pre_erro = True
+        ve_registro = acc.pode_ver_registro(c, conta[0], request.session) != (False, None)
         ligado = cfl.ligado(c, conta[0])
         link = cfl.link(cfl.token(c, conta[0], cliente_id)) if ligado and p["falta"] else ""
         c.commit()
@@ -118,7 +131,8 @@ def ver(request: Request, cliente_id: int):
                    aviso=_AVISOS.get(request.query_params.get("aviso") or "", ""),
                    erro=request.session.pop("pacientes_erro", ""), p=p, aba=aba,
                    abas=abas, opcoes_resp=opcoes, brl=cc.reais, gerencia=gerencia, hoje=ca.hoje_br(agora),
-                   pre=pre, ficha_ligado=ligado, link_ficha=link, SEXO=cpa.SEXO)
+                   pre=pre, pre_erro=pre_erro, ficha_ligado=ligado, link_ficha=link, SEXO=cpa.SEXO,
+                   ve_registro=ve_registro)
 
 
 @router.get(URL + "/{cliente_id}/termos/{aceite_id}.pdf")
@@ -293,7 +307,7 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="pc-topo"><div><h2>{{ p.nome_social or p.nome }}</h2>{% if p.nome_social %}<div class="sub">nome civil: {{ p.nome }}</div>{% endif %}
     <div class="sub">{% if p.idade is not none %}{{ p.idade }} anos · {% endif %}{% if p.cidade %}{{ p.cidade }} · {% endif %}{% if p.desde %}paciente desde {{ p.desde.strftime('%m/%Y') }}{% endif %}{% if p.responsavel %} · responsável: <a href="/painel/clinica/pacientes/{{ p.responsavel.id }}">{{ p.responsavel.nome }}</a>{% endif %}</div>
     {% if p.etiquetas %}<div style="margin-top:.3rem">{% for e in p.etiquetas %}<a class="pc-tag" href="/painel/clinica/pacientes?etiqueta={{ e|urlencode }}">{{ e }}</a>{% endfor %}</div>{% endif %}</div>
-    <div class="pc-acoes"><a href="/painel/clinica/pacientes">‹ Pacientes</a><a href="/painel/clinica/agenda/novo?cliente={{ p.id }}">Agendar</a>{% if p.conversa_id %}<a href="/painel/prospeccao/comunicacao?abrir={{ p.conversa_id }}">WhatsApp</a>{% endif %}</div></div>
+    <div class="pc-acoes"><a href="/painel/clinica/pacientes">‹ Pacientes</a><a href="/painel/clinica/agenda/novo?cliente={{ p.id }}">Agendar</a>{% if ve_registro %}<a href="/painel/clinica/registro?paciente={{ p.id }}">Registro de acesso</a>{% endif %}{% if p.conversa_id %}<a href="/painel/prospeccao/comunicacao?abrir={{ p.conversa_id }}">WhatsApp</a>{% endif %}</div></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
   {% if p.falta %}<div class="alerta" style="margin-top:.8rem">{{ p.ficha_txt|capitalize }}. <a href="/painel/clinica/pacientes/{{ p.id }}?aba=cadastro">Completar aqui</a>
@@ -373,6 +387,7 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="pc-cx" style="margin-top:0"><b>Contado pelo {{ 'responsável' if pre.por == 'responsavel' else 'paciente' }} em {{ pre.quando.strftime('%d/%m/%Y') }}</b>{% if pre.curta %} · retorno{% endif %}
     {% for pergunta, resposta in pre.linhas %}<div style="margin-top:.5rem"><div class="pc-m">{{ pergunta }}</div><div>{{ resposta }}</div></div>{% endfor %}
     <div class="pc-m" style="margin-top:.7rem">Só os profissionais de saúde da clínica veem estas respostas. Confira na consulta.</div></div>
+  {% elif aba == 'pre' and pre_erro %}<div class="erro">Não foi possível abrir a pré-consulta agora (a leitura precisa ficar no registro de acesso). Tente de novo em instantes.</div>
   {% elif aba == 'pre' %}<div class="pc-m">O paciente ainda não respondeu a pré-consulta.</div>
   {% endif %}
 </div>

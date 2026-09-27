@@ -1,0 +1,536 @@
+<title>Rotinas do funil de festa</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde; lilás pra IA), igual ao mockup da
+   parte 1 (funil_novo_eventos.html). Tema único de propósito: o painel não tem modo claro. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --zap:#0B141A; --zap-in:#1F2C33; --zap-out:#005C4B;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:82ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:82ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:88ch;margin:0}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota b{color:var(--text)}
+
+/* números medidos */
+.med{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.mt{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.75rem .9rem;display:flex;flex-direction:column;gap:.2rem}
+.mt .v{font-family:var(--display);font-size:1.6rem;font-variant-numeric:tabular-nums;line-height:1.1}
+.mt .v small{font-size:.85rem;color:var(--dim);font-weight:500}
+.mt p{margin:0;font-size:.8rem;color:var(--dim)}
+.mt.al{border-color:var(--coral-borda)} .mt.al .v{color:var(--coral-2)}
+.mt.at{border-color:var(--ambar-borda)} .mt.at .v{color:var(--ambar-2)}
+
+/* tabela das rotinas */
+.tab{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-2)}
+.lr{display:grid;grid-template-columns:11rem 1fr 1fr 1fr;border-top:1px solid var(--line)}
+.lr:first-child{border-top:0}
+.lr>div{padding:.65rem .8rem;min-width:0;font-size:.82rem;color:var(--dim)}
+.lr>div+div{border-left:1px solid var(--line)}
+.lr.cab>div{background:var(--surface-2);font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);padding-block:.5rem}
+.lr.cab .v{color:var(--neon-2)} .lr.cab .i{color:var(--ia-2)}
+.lr .r{font-family:var(--display);font-weight:600;font-size:.92rem;color:var(--text)}
+.lr p{margin:0}
+.lr b{color:var(--text)}
+.st{display:inline-block;font-family:var(--mono);font-size:.58rem;letter-spacing:.04em;border-radius:4px;padding:.02rem .35rem;margin-bottom:.2rem}
+.st.ja{background:var(--surface-2);color:var(--dim);border:1px solid var(--line-2)}
+.st.nv{background:var(--ia-fundo);color:var(--ia-2);border:1px solid var(--ia-borda)}
+.st.mu{background:var(--ambar-fundo);color:var(--ambar-2);border:1px solid var(--ambar-borda)}
+.st.off{background:var(--coral-fundo);color:var(--coral-2);border:1px solid var(--coral-borda)}
+
+/* linha do tempo da visita */
+.tempo{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.pt{display:grid;grid-template-columns:8.5rem 1fr 1fr;border-top:1px solid var(--line)}
+.pt:first-child{border-top:0}
+.pt>div{padding:.8rem .85rem;min-width:0;display:flex;flex-direction:column;gap:.45rem}
+.pt>div+div{border-left:1px solid var(--line)}
+.pt .q{font-family:var(--mono);font-size:.7rem;color:var(--neon-2)}
+.pt .q small{display:block;color:var(--faint);font-size:.62rem;margin-top:.15rem}
+.pt.cab>div{background:var(--surface-2);font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);padding-block:.5rem}
+.pt.cab .v{color:var(--neon-2)} .pt.cab .i{color:var(--ia-2)}
+.pt p{margin:0;font-size:.82rem;color:var(--dim)}
+.pt p b{color:var(--text)}
+.pt.novo>div:first-child{box-shadow:inset 3px 0 0 var(--ia)}
+
+/* balões */
+.bl{max-width:34rem;border-radius:10px;padding:.45rem .6rem;font-size:.8rem;line-height:1.45;color:#E9EDEF;position:relative}
+.bl.cli{background:var(--zap-out);align-self:flex-end}
+.bl.sis{background:var(--zap-in)}
+.bl .de{display:block;font-family:var(--mono);font-size:.58rem;color:#8FA8B3;margin-bottom:.15rem;letter-spacing:.03em}
+.av{border:1px solid var(--line-2);border-radius:10px;background:var(--surface);padding:.5rem .65rem;font-size:.8rem;display:flex;flex-direction:column;gap:.2rem}
+.av .de{font-family:var(--mono);font-size:.58rem;color:var(--faint);letter-spacing:.03em}
+.av b{color:var(--text)}
+.av .bt{display:flex;gap:.35rem;margin-top:.2rem;flex-wrap:wrap}
+.av .bt span{font-size:.7rem;border-radius:6px;padding:.15rem .5rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.av .bt span.n{border-color:var(--coral-borda);background:var(--coral-fundo);color:var(--coral-2)}
+.igual{font-family:var(--mono);font-size:.62rem;color:var(--faint)}
+
+/* quadro */
+.palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
+.tela{width:1180px;padding:16px;display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+.cl{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.45rem;display:flex;flex-direction:column;gap:6px}
+.cl.esp{border-style:dashed;border-color:var(--ambar-borda)}
+.cl h4{font-size:.74rem;display:flex;justify-content:space-between;gap:.25rem}
+.cl h4 span{color:var(--faint);font-family:var(--mono);font-weight:400}
+.cd{border:1px solid var(--line-2);border-radius:8px;background:var(--bg);padding:.4rem .45rem;font-size:.66rem;display:flex;flex-direction:column;gap:.18rem}
+.cd b{font-size:.74rem}
+.cd .m{color:var(--dim)}
+.who{align-self:flex-start;font-size:.56rem;border-radius:999px;padding:0 .4rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.who.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.sel{align-self:flex-start;font-size:.58rem;border-radius:4px;padding:.02rem .35rem;font-family:var(--mono)}
+.sel.ok{background:var(--neon-fundo);color:var(--neon-2);border:1px solid var(--neon-borda)}
+.sel.at{background:var(--ambar-fundo);color:var(--ambar-2);border:1px solid var(--ambar-borda)}
+.sel.bad{background:var(--coral-fundo);color:var(--coral-2);border:1px solid var(--coral-borda)}
+.sel.nt{background:var(--surface-2);color:var(--dim);border:1px solid var(--line-2)}
+.sel.nv{background:var(--ia-fundo);color:var(--ia-2);border:1px solid var(--ia-borda)}
+
+/* proposta e data: 3 cartões */
+.tr{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.tc{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:1rem 1.05rem;display:flex;flex-direction:column;gap:.6rem;font-size:.84rem;color:var(--dim)}
+.tc h3{font-size:1.02rem;color:var(--text)}
+.tc .onde{font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.tc dl{margin:0;display:flex;flex-direction:column;gap:.5rem}
+.tc dt{font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;font-family:var(--mono)}
+.tc dd{margin:0;display:flex;flex-direction:column;gap:.35rem}
+.tc dd b{color:var(--text)}
+.tc .hoje{border-top:1px dashed var(--line-2);padding-top:.5rem;font-size:.78rem}
+.tc .hoje b{color:var(--ambar-2)}
+
+/* onde se liga */
+.cfg{border:1px solid var(--line-2);border-radius:14px;background:var(--surface);overflow:hidden}
+.cfg .top{padding:.8rem 1rem;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:.15rem}
+.cfg .top b{font-family:var(--display);font-size:1rem}
+.cfg .top span{font-size:.78rem;color:var(--dim)}
+.op{display:grid;grid-template-columns:2.4rem 1fr 15rem;gap:.8rem;align-items:center;padding:.65rem 1rem;border-top:1px solid var(--line)}
+.op:first-of-type{border-top:0}
+.sw{width:2.2rem;height:1.2rem;border-radius:999px;background:var(--neon);position:relative}
+.sw::after{content:"";position:absolute;top:.15rem;right:.15rem;width:.9rem;height:.9rem;border-radius:50%;background:#062312}
+.sw.off{background:var(--line-2)} .sw.off::after{right:auto;left:.15rem;background:var(--faint)}
+.op h4{font-size:.88rem}
+.op p{margin:0;font-size:.78rem;color:var(--dim)}
+.op .val{font-family:var(--mono);font-size:.72rem;color:var(--text);border:1px solid var(--line-2);border-radius:6px;padding:.3rem .5rem;background:var(--bg)}
+.op .val small{display:block;color:var(--faint);font-size:.6rem}
+
+/* decisões */
+.dec{display:flex;flex-direction:column;gap:10px}
+.q2{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.35rem .8rem}
+.q2.alerta{border-color:var(--ambar-borda)}
+.q2 .qn{font-family:var(--mono);font-size:.75rem;color:var(--neon);grid-row:span 4;padding-top:.15rem}
+.q2 h3{font-size:.95rem}
+.q2 p{margin:0;color:var(--dim);font-size:.85rem}
+.q2 p b{color:var(--text)}
+.q2 .muda{color:var(--ambar-2);font-size:.8rem}
+.rec{font-size:.84rem;color:var(--neon-2)}
+.rec::before{content:"Recomendo: ";color:var(--faint)}
+
+.fases{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.fs{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:flex;flex-direction:column;gap:.4rem;font-size:.84rem;color:var(--dim)}
+.fs .n{font-family:var(--mono);font-size:.66rem;color:var(--neon)}
+.fs h3{font-size:.98rem;color:var(--text)}
+.fs ul{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:.2rem}
+.fs b{color:var(--text)}
+
+@media (max-width:900px){
+  .med{grid-template-columns:1fr 1fr}
+  .tr,.fases{grid-template-columns:1fr}
+  .lr{grid-template-columns:1fr}
+  .lr>div+div{border-left:0;border-top:1px dashed var(--line)}
+  .lr.cab{display:none}
+  .lr .h::before{content:"hoje · ";font-family:var(--mono);font-size:.6rem;color:var(--faint)}
+  .lr .m1::before{content:"👤 modelo 1 · CP Zarb · ";font-family:var(--mono);font-size:.6rem;color:var(--neon-2)}
+  .lr .m2::before{content:"🤖 modelo 2 · chip Thiago · ";font-family:var(--mono);font-size:.6rem;color:var(--ia-2)}
+  .pt{grid-template-columns:1fr}
+  .pt>div+div{border-left:0;border-top:1px dashed var(--line)}
+  .pt.cab{display:none}
+  .pt .m1::before{content:"👤 modelo 1 · vendedor";font-family:var(--mono);font-size:.6rem;color:var(--neon-2)}
+  .pt .m2::before{content:"🤖 modelo 2 · IA";font-family:var(--mono);font-size:.6rem;color:var(--ia-2)}
+  .op{grid-template-columns:2.4rem 1fr}
+  .op .val{grid-column:2}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <span class="k">Mockup pra aprovação · 27/09/2026 · Prime Eventos</span>
+    <h1>Funil novo de eventos, parte 2: as rotinas</h1>
+    <p>A parte 1 pôs as colunas no ar e fez os cards andarem sozinhos. A parte 2 é o que acontece <b>dentro</b> de cada coluna: quem é lembrado, que mensagem sai pro cliente e quando. Tudo isso é o que o mockup aprovado prometeu em "3 · Rotinas", mais as recomendações que você aprovou.</p>
+    <p>Muita coisa já existe no sistema, só que ligada a um modelo só (a confirmação de visita só vale pra visita que a IA marca) ou desligada (a Lista de espera). Em cada rotina está dito o que <b>já existe</b>, o que é <b>novo</b> e o que <b>muda</b>.</p>
+  </header>
+
+  <section class="sec">
+    <header>
+      <h2>O que medi na Prime</h2>
+      <p>Consulta só de leitura, em 27/09. É isto que decide o que vem primeiro.</p>
+    </header>
+    <div class="med">
+      <div class="mt al"><span class="v">24%</span><p><b>faltas nas visitas.</b> 6 de 25 com resultado, nos últimos 60 dias. Nenhuma recebeu confirmação.</p></div>
+      <div class="mt"><span class="v">29 <small>de 29</small></span><p><b>visitas marcadas pela equipe.</b> A IA do chip Thiago ainda não marcou nenhuma.</p></div>
+      <div class="mt at"><span class="v">5 a 253 <small>dias</small></span><p><b>prazo das 7 reservas de data de hoje.</b> Na IA são 72h; na equipe, até 60 dias antes da festa.</p></div>
+      <div class="mt"><span class="v">7</span><p><b>perdidos por "data indisponível".</b> A Lista de espera existe, mas está desligada.</p></div>
+    </div>
+    <p class="nota"><i>nota</i><span>A Prime faz <b>uma festa por dia</b>: em 41 dias com festa na agenda, só 1 teve duas. Por isso "data disputada" e "lista de espera" fazem sentido aqui. A Doce Mell, a outra conta de eventos, está parada (0 mensagens em 30 dias): pra ela, tudo nasce desligado.</span></p>
+  </section>
+
+  <section class="sec">
+    <header>
+      <h2>As rotinas, uma por linha</h2>
+      <p>Em lilás, o que é novo. O modelo 1 é o CP Zarb, com vendedores; o modelo 2 é o chip Thiago, com a IA atendendo e você supervisionando.</p>
+    </header>
+    <div class="tab">
+      <div class="lr cab"><div>rotina</div><div>hoje</div><div class="v">👤 modelo 1 · vendedor</div><div class="i">🤖 modelo 2 · IA</div></div>
+      <div class="lr">
+        <div class="r">Confirmar a visita</div>
+        <div class="h"><span class="st ja">só a da IA</span><p>Véspera às 18h e 2h antes, só pra visita que a IA marcou.</p></div>
+        <div class="m1"><span class="st nv">novo</span><p>A visita que o <b>vendedor</b> marca recebe as mesmas mensagens, em nome da empresa, pelo chip da conversa.</p></div>
+        <div class="m2"><span class="st ja">igual</span><p>Como hoje.</p></div>
+      </div>
+      <div class="lr">
+        <div class="r">"Veio?"</div>
+        <div class="h"><span class="st ja">só no app</span><p>"O cliente apareceu?" aparece no topo da agenda do app, se alguém abrir.</p></div>
+        <div class="m1"><span class="st nv">novo</span><p><b>1h depois</b> do horário, quem recebeu a visita é chamado (push e WhatsApp). Se não responder, de novo às 18h.</p></div>
+        <div class="m2"><span class="st nv">novo</span><p>A mesma pergunta, pra anfitriã.</p></div>
+      </div>
+      <div class="lr">
+        <div class="r">Depois da visita</div>
+        <div class="h"><span class="st ja">só o "faltou"</span><p>A IA manda "sentimos sua falta". Quem veio não recebe nada.</p></div>
+        <div class="m1"><span class="st nv">novo</span><p><b>Veio</b> e ninguém escreveu em 2h: o vendedor é lembrado. <b>Faltou</b>: o card volta pra Qualificado (já no ar) e o vendedor é avisado.</p></div>
+        <div class="m2"><span class="st nv">novo</span><p><b>Veio</b>: a IA agradece em 2h e oferece o orçamento. <b>Faltou</b>: como hoje.</p></div>
+      </div>
+      <div class="lr">
+        <div class="r">Validade da proposta</div>
+        <div class="h"><span class="st off">não aparece</span><p>A IA fala "7 dias"; o link do cliente diz "válido até" a data da festa.</p></div>
+        <div class="m1"><span class="st nv">novo</span><p>Selo no card: <b>vale até 02/10</b>, depois <b>vence amanhã</b> e <b>venceu</b>. O link do cliente mostra a mesma data.</p></div>
+        <div class="m2"><span class="st nv">novo</span><p>Igual, com a validade que a IA já usa.</p></div>
+      </div>
+      <div class="lr">
+        <div class="r">Data segurada</div>
+        <div class="h"><span class="st mu">muda</span><p>A reserva vence e a data é liberada, mas o card não mostra o prazo nem volta.</p></div>
+        <div class="m1"><span class="st nv">novo</span><p>Contagem no card. <b>Data disputada</b>: aviso quando outro cliente pede a mesma data. Venceu sem sinal: volta pra Proposta com "reserva venceu".</p></div>
+        <div class="m2"><span class="st nv">novo</span><p>A IA já lembra do sinal duas vezes. Ganha a contagem, o aviso e a volta pra Proposta.</p></div>
+      </div>
+      <div class="lr">
+        <div class="r">Lista de espera</div>
+        <div class="h"><span class="st off">desligada</span><p>Existe, mas precisa saber quantas festas cabem por dia.</p></div>
+        <div class="m1"><span class="st nv">novo</span><p>Vira coluna. A data vagou: o vendedor do 1º da fila é avisado (esse aviso já existe).</p></div>
+        <div class="m2"><span class="st nv">novo</span><p>A data vagou: a IA chama o cliente.</p></div>
+      </div>
+      <div class="lr">
+        <div class="r">Pós-festa</div>
+        <div class="h"><span class="st mu">coluna nova</span><p>O card chega na coluna (parte 1), mas nada acontece.</p></div>
+        <div class="m1"><span class="st nv">novo</span><p>No dia seguinte, o vendedor recebe o texto pronto: agradecer e pedir avaliação.</p></div>
+        <div class="m2"><span class="st nv">novo</span><p>A IA agradece, pede a avaliação e a indicação. Contato indicado vira lead novo.</p></div>
+      </div>
+      <div class="lr">
+        <div class="r">IA insiste</div>
+        <div class="h"><span class="st off">desligada</span><p>Pronta, mas desligada no chip Thiago.</p></div>
+        <div class="m1"><span class="st ja">não se aplica</span><p>No modelo 1 quem insiste é o follow-up de 7 dias.</p></div>
+        <div class="m2"><span class="st nv">liga</span><p>3º e 7º dia, perdido no 10º, como você aprovou.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <header>
+      <h2>A visita, do marcar ao depois</h2>
+      <p>Uma visita de exemplo: <b>Hana</b>, quarta 30/09 às 10h, recebida pela <b>Jacqueline</b>. As mensagens ao cliente são as que a IA já usa, agora também pra visita da equipe. Os avisos à equipe vão por push e pelo WhatsApp de avisos.</p>
+    </header>
+    <div class="tempo">
+      <div class="pt cab"><div>quando</div><div class="v">👤 modelo 1 · visita do vendedor</div><div class="i">🤖 modelo 2 · visita da IA</div></div>
+
+      <div class="pt novo">
+        <div class="q">ao marcar<small>na hora</small></div>
+        <div class="m1">
+          <div class="bl sis"><span class="de">Prime Eventos · chip da conversa</span>Oi, Hana! Sua visita ao Prime Eventos está marcada: quarta, 30/09, às 10h, com a Jacqueline. 📍 Rua das Flores, 100. Na véspera eu te chamo pra confirmar 😊</div>
+        </div>
+        <div class="m2"><span class="igual">igual a hoje: a IA confirma na própria conversa ("Marcado! ✅ …")</span></div>
+      </div>
+
+      <div class="pt">
+        <div class="q">véspera 18h<small>9h do dia, se a visita for à tarde</small></div>
+        <div class="m1">
+          <div class="bl sis"><span class="de">Prime Eventos</span>Oi, Hana! Amanhã às 10h é a sua visita ao Prime Eventos 😊 Confirma? Responda 1 para confirmar ou 2 se precisar remarcar.</div>
+          <div class="bl cli"><span class="de">Hana</span>1</div>
+          <div class="bl sis"><span class="de">Prime Eventos</span>Confirmadíssimo! 🎉 Te esperamos quarta às 10h.</div>
+          <p>O card ganha <span class="sel ok">confirmada ✓</span>. Se ela responder <b>2</b>, a Jacqueline é avisada e remarca: a IA <b>não entra</b> na conversa do vendedor.</p>
+        </div>
+        <div class="m2"><span class="igual">igual a hoje</span></div>
+      </div>
+
+      <div class="pt">
+        <div class="q">2h antes</div>
+        <div class="m1">
+          <div class="bl sis"><span class="de">Prime Eventos</span>Daqui a pouco, às 10h, te esperamos no Prime Eventos! 📍 Rua das Flores, 100</div>
+          <p>Se ela ainda não confirmou e passa 1h30 antes sem resposta, a Jacqueline recebe: <b>⏰ Hana não confirmou a visita das 10h. Continua marcada.</b></p>
+        </div>
+        <div class="m2"><span class="igual">igual a hoje (a anfitriã já recebe o ⏰)</span></div>
+      </div>
+
+      <div class="pt novo">
+        <div class="q">11h<small>1h depois do horário</small></div>
+        <div class="m1">
+          <div class="av"><span class="de">push e WhatsApp de avisos · pra Jacqueline</span><b>📍 A visita da Hana foi às 10h. Ela veio?</b>Responda no app:<div class="bt"><span>✅ Veio</span><span class="n">❌ Faltou</span></div></div>
+          <p>Os botões já existem no app. Sem resposta, a pergunta volta às 18h. No dia seguinte, a visita fica no topo da agenda do app e na esteira.</p>
+        </div>
+        <div class="m2">
+          <div class="av"><span class="de">pra anfitriã</span><b>📍 A visita da Hana foi às 10h. Ela veio?</b><div class="bt"><span>✅ Veio</span><span class="n">❌ Faltou</span></div></div>
+        </div>
+      </div>
+
+      <div class="pt novo">
+        <div class="q">veio<small>card → Visita feita (já no ar)</small></div>
+        <div class="m1">
+          <p><b>13h</b>, se ninguém escreveu pra Hana desde a visita:</p>
+          <div class="av"><span class="de">push · pra Jacqueline</span><b>💬 Fale com a Hana</b>A visita foi às 10h e ninguém escreveu depois. Mande a proposta enquanto a festa está fresca.</div>
+          <p>Se a Jacqueline já escreveu, nada sai.</p>
+        </div>
+        <div class="m2">
+          <p><b>13h</b>, a IA:</p>
+          <div class="bl sis"><span class="de">ZAQ SDR · chip Thiago</span>Oi, Hana! Foi um prazer te receber hoje 😊 Gostou do espaço? Já posso montar o orçamento dos seus 15 anos pra 150 convidados?</div>
+        </div>
+      </div>
+
+      <div class="pt">
+        <div class="q">faltou<small>card → Qualificado, com "remarcar" (já no ar)</small></div>
+        <div class="m1">
+          <div class="av"><span class="de">push · pra Jacqueline</span><b>❌ Hana faltou à visita</b>O card voltou pra Qualificado. Chame pra remarcar.</div>
+          <span class="st nv">novo: o aviso</span>
+        </div>
+        <div class="m2">
+          <div class="bl sis"><span class="de">ZAQ SDR</span>Oi! Sentimos sua falta na visita 😕 Quer marcar outro dia pra conhecer o espaço? Me diz o que fica melhor pra você.</div>
+          <span class="igual">igual a hoje</span>
+        </div>
+      </div>
+    </div>
+    <p class="nota"><i>§0</i><span>As mensagens ao cliente saem pelo <b>mesmo chip da conversa</b>, pelo caminho de envio que já existe. Nada aqui toca conexão, chip ou pareamento. Se o vendedor já confirmou pelo celular dele, ele marca <b>confirmada</b> no card e as mensagens param.</span></p>
+  </section>
+
+  <section class="sec">
+    <header>
+      <h2>A proposta e a data</h2>
+      <p>Três coisas que hoje o card não conta: até quando a proposta vale, quanto falta pro sinal e quem mais quer a mesma data.</p>
+    </header>
+    <div class="tr">
+      <div class="tc">
+        <span class="onde">coluna Proposta</span>
+        <h3>A validade no card</h3>
+        <dl>
+          <dt>o selo</dt>
+          <dd><span class="sel nt">vale até 02/10</span><span class="sel at">vence amanhã</span><span class="sel bad">venceu 02/10</span></dd>
+          <dt>a conta</dt>
+          <dd>Data do envio do orçamento + a validade da conta (<b>7 dias</b>, a mesma que a IA já fala).</dd>
+          <dt>no link do cliente</dt>
+          <dd>"Válido até <b>02/10</b>". Hoje o link mostra a data da festa, o que dá meses de validade.</dd>
+          <dt>quando vence</dt>
+          <dd>Nada sai pro cliente sozinho. O vendedor vê <b>venceu</b> no card e na esteira, e decide: renovar ou perguntar.</dd>
+        </dl>
+        <p class="hoje">Hoje: <b>20 cards</b> em Proposta com orçamento ligado ganham o selo.</p>
+      </div>
+      <div class="tc">
+        <span class="onde">coluna Data segurada</span>
+        <h3>A contagem e a data disputada</h3>
+        <dl>
+          <dt>o selo</dt>
+          <dd><span class="sel at">⏳ 41h pro sinal · R$ 5.520</span></dd>
+          <dt>outro cliente pede a mesma data</dt>
+          <dd>Quem segura a data é avisado uma vez:<div class="av"><span class="de">push · pra quem atende a Iara</span><b>⚠️ Outro cliente pediu sáb 13/02</b>A reserva da Iara vence em 41h. Vale lembrar do sinal.</div>E o card do outro cliente mostra <span class="sel bad">data segurada por outro · vence em 41h</span>.</dd>
+          <dt>venceu sem sinal</dt>
+          <dd>O card volta pra <b>Proposta</b> com <span class="sel bad">reserva venceu</span>, a data fica livre e o 1º da Lista de espera é chamado.</dd>
+        </dl>
+        <p class="hoje">Hoje: a reserva vence, a data é liberada, e <b>o card fica parado</b> na coluna.</p>
+      </div>
+      <div class="tc">
+        <span class="onde">coluna nova, antes do Perdido</span>
+        <h3>A Lista de espera</h3>
+        <dl>
+          <dt>quem entra</dt>
+          <dd>A data que o cliente quer já está segurada ou fechada. O card ganha <span class="sel bad">data ocupada</span> sozinho; <b>entra na lista quando o cliente aceita esperar</b>: botão no card, ou a IA no modelo 2.</dd>
+          <dt>enquanto espera</dt>
+          <dd>Ninguém cobra: fora da esteira, do Follow-up e do Resgate. O card mostra <span class="sel nt">1º da fila · a reserva do outro vence em 41h</span>.</dd>
+          <dt>a data vagou</dt>
+          <dd>Modelo 1: o vendedor do 1º da fila é avisado (já existe). Modelo 2: a IA chama.<div class="bl sis"><span class="de">ZAQ SDR</span>Oi, Léo! A data que você queria, sábado 13/02, abriu 🎉 Ainda quer? Se quiser, já seguro pra você.</div></dd>
+          <dt>a data passou</dt>
+          <dd>Vai sozinho pra Perdido, "data indisponível".</dd>
+        </dl>
+        <p class="hoje">Hoje: desligada, porque a conta <b>não diz quantas festas cabem por dia</b>. Os 7 perdidos por data indisponível teriam entrado aqui.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <header>
+      <h2>O pós-festa</h2>
+      <p>No dia seguinte à festa, às 10h. A Prime teve 2 festas nos últimos 30 dias e tem 2 nos próximos 60: é pouco volume, e cada uma vale uma avaliação.</p>
+    </header>
+    <div class="tempo">
+      <div class="pt cab"><div>quando</div><div class="v">👤 modelo 1 · vendedor</div><div class="i">🤖 modelo 2 · IA</div></div>
+      <div class="pt novo">
+        <div class="q">dia seguinte, 10h</div>
+        <div class="m1">
+          <div class="av"><span class="de">push e esteira · pra quem vendeu</span><b>🎉 A festa da Ana foi ontem</b>Agradeça e peça a avaliação. Texto pronto pra copiar:</div>
+          <div class="bl sis"><span class="de">sugestão · o vendedor manda do jeito dele</span>Oi, Ana! Obrigada por celebrar com a gente ontem 🎉 Deu tudo certo? Se puder, deixa sua avaliação aqui, ajuda muito: g.page/prime-eventos</div>
+        </div>
+        <div class="m2">
+          <div class="bl sis"><span class="de">ZAQ SDR · chip Thiago</span>Oi, Ana! Obrigada por celebrar com a gente ontem 🎉 Deu tudo certo? Se puder, deixa sua avaliação aqui, ajuda muito: g.page/prime-eventos<br><br>E se alguém que você conhece estiver planejando uma festa, me passa o contato que eu cuido com carinho 😊</div>
+          <p>Contato compartilhado vira <b>lead novo</b>, com a origem "indicação da Ana".</p>
+        </div>
+      </div>
+      <div class="pt">
+        <div class="q">7 dias depois</div>
+        <div class="m1"><p>O card sai do quadro sozinho. Continua no cadastro, como venda fechada.</p></div>
+        <div class="m2"><p>Igual.</p></div>
+      </div>
+    </div>
+    <p class="nota"><i>nota</i><span>A recompra (próximo aniversário, irmãos) fica pra depois, como você decidiu. O link de avaliação é o endereço de avaliação do Google da Prime (o <b>g.page</b> acima é de exemplo); sem link, a mensagem sai sem a avaliação.</span></p>
+  </section>
+
+  <section class="sec">
+    <header>
+      <h2>Como os cards ficam</h2>
+      <p>Os selos novos no quadro da Prime. Os nomes são de exemplo.</p>
+    </header>
+    <div class="palco">
+      <div class="tela">
+        <div class="cl"><h4>Qualificado <span>34</span></h4>
+          <div class="cd"><span class="who">👤 Thiago</span><b>Nina</b><span class="m">infantil · 20/11 · 80</span><span class="sel bad">faltou · remarcar</span></div>
+        </div>
+        <div class="cl"><h4>Visita marcada <span>5</span></h4>
+          <div class="cd"><span class="who">👤 Jacqueline</span><b>Hana</b><span class="m">qua 30/09 10h</span><span class="sel ok">confirmada ✓</span></div>
+          <div class="cd"><span class="who">👤 Pedro</span><b>Rui</b><span class="m">hoje 15h</span><span class="sel at">não confirmou</span></div>
+        </div>
+        <div class="cl"><h4>Visita feita <span>8</span></h4>
+          <div class="cd"><span class="who">👤 Jacqueline</span><b>Paula</b><span class="m">veio hoje, 10h</span><span class="sel at">falar até 13h</span></div>
+          <div class="cd"><span class="who ia">🤖 ZAQ SDR</span><b>Clara</b><span class="m">veio ontem</span><span class="sel nv">agradecida ✓</span></div>
+        </div>
+        <div class="cl"><h4>Proposta <span>163</span></h4>
+          <div class="cd"><span class="who">👤 Pedro</span><b>Bruno</b><span class="m">R$ 18.400</span><span class="sel nt">vale até 02/10</span></div>
+          <div class="cd"><span class="who">👤 Thiago</span><b>Marta</b><span class="m">R$ 9.900</span><span class="sel bad">venceu 25/09</span></div>
+          <div class="cd"><span class="who">👤 Jacqueline</span><b>Davi</b><span class="m">R$ 12.300</span><span class="sel bad">reserva venceu</span></div>
+        </div>
+        <div class="cl"><h4>Data segurada <span>1</span></h4>
+          <div class="cd"><span class="who ia">🤖 ZAQ SDR</span><b>Iara</b><span class="m">sáb 13/02 · sinal R$ 5.520</span><span class="sel at">⏳ 41h pro sinal</span><span class="sel bad">outro cliente pediu a data</span></div>
+        </div>
+        <div class="cl"><h4>Pós-festa <span>1</span></h4>
+          <div class="cd"><span class="who">👤 Thiago</span><b>Ana</b><span class="m">festa ontem</span><span class="sel at">pedir avaliação</span></div>
+        </div>
+        <div class="cl esp"><h4>⏳ Lista de espera <span>1</span></h4>
+          <div class="cd"><span class="who">👤 Jacqueline</span><b>Léo</b><span class="m">quer sáb 13/02</span><span class="sel nt">1º da fila · vence em 41h</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <header>
+      <h2>Onde se liga</h2>
+      <p>Um bloco novo na régua do funil (Funil › Régua), só pra contas que vendem festa. Na Prime, tudo nasce ligado, com a sua autorização. Nas outras contas de eventos, tudo nasce desligado até o dono ligar.</p>
+    </header>
+    <div class="cfg">
+      <div class="top"><b>Rotinas de festa</b><span>Prime Eventos · valem pros dois modelos, cada um no seu jeito</span></div>
+      <div class="op"><span class="sw"></span><div><h4>Confirmar as visitas da equipe</h4><p>As mesmas mensagens da IA, em nome da empresa.</p></div><div class="val">ao marcar · véspera 18h · 2h antes</div></div>
+      <div class="op"><span class="sw"></span><div><h4>Perguntar "veio?"</h4><p>Pra quem recebeu a visita (no modelo 2, a anfitriã).</p></div><div class="val">1h depois · de novo às 18h</div></div>
+      <div class="op"><span class="sw"></span><div><h4>Depois da visita</h4><p>Modelo 1: lembra o vendedor. Modelo 2: a IA agradece.</p></div><div class="val">2h depois</div></div>
+      <div class="op"><span class="sw"></span><div><h4>Validade da proposta</h4><p>No card e no link do cliente.</p></div><div class="val">7 dias</div></div>
+      <div class="op"><span class="sw"></span><div><h4>Reserva da data</h4><p>Contagem, data disputada e volta pra Proposta.</p></div><div class="val">IA 72h · equipe: ver decisão 1</div></div>
+      <div class="op"><span class="sw"></span><div><h4>Lista de espera</h4><p>Liga quando a conta diz quantas festas cabem por dia.</p></div><div class="val">1 festa por dia<small>medido: 40 de 41 dias</small></div></div>
+      <div class="op"><span class="sw off"></span><div><h4>Pós-festa</h4><p>Agradecer, avaliação e indicação.</p></div><div class="val">dia seguinte 10h<small>falta o link de avaliação</small></div></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <header>
+      <h2>Pra você decidir</h2>
+      <p>A primeira reabre uma decisão que você já tinha tomado, porque o dado de hoje mostrou uma coisa que eu não sabia quando recomendei.</p>
+    </header>
+    <div class="dec">
+      <div class="q2 alerta"><span class="qn">1</span>
+        <h3>A reserva da data feita pela equipe também vira 72h?</h3>
+        <p class="muda">Muda o que foi aprovado. Quando recomendei "72h pros dois modelos", eu achava que a equipe também usava 72h. Não usa: a reserva da equipe vale <b>até 60 dias antes da festa</b> (mínimo 3 dias). As 7 reservas de hoje têm de 5 a 253 dias de prazo.</p>
+        <p>Cortar pra 72h mudaria de uma vez o jeito que a equipe vende.</p>
+        <p class="rec">a IA continua com 72h; a equipe continua com o prazo de hoje, mas <b>quando outro cliente pede a mesma data, a reserva passa a vencer em 48h</b>, e quem segura é avisado. É o "direito de preferência" que o setor usa.</p>
+      </div>
+      <div class="q2"><span class="qn">2</span>
+        <h3>Quantas festas cabem por dia na Prime?</h3>
+        <p>É o número que liga a Lista de espera e a data disputada. Na agenda, 40 de 41 dias tiveram uma festa só.</p>
+        <p class="rec">1 festa por dia.</p>
+      </div>
+      <div class="q2"><span class="qn">3</span>
+        <h3>Qual o link de avaliação?</h3>
+        <p>O Pós-festa pede avaliação. Sem link, a mensagem sai só com o agradecimento e a indicação.</p>
+        <p class="rec">o link de avaliação do Google da Prime. Até você mandar, o Pós-festa fica desligado.</p>
+      </div>
+      <div class="q2"><span class="qn">4</span>
+        <h3>Quando o cliente do vendedor responde "2" (remarcar), quem cuida?</h3>
+        <p>A mensagem de confirmação sai em nome da empresa, mas a conversa é do vendedor.</p>
+        <p class="rec">o vendedor é avisado e remarca; a IA não entra na conversa dele.</p>
+      </div>
+      <div class="q2"><span class="qn">5</span>
+        <h3>A validade de 7 dias também vale no link do cliente?</h3>
+        <p>Hoje o link diz "válido até" a data da festa. Com 7 dias, o link e o card dizem a mesma coisa, e é o que a IA já fala.</p>
+        <p class="rec">sim, 7 dias no link também.</p>
+      </div>
+      <div class="q2"><span class="qn">6</span>
+        <h3>A "IA insiste" liga no chip Thiago nesse deploy?</h3>
+        <p>Você aprovou ligar junto com o funil novo, e ela ainda está desligada. É mudança de configuração em produção.</p>
+        <p class="rec">ligar pela migração da parte 2a, com esta aprovação.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <header>
+      <h2>Como seria construído</h2>
+      <p>Grande pra um PR só. Proposta em duas entregas, a da visita primeiro, porque é onde estão os 24% de faltas. Cada uma com o seu aviso nas Novidades (público <b>eventos</b>, pra dono, gestor e vendedor).</p>
+    </header>
+    <div class="fases">
+      <div class="fs"><span class="n">2a · primeiro</span><h3>A visita</h3>
+        <ul>
+          <li>Confirmação da visita da equipe (ao marcar, véspera, 2h antes) e o selo <b>confirmada</b>.</li>
+          <li>O "veio?" 1h depois e às 18h.</li>
+          <li>Depois da visita: lembrete do vendedor em 2h; agradecimento da IA.</li>
+          <li>Aviso do "faltou" pro vendedor.</li>
+          <li>IA insiste ligada no chip Thiago.</li>
+        </ul>
+      </div>
+      <div class="fs"><span class="n">2b · depois</span><h3>A proposta, a data e o pós-festa</h3>
+        <ul>
+          <li>Validade no card e no link.</li>
+          <li>Contagem da Data segurada, data disputada e a volta pra Proposta.</li>
+          <li>Lista de espera como coluna, e a IA chamando quando a data vaga.</li>
+          <li>Pós-festa: aviso ao vendedor, mensagem da IA, indicação vira lead.</li>
+        </ul>
+      </div>
+      <div class="fs"><span class="n">3 · por último</span><h3>O bastão</h3>
+        <ul>
+          <li>A escolha no cartão do chip Thiago: <b>Validação</b>, <b>passa na visita feita</b> ou <b>passa quando alguém assume</b>.</li>
+          <li>Como no mockup da parte 1.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="nota"><i>§0</i><span>Nenhuma rotina apaga ou reescreve conversa, mensagem, chip ou conexão. As mensagens saem pelo envio que já existe, com o mesmo freio de horário (9h às 19h, segunda a sábado) e o mesmo teto por dia da IA.</span></p>
+  </section>
+
+</div>

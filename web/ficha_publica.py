@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from db.conexao import get_pool
 from finance import clinica_agenda as ca
@@ -135,6 +136,10 @@ def ficha(request: Request, tok: str):
 @router.post("/ficha/{tok}/entrar")
 async def entrar(request: Request, tok: str):
     form = dict(await request.form())
+    return await run_in_threadpool(_entrar, request, tok, form)
+
+
+def _entrar(request: Request, tok: str, form: dict):
     agora = datetime.now(timezone.utc)
     with get_pool().connection() as c:
         f = _aberta(c, tok)
@@ -153,6 +158,10 @@ async def entrar(request: Request, tok: str):
 @router.post("/ficha/{tok}/cadastro")
 async def cadastro(request: Request, tok: str):
     form = dict(await request.form())
+    return await run_in_threadpool(_cadastro, request, tok, form)
+
+
+def _cadastro(request: Request, tok: str, form: dict):
     agora = datetime.now(timezone.utc)
     with get_pool().connection() as c:
         f = _aberta(c, tok)
@@ -161,8 +170,7 @@ async def cadastro(request: Request, tok: str):
     nivel = _nivel(request, tok)
     if f["nascimento"] and not nivel:
         return _ir(request, tok)
-    from starlette.concurrency import run_in_threadpool
-    erro, aviso = await run_in_threadpool(cfl.salvar_cadastro, get_pool(), f, form, agora, nivel == "data")
+    erro, aviso = cfl.salvar_cadastro(get_pool(), f, form, agora, nivel == "data")
     if erro:
         return _ir(request, tok, 1, erro)
     # quem acabou de dar a data segue, mas não vê o que a recepção guardou
@@ -173,6 +181,10 @@ async def cadastro(request: Request, tok: str):
 @router.post("/ficha/{tok}/preconsulta")
 async def preconsulta(request: Request, tok: str):
     form = dict(await request.form())
+    return await run_in_threadpool(_preconsulta, request, tok, form)
+
+
+def _preconsulta(request: Request, tok: str, form: dict):
     agora = datetime.now(timezone.utc)
     if not _nivel(request, tok):
         return _ir(request, tok)
@@ -195,6 +207,10 @@ async def preconsulta(request: Request, tok: str):
 @router.post("/ficha/{tok}/termos")
 async def termos(request: Request, tok: str):
     form = dict(await request.form())
+    return await run_in_threadpool(_termos, request, tok, form)
+
+
+def _termos(request: Request, tok: str, form: dict):
     agora = datetime.now(timezone.utc)
     if not _nivel(request, tok):
         return _ir(request, tok)

@@ -54,7 +54,7 @@ _log = logging.getLogger("openclaw.funil_perdido")
 
 #: vizinho dos locks da régua (771147), do follow-up (771148), do teto (771149)
 #: e da agenda (771150)
-_LOCK = 771151
+_LOCK = 771184          # era 771151, a mesma da temperatura — revisão de 27/09/2026
 
 MODOS = ("off", "observando", "ligado")
 

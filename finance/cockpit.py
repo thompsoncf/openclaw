@@ -3312,6 +3312,13 @@ def remarcar_visita(pool, conta_id: int, membro_id: int | None, evento_id: int, 
     with pool.connection() as c:
         c.execute("update eventos_agenda set ics_token=%s where id=%s and conta_id=%s",
                   (novo_token, evento_id, conta_id))
+        # a visita que a IA marcou: o relógio dela recomeça no horário novo
+        from finance import ia_visita as _iv
+        _iv.recomecar(c, conta_id, evento_id, ini)
+        # quem faltou e remarcou volta pra "Visita marcada" (o card tinha voltado pra
+        # Qualificado com a falta)
+        from finance import funil_regua as _fr
+        _fr.card_pela_remarcacao(c, conta_id, evento_id, membro_id)
         try:
             c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo,
                            resultado, descricao) values (%s,%s,'visita','remarcado',%s)""",

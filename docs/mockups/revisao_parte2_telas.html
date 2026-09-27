@@ -1,0 +1,228 @@
+<title>Revisão do funil, parte 2</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde; lilás pra IA), igual aos mockups do
+   funil novo. Tema único de propósito: o painel não tem modo claro. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:80ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.3rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.med{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.mt{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.75rem .9rem;display:flex;flex-direction:column;gap:.2rem}
+.mt .v{font-family:var(--display);font-size:1.6rem;font-variant-numeric:tabular-nums;line-height:1.1}
+.mt .v small{font-size:.85rem;color:var(--dim);font-weight:500}
+.mt p{margin:0;font-size:.8rem;color:var(--dim)}
+.mt.at{border-color:var(--ambar-borda)} .mt.at .v{color:var(--ambar-2)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:80ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.82rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:88ch;margin:0}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota i.q{background:var(--ambar)}
+.nota b{color:var(--text)}
+
+/* antes × depois */
+.ad{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.lado{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);padding:1rem;display:flex;flex-direction:column;gap:.75rem;min-width:0}
+.lado>.rot{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.lado.hoje>.rot{color:var(--coral-2)} .lado.dep>.rot{color:var(--neon-2)}
+.lado p{margin:0;font-size:.84rem;color:var(--dim)}
+.lado p b{color:var(--text)}
+
+/* coluna e card do quadro */
+.col{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.6rem;display:flex;flex-direction:column;gap:.5rem}
+.col .ch{display:flex;justify-content:space-between;font-family:var(--display);font-weight:600;font-size:.9rem}
+.col .ch span{font-family:var(--mono);font-size:.7rem;color:var(--faint);font-weight:400}
+.card{border:1px solid var(--line-2);border-radius:10px;background:var(--surface-2);padding:.55rem .65rem;display:flex;flex-direction:column;gap:.35rem}
+.card .n{font-weight:600;font-size:.88rem}
+.card .s{font-size:.74rem;color:var(--dim)}
+.selo{align-self:flex-start;font-size:.7rem;border-radius:6px;padding:.1rem .45rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+.selo.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.bts{display:flex;gap:.35rem;flex-wrap:wrap}
+.bts span{font-size:.72rem;border-radius:6px;padding:.18rem .55rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.bts span.n{border-color:var(--coral-borda);background:var(--coral-fundo);color:var(--coral-2)}
+.toast{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2);border-radius:10px;padding:.5rem .7rem;font-size:.8rem}
+.fluxo{font-family:var(--mono);font-size:.72rem;color:var(--dim);display:flex;flex-direction:column;gap:.3rem}
+.fluxo s{color:var(--coral-2)}
+
+/* tabela do raio-x */
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--bg-2)}
+table{border-collapse:collapse;width:100%;min-width:520px;font-size:.84rem}
+th,td{padding:.55rem .8rem;text-align:left;border-top:1px solid var(--line)}
+th{font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);background:var(--surface-2);border-top:0}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td .tag{font-family:var(--mono);font-size:.6rem;border-radius:4px;padding:.02rem .35rem;margin-left:.4rem}
+.tag.nv{background:var(--neon-fundo);color:var(--neon-2);border:1px solid var(--neon-borda)}
+.tag.fora{background:var(--surface-2);color:var(--dim);border:1px solid var(--line-2)}
+tr.tot td{font-weight:600;color:var(--text);background:var(--surface)}
+td.dim{color:var(--dim)}
+
+/* histórico de avisos */
+.hist{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:.9rem;display:flex;flex-direction:column;gap:.7rem}
+.chips{display:flex;gap:.4rem;flex-wrap:wrap}
+.chips span{font-size:.74rem;border-radius:999px;padding:.2rem .65rem;border:1px solid var(--line-2);color:var(--dim)}
+.chips span.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.chips span b{font-variant-numeric:tabular-nums;color:inherit;margin-left:.25rem}
+.linha{display:grid;grid-template-columns:6.5rem 6rem 1fr;gap:.6rem;font-size:.8rem;padding-block:.35rem;border-top:1px solid var(--line);align-items:baseline}
+.linha .q{font-family:var(--mono);font-size:.7rem;color:var(--faint)}
+.linha .o{font-family:var(--mono);font-size:.62rem;border-radius:4px;padding:.02rem .35rem;justify-self:start}
+.o.cob{background:var(--ambar-fundo);color:var(--ambar-2);border:1px solid var(--ambar-borda)}
+.o.vis{background:var(--ia-fundo);color:var(--ia-2);border:1px solid var(--ia-borda)}
+.o.tst{background:var(--surface-2);color:var(--dim);border:1px solid var(--line-2)}
+.linha .t{color:var(--dim)}
+.linha .t b{color:var(--text)}
+
+.dec{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:14px;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
+.dec h3{font-size:1rem;color:var(--ambar-2)}
+.dec p,.dec li{margin:0;font-size:.86rem;color:var(--text)}
+.dec ul{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:.3rem}
+
+@media (max-width:720px){.ad{grid-template-columns:1fr}.linha{grid-template-columns:5.5rem 1fr}.linha .t{grid-column:1/-1}}
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <span class="k">Revisão do funil de eventos · parte 2 · as telas</span>
+    <h1>Quatro telas que a revisão encontrou tortas</h1>
+    <p>Os consertos de motor da parte 2 já estão prontos e não mudam tela. Estas quatro mudam o que você e a equipe veem, então vêm antes pra aprovação. Os números são da <b>Prime (34)</b> e da <b>ZAQ (3)</b>, lidos hoje, 27/09, só leitura.</p>
+  </div>
+
+  <div class="med">
+    <div class="mt at"><span class="v">42 <small>leads</small></span><p>em aberto na Prime que o Raio-X não conta hoje (34 em Qualificado, 8 em Visita feita)</p></div>
+    <div class="mt"><span class="v">0 <small>cards</small></span><p>em Data segurada agora. O conserto 7 é pra quando acontecer</p></div>
+    <div class="mt"><span class="v">146 <small>avisos</small></span><p>no histórico da Prime em 30 dias, de 5 tipos, todos na mesma lista</p></div>
+    <div class="mt"><span class="v">0 <small>mudanças</small></span><p>na ZAQ: os leads dela já estão nas colunas contadas</p></div>
+  </div>
+
+  <!-- 7 -->
+  <section class="sec">
+    <header>
+      <span class="k">Item 7 · Quadro</span>
+      <h2>Data segurada depois que a festa passou</h2>
+      <p>O card entra em <b>Data segurada</b> quando o cliente aprova, e só sai pro <b>Fechado</b> quando o contrato é assinado no sistema. Se o sinal foi pago mas o contrato não passou pelo sistema, a festa acontece e o card fica ali pra sempre, e o agradecimento do pós-festa nunca sai.</p>
+    </header>
+    <div class="ad">
+      <div class="lado hoje">
+        <span class="rot">Hoje</span>
+        <div class="col">
+          <div class="ch">Data segurada <span>1</span></div>
+          <div class="card"><span class="n">Iara</span><span class="s">15 anos · festa 13/02</span><span class="selo">⏳ sinal até 10/02</span></div>
+        </div>
+        <p>Em 20/02 o card continua igual, sem dizer nada. Ninguém percebe que ficou pra trás.</p>
+      </div>
+      <div class="lado dep">
+        <span class="rot">Depois</span>
+        <div class="col">
+          <div class="ch">Pós-festa <span>1</span></div>
+          <div class="card"><span class="n">Iara</span><span class="s">15 anos · festa 13/02</span><span class="selo ok">🎉 sinal pago · foi sozinho pro Pós-festa</span></div>
+        </div>
+        <div class="col">
+          <div class="ch">Data segurada <span>1</span></div>
+          <div class="card"><span class="n">Léo</span><span class="s">Casamento · festa 13/02</span><span class="selo">📅 A festa era 13/02 e não tem sinal. Fechou?</span><div class="bts"><span>Fechou</span><span class="n">Não fechou</span></div></div>
+        </div>
+        <p><b>Com sinal pago</b>, a festa aconteceu: no dia seguinte o card vai sozinho pro Pós-festa e o agradecimento sai. <b>Sem sinal</b>, o card ganha o selo e dois botões. "Fechou" leva pro Fechado. "Não fechou" leva pro Perdido com o motivo "data passou".</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 -->
+  <section class="sec">
+    <header>
+      <span class="k">Item 9 · Quadro</span>
+      <h2>Arrastar o card pra Lista de espera</h2>
+      <p>O botão "esperar a data" já faz tudo certo. Arrastar o card pra coluna, não: ele entra sem lugar na fila e, no ciclo seguinte (uns 2 minutos), volta sozinho pra Proposta com a nota "a data mudou", que não é verdade.</p>
+    </header>
+    <div class="ad">
+      <div class="lado hoje">
+        <span class="rot">Hoje</span>
+        <div class="fluxo">
+          <span>arrasta Léo pra Lista de espera</span>
+          <span>→ card na coluna, sem posição na fila</span>
+          <span>→ 2 min depois volta pra Proposta</span>
+          <span><s>nota: "A data mudou pra 13/02: saiu da lista de espera."</s></span>
+        </div>
+      </div>
+      <div class="lado dep">
+        <span class="rot">Depois</span>
+        <p><b>Data ocupada por outra festa:</b> arrastar faz o mesmo que o botão. O card entra na fila e ganha o selo da posição.</p>
+        <div class="card"><span class="n">Léo</span><span class="s">Casamento · 13/02</span><span class="selo">⏳ 2º da fila · 13/02</span></div>
+        <p><b>Data livre, ou card sem data:</b> o card não se move, e o quadro explica:</p>
+        <div class="toast">A data 13/02 está livre: dá pra seguir a venda.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="sec">
+    <header>
+      <span class="k">Item 10 · Raio-X</span>
+      <h2>O Raio-X conta as colunas novas</h2>
+      <p>O Raio-X tem uma lista fixa do que é "lead em aberto" (Novo, Contatado, Visita marcada, Proposta), feita antes do funil novo. As colunas que entraram depois ficam de fora. Isso vale pro total e também pro "responda hoje" e pro "parou na 1ª mensagem". A proposta é ler a lista do funil de cada conta: <b>toda coluna de venda conta, menos a Lista de espera</b>, que espera a data abrir e não o vendedor.</p>
+    </header>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Coluna da Prime</th><th class="num">Leads</th><th class="num">Conta hoje</th><th class="num">Conta depois</th></tr></thead>
+        <tbody>
+          <tr><td>Novo</td><td class="num">2</td><td class="num">2</td><td class="num">2</td></tr>
+          <tr><td>Contatado</td><td class="num">213</td><td class="num">213</td><td class="num">213</td></tr>
+          <tr><td>Qualificado<span class="tag nv">entra</span></td><td class="num">34</td><td class="num dim">—</td><td class="num">34</td></tr>
+          <tr><td>Follow-up<span class="tag nv">entra</span></td><td class="num">0</td><td class="num dim">—</td><td class="num">0</td></tr>
+          <tr><td>Visita marcada</td><td class="num">5</td><td class="num">5</td><td class="num">5</td></tr>
+          <tr><td>Visita feita<span class="tag nv">entra</span></td><td class="num">8</td><td class="num dim">—</td><td class="num">8</td></tr>
+          <tr><td>Proposta</td><td class="num">163</td><td class="num">163</td><td class="num">163</td></tr>
+          <tr><td>Data segurada<span class="tag nv">entra</span></td><td class="num">0</td><td class="num dim">—</td><td class="num">0</td></tr>
+          <tr><td>Lista de espera<span class="tag fora">fica fora</span></td><td class="num">0</td><td class="num dim">—</td><td class="num dim">—</td></tr>
+          <tr class="tot"><td>Em aberto</td><td class="num"></td><td class="num">383</td><td class="num">425</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="nota"><i>ZAQ</i><span>Os 239 leads em aberto da ZAQ já estão em Novo, Contatado, Qualificado e Proposta, então o número dela não muda. Como a lista passa a vir do funil de cada conta, nenhuma coluna de um nicho vaza pro outro.</span></p>
+  </section>
+
+  <!-- 13 -->
+  <section class="sec">
+    <header>
+      <span class="k">Item 13 · Follow-up › Histórico do aviso</span>
+      <h2>O histórico diz de onde veio cada aviso</h2>
+      <p>O histórico por vendedor foi feito pra cobrança da manhã, mas hoje também recebe o fecho do dia, o aviso da visita e o teste, tudo igual. Cada linha ganha a etiqueta do tipo, e em cima entram os filtros.</p>
+    </header>
+    <div class="hist">
+      <div class="chips"><span class="on">Todos<b>146</b></span><span>Cobrança<b>138</b></span><span>Visita<b>4</b></span><span>Testes<b>4</b></span></div>
+      <div class="linha"><span class="q">27/09 08:02</span><span class="o cob">cobrança</span><span class="t"><b>WhatsApp</b> · 10 leads para hoje · entregue, lido</span></div>
+      <div class="linha"><span class="q">26/09 19:00</span><span class="o cob">fecho do dia</span><span class="t"><b>WhatsApp</b> · o que ficou feito e o que não ficou · entregue</span></div>
+      <div class="linha"><span class="q">26/09 11:03</span><span class="o vis">visita</span><span class="t"><b>Push</b> · 📍 Visita das 10h: o cliente veio?</span></div>
+      <div class="linha"><span class="q">25/09 16:40</span><span class="o tst">teste</span><span class="t"><b>WhatsApp</b> · Testar agora · entregue</span></div>
+    </div>
+    <p class="nota"><i>Cobrança</i><span>Junta a cobrança da manhã (32 linhas), a esteira (71) e o fecho do dia (35). O resumo no topo do card continua contando só a cobrança, como hoje. Quando entrarem avisos de festa ou de resgate, eles ganham o filtro deles.</span></p>
+  </section>
+
+  <section class="sec">
+    <div class="dec">
+      <h3>O que preciso que você decida</h3>
+      <ul>
+        <li><b>Item 7:</b> com sinal pago, o card pode ir sozinho pro Pós-festa? Ele passa a contar como venda fechada (o Pós-festa já conta). Recomendo que sim: o sinal pago é a prova de que a festa foi vendida. A alternativa é todo caso cair no selo "Fechou?".</li>
+        <li><b>Itens 9, 10 e 13:</b> do jeito que está aqui?</li>
+      </ul>
+      <p>O aviso em Novidades vai junto no mesmo PR, pra quem vende festa (Prime).</p>
+    </div>
+  </section>
+</div>

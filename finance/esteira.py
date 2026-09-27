@@ -927,6 +927,10 @@ def salvar_espelho(c, conta_id: int, de, para) -> dict:
     de, para = _id(de), _id(para)
     if not de or not para:
         de = para = None
+    elif de == para:
+        # a cópia do aviso de alguém pra ele mesmo: ele já recebe o original
+        # (revisão de 27/09/2026)
+        return {"ok": False, "erro": "Quem recebe a cópia tem que ser outra pessoa."}
     else:
         ok = {r[0] for r in c.execute("select id from membros where conta_id=%s and ativo "
                                       "and id = any(%s)", (conta_id, [de, para])).fetchall()}

@@ -281,17 +281,27 @@ def pendentes_da_abertura(c, conta_id: int, limite: int = 5) -> list[int]:
                 f"select {_COLS} from chip_regra where conta_id=%s and ativa and ia_ligada "
                 "and ia_horario='proprio' and membro_id is not null", (conta_id,)).fetchall()]
             saida = []
+            # o lead que o RESGATE deu (migração 396) também espera a abertura — a
+            # conversa dele fica no chip onde já estava, não no chip da regra
+            tem_resgate = bool(c.execute("select to_regclass('public.resgate_leads')").fetchone()[0])
+            do_resgate = ("""or exists (select 1 from resgate_leads rl
+                                         where rl.prospeccao_id = p.id and rl.ativo
+                                           and rl.membro_id = p.vendedor_id)"""
+                          if tem_resgate else "")
             for r in regras:
                 if not ia_pode_falar(r):
                     continue
                 saida += [x[0] for x in c.execute(
                     """select cv.id from conversas cv
                          join prospeccao p on p.id = cv.prospeccao_id
-                        where cv.conta_id=%s and coalesce(cv.chip_id, cv.conta_id)=%s
+                        where cv.conta_id=%s
                           and p.vendedor_id=%s and cv.agente_ativo
                           and cv.status <> 'pendente'
                           and cv.ultima_msg_em > now() - interval '3 days'
-                          and exists (select 1 from chip_regra_leads l where l.prospeccao_id = p.id)
+                          and ((coalesce(cv.chip_id, cv.conta_id)=%s
+                                and exists (select 1 from chip_regra_leads l
+                                             where l.prospeccao_id = p.id))
+                               """ + do_resgate + """)
                           -- recebeu o recado de fora do horário…
                           and exists (select 1 from mensagens f where f.conversa_id=cv.id
                                          and f.autor='bot' and f.status=%s
@@ -303,7 +313,7 @@ def pendentes_da_abertura(c, conta_id: int, limite: int = 5) -> list[int]:
                                  from mensagens m where m.conversa_id=cv.id
                                 order by m.criado_em desc, m.id desc limit 1)
                         order by cv.ultima_msg_em limit %s""",
-                    (conta_id, r["chip_id"], r["membro_id"], STATUS_FORA, STATUS_FORA,
+                    (conta_id, r["membro_id"], r["chip_id"], STATUS_FORA, STATUS_FORA,
                      limite)).fetchall()]
             return saida[:limite]
     except Exception:  # noqa: BLE001

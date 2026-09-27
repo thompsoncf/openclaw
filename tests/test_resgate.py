@@ -627,3 +627,130 @@ def test_o_app_mostra_quando_o_lead_vai_pro_resgate(pool, equipe):
         assert st and not st["vencido"] and st["dias"] == 1
         longe, _ = _lead(c, equipe["PEDRO"], dias=1, numero="5586999990002")
         assert rg.situacao_do_lead(c, EMPRESA, longe) is None
+
+
+# ══════════════════════════════════════════════ o que a revisão pegou
+
+@pytest.mark.parametrize("txt", ["quero orçamento para 100 pessoas", "Parece ótimo!", "Parabéns!",
+                                 "quando chega o orçamento?", "não quero sair tarde da festa",
+                                 "não quero buffet, só o salão", "pode parar o carro na frente?"])
+def test_conversa_normal_nao_e_pedido_de_parar(txt):
+    assert not rg.RE_PARAR.search(txt)
+
+
+@pytest.mark.parametrize("txt", ["pare", "Pare de me mandar mensagem", "não quero mais, obrigada",
+                                 "nao tenho interesse", "me tira da lista", "já fechei com outro",
+                                 "desisti", "não me mande mais nada"])
+def test_pedido_de_parar(txt):
+    assert rg.RE_PARAR.search(txt)
+
+
+def test_envio_que_falha_devolve_a_conversa_como_estava(pool, equipe, duble):
+    """A IA ligada numa conversa que voltou pro vendedor responderia o cliente dele."""
+    duble["estado"]["ok"] = False
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, cv = _lead(c, equipe["PEDRO"])
+        c.execute("update conversas set status='pendente', agente_ativo=false, "
+                  "responsavel_membro_id=%s where id=%s", (equipe["PEDRO"], cv))
+        c.commit()
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select status, agente_ativo, responsavel_membro_id from conversas "
+                         "where id=%s", (cv,)).fetchone() == ("pendente", False, equipe["PEDRO"])
+
+
+def test_o_lead_que_falhou_nao_trava_a_fila(pool, equipe, duble):
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        ruim, _ = _lead(c, equipe["PEDRO"], dias=9, ultimo="in", numero="5586999990001")
+        bom, _ = _lead(c, equipe["PEDRO"], dias=9, numero="5586999990002")
+    duble["estado"]["ok"] = False
+    rg.rodar(pool)
+    duble["estado"]["ok"] = True
+    with pool.connection() as c:
+        c.execute("update resgate_envios set criado_em = greatest(criado_em - interval '1 hour', "
+                  "date_trunc('day', now() at time zone '-03') at time zone '-03' + interval '1 minute')")
+        c.commit()
+    rg.rodar(pool)
+    assert [s["numero"] for s in duble["saiu"]] == ["5586999990001", "5586999990002"]
+
+
+def test_um_chip_fora_do_ar_nao_para_os_outros(pool, equipe, duble):
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        _lead(c, equipe["PEDRO"], dias=9, ultimo="in", chip=CHIP2, numero="5586999990001")
+        _lead(c, equipe["PEDRO"], dias=9, numero="5586999990002")
+        c.execute("update canais_config set desconectado_em = now() where conta_id=%s", (CHIP2,))
+        c.commit()
+    rg.rodar(pool)
+    assert [s["numero"] for s in duble["saiu"]] == ["5586999990002"]
+
+
+def test_desligar_e_devolver_libera_os_leads_pro_follow_up(pool, equipe, duble):
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        rg.salvar(c, EMPRESA, {"modo": "off", "membro_id": equipe["ZAQ"], "dias_semana": ["0"]})
+        c.execute("update prospeccao set vendedor_id=%s where id=%s", (equipe["PEDRO"], lid))
+        c.commit()
+        assert rg.leads_da_ia(c, EMPRESA) == set()          # na hora, sem esperar o ciclo
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select estado, ativo from resgate_leads").fetchone() == ("devolvido", False)
+        assert c.execute("select agente_ativo, responsavel_membro_id from conversas where id=%s",
+                         (cv,)).fetchone() == (False, equipe["PEDRO"])
+
+
+def test_lead_que_a_regra_deu_nao_e_resgatado(pool, equipe):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        lid, _ = _lead(c, equipe["PEDRO"])
+        c.execute("insert into chip_regra_leads (prospeccao_id, conta_id, chip_id, membro_id) "
+                  "values (%s,%s,%s,%s)", (lid, EMPRESA, CHIP2, equipe["PEDRO"]))
+        c.commit()
+        assert rg.fila(c, EMPRESA) == []
+
+
+def test_supervisor_de_outro_ddd_nao_e_o_supervisor(pool, equipe):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        assert rg.e_do_supervisor(c, EMPRESA, "551187654321")          # sem o nono dígito
+        assert not rg.e_do_supervisor(c, EMPRESA, "5586987654321")     # mesmos 8, outro DDD
+
+
+def test_testar_so_com_o_resgate_ligado_ou_em_ensaio(pool, equipe, duble):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"])
+        rg.salvar(c, EMPRESA, {"modo": "off", "membro_id": equipe["ZAQ"],
+                               "supervisor_whatsapp": SUPERVISOR, "dias_semana": ["0"]})
+        c.commit()
+    r = rg.testar(pool, EMPRESA)
+    assert not r["ok"] and "Ensaio" in r["erro"]
+    assert duble["saiu"] == []
+
+
+def test_o_supervisor_sem_teste_recebe_um_lembrete_so_e_a_reentrega_nao_duplica(pool, equipe, duble):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+    rg.responder_supervisor(pool, EMPRESA, "ok", "M1")
+    rg.responder_supervisor(pool, EMPRESA, "ok", "M1")          # reentrega
+    rg.responder_supervisor(pool, EMPRESA, "valeu", "M2")
+    assert len(duble["saiu"]) == 1 and "supervisor do resgate" in duble["saiu"][0]["texto"]
+    with pool.connection() as c:
+        # a mensagem dele fica guardada, mesmo sem virar conversa
+        assert c.execute("select count(*) from resgate_envios where tipo='do_supervisor'"
+                         ).fetchone()[0] == 2
+
+
+def test_o_resgatado_que_escreveu_fora_do_horario_e_atendido_na_abertura(pool, equipe, duble):
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("update chip_regra set ia_horario='proprio', ia_dias='{0,1,2,3,4,5,6}', "
+                  "ia_hora_ini=0, ia_hora_fim=24")
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto, status, criado_em) "
+                  "values (%s,'whatsapp','in','lead','oi, ainda tem?',null, now() + interval '1 second'),"
+                  "(%s,'whatsapp','out','bot','volto às 8h',%s, now() + interval '2 seconds')",
+                  (cv, cv, cr.STATUS_FORA))
+        c.commit()
+        assert cv in cr.pendentes_da_abertura(c, EMPRESA)

@@ -86,12 +86,19 @@ FREIO_PARAR = 3
 FREIO_FALHAS = 3
 #: festa em menos de tantos dias não é resgatada (é do supervisor decidir)
 FESTA_MIN_DIAS = 3
+#: o lead cujo envio falhou fica de fora por tantos dias
+FALHA_DIAS = 7
 
 #: "pare", "não quero mais", "me tira da lista"… — o cliente que pediu pra parar
-#: nunca mais é chamado pelo resgate
+#: nunca mais é chamado pelo resgate. Palavra INTEIRA e frase inteira: "para" (a
+#: preposição), "parece", "parabéns", "quando chega" e "não quero sair tarde" são
+#: conversa, não pedido de parar — e cada falso "pare" gasta um degrau do freio.
 RE_PARAR = re.compile(
-    r"\b(par[ae]r?|chega|sair|remov[ae]|me tir[ae]|n[aã]o (quero|tenho interesse|preciso)|"
-    r"sem interesse|desisti|j[aá] (fechei|contratei)|n[aã]o me (mande|chame|ligue)|bloque)",
+    r"(?<!\w)(pare|parem|parar de|para de (me )?(mandar|chamar|enviar)|"
+    r"n[aã]o quero mais|n[aã]o tenho (mais )?interesse|sem interesse|"
+    r"n[aã]o me (mande|mandem|chame|chamem|ligue|procure)|"
+    r"me (tira|tire|remove|remova|exclui|exclua) d[aeo]|sai[r]? da lista|"
+    r"desisti|j[aá] (fechei|contratei)|vou bloquear|bloqueado)(?!\w)",
     re.I)
 
 FAIXAS = {1: "Cliente esperando resposta", 2: "Festa com data por vir",
@@ -113,6 +120,17 @@ def numero_do_supervisor(v) -> str:
 
 def _fim8(v) -> str:
     return _so_digitos(v)[-8:]
+
+
+def chave_do_numero(v) -> str:
+    """DDD + os 8 últimos dígitos: o mesmo número com ou sem o nono dígito, e com ou
+    sem o 55 — mas nunca o de outro DDD (8 dígitos sozinhos colidem entre cidades)."""
+    d = _so_digitos(v)
+    if d.startswith("55") and len(d) in (12, 13):
+        d = d[2:]
+    if len(d) in (10, 11):
+        return d[:2] + d[-8:]
+    return ""
 
 
 # ══════════════════════════════════════════════════════════════════ a config
@@ -264,10 +282,14 @@ def _sql_leads(festa: bool) -> str:
     with l as (
       select p.id, p.status, p.vendedor_id, p.evento_em, p.criado_em, p.orcamento_id,
              coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Cliente') quem,
-             coalesce(nullif(p.whatsapp,''), nullif(p.telefone,'')) numero
+             nullif(p.whatsapp,'') numero, nullif(p.telefone,'') telefone
         from prospeccao p
        where p.conta_id = %(conta)s and p.estagio = 'lead'
          and p.vendedor_id is distinct from %(ia)s
+         and (p.vendedor_id is null or p.vendedor_id not in (
+               select cr.membro_id from chip_regra cr
+                where cr.conta_id = %(conta)s and cr.membro_id is not null))
+         and not exists (select 1 from chip_regra_leads cl where cl.prospeccao_id = p.id)
          and p.status not in {fr.sql_fechadas('p')}
          and (%(perdidos)s or p.status <> 'perdido')
          and (%(lead)s::bigint is null or p.id = %(lead)s::bigint)
@@ -298,7 +320,7 @@ def _sql_leads(festa: bool) -> str:
        where e.conta_id = %(conta)s and {vis.sql_conta('e', festa=festa)}
        group by e.prospeccao_id)
     select l.id, l.status, l.vendedor_id, l.evento_em, l.criado_em, l.orcamento_id, l.quem,
-           coalesce(l.numero, cvw.contato_ref), msg.ult_out, msg.ult_in, nota.em,
+           coalesce(l.numero, cvw.contato_ref, l.telefone), msg.ult_out, msg.ult_in, nota.em,
            vis.ultima, coalesce(vis.futura, false),
            (select o.criado_em from orcamentos o where o.id = l.orcamento_id),
            cvw.id, cvw.chip_id
@@ -545,8 +567,10 @@ def e_lead_do_resgate(c, conta_id: int, prospeccao_id) -> bool:
         return False
     try:
         with c.transaction():
-            return bool(c.execute("select 1 from resgate_leads where prospeccao_id=%s and conta_id=%s "
-                                  "and ativo", (prospeccao_id, conta_id)).fetchone())
+            return bool(c.execute(
+                """select 1 from resgate_leads r join prospeccao p on p.id = r.prospeccao_id
+                    where r.prospeccao_id=%s and r.conta_id=%s and r.ativo
+                      and p.vendedor_id = r.membro_id""", (prospeccao_id, conta_id)).fetchone())
     except Exception:  # noqa: BLE001
         return False
 
@@ -556,8 +580,12 @@ def leads_da_ia(c, conta_id: int) -> set[int]:
     pulam estes (o dono deles é o membro IA, que não tem celular). Tolerante."""
     try:
         with c.transaction():
+            # só enquanto o lead é do membro IA: devolvido pelo gestor (com o resgate
+            # ligado ou não), volta pra cobrança do vendedor na hora
             return {int(r[0]) for r in c.execute(
-                "select prospeccao_id from resgate_leads where conta_id=%s and ativo",
+                """select r.prospeccao_id from resgate_leads r
+                     join prospeccao p on p.id = r.prospeccao_id
+                    where r.conta_id=%s and r.ativo and p.vendedor_id = r.membro_id""",
                 (conta_id,)).fetchall()}
     except Exception:  # noqa: BLE001
         return set()
@@ -605,17 +633,26 @@ def _passar(c, conta_id: int, lead: dict, membro_ia: int) -> bool:
          lead["id"], lead["desde"], lead["vendedor_id"])).rowcount
     if not ok:
         return False
+    # como a conversa estava: se o envio falhar, ela volta EXATAMENTE assim — a IA
+    # ligada numa conversa que voltou pro vendedor responderia o cliente dele
+    cv = c.execute("select status, agente_ativo, responsavel_membro_id from conversas "
+                   "where id=%s and conta_id=%s", (lead["conversa_id"], conta_id)).fetchone()
     c.execute("""insert into resgate_leads (prospeccao_id, conta_id, membro_id, vendedor_antes,
                                             conversa_id, faixa, status_antes, entrou_em, ativo,
-                                            estado, ultimo_envio_em, respondeu_em, saiu_em)
-                 values (%s,%s,%s,%s,%s,%s,%s,now(),true,'chamado',null,null,null)
+                                            estado, ultimo_envio_em, respondeu_em, saiu_em,
+                                            conv_status_antes, conv_agente_antes, conv_resp_antes)
+                 values (%s,%s,%s,%s,%s,%s,%s,now(),true,'chamado',null,null,null,%s,%s,%s)
                  on conflict (prospeccao_id) do update set
                    membro_id=excluded.membro_id, vendedor_antes=excluded.vendedor_antes,
                    conversa_id=excluded.conversa_id, faixa=excluded.faixa,
                    status_antes=excluded.status_antes, entrou_em=now(), ativo=true,
-                   estado='chamado', ultimo_envio_em=null, respondeu_em=null, saiu_em=null""",
+                   estado='chamado', ultimo_envio_em=null, respondeu_em=null, saiu_em=null,
+                   conv_status_antes=excluded.conv_status_antes,
+                   conv_agente_antes=excluded.conv_agente_antes,
+                   conv_resp_antes=excluded.conv_resp_antes""",
               (lead["id"], conta_id, membro_ia, lead["vendedor_id"], lead["conversa_id"],
-               lead["faixa"], lead["status"]))
+               lead["faixa"], lead["status"], cv[0] if cv else None, cv[1] if cv else None,
+               cv[2] if cv else None))
     c.execute("""update conversas set responsavel_membro_id=%s, agente_ativo=true,
                         status = 'aberta'
                   where id=%s and conta_id=%s""", (membro_ia, lead["conversa_id"], conta_id))
@@ -633,9 +670,15 @@ def _passar(c, conta_id: int, lead: dict, membro_ia: int) -> bool:
 
 
 def _devolver(c, conta_id: int, lead: dict) -> None:
-    """O envio falhou: o lead volta pra quem era, como se nada tivesse acontecido."""
+    """O envio falhou: o lead volta pra quem era, e a conversa volta como estava."""
     c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
               (lead["vendedor_id"], lead["id"], conta_id))
+    c.execute("""update conversas cv set status = coalesce(r.conv_status_antes, cv.status),
+                        agente_ativo = coalesce(r.conv_agente_antes, false),
+                        responsavel_membro_id = r.conv_resp_antes
+                   from resgate_leads r
+                  where r.prospeccao_id=%s and r.conta_id=%s and cv.id = r.conversa_id
+                    and cv.conta_id = r.conta_id""", (lead["id"], conta_id))
     c.execute("delete from resgate_leads where prospeccao_id=%s and conta_id=%s", (lead["id"], conta_id))
     c.execute("""delete from prospeccao_atividades
                   where prospeccao_id=%s and membro_id is null
@@ -692,6 +735,33 @@ def _nome(c, conta_id: int, membro_id) -> str:
 
 # ══════════════════════════════════════════════════════════════════ o que já está com a IA
 
+def _devolvido(c, conta_id: int, lead: int, conv, vend) -> None:
+    """O gestor deu o lead pra alguém: sai do resgate, e a IA sai da conversa (quem
+    responde agora é gente — a do novo dono)."""
+    c.execute("""update resgate_leads set ativo=false, estado='devolvido', saiu_em=now()
+                  where prospeccao_id=%s and conta_id=%s""", (lead, conta_id))
+    if conv:
+        c.execute("""update conversas set agente_ativo=false, responsavel_membro_id=%s
+                      where id=%s and conta_id=%s""", (vend, conv, conta_id))
+
+
+def varrer_devolvidos(pool, conta_id: int) -> int:
+    """Com o resgate em qualquer modo: lead que o gestor tirou do membro IA sai do
+    resgate. Sem isto, desligar o resgate e devolver os leads deixaria a cobrança do
+    vendedor pulando esses leads pra sempre."""
+    n = 0
+    with pool.connection() as c:
+        for lead, conv, vend in c.execute(
+                """select r.prospeccao_id, r.conversa_id, p.vendedor_id
+                     from resgate_leads r join prospeccao p on p.id = r.prospeccao_id
+                    where r.conta_id=%s and r.ativo
+                      and p.vendedor_id is distinct from r.membro_id""", (conta_id,)).fetchall():
+            _devolvido(c, conta_id, lead, conv, vend)
+            n += 1
+        c.commit()
+    return n
+
+
 def _acompanhar(pool, conta_id: int, cfg: dict, agora: datetime) -> dict:
     """Os leads que já estão com a IA: o cliente respondeu? pediu pra parar? alguém
     da equipe falou com ele (a IA sai)? o gestor deu o lead pra outra pessoa?"""
@@ -706,8 +776,7 @@ def _acompanhar(pool, conta_id: int, cfg: dict, agora: datetime) -> dict:
                 where r.conta_id=%s and r.ativo""", (conta_id,)).fetchall()
         for lead, conv, entrou, estado, mid, vend, quem in rows:
             if vend != mid:
-                c.execute("""update resgate_leads set ativo=false, estado='devolvido', saiu_em=now()
-                              where prospeccao_id=%s""", (lead,))
+                _devolvido(c, conta_id, lead, conv, vend)
                 out["devolvidos"] += 1
                 continue
             if estado == "chamado":
@@ -722,7 +791,7 @@ def _acompanhar(pool, conta_id: int, cfg: dict, agora: datetime) -> dict:
                     out["pararam" if parou else "responderam"] += 1
                     if parou:
                         _registrar(c, conta_id, "parou", lead=lead)
-            if estado not in ("pausado", "parou"):
+            if estado != "pausado":
                 r = {"vale_desde": entrou}
                 if _cr.pausar_se_humano(c, conta_id, conv, r):
                     c.execute("update resgate_leads set estado='pausado' where prospeccao_id=%s",
@@ -917,7 +986,7 @@ def _um_envio(pool, conta_id: int, cfg: dict, regra, todos: list[dict], agora: d
     vencidos = [x for x in todos if x["vence_em"] <= agora]
     if not vencidos:
         return
-    ordem = {x["id"]: i for i, x in enumerate(fila_de(vencidos))}
+    chip_caido = False
     with pool.connection() as c:
         ja_previa = {(r[0], r[1]) for r in c.execute(
             "select prospeccao_id, ref_em from resgate_envios where conta_id=%s and tipo='previa'",
@@ -925,34 +994,42 @@ def _um_envio(pool, conta_id: int, cfg: dict, regra, todos: list[dict], agora: d
         sem_texto = {r[0] for r in c.execute(
             """select prospeccao_id from resgate_envios where conta_id=%s and tipo='erro_texto'
                 and criado_em > %s""", (conta_id, agora - timedelta(hours=6))).fetchall()}
+        # o número que não recebeu (fora do WhatsApp, bloqueado) não é tentado de novo
+        # por FALHA_DIAS: sem isto o mesmo lead seria o 1º da fila a cada passada, e
+        # três falhas dele puxariam o freio da empresa inteira
+        falhou = {r[0] for r in c.execute(
+            """select prospeccao_id from resgate_envios where conta_id=%s and tipo='retomada'
+                and not ok and criado_em > %s""",
+            (conta_id, agora - timedelta(days=FALHA_DIAS))).fetchall()}
         candidato = None
-        for x in sorted(vencidos, key=lambda x: ordem[x["id"]]):
-            if x["id"] in sem_texto:
+        for x in fila_de(vencidos):
+            if x["id"] in sem_texto or x["id"] in falhou:
                 continue
             if not ligado and (x["id"], x["desde"]) in ja_previa:
                 continue
             if ligado and not _avisado_a_tempo(c, conta_id, cfg, x, agora):
                 continue
+            if ligado and not _chip_de_pe(c, conta_id, x["chip_id"]):
+                chip_caido = True        # este espera o chip voltar; o próximo pode ir
+                continue
             candidato = x
             break
-        if not candidato or not _pode_mandar_agora(c, conta_id, cfg, candidato["id"], agora):
-            c.commit()
-            return
-        if ligado and not _chip_de_pe(c, conta_id, candidato["chip_id"]):
-            ja = c.execute("""select 1 from resgate_envios where conta_id=%s and tipo='freio_chip'
-                               and criado_em > %s""", (conta_id, agora - timedelta(hours=6))).fetchone()
-            c.commit()
-            if not ja:
-                with pool.connection() as c2:
-                    _registrar(c2, conta_id, "freio_chip")
-                    c2.commit()
-                supervisor(pool, conta_id, "📵 Resgate esperando: o número por onde a conversa "
-                                           "sai está fora do ar. Volto a chamar quando ele voltar.",
-                           cfg=cfg)
-            return
+        pode = bool(candidato) and _pode_mandar_agora(c, conta_id, cfg, candidato["id"], agora)
+        avisar_chip = False
+        if chip_caido and not candidato:
+            avisar_chip = not c.execute(
+                """select 1 from resgate_envios where conta_id=%s and tipo='freio_chip'
+                    and criado_em > %s""", (conta_id, agora - timedelta(hours=6))).fetchone()
+            if avisar_chip:
+                _registrar(c, conta_id, "freio_chip")
         n_hoje = _contagem_hoje(c, conta_id, ("previa", "retomada"), agora) + 1
-        vendedor = _nome(c, conta_id, candidato["vendedor_id"])
+        vendedor = _nome(c, conta_id, candidato["vendedor_id"]) if candidato else ""
         c.commit()
+    if avisar_chip:
+        supervisor(pool, conta_id, "📵 Resgate esperando: o número por onde as conversas da fila "
+                                   "saem está fora do ar. Volto a chamar quando ele voltar.", cfg=cfg)
+    if not pode:
+        return
     texto = redigir(pool, conta_id, candidato, regra, agora)
     if not texto:
         with pool.connection() as c:
@@ -994,31 +1071,51 @@ def _resumo_do_dia(pool, conta_id: int, cfg: dict, agora: datetime) -> None:
 
 def rodar(pool, agora: datetime | None = None) -> dict:
     """Um ciclo do resgate em toda empresa com ele em Ensaio ou ligado. Uma trava só
-    pro processo inteiro: dois workers do Render não mandam a mesma retomada."""
+    pro processo inteiro: dois workers do Render não mandam a mesma retomada.
+
+    A TRAVA FICA FORA DE TRANSAÇÃO. O pool abre toda conexão com
+    `idle_in_transaction_session_timeout=60s` (db/conexao.py), e um ciclo daqui pode
+    passar disso (a IA escrevendo, o envio, os avisos). Numa transação aberta, a
+    sessão da trava seria derrubada no meio do ciclo, a trava soltaria e o outro
+    worker mandaria uma segunda retomada dentro do espaçamento. Em autocommit a
+    trava de sessão vale sem transação nenhuma aberta."""
     agora = agora or datetime.now(timezone.utc)
     total = {"previas": 0, "retomadas": 0, "avisos": 0}
     with pool.connection() as lk:
-        try:
-            if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-                return total
-        except Exception:  # noqa: BLE001
-            return total
+        lk.commit()
+        lk.autocommit = True
         try:
             try:
-                with pool.connection() as c:
-                    contas = [r[0] for r in c.execute(
-                        "select conta_id from resgate_config where modo in ('ensaio','ligado')").fetchall()]
-            except Exception:  # noqa: BLE001 — banco sem a 396
+                if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+                    return total
+            except Exception:  # noqa: BLE001
                 return total
-            for conta_id in contas:
+            try:
                 try:
-                    r = _uma_conta(pool, conta_id, agora)
-                    for k in total:
-                        total[k] += r.get(k, 0)
-                except Exception as e:  # noqa: BLE001
-                    _log.warning("resgate.rodar: conta %s: %s: %s", conta_id, type(e).__name__, e)
+                    with pool.connection() as c:
+                        contas = [r[0] for r in c.execute(
+                            "select conta_id from resgate_config where modo in ('ensaio','ligado')"
+                        ).fetchall()]
+                        com_leads = [r[0] for r in c.execute(
+                            "select distinct conta_id from resgate_leads where ativo").fetchall()]
+                except Exception:  # noqa: BLE001 — banco sem a 396
+                    return total
+                for conta_id in sorted(set(com_leads) - set(contas)):
+                    try:
+                        varrer_devolvidos(pool, conta_id)
+                    except Exception as e:  # noqa: BLE001
+                        _log.warning("resgate.rodar: devolvidos da conta %s: %s", conta_id, e)
+                for conta_id in contas:
+                    try:
+                        r = _uma_conta(pool, conta_id, agora)
+                        for k in total:
+                            total[k] += r.get(k, 0)
+                    except Exception as e:  # noqa: BLE001
+                        _log.warning("resgate.rodar: conta %s: %s: %s", conta_id, type(e).__name__, e)
+            finally:
+                lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
         finally:
-            lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+            lk.autocommit = False
     return total
 
 
@@ -1027,11 +1124,12 @@ def rodar(pool, agora: datetime | None = None) -> dict:
 def e_do_supervisor(c, conta_id: int, numero) -> bool:
     """Esta mensagem que chegou é do supervisor do resgate? Aí ela não vira lead nem
     conversa da empresa: ou é o "Testar comigo", ou é ele respondendo um aviso."""
-    fim = _fim8(numero)
-    if len(fim) < 8:
+    chave = chave_do_numero(numero)
+    if not chave:
         return False
     cfg = config(c, conta_id)
-    return cfg.get("modo") in ("ensaio", "ligado") and _fim8(cfg.get("supervisor_whatsapp")) == fim
+    return (cfg.get("modo") in ("ensaio", "ligado")
+            and chave_do_numero(cfg.get("supervisor_whatsapp")) == chave)
 
 
 def testar(pool, conta_id: int) -> dict:
@@ -1040,6 +1138,9 @@ def testar(pool, conta_id: int) -> dict:
     agora = datetime.now(timezone.utc)
     with pool.connection() as c:
         cfg = config(c, conta_id)
+        if cfg.get("modo") not in ("ensaio", "ligado"):
+            # desligado, a resposta do supervisor não é interceptada e viraria lead
+            return {"ok": False, "erro": "Ponha o resgate em Ensaio (ou Ligado) e salve antes de testar."}
         if not cfg.get("supervisor_whatsapp"):
             return {"ok": False, "erro": "Ponha o WhatsApp do supervisor e salve antes de testar."}
         if not cfg.get("membro_id"):
@@ -1058,7 +1159,7 @@ def testar(pool, conta_id: int) -> dict:
         c.execute("delete from resgate_teste where conta_id=%s", (conta_id,))
         c.execute("""insert into resgate_teste (conta_id, numero8, prospeccao_id, historico)
                      values (%s,%s,%s,%s)""",
-                  (conta_id, _fim8(cfg["supervisor_whatsapp"]), lead["id"],
+                  (conta_id, chave_do_numero(cfg["supervisor_whatsapp"]), lead["id"],
                    json.dumps([{"quem": "ia", "texto": texto}], ensure_ascii=False)))
         c.commit()
     supervisor(pool, conta_id, f"🧪 Testar comigo · você é {_primeiro(lead['quem'])} (lead #{lead['id']}).\n"
@@ -1068,26 +1169,46 @@ def testar(pool, conta_id: int) -> dict:
     return {"ok": True}
 
 
-def responder_supervisor(pool, conta_id: int, texto: str) -> None:
+def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None) -> None:
     """O supervisor escreveu. Com um teste aberto, a IA responde como responderia ao
     cliente (sem marcar visita nem mandar orçamento: é só a conversa). Sem teste, um
-    lembrete de como testar. Nunca levanta."""
+    lembrete de como testar — no máximo um a cada 6 horas. Nunca levanta.
+
+    A mensagem fica GUARDADA (`resgate_envios`, tipo 'do_supervisor'): não vira
+    conversa da empresa, mas também não some. E é por ela que a reentrega do wa-qr (a
+    mesma mensagem de novo, quando a conexão oscila) não ganha segunda resposta."""
     try:
         from core.brain import Brain
         from finance import agente as ag
         with pool.connection() as c:
-            cfg = config(c, conta_id)
-            t = c.execute("""select id, prospeccao_id, historico from resgate_teste
-                              where conta_id=%s and expira_em > now()
-                              order by id desc limit 1""", (conta_id,)).fetchone()
-            if not t:
+            if sid and c.execute("""select 1 from resgate_envios where conta_id=%s
+                                      and tipo='do_supervisor' and erro=%s""",
+                                 (conta_id, str(sid)[:200])).fetchone():
                 c.commit()
-                supervisor(pool, conta_id, "Este é o número do supervisor do resgate. Pra conversar "
-                                           "com a IA como se fosse um cliente, use o botão \"Testar "
-                                           "comigo\" no cartão do Resgate.", tipo="teste", cfg=cfg)
                 return
-            hist = list(t[2] or []) + [{"quem": "cliente", "texto": (texto or "")[:1000]}]
-            regra = regra_do_membro(c, conta_id, cfg.get("membro_id"))
+            _registrar(c, conta_id, "do_supervisor", texto=texto, erro=(str(sid)[:200] if sid else None))
+            cfg = config(c, conta_id)
+            # o histórico cresce por APPEND no banco: duas mensagens seguidas não se
+            # atropelam reescrevendo o mesmo jsonb
+            t = c.execute("""update resgate_teste set historico = historico || %s::jsonb,
+                                    expira_em = now() + interval '2 hours'
+                              where id = (select id from resgate_teste
+                                           where conta_id=%s and expira_em > now()
+                                           order by id desc limit 1)
+                          returning id, prospeccao_id, historico""",
+                          (json.dumps([{"quem": "cliente", "texto": (texto or "")[:1000]}],
+                                      ensure_ascii=False), conta_id)).fetchone()
+            if not t:
+                lembrou = c.execute("""select 1 from resgate_envios where conta_id=%s and tipo='lembrete'
+                                        and criado_em > now() - interval '6 hours'""",
+                                    (conta_id,)).fetchone()
+                c.commit()
+                if not lembrou:
+                    supervisor(pool, conta_id, "Este é o número do supervisor do resgate. Pra conversar "
+                                               "com a IA como se fosse um cliente, use o botão \"Testar "
+                                               "comigo\" no cartão do Resgate.", tipo="lembrete", cfg=cfg)
+                return
+            hist = list(t[2] or [])
             festa = _perfil_eventos(c, conta_id)
             conv = c.execute("""select id from conversas where prospeccao_id=%s and conta_id=%s
                                  order by ultima_msg_em desc nulls last limit 1""",
@@ -1113,9 +1234,8 @@ def responder_supervisor(pool, conta_id: int, texto: str) -> None:
         with pool.connection() as c:
             from finance import ia_uso as _iu
             _iu.registrar(c, conta_id, None, t[1], getattr(brain, "model", None), resp)
-            c.execute("update resgate_teste set historico=%s, expira_em=now() + interval '2 hours' "
-                      "where id=%s", (json.dumps(hist + [{"quem": "ia", "texto": resposta}],
-                                                 ensure_ascii=False), t[0]))
+            c.execute("update resgate_teste set historico = historico || %s::jsonb where id=%s",
+                      (json.dumps([{"quem": "ia", "texto": resposta}], ensure_ascii=False), t[0]))
             c.commit()
         supervisor(pool, conta_id, resposta, tipo="teste", lead=t[1], cfg=cfg)
     except Exception as e:  # noqa: BLE001

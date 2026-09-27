@@ -60,7 +60,11 @@ create table if not exists public.resgate_leads (
   ultimo_envio_em timestamptz,
   respondeu_em    timestamptz,
   opt_out         boolean not null default false,
-  saiu_em         timestamptz
+  saiu_em         timestamptz,
+  -- a conversa como estava antes da passagem: o envio que falha a devolve assim
+  conv_status_antes text,
+  conv_agente_antes boolean,
+  conv_resp_antes   bigint
 );
 create index if not exists resgate_leads_conta_idx on public.resgate_leads (conta_id, ativo);
 

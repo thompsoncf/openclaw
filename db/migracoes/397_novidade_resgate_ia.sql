@@ -29,9 +29,9 @@ insert into public.novidades (chave, tipo, publico, pra_quem, titulo, resumo, li
 
 COMO FUNCIONA
 
-- No 8º dia sem mensagem nossa, o lead passa pra IA, que lê a conversa e retoma de onde parou: primeiro quem fez uma pergunta e ficou sem resposta, depois quem tem festa chegando, depois os abertos e, por último, os perdidos.
+- No 8º dia sem mensagem nossa, o lead passa pra IA, que lê a conversa e retoma de onde parou: primeiro quem fez uma pergunta e ficou sem resposta, depois quem tem data marcada chegando, depois os abertos e, por último, os perdidos.
 - O vendedor recebe um aviso 2 dias antes. Pra ficar com o lead, basta mandar uma mensagem ou escrever o motivo em "Segurar este lead", que vai pro histórico da ficha.
-- Visita marcada pra frente, a IA não se mete. Lead com visita feita ou orçamento tem prazo maior (14 dias, ajustável).
+- Visita ou reunião marcada pra frente, a IA não se mete. Lead que já teve visita ou reunião, ou que recebeu orçamento, tem prazo maior (14 dias, ajustável).
 - No máximo 20 mensagens por dia, uma a cada 20 a 30 minutos, só no horário do cartão e sempre pelo número onde a conversa já está. Se 3 clientes pedirem pra parar ou 3 envios falharem no mesmo dia, o resgate pausa sozinho.
 
 O SUPERVISOR
@@ -49,7 +49,7 @@ Fica em Comunicação › Agente › Regras por número, no cartão "Resgate da 
 
 - 2 dias antes, você recebe um aviso com a lista.
 - Pra ficar com o lead: mande uma mensagem pro cliente, ou abra o lead no app e escreva o motivo em "Segurar este lead" (ele vai pro histórico da ficha). O prazo recomeça dali.
-- Lead com visita marcada pra frente nunca vai pra IA.$txt$,
+- Lead com visita ou reunião marcada pra frente nunca vai pra IA.$txt$,
  timestamptz '2026-09-27 15:00:00+00')
 on conflict (chave) do nothing;
 

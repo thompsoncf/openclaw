@@ -6332,7 +6332,8 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
         if _rg.e_do_supervisor(c, empresa_id, sender):
             c.commit()
             log.info("webhook_wa_qr: empresa=%s mensagem do supervisor do resgate", empresa_id)
-            background_tasks.add_task(_rg.responder_supervisor, get_pool(), empresa_id, texto)
+            background_tasks.add_task(_rg.responder_supervisor, get_pool(), empresa_id, texto,
+                                      payload.get("id") or None)
             return Response("ok", media_type="text/plain")
         m = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                       (empresa_id,)).fetchone()
@@ -14713,7 +14714,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <select class="fld" name="membro_id">{% for m in resgate.membros %}<option value="{{ m.id }}" {% if rg.membro_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
           <div class="agfield"><label>Dias sem mensagem (passa no dia seguinte)</label>
             <input class="fld" name="dias" type="number" min="3" max="60" value="{{ rg.dias }}"></div>
-          <div class="agfield"><label>{{ voc.lead | capitalize }} esquentado (visita feita ou orçamento): dias</label>
+          <div class="agfield"><label>{{ voc.lead | capitalize }} esquentado ({{ 'visita feita' if regra_eventos else 'reunião feita' }} ou orçamento): dias</label>
             <div class="rghoras"><input class="fld" name="aquecido_dias" type="number" min="3" max="90" value="{{ rg.aquecido_dias or 14 }}" style="max-width:5rem">
               <label style="display:inline-flex;gap:.3rem;align-items:center"><input type="checkbox" name="aquecido_nunca" value="1" {% if rg.aquecido_dias is none %}checked{% endif %}> nunca vai</label></div></div>
           <div class="agfield"><label>Mensagens por dia (teto)</label>

@@ -1,4 +1,4 @@
-"""Prontuário, fase 1: quem vê o quê (finance/clinica_acesso_clinico.py, migração 419).
+"""Prontuário, fase 1: quem vê o quê (finance/clinica_acesso_clinico.py, migração 421).
 
 O conteúdo clínico só abre pra profissional de saúde que o DONO liberou; toda leitura
 fica no registro de acesso, que não se altera nem se apaga; o suporte do Zaq e o agente
@@ -166,7 +166,7 @@ def test_quem_ve_o_registro(tela, banco, zap):  # noqa: F811
     assert "manchas" not in html
 
 
-def test_antes_da_419_ninguem_le(pool, zap):  # noqa: F811
+def test_antes_da_421_ninguem_le(pool, zap):  # noqa: F811
     with pool.connection() as c:
         assert acc.leitor(c, CLINICA, {"papel": "dono"}) is None
         assert acc.estado(c, CLINICA) == {} and acc.registro(c, CLINICA, acc_agora()) == []

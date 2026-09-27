@@ -1,5 +1,5 @@
--- 420_novidade_prontuario_acesso.sql
--- O aviso da fase 1 do prontuário (quem vê o quê e o registro de acesso, migração 419),
+-- 422_novidade_prontuario_acesso.sql
+-- O aviso da fase 1 do prontuário (quem vê o quê e o registro de acesso, migração 421),
 -- seguindo a seção 5 do CLAUDE.md.
 --
 -- PÚBLICO `clinica`. PRA QUEM: dono e gestor (quem libera e quem vê o registro).

@@ -1,7 +1,7 @@
 """Quem lê o conteúdo clínico, e o registro de cada leitura (prontuário, fase 1).
 
 Desenho aprovado: docs/mockups/clinica_prontuario.html, seção 01 ("a regra que muda"),
-11.8 (o registro de acesso) e 15 (parte 1). Migração 419.
+11.8 (o registro de acesso) e 15 (parte 1). Migração 421.
 
   - O acesso NÃO vem do papel no sistema (dono, gestor, recepção). Vem de ser
     PROFISSIONAL DE SAÚDE da clínica: o cadastro dele em Configurar › Profissionais, com
@@ -57,7 +57,7 @@ def leitor(c, conta_id: int, session) -> dict | None:
                           and coalesce(conselho, '') <> '' limit 1""", (conta_id,)).fetchone()
             else:
                 r = None
-    except Exception:  # noqa: BLE001 — base sem a 419: ninguém lê
+    except Exception:  # noqa: BLE001 — base sem a 421: ninguém lê
         return None
     return {"profissional_id": r[0], "nome": r[1], "membro_id": membro} if r else None
 
@@ -104,7 +104,7 @@ def ler(c, conta_id: int, session, cliente_id: int, o_que: str, ip: str = "") ->
 # ------------------------------------------------------------------ quem libera
 
 def estado(c, conta_id: int) -> dict[int, dict]:
-    """{profissional_id: {'acesso_clinico', 'e_dono', 'desde'}} (base sem a 419: vazio)."""
+    """{profissional_id: {'acesso_clinico', 'e_dono', 'desde'}} (base sem a 421: vazio)."""
     try:
         with c.transaction():
             rows = c.execute(
@@ -201,7 +201,7 @@ def registro(c, conta_id: int, agora: datetime, *, dias: int = 7, cliente_id: in
                      left join pessoas p on p.id = k.pessoa_id
                     where a.conta_id=%s and """ + " and ".join(cond) + " order by a.criado_em desc limit 500",
                 [conta_id] + args).fetchall()
-    except Exception:  # noqa: BLE001 — base sem a 419
+    except Exception:  # noqa: BLE001 — base sem a 421
         return []
     return [{"quando": ca.local(r[0]), "quem": r[1], "o_que": r[2], "cliente_id": r[3], "paciente": r[4] or "",
              "profissional_id": r[5]} for r in rows]

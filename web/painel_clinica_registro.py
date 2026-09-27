@@ -6,7 +6,7 @@
                            Filtros: paciente (?paciente=id) e pessoa (?quem=id do
                            profissional) — ids, nunca nome na URL.
 
-finance/clinica_acesso_clinico.py (migração 419).
+finance/clinica_acesso_clinico.py (migração 421).
 """
 from __future__ import annotations
 

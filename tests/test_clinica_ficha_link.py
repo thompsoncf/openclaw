@@ -28,7 +28,7 @@ def banco(_banco_pacientes):  # noqa: F811
     with _banco_pacientes.connection() as c:
         c.execute((BASE / "411_clinica_ficha_link.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "417_clinica_termos_modelos.sql").read_text(encoding="utf-8"))
-        c.execute((BASE / "419_clinica_acesso_clinico.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "421_clinica_acesso_clinico.sql").read_text(encoding="utf-8"))
         c.commit()
     return _banco_pacientes
 

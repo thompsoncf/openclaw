@@ -93,6 +93,7 @@ def pool():
         c.execute((BASE / "396_resgate_ia.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "398_resgate_toques.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "401_ia_fora_da_esteira.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "403_resgate_origem_e_espelho.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos')")
         c.execute("insert into contas (id, nome, chip_de, nicho_id) values "
                   "(%s,'Prime',null,1),(%s,'CP Thiago',%s,null),(%s,'Outra',null,1)",
@@ -1140,3 +1141,252 @@ def test_quem_e_a_ia(pool, equipe):
         c.commit()
         assert cr.membros_ia(c, EMPRESA) == {equipe["ZAQ"]}
         assert cr.membros_ia(c, OUTRA) == set()
+
+
+
+# ══════════════════════════════════════════════ de onde veio, e o perdido pelo motivo
+# O mockup das três trilhas, versão 2 (aprovado em 27/09/2026 com as recomendações):
+# a coluna Resgate diz de onde o lead veio, o perdido é chamado conforme o motivo, o
+# perdido da IA do número volta uma vez depois de 30 dias, e a IA lê o resumo da
+# conversa inteira antes de escrever.
+
+def _perdido(c, lid, motivo=None, por="manual", evento=None):
+    c.execute("update prospeccao set status='perdido', perda_motivo=%s, evento_em=%s where id=%s",
+              (motivo, evento, lid))
+    c.execute("insert into funil_movimentos (conta_id, prospeccao_id, de, para, motivo, criado_em) "
+              "values (%s,%s,'contatado','perdido',%s, now() - interval '9 days')", (EMPRESA, lid, por))
+    c.commit()
+
+
+def _origem(c, lid):
+    return next(x for x in rg.leads(c, EMPRESA) if x["id"] == lid)["origem"]
+
+
+def test_a_origem_de_cada_lead(pool, equipe):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        parado, _ = _lead(c, equipe["PEDRO"], dias=10)
+        do_vend, _ = _lead(c, equipe["PEDRO"], dias=10, numero="5586999990002")
+        da_esteira, _ = _lead(c, equipe["PEDRO"], dias=10, numero="5586999990003")
+        _perdido(c, do_vend, "achou_caro")
+        _perdido(c, da_esteira, "outro", por="sem_tratativa")
+        assert _origem(c, parado) == "follow_up"
+        assert _origem(c, do_vend) == "perdido_vendedor"
+        assert _origem(c, da_esteira) == "perdido_esteira"
+
+
+@pytest.mark.parametrize("motivo", rg.MOTIVOS_NAO_CHAMA)
+def test_o_perdido_que_nao_se_chama(pool, equipe, motivo):
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+        _perdido(c, lid, motivo)
+        assert rg.fila(c, EMPRESA) == []
+
+
+def test_data_indisponivel_so_com_a_festa_a_mais_de_30_dias(pool, equipe):
+    hoje = datetime.now(timezone.utc).date()
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        perto, _ = _lead(c, equipe["PEDRO"], dias=10)
+        longe, _ = _lead(c, equipe["PEDRO"], dias=10, numero="5586999990002")
+        sem, _ = _lead(c, equipe["PEDRO"], dias=10, numero="5586999990003")
+        _perdido(c, perto, "data_indisponivel", evento=hoje + timedelta(days=20))
+        _perdido(c, longe, "data_indisponivel", evento=hoje + timedelta(days=60))
+        _perdido(c, sem, "data_indisponivel")
+        assert _ids(rg.fila(c, EMPRESA)) == [longe]
+
+
+def test_o_pedido_de_data_indisponivel_pergunta_se_e_flexivel():
+    lead = {"quem": "Carla", "faixa": 4, "perda_motivo": "data_indisponivel"}
+    p = rg._pedido_retomada(lead, None, True, "Cliente: tem 12/12?", 30,
+                            perda=("Data indisponível", ""))
+    assert "flexível" in p and "sem prometer" in p and "PERDIDO: Data indisponível" in p
+
+
+def test_o_resumo_entra_no_pedido_e_o_toque_nao_manda_citar():
+    resumo = {"quer": "15 anos pra 120 em 12/12", "em_que_pe": ["pediu o valor do sábado"],
+              "pode_travar": ["preço"], "proximo_passo": "mandar o valor"}
+    lead = {"quem": "Carla", "faixa": 3}
+    p = rg._pedido_retomada(lead, None, True, "Cliente: e o sábado?", 9, resumo=resumo)
+    assert "Quer: 15 anos pra 120 em 12/12" in p and "PARTE DAQUI" in p
+    assert '"nao_chamar": true' in p
+    t = rg._pedido_toque(lead, 2, True, "Cliente: e o sábado?", 3, resumo)
+    assert "Quer: 15 anos" in t and "PARTE DAQUI" not in t
+    assert rg._resumo_linha(resumo) == "15 anos pra 120 em 12/12 · parou: pediu o valor do sábado"
+
+
+def test_o_nao_respondeu_e_chamado_uma_vez_so(pool, equipe, duble):
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, cv = _lead(c, equipe["PEDRO"], dias=10)
+        _perdido(c, lid, "nao_respondeu")
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1
+    with pool.connection() as c:
+        assert c.execute("select origem, uma_vez, perda_motivo from resgate_leads").fetchone() == \
+            ("perdido_vendedor", True, "nao_respondeu")
+        _atrasar(c, 4)
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1                          # sem o 2º toque
+    with pool.connection() as c:
+        _atrasar(c, 4)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select estado from resgate_leads").fetchone()[0] == "perdido"
+    assert len(duble["saiu"]) == 1
+
+
+def test_a_ia_le_que_acabou_e_nao_chama(pool, equipe, duble, monkeypatch):
+    monkeypatch.setattr(rg, "redigir", lambda *a, **k: {"nao_chamar": True,
+                                                        "motivo": "ele disse que fechou com outro buffet"})
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+    rg.rodar(pool)
+    assert not any(x["numero"] == "5586999990001" for x in duble["saiu"])   # nada pro cliente
+    assert "não chamei" in duble["saiu"][0]["texto"]                         # o supervisor sabe
+    with pool.connection() as c:
+        assert c.execute("select vendedor_id from prospeccao where id=%s", (lid,)).fetchone()[0] == equipe["PEDRO"]
+        assert c.execute("select texto from resgate_envios where tipo='descartado'").fetchone()[0] \
+            == "ele disse que fechou com outro buffet"
+        assert rg.fila(c, EMPRESA) == []                     # descartado pra sempre
+
+
+def test_no_ensaio_a_previa_diz_que_nao_chamaria(pool, equipe, duble, monkeypatch):
+    monkeypatch.setattr(rg, "redigir", lambda *a, **k: {"nao_chamar": True, "motivo": "desistiu da festa"})
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        txt = c.execute("select texto from resgate_envios where tipo='previa'").fetchone()[0]
+        assert "Eu NÃO chamaria: desistiu da festa" in txt
+        assert not c.execute("select 1 from resgate_envios where tipo='descartado'").fetchone()
+
+
+def test_valor_fora_do_orcamento_nao_sai_sozinho(pool, equipe, duble, monkeypatch):
+    monkeypatch.setattr(rg, "redigir", lambda *a, **k: {
+        "texto": "Sai por R$ 4.999!", "resumo_linha": "",
+        "avisos": ["A mensagem cita R$ 4.999, que não está no orçamento."]})
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+    rg.rodar(pool)
+    assert not any(x["numero"] == "5586999990001" for x in duble["saiu"])
+    with pool.connection() as c:
+        assert c.execute("select vendedor_id from prospeccao where id=%s", (lid,)).fetchone()[0] == equipe["PEDRO"]
+        assert c.execute("select count(*) from resgate_envios where tipo='valor_conferir'").fetchone()[0] == 1
+    rg.rodar(pool)
+    with pool.connection() as c:                            # não tenta de novo no mesmo dia
+        assert c.execute("select count(*) from resgate_envios where tipo='valor_conferir'").fetchone()[0] == 1
+
+
+def test_a_passagem_guarda_a_origem_e_o_resumo(pool, equipe, duble, monkeypatch):
+    monkeypatch.setattr(rg, "redigir", lambda *a, **k: {
+        "texto": "Oi Carla!", "resumo_linha": "15 anos · parou: pediu o valor", "avisos": []})
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=9)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        origem, desde, linha = c.execute(
+            "select origem, parado_desde, resumo_linha from resgate_leads").fetchone()
+        assert origem == "follow_up" and linha == "15 anos · parou: pediu o valor"
+        assert (datetime.now(timezone.utc) - desde).days == 9
+
+
+def test_a_previa_diz_de_onde_veio_e_o_resumo(pool, equipe, duble, monkeypatch):
+    monkeypatch.setattr(rg, "redigir", lambda *a, **k: {
+        "texto": "Oi Carla!", "resumo_linha": "15 anos · parou: pediu o valor", "avisos": []})
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+        _perdido(c, lid, "outro", por="sem_tratativa")
+    rg.rodar(pool)
+    with pool.connection() as c:
+        txt = c.execute("select texto from resgate_envios where tipo='previa'").fetchone()[0]
+    assert "veio dos perdidos" in txt and "✨ 15 anos · parou: pediu o valor" in txt
+
+
+def _perdido_da_ia(c, equipe, dias_perdido, numero="5586988880009"):
+    lid, cv = _lead_da_ia(c, equipe, dias=dias_perdido + 10, numero=numero, quem="Rui")
+    c.execute("update prospeccao set status='perdido', perda_motivo='nao_respondeu' where id=%s", (lid,))
+    c.execute("update chip_regra_leads set perdido_em = now() - make_interval(days => %s), toques=2 "
+              "where prospeccao_id=%s", (dias_perdido, lid))
+    c.commit()
+    return lid, cv
+
+
+def test_a_repescagem_da_ia_volta_uma_vez_depois_de_30_dias(pool, equipe, duble):
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=True)
+        cedo, _ = _perdido_da_ia(c, equipe, 20)
+        lid, cv = _perdido_da_ia(c, equipe, 31, numero="5586988880010")
+        assert _ids(rg.fila(c, EMPRESA)) == [lid]
+        assert _origem(c, lid) == "ia_numero"
+    rg.rodar(pool)                                   # sem aviso a vendedor: o dono é a IA
+    assert duble["avisos"] == []
+    assert [x["numero"] for x in duble["saiu"]] == ["5586988880010"]
+    with pool.connection() as c:
+        assert c.execute("select origem, uma_vez from resgate_leads where prospeccao_id=%s",
+                         (lid,)).fetchone() == ("ia_numero", True)
+        # 7 dias sem resposta: fica como perdido do resgate, e nunca mais volta
+        _atrasar(c, 8)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select estado from resgate_leads where prospeccao_id=%s",
+                         (lid,)).fetchone()[0] == "perdido"
+        c.execute("update resgate_leads set ativo=false")
+        c.commit()
+        assert lid not in _ids(rg.fila(c, EMPRESA))
+
+
+class _Resp:
+    def __init__(self, txt):
+        self.content = [type("B", (), {"type": "text", "text": txt})()]
+        self.usage = None
+        self.stop_reason = "end_turn"
+
+
+def _brain_fake(monkeypatch, txt, pedidos):
+    import core.brain as cb
+
+    class _B:
+        model = "fake"
+
+        def chamar(self, system, mensagens, **k):
+            pedidos.append(mensagens[0]["content"])
+            return _Resp(txt)
+    monkeypatch.setattr(cb, "Brain", _B)
+    # a base da empresa (instruções, catálogo) mora em tabelas que este schema não tem
+    monkeypatch.setattr(rg, "_system", lambda *a, **k: "sistema")
+
+
+def test_redigir_escreve_em_cima_do_resumo(pool, equipe, monkeypatch):
+    pedidos = []
+    _brain_fake(monkeypatch, '{"mensagem": "Oi Carla! Você perguntou do sábado…"}', pedidos)
+    monkeypatch.setattr(rg, "_resumo_antes", lambda pool, conta, lid: {
+        "quer": "15 anos pra 120", "em_que_pe": ["pediu o valor do sábado"]})
+    monkeypatch.setattr(rg, "_valores_fora", lambda *a, **k: [])
+    from finance import ia_uso
+    monkeypatch.setattr(ia_uso, "registrar", lambda *a, **k: None)
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10)
+        lead = rg.fila(c, EMPRESA)[0]
+    r = rg.redigir(pool, EMPRESA, lead, None)
+    assert r["texto"].startswith("Oi Carla!") and r["resumo_linha"].startswith("15 anos pra 120")
+    assert "Quer: 15 anos pra 120" in pedidos[0]
+
+
+def test_redigir_devolve_nao_chamar(pool, equipe, monkeypatch):
+    _brain_fake(monkeypatch, '{"nao_chamar": true, "motivo": "fechou com outro"}', [])
+    monkeypatch.setattr(rg, "_resumo_antes", lambda *a: None)
+    from finance import ia_uso
+    monkeypatch.setattr(ia_uso, "registrar", lambda *a, **k: None)
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10)
+        lead = rg.fila(c, EMPRESA)[0]
+    assert rg.redigir(pool, EMPRESA, lead, None) == {"nao_chamar": True, "motivo": "fechou com outro"}

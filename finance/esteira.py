@@ -895,6 +895,78 @@ def _rotulo_do_saldo(ultima: datetime | None, agora: datetime) -> str:
     return "Desde a última cobrança"
 
 
+# ------------------------------------------------------------------ o espelho
+
+#: em `aviso_envios`: a cópia não é cobrança de ninguém e não entra na conta dela
+ORIGEM_ESPELHO = "espelho"
+
+
+def espelho(c, conta_id: int) -> dict:
+    """O ESPELHO DO VENDEDOR (mockup das três trilhas, aprovado em 27/09/2026): o dono
+    recebe no WhatsApp uma cópia do que UM vendedor recebe — a cobrança da manhã, o
+    aviso do último dia e o aviso do resgate —, pra testar a cobrança do jeito que
+    ela chega na mão da equipe, sem lead de teste e sem ser cobrado como vendedor.
+    {"de": membro copiado, "para": quem recebe a cópia}; vazio = desligado."""
+    try:
+        with c.transaction():
+            r = c.execute("select espelho_de, espelho_para from funil_regua where conta_id=%s",
+                          (conta_id,)).fetchone()
+    except Exception:  # noqa: BLE001 — banco sem a 403
+        return {"de": None, "para": None}
+    return {"de": r[0] if r else None, "para": r[1] if r else None}
+
+
+def salvar_espelho(c, conta_id: int, de, para) -> dict:
+    """Um vendedor por vez (decisão 3). Os dois têm que ser da conta e ativos; quem
+    recebe precisa de WhatsApp — a cópia só vai por ele. Vazio desliga."""
+    def _id(v):
+        try:
+            return int(v or 0) or None
+        except (TypeError, ValueError):
+            return None
+    de, para = _id(de), _id(para)
+    if not de or not para:
+        de = para = None
+    else:
+        ok = {r[0] for r in c.execute("select id from membros where conta_id=%s and ativo "
+                                      "and id = any(%s)", (conta_id, [de, para])).fetchall()}
+        if {de, para} - ok:
+            return {"ok": False, "erro": "Escolha pessoas da equipe desta empresa."}
+        from finance import follow_up as _fu
+        if not _fu._zap_do_membro(c, conta_id, para):
+            return {"ok": False, "erro": "Quem recebe a cópia precisa ter WhatsApp no cadastro."}
+    fr.config(c, conta_id)          # garante a linha
+    c.execute("update funil_regua set espelho_de=%s, espelho_para=%s where conta_id=%s",
+              (de, para, conta_id))
+    return {"ok": True}
+
+
+def copiar(pool, conta_id: int, membro_id: int, nome: str, titulo: str, corpo: str) -> bool:
+    """Se `membro_id` é o vendedor espelhado, a cópia do aviso dele vai pro WhatsApp de
+    quem pediu, marcada como cópia. Não conta no teto dele nem vira cobrança de
+    ninguém: fica em `aviso_envios` com a origem própria. Nunca levanta."""
+    try:
+        from finance import aviso_log as _al
+        from finance import follow_up as _fu
+        with pool.connection() as c:
+            e = espelho(c, conta_id)
+            if not e["de"] or e["de"] != membro_id or not e["para"]:
+                return False
+            numero = _fu._zap_do_membro(c, conta_id, e["para"])
+        if not numero:
+            return False
+        quem = (nome or "").strip().split()[0].capitalize() if (nome or "").strip() else "o vendedor"
+        texto = f"🪞 Cópia do que {quem} recebeu\n\n" + _fu._texto_zap(titulo, corpo)
+        r = _fu._mandar_zap(pool, conta_id, numero, texto)
+        _al.registrar(pool, conta_id, origem=ORIGEM_ESPELHO, canal="whatsapp",
+                      membro_id=e["para"], destino=numero, assunto=titulo,
+                      ok=bool(r.get("ok")), motivo=r.get("erro", ""), sid=r.get("sid", ""))
+        return bool(r.get("ok"))
+    except Exception:  # noqa: BLE001
+        _log.warning("esteira: a cópia do espelho falhou (conta %s)", conta_id, exc_info=True)
+        return False
+
+
 def notificar(pool, conta_id: int, cobrancas_hoje: list[dict]) -> None:
     """Um aviso por pessoa, por dia. Best-effort inteiro — cobrança não derruba
     poller, e um aviso perdido custa menos que um ciclo que não roda.
@@ -939,6 +1011,8 @@ def notificar(pool, conta_id: int, cobrancas_hoje: list[dict]) -> None:
                 _al.registrar(pool, conta_id, origem="esteira", canal="whatsapp",
                               membro_id=membro_id, assunto=titulo, n_leads=len(itens),
                               ok=False, motivo="membro sem WhatsApp cadastrado")
+            # o espelho: a mesma mensagem, marcada como cópia, pra quem pediu
+            copiar(pool, conta_id, membro_id, nome, titulo, corpo)
             # O PUSH, o terceiro canal (19/09/2026, pedido do dono: "sempre nos 3
             # canais"). Vem depois do WhatsApp e antes do e-mail porque é o mais
             # barato dos três e o único que já chega com o app aberto no bolso —

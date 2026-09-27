@@ -226,10 +226,10 @@ def test_captar_e_etapas_abrem_em_gaveta():
 
 
 def test_o_reload_nao_apaga_a_busca_digitada():
-    ciclo = FONTE.split("setInterval(function(){\n  if(document.hidden) return;")[1][:1400]
-    assert "kbb.value.trim()!==KB_BUSCA" in ciclo
-    assert ciclo.index("KB_BUSCA) return;") < ciclo.index("location.reload();")
-    assert "cap.style.display !== 'none'" in ciclo and ".etcfg[open]" in ciclo
+    """A troca no lugar (27/09/2026) tem os mesmos freios do recarregamento de antes."""
+    freios = FONTE.split("function _kbFreado(){")[1][:1200]
+    assert "kbb.value.trim()!==KB_BUSCA" in freios
+    assert "cap.style.display !== 'none'" in freios and ".etcfg[open]" in freios
 
 
 def test_no_celular_a_aba_diz_quantos_esperam_resposta():

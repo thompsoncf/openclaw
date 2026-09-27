@@ -59,7 +59,15 @@ def leitor(c, conta_id: int, session) -> dict | None:
                 r = None
     except Exception:  # noqa: BLE001 — base sem a 421: ninguém lê
         return None
-    return {"profissional_id": r[0], "nome": r[1], "membro_id": membro} if r else None
+    if not r:
+        return None
+    cad = [r[0]]
+    if membro:
+        cad = [x[0] for x in c.execute(
+            """select p.id from clinica_profissionais p where p.conta_id=%s and p.membro_id=%s and p.ativo
+                 and p.acesso_clinico and p.acesso_clinico_membro_id = p.membro_id and not p.e_dono""",
+            (conta_id, membro)).fetchall()] or cad
+    return {"profissional_id": r[0], "nome": r[1], "membro_id": membro, "cadastros": cad}
 
 
 def _papel_atual(c, conta_id: int, session) -> str | None:

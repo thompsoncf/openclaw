@@ -250,6 +250,7 @@ def situacoes(c, conta_id: int, cliente_ids, agora: datetime) -> dict[int, dict]
         if not _falta_migracao(e) and "servico_id" not in str(e):
             raise
     pre = cpc.resumo(c, conta_id, ids)
+    alergia_ficha = _alergia_na_ficha_clinica(c, conta_id, ids)
     out = {}
     for kid, nome, nasc, cid, cpf, resp, resp_cpf in rows:
         idade = _idade(nasc, hoje)
@@ -272,11 +273,28 @@ def situacoes(c, conta_id: int, cliente_ids, agora: datetime) -> dict[int, dict]
         out[kid] = {"pct": round(100 * feitos / len(itens)), "falta": falta, "completa": not falta,
                     "cpf_ok": cpf_ok, "pre_ok": pre_ok, "termos_ok": termos_ok, "menor": menor,
                     "cadastro_ok": not [r for r in falta if r not in ("pré-consulta", "termos")],
-                    "alergia": bool(pre.get(kid, {}).get("alergia")),
+                    "alergia": bool(pre.get(kid, {}).get("alergia")) or kid in alergia_ficha,
                     "pre_em": ca.local(pre[kid]["quando"]) if kid in pre else None,
                     # a pré-consulta curta só depois de uma completa respondida
                     "retorno": bool(pre.get(kid, {}).get("tem_completa")), "pelo_link": pelo_link}
     return out
+
+
+def _alergia_na_ficha_clinica(c, conta_id: int, ids: list[int]) -> set[int]:
+    """SÓ O AVISO: o banco responde sim/não e o texto da alergia nunca sai de lá (este
+    módulo está no caminho do agente e do link público, que não leem prontuário)."""
+    try:
+        with c.transaction():
+            rows = c.execute(
+                """select cliente_id from (
+                     select distinct on (cliente_id) cliente_id, btrim(alergias) as a
+                       from clinica_ficha_clinica where conta_id=%s and cliente_id = any(%s)
+                      order by cliente_id, criado_em desc, id desc) x
+                    where a <> '' and lower(a) not in ('nenhuma', 'não', 'nao')""",
+                (conta_id, list(ids))).fetchall()
+    except Exception:  # noqa: BLE001 — base sem a 423
+        return set()
+    return {r[0] for r in rows}
 
 
 def situacao(c, conta_id: int, cliente_id: int, agora: datetime) -> dict | None:

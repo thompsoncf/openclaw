@@ -341,8 +341,17 @@ def ver_evento(request: Request, evento_id: int):
         kid = _cfl.cliente_do_evento(c, conta_id, evento_id)
         ficha = _cfl.situacao(c, conta_id, kid, agora) if kid else None
         from finance import clinica_acesso_clinico as _acc
+        # o prontuário (fase 2): o botão pro profissional DAQUELE horário, com o paciente presente
+        _leitor = _acc.leitor(c, conta_id, request.session) if kid else None
+        abre_prontuario = bool(_leitor and ev["profissional_id"] in _leitor["cadastros"]
+                               and ev["situacao"] in ("presente", "atendimento", "finalizado"))
+        from finance import clinica_prontuario as _prt
+        rascunho = _prt.rascunho_do_evento(c, conta_id, evento_id)
+        retorno_evo = _prt.retorno_da_evolucao(c, conta_id, evento_id)
+        if retorno_evo:
+            volta_padrao = retorno_evo
         pre = None
-        if kid and _acc.leitor(c, conta_id, request.session) and _cpc.resumo(c, conta_id, [kid]):
+        if kid and _leitor and _cpc.resumo(c, conta_id, [kid]):
             try:
                 if _acc.ler(c, conta_id, request.session, kid, "pré-consulta (pelo agendamento)",
                             _ip_req(request)):
@@ -359,6 +368,7 @@ def ver_evento(request: Request, evento_id: int):
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
                    pacote_feito=pacote_feito, pacote_vai=pacote_vai, assin_vai=assin_vai, assin_feito=assin_feito, volta_padrao=volta_padrao, retorno=retorno,
                    pac_cfg=pac_cfg, prod=prod, ficha_kid=kid, ficha=ficha, ficha_txt=_cfl.falta_txt(ficha), pre=pre,
+                   abre_prontuario=abre_prontuario, rascunho=rascunho,
                    ev=ev, prof=prof, proximos=ca.PROXIMOS.get(ev["situacao"], ()), remarcar=remarcar,
                    conversa=conversa, quando=f"{ca.dia_txt(ev['inicio'])} {ev['hora']}–{ev['fim_txt']}",
                    msg_marcado=msg_marcado, msg_vespera=msg_vespera,
@@ -631,14 +641,16 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div><b>Status:</b> <span class="ev s-{{ ev.situacao }}" style="display:inline-block;padding:.1rem .5rem;border-radius:6px;border:1px solid var(--borda)">{{ SIT_D[ev.situacao] }}</span>
       {% if ev.pede_remarcar_em %} · <b>pediu para remarcar</b>{% endif %}
       {% if ev.confirmado_em %} · confirmou{% elif ev.confirmacao_enviada_em %} · lembrete da véspera enviado{% endif %}</div>
-    {% if ficha_kid %}<div style="margin-top:.4rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><span><a href="/painel/clinica/pacientes/{{ ficha_kid }}">Ficha do paciente</a> · {{ ficha_txt }}{% if ficha and ficha.alergia %} · <b>⚠ informou alergia</b>{% endif %}</span>
+    {% if ficha_kid %}<div style="margin-top:.4rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><span><a href="/painel/clinica/pacientes/{{ ficha_kid }}">Ficha do paciente</a> · {{ ficha_txt }}{% if ficha and ficha.alergia %} · <b>⚠ alergia</b>{% endif %}</span>
       {% if ficha and not ficha.completa and ficha.pelo_link and ev.situacao in ('agendado','confirmado','presente') %}<form method="post" action="/painel/clinica/pacientes/{{ ficha_kid }}/balcao" style="margin:0"><button class="sec" style="width:auto;min-height:32px;padding:.2rem .7rem">Preencher no balcão</button></form>{% endif %}</div>
     {% if ficha and not ficha.cpf_ok and ev.situacao in ('presente','atendimento','finalizado') %}<div class="alerta" style="margin-top:.4rem">Falta o CPF{% if ficha.menor %} do responsável{% endif %} (vai na nota fiscal): peça antes de receber. <a href="/painel/clinica/pacientes/{{ ficha_kid }}?aba=cadastro">Completar</a></div>{% endif %}{% endif %}
     <div class="mut" style="margin-top:.3rem">{% if ev.fone %}Celular {{ ev.fone }}{% endif %}{% if ev.origem %} · veio por {{ ev.origem }}{% endif %}{% if ev.marcado_por == 'ia' %} · marcado pelo agente no WhatsApp{% elif ev.marcado_por == 'vaga' %} · veio de vaga liberada{% endif %}{% if ev.observacao %} · {{ ev.observacao }}{% endif %}</div>
     {% if proximos %}<div class="ag-acoes">{% for s in proximos if s != 'finalizado' %}
       <form method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao"><input type="hidden" name="nova" value="{{ s }}"><button class="{% if s in ('faltou','cancelou') %}sec{% endif %}">{{ {'agendado':'Reabrir','confirmado':'Confirmar','presente':'Chegou','atendimento':'Entrou no atendimento','faltou':'Faltou','cancelou':'Cancelar'}[s] }}</button></form>
     {% endfor %}</div>
+    {% if abre_prontuario %}<div class="ag-acoes"><a class="ag-bt" href="/painel/clinica/prontuario/{{ ficha_kid }}?evento={{ ev.id }}">Abrir prontuário</a></div>{% endif %}
     {% if 'finalizado' in proximos %}
+    {% if rascunho %}<div class="alerta" style="margin-top:.6rem">A evolução deste atendimento está em rascunho: {% if abre_prontuario %}<a href="/painel/clinica/prontuario/{{ ficha_kid }}/evolucao/{{ rascunho.id }}">assine</a>{% else %}o profissional assina{% endif %} antes de finalizar.</div>{% endif %}
     <form class="ag-form" method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/situacao" style="margin-top:.7rem">
       <input type="hidden" name="nova" value="finalizado">
       {% if assin_vai %}

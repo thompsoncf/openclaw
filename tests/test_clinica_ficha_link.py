@@ -29,6 +29,7 @@ def banco(_banco_pacientes):  # noqa: F811
         c.execute((BASE / "411_clinica_ficha_link.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "417_clinica_termos_modelos.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "421_clinica_acesso_clinico.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "423_clinica_prontuario.sql").read_text(encoding="utf-8"))
         c.commit()
     return _banco_pacientes
 
@@ -282,7 +283,7 @@ def test_so_o_profissional_le_a_pre_consulta(cli, banco, zap):  # noqa: F811
     _completar(banco, kid)
     cli.get("/_papel/vendedor/51")                                  # a recepção
     html = cli.get(f"/painel/clinica/pacientes/{kid}?aba=pre").text
-    assert "manchas no rosto" not in html and "dipirona" not in html and "informou alergia" in html
+    assert "manchas no rosto" not in html and "dipirona" not in html and "⚠ alergia" in html
     assert "manchas no rosto" not in cli.get(f"/painel/clinica/agenda/evento/{eid}").text
     cli.get("/_papel/gestor/52")                                    # o Dr. Manoel
     html = cli.get(f"/painel/clinica/pacientes/{kid}?aba=pre").text

@@ -227,7 +227,7 @@ def listar(c, conta_id: int, agora: datetime, *, filtro: str = "todos", busca: s
     try:
         with c.transaction():
             contatos = c.execute(
-                """select p.id, coalesce(nullif(p.contato,''), nullif(p.empresa,''), ''),
+                r"""select p.id, coalesce(nullif(p.contato,''), nullif(p.empresa,''), ''),
                           coalesce(nullif(p.whatsapp,''), p.telefone, ''), coalesce(p.cidade, ''),
                           (select max(m.criado_em) from conversas cv join mensagens m on m.conversa_id = cv.id
                             where cv.prospeccao_id = p.id and cv.conta_id = p.conta_id and m.direcao = 'in')

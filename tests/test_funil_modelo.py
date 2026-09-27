@@ -2,7 +2,8 @@
 
 O que estes testes protegem, em uma frase cada:
   * cada nicho recebe AS COLUNAS DELE, e a palavra de um não vaza pro outro;
-  * eventos são SEIS colunas, com "Fechado" fora do quadro e ligado à Agenda;
+  * eventos são as colunas do funil novo (27/09/2026), com "Fechado" fora do quadro
+    e ligado à Agenda;
   * a conta que já existe NÃO é reescrita — o modelo só propõe;
   * nada some: etapa fora do modelo sai do quadro, nunca é apagada, e nenhum lead
     muda de status;
@@ -29,6 +30,9 @@ create table funil_etapas (id bigserial primary key,
   -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
   semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int not null default 0, fixa boolean not null default false,
+  -- 177: a régua da etapa (o modelo grava a fase e o gatilho das colunas novas)
+  fase text not null default 'venda', gatilho text,
+  gatilho_ativo boolean not null default false,
   unique (conta_id, chave));
 """
 
@@ -104,13 +108,16 @@ def _leads(pool, chave, n, conta=CONTA):
 
 # ------------------------------------------------------------------ o modelo, puro
 
-def test_eventos_tem_seis_colunas_e_fechado_fora_do_quadro():
-    """As seis que o dono aprovou em 11/09/2026. Se alguém acrescentar uma coluna
-    ao modelo sem decidir se ela é coluna, este teste conta errado e reclama."""
+def test_eventos_tem_as_colunas_do_funil_novo_e_fechado_fora_do_quadro():
+    """As que o dono aprovou em 27/09/2026 (docs/mockups/funil_novo_eventos.html).
+    Se alguém acrescentar uma coluna ao modelo sem decidir se ela é coluna, este
+    teste conta errado e reclama."""
     m = rxp.etapas_padrao("eventos")
     colunas = [rot for _ch, rot, _o, _f, sai, _a in m if not sai]
-    assert colunas == ["Novo", "Contatado", "Follow-up", "Agendado Visita",
-                       "Proposta", "Perdido"]
+    assert colunas == ["Novo", "Contatado", "Qualificado", "Visita marcada",
+                       "Visita feita", "Proposta", "Data segurada", "Pós-festa",
+                       "Perdido"]
+    assert "Follow-up" not in [e[1] for e in m], "a tela Follow-up já faz esse papel"
     fechado = [e for e in m if e[0] == "ganho"][0]
     assert fechado[1] == "Fechado"
     assert fechado[4] is True, "Fechado tem que sair do quadro"
@@ -119,11 +126,14 @@ def test_eventos_tem_seis_colunas_e_fechado_fora_do_quadro():
     assert fechado[5] is True, "Fechado tem que criar o compromisso na Agenda"
 
 
-def test_a_chave_de_agendado_visita_continua_sendo_qualificado():
-    """O rótulo muda por ramo; a CHAVE não. É ela que está em prospeccao.status de
-    14 leads da Prime — trocá-la deixaria os 14 apontando pro nada."""
+def test_a_chave_da_visita_marcada_continua_sendo_qualificado():
+    """O rótulo muda por ramo; a CHAVE não. É ela que está em prospeccao.status dos
+    leads da Prime — trocá-la deixaria todos apontando pro nada. O "Qualificado" de
+    eventos (a ficha completa) ganhou chave própria."""
     m = {e[0]: e[1] for e in rxp.etapas_padrao("eventos")}
-    assert m["qualificado"] == "Agendado Visita"
+    assert m["qualificado"] == "Visita marcada"
+    assert m["ficha_completa"] == "Qualificado"
+    assert m["evento_realizado"] == "Data segurada"
     assert "agendado_visita" not in m
 
 
@@ -166,8 +176,10 @@ def test_ganho_e_perdido_ficam_depois_do_corte_da_pos_venda():
     for p in ("eventos", "recorrente", "produto"):
         m = {e[0]: e[2] for e in rxp.etapas_padrao(p)}
         assert m["ganho"] == 900 and m["perdido"] == 910, p
-        miolo = [o for ch, o in m.items() if ch not in ("ganho", "perdido")]
+        # o Pós-festa fica entre os dois: é pós-venda (fase 'pos'), não miolo
+        miolo = [o for ch, o in m.items() if ch not in ("ganho", "perdido", "pos_festa")]
         assert max(miolo) < 900, p
+    assert fm.FASE["pos_festa"] == "pos"
 
 
 # ------------------------------------------------------------------ semear
@@ -179,7 +191,17 @@ def test_conta_de_eventos_nasce_com_o_funil_de_eventos(limpo):
         fm.semear(c, CONTA, "eventos")
         c.commit()
     assert [r[1] for r in _etapas(limpo)] == [
-        "Novo", "Contatado", "Follow-up", "Agendado Visita", "Proposta", "Fechado", "Perdido"]
+        "Novo", "Contatado", "Qualificado", "Visita marcada", "Visita feita", "Proposta",
+        "Data segurada", "Fechado", "Pós-festa", "Perdido"]
+    # as colunas que andam sozinhas nascem com o gatilho, e o Pós-festa na fase pós
+    with limpo.connection() as c:
+        regua = dict((ch, (fase, gat, ativo)) for ch, fase, gat, ativo in c.execute(
+            """select chave, fase, gatilho, gatilho_ativo from funil_etapas
+                where conta_id=%s""", (CONTA,)).fetchall())
+    assert regua["ficha_completa"] == ("venda", "ficha_completa", True)
+    assert regua["visita_feita"] == ("venda", "compromisso_feito", True)
+    assert regua["pos_festa"] == ("pos", "festa_passou", True)
+    assert regua["ganho"][0] == "fechamento" and regua["proposta"] == ("venda", None, False)
 
 
 def test_semear_duas_vezes_nao_duplica(limpo):
@@ -187,7 +209,7 @@ def test_semear_duas_vezes_nao_duplica(limpo):
         fm.semear(c, CONTA, "eventos")
         assert fm.semear(c, CONTA, "eventos") == 0
         c.commit()
-    assert len(_etapas(limpo)) == 7
+    assert len(_etapas(limpo)) == len(rxp.etapas_padrao("eventos")) == 10
 
 
 def test_semear_nao_reescreve_o_rotulo_de_quem_ja_tem(limpo):
@@ -215,8 +237,9 @@ def test_o_plano_de_uma_conta_generica_de_eventos(limpo):
     _generico(limpo)
     with limpo.connection() as c:
         itens = {i["id"]: i for i in fm.plano(c, CONTA, "eventos")}
-    assert "criar:follow_up" in itens
-    assert itens["rotulo:qualificado"]["para"] == "Agendado Visita"
+    assert "criar:ficha_completa" in itens and "criar:pos_festa" in itens
+    assert "criar:follow_up" not in itens
+    assert itens["rotulo:qualificado"]["para"] == "Visita marcada"
     assert itens["rotulo:ganho"]["para"] == "Fechado"
     assert itens["quadro:ganho"]["para"] is True
     assert itens["agenda:ganho"]["para"] is True
@@ -230,13 +253,13 @@ def test_o_plano_nunca_propoe_apagar(limpo):
     _generico(limpo)
     with limpo.connection() as c:
         c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
-                     values (%s,'evento_realizado','Evento A Realizar',60,false)""", (CONTA,))
+                     values (%s,'evento_a_realizar','Evento A Realizar',60,false)""", (CONTA,))
         c.commit()
-    _leads(limpo, "evento_realizado", 5)
+    _leads(limpo, "evento_a_realizar", 5)
     with limpo.connection() as c:
         itens = {i["id"]: i for i in fm.plano(c, CONTA, "eventos")}
     assert not [i for i in itens.values() if i["acao"] not in fm.ACOES]
-    fora = itens["quadro:evento_realizado"]
+    fora = itens["quadro:evento_a_realizar"]
     assert fora["para"] is True and fora["leads"] == 5
     assert "continuam no cadastro" in fora["nota"]
 
@@ -275,10 +298,10 @@ def test_rotulo_que_o_dono_trocou_a_mao_vem_desmarcado(limpo):
 def test_aplicar_so_mexe_no_que_foi_marcado(limpo):
     _generico(limpo)
     with limpo.connection() as c:
-        feito = fm.aplicar(c, CONTA, "eventos", ["criar:follow_up"])
+        feito = fm.aplicar(c, CONTA, "eventos", ["criar:visita_feita"])
         c.commit()
     assert feito["criar"] == 1 and sum(feito.values()) == 1
-    assert _por(limpo, "follow_up")[1] == "Follow-up"
+    assert _por(limpo, "visita_feita")[1] == "Visita feita"
     assert _por(limpo, "qualificado")[1] == "Qualificado", "renomeou sem ser marcado"
 
 
@@ -325,18 +348,18 @@ def test_adotar_nao_apaga_etapa_nenhuma(limpo):
     _generico(limpo)
     with limpo.connection() as c:
         c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
-                     values (%s,'evento_realizado','Evento A Realizar',60,false)""", (CONTA,))
+                     values (%s,'evento_a_realizar','Evento A Realizar',60,false)""", (CONTA,))
         c.commit()
-    _leads(limpo, "evento_realizado", 5)
+    _leads(limpo, "evento_a_realizar", 5)
     with limpo.connection() as c:
         fm.aplicar(c, CONTA, "eventos", [i["id"] for i in fm.plano(c, CONTA, "eventos")])
         c.commit()
     chaves = {r[0] for r in _etapas(limpo)}
-    assert "evento_realizado" in chaves, "a etapa foi apagada"
-    assert _por(limpo, "evento_realizado")[4] is True, "devia ter saído do quadro"
+    assert "evento_a_realizar" in chaves, "a etapa foi apagada"
+    assert _por(limpo, "evento_a_realizar")[4] is True, "devia ter saído do quadro"
     with limpo.connection() as c:
         n = c.execute("""select count(*) from prospeccao
-                          where conta_id=%s and status='evento_realizado'""", (CONTA,)).fetchone()[0]
+                          where conta_id=%s and status='evento_a_realizar'""", (CONTA,)).fetchone()[0]
     assert n == 5, "os 5 leads da etapa sumiram"
 
 
@@ -348,7 +371,7 @@ def test_uma_conta_nao_alcanca_a_outra(limpo):
     with limpo.connection() as c:
         fm.aplicar(c, CONTA, "eventos", [i["id"] for i in fm.plano(c, CONTA, "eventos")])
         c.commit()
-    assert _por(limpo, "qualificado", CONTA)[1] == "Agendado Visita"
+    assert _por(limpo, "qualificado", CONTA)[1] == "Visita marcada"
     assert _por(limpo, "qualificado", CONTA + 1)[1] == "Qualificado"
 
 
@@ -360,15 +383,15 @@ def test_etapa_fora_do_modelo_leva_a_agenda_junto_ao_sair_do_quadro(limpo):
     _generico(limpo)
     with limpo.connection() as c:
         c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
-                     values (%s,'evento_realizado','Evento A Realizar',60,false)""", (CONTA,))
+                     values (%s,'evento_a_realizar','Evento A Realizar',60,false)""", (CONTA,))
         c.commit()
-    _leads(limpo, "evento_realizado", 5)
+    _leads(limpo, "evento_a_realizar", 5)
     with limpo.connection() as c:
         itens = fm.plano(c, CONTA, "eventos")
     ids = [i["id"] for i in itens]
-    assert "agenda:evento_realizado" in ids
+    assert "agenda:evento_a_realizar" in ids
     # e vem ANTES da saída: é a ordem em que o aviso da 239 manda ligar
-    assert ids.index("agenda:evento_realizado") < ids.index("quadro:evento_realizado")
+    assert ids.index("agenda:evento_a_realizar") < ids.index("quadro:evento_a_realizar")
 
 
 def test_ramo_sem_ponte_com_a_agenda_nao_propoe_agendar(limpo):

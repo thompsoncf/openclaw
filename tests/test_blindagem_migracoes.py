@@ -73,8 +73,10 @@ create table canais_config (id bigserial primary key, conta_id bigint, canal tex
 -- whatsapp/telefone também são da 075: a 148 lê os dois pra reconstruir o número
 -- que a campanha já tentou. orcamento_id é da 075 também: o backfill da 197 (data
 -- do evento no lead) copia de `orcamentos.evento` pelo lead amarrado por ela.
+-- status também é da 075: a 412 (funil novo de eventos) só tira a coluna
+-- "Follow-up" da Prime do quadro se nenhum lead estiver nela.
 create table prospeccao (id bigserial primary key, conta_id bigint,
-  whatsapp text, telefone text, orcamento_id bigint);
+  whatsapp text, telefone text, orcamento_id bigint, status text);
 -- prospeccao_atividades vem da 075 também (marcada como aplicada); a 127 recria
 -- o check de tipo pra incluir 'bounce'.
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint,

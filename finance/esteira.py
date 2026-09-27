@@ -144,14 +144,14 @@ def resolver(c, conta_id: int, agora: datetime | None = None) -> int:
                   resolucao = case
                     when """ + _SQL_RESGATE + """ then 'resgate'
                     when exists (select 1 from conversas cv join mensagens m on m.conversa_id=cv.id
-                                  where cv.prospeccao_id = e.prospeccao_id
+                                  where cv.prospeccao_id = e.prospeccao_id and cv.conta_id = e.conta_id
                                     and m.direcao='in' and m.criado_em > e.entrou_em) then 'cliente_voltou'
                     when exists (select 1 from funil_movimentos fm
-                                  where fm.prospeccao_id = e.prospeccao_id
+                                  where fm.prospeccao_id = e.prospeccao_id and fm.conta_id = e.conta_id
                                     and fm.criado_em > e.entrou_em
                                     and fm.para in ('perdido','ganho')) then 'fechou'
                     when exists (select 1 from funil_movimentos fm
-                                  where fm.prospeccao_id = e.prospeccao_id
+                                  where fm.prospeccao_id = e.prospeccao_id and fm.conta_id = e.conta_id
                                     and fm.criado_em > e.entrou_em
                                     and fm.motivo not like 'temperatura%%') then 'moveu'
                     when """ + _SQL_HISTORICO + """ then 'historico'
@@ -160,13 +160,13 @@ def resolver(c, conta_id: int, agora: datetime | None = None) -> int:
               and (""" + _SQL_RESGATE + """
                 or """ + _SQL_HISTORICO + """
                 or exists (select 1 from conversas cv join mensagens m on m.conversa_id=cv.id
-                            where cv.prospeccao_id = e.prospeccao_id and m.direcao='out'
+                            where cv.prospeccao_id = e.prospeccao_id and cv.conta_id = e.conta_id and m.direcao='out'
                               and m.criado_em > e.entrou_em)
                 or exists (select 1 from conversas cv join mensagens m on m.conversa_id=cv.id
-                            where cv.prospeccao_id = e.prospeccao_id and m.direcao='in'
+                            where cv.prospeccao_id = e.prospeccao_id and cv.conta_id = e.conta_id and m.direcao='in'
                               and m.criado_em > e.entrou_em)
                 or exists (select 1 from funil_movimentos fm
-                            where fm.prospeccao_id = e.prospeccao_id
+                            where fm.prospeccao_id = e.prospeccao_id and fm.conta_id = e.conta_id
                               and fm.criado_em > e.entrou_em
                               and fm.motivo not like 'temperatura%%'))""",
         (agora, conta_id)).rowcount

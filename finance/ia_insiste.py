@@ -187,7 +187,7 @@ def _sql_ainda_calado() -> str:
        and not exists (select 1 from mensagens mi where mi.conversa_id = %(conversa)s
                          and mi.direcao = 'in' and mi.criado_em > %(ult_in)s)
        and exists (select 1 from conversas cv where cv.id = %(conversa)s
-                     and cv.agente_ativo and coalesce(cv.status,'') <> 'pendente')"""
+                     and cv.conta_id = %(conta)s and cv.agente_ativo and coalesce(cv.status,'') <> 'pendente')"""
 
 
 def _perder(pool, conta_id: int, lead: dict, agora: datetime) -> bool:

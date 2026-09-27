@@ -133,12 +133,13 @@ def ia_pode_falar(r: dict, agora: datetime | None = None) -> bool:
     agora = (agora or datetime.now(timezone.utc)).astimezone(_BRT)
     if agora.weekday() not in (r.get("ia_dias") or []):
         return False
-    return int(r.get("ia_hora_ini") or 0) <= agora.hour < int(r.get("ia_hora_fim") or 24)
+    ini, fim = r.get("ia_hora_ini"), r.get("ia_hora_fim")
+    return int(0 if ini is None else ini) <= agora.hour < int(24 if fim is None else fim)
 
 
 def texto_fora(r: dict) -> str:
     return (r.get("ia_fora_texto") or "").strip() or FORA_PADRAO.format(
-        hora=int(r.get("ia_hora_ini") or 8))
+        hora=int(8 if r.get("ia_hora_ini") is None else r.get("ia_hora_ini")))
 
 
 def dono_do_contato_novo(c, conta_id: int, chip_id, *, contato_novo: bool) -> dict | None:
@@ -413,9 +414,13 @@ def salvar(c, conta_id: int, chip_id: int, f: dict) -> dict:
         return {"ok": False, "erro": "Escolha quem recebe os leads deste número."}
     horario = f.get("ia_horario") if f.get("ia_horario") in HORARIOS else "24h"
     dias = sorted({int(d) for d in (f.get("ia_dias") or []) if str(d).isdigit() and 0 <= int(d) <= 6})
+    # 0h é hora de verdade (a IA que começa à meia-noite): o `or 8` antigo lia o 0 como
+    # "vazio" e gravava 8h — a IA ficava calada da meia-noite às 8h sem ninguém saber
+    def _hora(v, padrao):
+        return padrao if v is None or str(v).strip() == "" else int(v)
     try:
-        ini = max(0, min(23, int(f.get("ia_hora_ini") or 8)))
-        fim = max(1, min(24, int(f.get("ia_hora_fim") or 22)))
+        ini = max(0, min(23, _hora(f.get("ia_hora_ini"), 8)))
+        fim = max(1, min(24, _hora(f.get("ia_hora_fim"), 22)))
     except (TypeError, ValueError):
         ini, fim = 8, 22
     if horario == "proprio" and (not dias or ini >= fim):

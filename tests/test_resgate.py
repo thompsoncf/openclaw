@@ -368,7 +368,7 @@ def test_ensaio_manda_a_previa_pro_supervisor_e_nao_mexe_no_lead(pool, equipe, d
     assert len(duble["saiu"]) == 1
 
 
-def test_o_ritmo_espacamento_e_teto(pool, equipe, duble):
+def test_o_ritmo_espacamento_e_teto(pool, equipe, duble, monkeypatch):
     with pool.connection() as c:
         _cfg(c, equipe, teto_dia=2)
         for i in range(4):
@@ -376,15 +376,9 @@ def test_o_ritmo_espacamento_e_teto(pool, equipe, duble):
     rg.rodar(pool)
     rg.rodar(pool)                                    # 2ª passada: espaçamento segura
     assert len(duble["saiu"]) == 1
-    with pool.connection() as c:
-        c.execute("update resgate_envios set criado_em = greatest(criado_em - interval '1 hour', "
-                  "date_trunc('day', now() at time zone '-03') at time zone '-03' + interval '1 minute')")
-        c.commit()
+    # sem espaçamento daqui pra frente: quem segura agora é só o teto
+    monkeypatch.setattr(rg, "ESPACO_MIN", -60)
     rg.rodar(pool)
-    with pool.connection() as c:
-        c.execute("update resgate_envios set criado_em = greatest(criado_em - interval '1 hour', "
-                  "date_trunc('day', now() at time zone '-03') at time zone '-03' + interval '1 minute')")
-        c.commit()
     rg.rodar(pool)                                    # teto de 2 no dia
     assert len(duble["saiu"]) == 2
 
@@ -469,17 +463,14 @@ def test_sai_pelo_chip_da_conversa(pool, equipe, duble):
     assert duble["saiu"][0]["chip"] == CHIP2
 
 
-def test_envio_que_falha_devolve_o_lead_e_3_falhas_pausam(pool, equipe, duble):
+def test_envio_que_falha_devolve_o_lead_e_3_falhas_pausam(pool, equipe, duble, monkeypatch):
     duble["estado"]["ok"] = False
+    monkeypatch.setattr(rg, "ESPACO_MIN", -60)      # uma tentativa por passada, sem esperar
     with pool.connection() as c:
         _ligar(c, equipe, aviso_vendedor=False)
         ids = [_lead(c, equipe["PEDRO"], numero=f"558699999000{i}")[0] for i in range(4)]
     for _ in range(3):
         rg.rodar(pool)
-        with pool.connection() as c:
-            c.execute("update resgate_envios set criado_em = greatest(criado_em - interval '1 hour', "
-                      "date_trunc('day', now() at time zone '-03') at time zone '-03' + interval '1 minute')")
-            c.commit()
     with pool.connection() as c:
         assert all(c.execute("select vendedor_id from prospeccao where id=%s", (i,)).fetchone()[0]
                    == equipe["PEDRO"] for i in ids)
@@ -669,7 +660,7 @@ def test_envio_que_falha_devolve_a_conversa_como_estava(pool, equipe, duble):
                          "where id=%s", (cv,)).fetchone() == ("pendente", False, equipe["PEDRO"])
 
 
-def test_o_lead_que_falhou_nao_trava_a_fila(pool, equipe, duble):
+def test_o_lead_que_falhou_nao_trava_a_fila(pool, equipe, duble, monkeypatch):
     with pool.connection() as c:
         _ligar(c, equipe, aviso_vendedor=False)
         ruim, _ = _lead(c, equipe["PEDRO"], dias=9, ultimo="in", numero="5586999990001")
@@ -677,10 +668,7 @@ def test_o_lead_que_falhou_nao_trava_a_fila(pool, equipe, duble):
     duble["estado"]["ok"] = False
     rg.rodar(pool)
     duble["estado"]["ok"] = True
-    with pool.connection() as c:
-        c.execute("update resgate_envios set criado_em = greatest(criado_em - interval '1 hour', "
-                  "date_trunc('day', now() at time zone '-03') at time zone '-03' + interval '1 minute')")
-        c.commit()
+    monkeypatch.setattr(rg, "ESPACO_MIN", -60)
     rg.rodar(pool)
     assert [s["numero"] for s in duble["saiu"]] == ["5586999990001", "5586999990002"]
 

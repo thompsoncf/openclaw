@@ -14,6 +14,11 @@ vê o que a recepção guardou (CPF, endereço), e o cadastro dele só preenche 
 vazio (clinica_ficha_link.salvar_cadastro). Só quem provou a data (nível "data") vê a
 ficha preenchida.
 
+CHECK-IN NO BALCÃO (?b=código): a recepção gera no painel um código de uso único que
+vale 15 minutos; quem confere que é o paciente é ela, na frente dele. Nível "balcao": vê
+a ficha como quem provou a data, por 30 minutos, e ao terminar a sessão se fecha — o
+próximo que pegar o tablet não volta na ficha de ninguém.
+
 Erro e aviso moram na sessão, nunca na URL. Com o link desligado pela clínica, a
 página não abre.
 
@@ -40,6 +45,7 @@ _log = logging.getLogger("clinica.ficha_publica")
 
 router = APIRouter()
 _VALIDADE_S = 2 * 60 * 60          # a data vale 2 horas neste celular
+_VALIDADE_BALCAO_S = 30 * 60       # o tablet do balcão, meia hora
 _PASSOS = ((1, "Cadastro"), (2, "Pré-consulta"), (3, "Termos"), (4, "Pronto"))
 
 
@@ -53,13 +59,22 @@ def _ip(request: Request) -> str:
 
 
 def _nivel(request: Request, tok: str) -> str | None:
-    """'data' (provou a data de nascimento), 'novo' (a ficha não tinha data e ele deu
-    agora) ou None."""
+    """'data' (provou a data de nascimento), 'balcao' (a recepção abriu no balcão),
+    'novo' (a ficha não tinha data e ele deu agora) ou None."""
     ok = request.session.get("fichas_ok") or {}
     v = ok.get(tok) if isinstance(ok, dict) else None
     if not isinstance(v, list) or len(v) != 2 or _time.time() - float(v[0]) >= _VALIDADE_S:
         return None
-    return v[1] if v[1] in ("data", "novo") else None
+    if v[1] == "balcao" and _time.time() - float(v[0]) >= _VALIDADE_BALCAO_S:
+        return None
+    return v[1] if v[1] in ("data", "novo", "balcao") else None
+
+
+def _fechar(request: Request, tok: str) -> None:
+    ok = request.session.get("fichas_ok") or {}
+    if isinstance(ok, dict) and tok in ok:
+        ok.pop(tok)
+        request.session["fichas_ok"] = ok
 
 
 def _liberar(request: Request, tok: str, nivel: str) -> None:
@@ -81,8 +96,15 @@ def _empresa(c, conta_id: int) -> str:
     return r[0] if r else ""
 
 
+def _pagina(html: str, status: int = 200) -> HTMLResponse:
+    """Toda página da ficha sai sem cache: no tablet do balcão, o Voltar não pode trazer
+    a ficha do paciente anterior."""
+    return HTMLResponse(html, status_code=status,
+                        headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"})
+
+
 def _nao_achou() -> HTMLResponse:
-    return HTMLResponse(_env.get_template("ficha_404.html").render(), status_code=404)
+    return _pagina(_env.get_template("ficha_404.html").render(), 404)
 
 
 def _ir(request: Request, tok: str, passo: int | None = None, erro: str = "", aviso: str = "") -> RedirectResponse:
@@ -104,16 +126,21 @@ def ficha(request: Request, tok: str):
         if not f:
             return _nao_achou()
         empresa = _empresa(c, f["conta_id"])
+        if q.get("b"):
+            # o código do balcão NÃO é gasto no GET (a prévia de link do WhatsApp e o
+            # pré-carregamento do navegador fazem GET): o botão "Começar" é que gasta
+            return _pagina(_env.get_template("ficha_balcao.html").render(
+                empresa=empresa, tok=tok, cod=q["b"][:40], logado=_logado(request)))
         nivel = _nivel(request, tok)
         liberado = bool(nivel)
         if not liberado and f["nascimento"]:
             travada = bool(f["travada_ate"] and f["travada_ate"] > agora)
-            return HTMLResponse(_env.get_template("ficha_entrar.html").render(
+            return _pagina(_env.get_template("ficha_entrar.html").render(
                 empresa=empresa, tok=tok, primeiro=cfl.cpa._primeiro(f["nome"]).capitalize(),
                 travada=travada, erro=erro))
         s = cfl.situacao(c, f["conta_id"], f["id"], agora) or {}
-        # só quem provou a data vê o que já está guardado
-        dados = cfl.cpa.ficha(c, f["conta_id"], f["id"], agora) if nivel == "data" else None
+        # só quem provou a data (ou está no balcão, com a recepção) vê o que está guardado
+        dados = cfl.cpa.ficha(c, f["conta_id"], f["id"], agora) if nivel in ("data", "balcao") else None
         eid = cfl.proximo_evento(c, f["conta_id"], f["id"], agora)
         ev = ca.evento(c, f["conta_id"], eid) if eid else None
         prof = ca._prof_nome(c, f["conta_id"], ev) if ev else ""
@@ -124,13 +151,46 @@ def ficha(request: Request, tok: str):
     elif passo is None:
         passo = 1 if not s.get("cadastro_ok") else 2 if not s.get("pre_ok") else 3 if not s.get("termos_ok") else 4
     curta = bool(s.get("retorno"))
-    return HTMLResponse(_env.get_template("ficha_passos.html").render(
+    balcao = nivel == "balcao"
+    if balcao and passo == 4:
+        _fechar(request, tok)         # terminou no tablet: o próximo não volta aqui
+    return _pagina(_env.get_template("ficha_passos.html").render(
+        balcao=balcao, SEXO=cfl.cpa.SEXO,
         empresa=empresa, tok=tok, passo=passo, PASSOS=_PASSOS, erro=erro, aviso=aviso, s=s, d=dados,
         nome=f["nome"], liberado=liberado, menor=bool(s.get("menor")), curta=curta,
         perguntas=cpc.perguntas(curta), GRAVIDEZ=cpc.GRAVIDEZ, COMO=cfl.COMO_CONHECEU, IMAGEM=cfl.IMAGEM,
         termos=cfl.textos_dos_termos(empresa, f["nome"], bool(s.get("menor"))),
         ev=ev, quando=(f"{ca.dia_txt(ev['inicio'])} às {ev['hora']}" if ev else ""),
         prof=prof))
+
+
+def _logado(request: Request) -> bool:
+    """O aparelho tem sessão do painel: o paciente com ele na mão teria o Zaq inteiro."""
+    return bool(request.session.get("conta_id") or request.session.get("papel"))
+
+
+@router.post("/ficha/{tok}/balcao")
+async def balcao(request: Request, tok: str):
+    form = dict(await request.form())
+    return await run_in_threadpool(_balcao, request, tok, form)
+
+
+def _balcao(request: Request, tok: str, form: dict):
+    agora = datetime.now(timezone.utc)
+    if _logado(request):
+        return _ir(request, tok, erro="Este aparelho está logado no Zaq. Abra o QR num tablet sem login "
+                                      "ou no celular do paciente.")
+    with get_pool().connection() as c:
+        f = _aberta(c, tok)
+        if not f:
+            return _nao_achou()
+        ok = cfl.usar_balcao(c, f, str(form.get("b") or ""), agora)
+        c.commit()
+    if not ok:
+        return _ir(request, tok, erro="Este código do balcão já foi usado ou venceu. Peça outro à recepção.")
+    # ---- 2: o tablet fica só com ESTA ficha: a de quem parou no meio sai daqui
+    request.session["fichas_ok"] = {tok: [_time.time(), "balcao"]}
+    return _ir(request, tok)
 
 
 @router.post("/ficha/{tok}/entrar")
@@ -170,11 +230,12 @@ def _cadastro(request: Request, tok: str, form: dict):
     nivel = _nivel(request, tok)
     if f["nascimento"] and not nivel:
         return _ir(request, tok)
-    erro, aviso = cfl.salvar_cadastro(get_pool(), f, form, agora, nivel == "data")
+    erro, aviso = cfl.salvar_cadastro(get_pool(), f, form, agora, nivel in ("data", "balcao"))
     if erro:
         return _ir(request, tok, 1, erro)
     # quem acabou de dar a data segue, mas não vê o que a recepção guardou
-    _liberar(request, tok, nivel or "novo")
+    if not nivel:
+        _liberar(request, tok, "novo")   # quem já entrou mantém o prazo de quando entrou
     return _ir(request, tok, 2, aviso=aviso or "")
 
 
@@ -273,9 +334,13 @@ _TPL_PASSOS = r"""<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 
 {% if passo == 1 %}
-<form class="cx" method="post" action="/ficha/{{ tok }}/cadastro">
+<form class="cx" method="post" action="/ficha/{{ tok }}/cadastro"{% if balcao %} autocomplete="off"{% endif %}>
   <label for="nome">Nome completo{% if menor %} do paciente{% endif %}</label>
-  <input type="text" id="nome" name="nome" required autocomplete="name" value="{{ (d.nome if d else nome) or '' }}">
+  <input type="text" id="nome" name="nome" required autocomplete="{{ 'off' if balcao else 'name' }}" value="{{ (d.nome if d else nome) or '' }}">
+  <label for="ns">Nome social (opcional)</label>
+  <input type="text" id="ns" name="nome_social" value="{{ d.nome_social if d else '' }}" placeholder="Como prefere ser chamado(a)">
+  <div class="duas"><div><label for="sx">Sexo</label><select id="sx" name="sexo"><option value="">—</option>{% for v, r in SEXO %}<option value="{{ v }}" {% if d and d.sexo == v %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
+    <div><label for="pf">Profissão</label><input type="text" id="pf" name="profissao" value="{{ d.profissao if d else '' }}"></div></div>
   <label for="nasc">Data de nascimento</label>
   <input type="date" id="nasc" name="nascimento" required value="{{ d.nascimento.isoformat() if d and d.nascimento else '' }}">
   <label for="cpf">CPF{% if menor %} do paciente (se tiver){% endif %}</label>
@@ -292,9 +357,14 @@ _TPL_PASSOS = r"""<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   {% endif %}
   <div class="duas"><div><label for="cid">Cidade</label><input type="text" id="cid" name="cidade" required value="{{ d.cidade if d else '' }}"></div>
     <div><label for="uf">UF</label><input type="text" id="uf" name="uf" maxlength="2" value="{{ d.uf if d else '' }}"></div></div>
-  <label for="end">Endereço (opcional)</label><input type="text" id="end" name="endereco" value="{{ d.endereco if d else '' }}">
+  <label for="end">Rua (opcional)</label><input type="text" id="end" name="endereco" value="{{ d.endereco if d else '' }}">
+  <div class="duas"><div><label for="nu">Número</label><input type="text" id="nu" name="numero" value="{{ d.numero if d else '' }}"></div>
+    <div><label for="co">Complemento</label><input type="text" id="co" name="complemento" value="{{ d.complemento if d else '' }}"></div></div>
+  <label for="ba">Bairro</label><input type="text" id="ba" name="bairro" value="{{ d.bairro if d else '' }}">
   <label for="cep">CEP (opcional)</label><input type="text" id="cep" name="cep" inputmode="numeric" value="{{ d.cep if d else '' }}">
   <label for="em">E-mail (opcional)</label><input type="email" id="em" name="email" value="{{ d.email if d else '' }}">
+  <div class="duas"><div><label for="ce">Contato de emergência</label><input type="text" id="ce" name="contato_emergencia" placeholder="Nome" value="{{ d.contato_emergencia if d else '' }}"></div>
+    <div><label for="cf">Telefone dele</label><input type="text" id="cf" name="fone_emergencia" inputmode="tel" value="{{ d.fone_emergencia if d else '' }}"></div></div>
   {% if not (d and d.como_conheceu) %}<label for="cc">Como conheceu a clínica?</label>
   <select id="cc" name="como_conheceu"><option value="">—</option>{% for o in COMO %}<option>{{ o }}</option>{% endfor %}</select>{% endif %}
   <button>Salvar e continuar</button>
@@ -336,10 +406,24 @@ _TPL_PASSOS = r"""<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   {% if ev %}<div style="margin-top:.3rem">Sua consulta: {{ quando }}{% if prof %} com {{ prof }}{% endif %}.</div>{% endif %}
   {% if s.falta %}<div class="mut" style="margin-top:.3rem">Ainda falta: {{ s.falta|join(', ') }}. <a href="/ficha/{{ tok }}?passo=1">Completar</a></div>{% endif %}
 </div>
-<p class="mut">Precisa mudar algo? Abra o mesmo link ou fale com a clínica pelo WhatsApp.</p>
+{% if balcao %}<div class="cx"><b>Pode devolver o tablet à recepção.</b> Obrigado!</div>
+{% else %}<p class="mut">Precisa mudar algo? Abra o mesmo link ou fale com a clínica pelo WhatsApp.</p>{% endif %}
 {% endif %}
 </div></body></html>"""
 
+_TPL_BALCAO = r"""<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Ficha · {{ empresa }}</title>""" + _CSS + r"""</head><body><div class="pg">
+<div class="mut">{{ empresa }}</div><h1>Sua ficha</h1>
+{% if logado %}<div class="erro">Este aparelho está logado no Zaq. Abra o QR num tablet sem login ou no celular do paciente.</div>
+{% else %}<form class="cx" method="post" action="/ficha/{{ tok }}/balcao">
+  <input type="hidden" name="b" value="{{ cod }}">
+  <div>A recepção abriu a sua ficha aqui. Leva uns 3 minutos.</div>
+  <button>Começar</button>
+</form>{% endif %}
+</div></body></html>"""
+
+_env.loader.mapping["ficha_balcao.html"] = _TPL_BALCAO
 _env.loader.mapping["ficha_404.html"] = _TPL_404
 _env.loader.mapping["ficha_entrar.html"] = _TPL_ENTRAR
 _env.loader.mapping["ficha_passos.html"] = _TPL_PASSOS

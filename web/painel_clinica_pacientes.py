@@ -53,11 +53,11 @@ def lista(request: Request):
     busca = request.session.get("pacientes_busca", "")
     with get_pool().connection() as c:
         d = cpa.listar(c, conta[0], agora, filtro=q.get("f") or "todos", busca=busca,
-                       cidade=q.get("cidade") or "")
+                       cidade=q.get("cidade") or "", etiqueta=q.get("etiqueta") or "")
     return _render("clinica_pacientes.html", request, titulo="Pacientes", secao_ativa="pacientes",
                    aviso=_AVISOS.get(q.get("aviso") or "", ""), erro=request.session.pop("pacientes_erro", ""),
                    d=d, filtros=cpa.FILTROS, f=q.get("f") or "todos", busca=busca,
-                   cidade=q.get("cidade") or "")
+                   cidade=q.get("cidade") or "", etiqueta=q.get("etiqueta") or "")
 
 
 @router.post(URL + "/buscar")
@@ -68,7 +68,8 @@ async def buscar(request: Request):
         return redir
     request.session["pacientes_busca"] = " ".join(str(form.get("q") or "").split())[:60]
     from urllib.parse import urlencode
-    volta = {k: v for k, v in (("f", form.get("f") or ""), ("cidade", form.get("cidade") or "")) if v}
+    volta = {k: v for k, v in (("f", form.get("f") or ""), ("cidade", form.get("cidade") or ""),
+                                ("etiqueta", form.get("etiqueta") or "")) if v}
     return RedirectResponse(URL + ("?" + urlencode(volta) if volta else ""), status_code=303)
 
 
@@ -117,7 +118,32 @@ def ver(request: Request, cliente_id: int):
                    aviso=_AVISOS.get(request.query_params.get("aviso") or "", ""),
                    erro=request.session.pop("pacientes_erro", ""), p=p, aba=aba,
                    abas=abas, opcoes_resp=opcoes, brl=cc.reais, gerencia=gerencia, hoje=ca.hoje_br(agora),
-                   pre=pre, ficha_ligado=ligado, link_ficha=link)
+                   pre=pre, ficha_ligado=ligado, link_ficha=link, SEXO=cpa.SEXO)
+
+
+@router.post(URL + "/{cliente_id}/balcao", response_class=HTMLResponse)
+def balcao(request: Request, cliente_id: int):
+    """Check-in no balcão: um QR e um link que valem uma vez, por 15 minutos. O paciente
+    abre no tablet da clínica (sem login no painel) ou no celular dele e preenche a ficha
+    na frente da recepção — sem a data de nascimento, porque quem confere é ela."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    agora = datetime.now(timezone.utc)
+    with get_pool().connection() as c:
+        p = cpa.ficha(c, conta[0], cliente_id, agora)
+        if not p:
+            return RedirectResponse(URL, status_code=303)
+        if not cfl.ligado(c, conta[0]):
+            return _ir(request, f"{URL}/{cliente_id}", erro="O link da ficha está desligado (Agenda › Link da ficha).")
+        par = cfl.gerar_balcao(c, conta[0], cliente_id, agora)
+        c.commit()
+    if not par:
+        return RedirectResponse(URL, status_code=303)
+    url = cfl.link_balcao(*par)
+    from finance.pix import qr_svg
+    return _render("clinica_paciente_balcao.html", request, titulo=p["nome"], secao_ativa="pacientes",
+                   p=p, url=url, qr=qr_svg(url) or "", minutos=cfl.BALCAO_MIN)
 
 
 @router.post(URL + "/{cliente_id}/link/novo")
@@ -206,19 +232,21 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="pc-acoes"><a href="/painel/clinica/agenda">‹ Agenda</a></div></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
-  <div class="pc-chips">{% for k, r in filtros %}<a class="pc-chip {% if f == k %}on{% endif %}" href="/painel/clinica/pacientes?f={{ k }}{% if cidade %}&cidade={{ cidade|urlencode }}{% endif %}">{{ r }} {{ d.contagem[k] }}</a>{% endfor %}</div>
+  <div class="pc-chips">{% for k, r in filtros %}<a class="pc-chip {% if f == k %}on{% endif %}" href="/painel/clinica/pacientes?f={{ k }}{% if cidade %}&cidade={{ cidade|urlencode }}{% endif %}{% if etiqueta %}&etiqueta={{ etiqueta|urlencode }}{% endif %}">{{ r }} {{ d.contagem[k] }}</a>{% endfor %}</div>
   <form class="pc-busca" method="post" action="/painel/clinica/pacientes/buscar">
     <input type="hidden" name="f" value="{{ f }}">
     <input name="q" value="{{ busca }}" placeholder="🔍 Buscar por nome ou telefone" autocomplete="off">
     <select name="cidade" onchange="this.form.submit()"><option value="">Todas as cidades</option>{% for cd in d.cidades %}<option value="{{ cd }}" {% if cd == cidade %}selected{% endif %}>{{ cd }}</option>{% endfor %}</select>
+    {% if d.etiquetas %}<select name="etiqueta" onchange="this.form.submit()"><option value="">Todas as etiquetas</option>{% for e in d.etiquetas %}<option value="{{ e }}" {% if e == etiqueta %}selected{% endif %}>{{ e }}</option>{% endfor %}</select>{% endif %}
     <button class="sec" style="width:auto">Buscar</button>
   </form>
-  {% if busca %}<form method="post" action="/painel/clinica/pacientes/buscar" style="margin:0"><input type="hidden" name="q" value=""><input type="hidden" name="f" value="{{ f }}"><input type="hidden" name="cidade" value="{{ cidade }}"><button class="sec" style="width:auto">Limpar a busca “{{ busca }}”</button></form>{% endif %}
+  {% if busca %}<form method="post" action="/painel/clinica/pacientes/buscar" style="margin:0"><input type="hidden" name="q" value=""><input type="hidden" name="f" value="{{ f }}"><input type="hidden" name="cidade" value="{{ cidade }}"><input type="hidden" name="etiqueta" value="{{ etiqueta }}"><button class="sec" style="width:auto">Limpar a busca “{{ busca }}”</button></form>{% endif %}
   {% if d.pacientes %}
   <table class="pc-t"><tr><th>Paciente</th><th>WhatsApp</th><th>Cidade</th><th>Último atendimento</th><th>Próximo</th><th>Situação</th><th></th></tr>
   {% for p in d.pacientes %}<tr>
     <td>{% if p.id %}<a class="nm" href="/painel/clinica/pacientes/{{ p.id }}">{{ p.nome }}</a>{% else %}<b>{{ p.nome }}</b>{% endif %}
-      <div class="pc-m">{% if p.idade is not none %}{{ p.idade }} anos{% elif p.id %}idade a completar{% else %}ainda sem ficha{% endif %}{% if p.responsavel %} · responsável: {{ p.responsavel }}{% endif %}</div></td>
+      <div class="pc-m">{% if p.idade is not none %}{{ p.idade }} anos{% elif p.id %}idade a completar{% else %}ainda sem ficha{% endif %}{% if p.responsavel %} · responsável: {{ p.responsavel }}{% endif %}{% if p.nome_social %} · nome social: {{ p.nome_social }}{% endif %}</div>
+      {% for e in p.etiquetas %}<span class="pc-tag">{{ e }}</span>{% endfor %}</td>
     <td>{{ p.fone }}</td><td>{{ p.cidade }}</td>
     <td>{% if p.ultimo %}{{ p.ultimo.strftime('%d/%m/%Y') }}{% else %}—{% endif %}</td>
     <td>{% if p.proximo %}{{ p.proximo.strftime('%d/%m %H:%M') }}{% else %}—{% endif %}</td>
@@ -245,15 +273,17 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 
 _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="pc-pag">
-  <div class="pc-topo"><div><h2>{{ p.nome }}</h2>
-    <div class="sub">{% if p.idade is not none %}{{ p.idade }} anos · {% endif %}{% if p.cidade %}{{ p.cidade }} · {% endif %}{% if p.desde %}paciente desde {{ p.desde.strftime('%m/%Y') }}{% endif %}{% if p.responsavel %} · responsável: <a href="/painel/clinica/pacientes/{{ p.responsavel.id }}">{{ p.responsavel.nome }}</a>{% endif %}</div></div>
+  <div class="pc-topo"><div><h2>{{ p.nome_social or p.nome }}</h2>{% if p.nome_social %}<div class="sub">nome civil: {{ p.nome }}</div>{% endif %}
+    <div class="sub">{% if p.idade is not none %}{{ p.idade }} anos · {% endif %}{% if p.cidade %}{{ p.cidade }} · {% endif %}{% if p.desde %}paciente desde {{ p.desde.strftime('%m/%Y') }}{% endif %}{% if p.responsavel %} · responsável: <a href="/painel/clinica/pacientes/{{ p.responsavel.id }}">{{ p.responsavel.nome }}</a>{% endif %}</div>
+    {% if p.etiquetas %}<div style="margin-top:.3rem">{% for e in p.etiquetas %}<a class="pc-tag" href="/painel/clinica/pacientes?etiqueta={{ e|urlencode }}">{{ e }}</a>{% endfor %}</div>{% endif %}</div>
     <div class="pc-acoes"><a href="/painel/clinica/pacientes">‹ Pacientes</a><a href="/painel/clinica/agenda/novo?cliente={{ p.id }}">Agendar</a>{% if p.conversa_id %}<a href="/painel/prospeccao/comunicacao?abrir={{ p.conversa_id }}">WhatsApp</a>{% endif %}</div></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
   {% if p.falta %}<div class="alerta" style="margin-top:.8rem">{{ p.ficha_txt|capitalize }}. <a href="/painel/clinica/pacientes/{{ p.id }}?aba=cadastro">Completar aqui</a>
     {% if link_ficha %}<div class="pc-acoes" style="margin-top:.5rem"><input readonly value="{{ link_ficha }}" onclick="this.select()" style="min-width:260px;margin:0">
       <form method="post" action="/painel/clinica/pacientes/{{ p.id }}/link" style="margin:0"><button class="sec" onclick="this.disabled=true;this.form.submit()">Mandar o link no WhatsApp</button></form>
-      <form method="post" action="/painel/clinica/pacientes/{{ p.id }}/link/novo" style="margin:0" onsubmit="return confirm('Gerar outro link? O antigo para de abrir.')"><button class="sec">Gerar outro link</button></form></div>
+      <form method="post" action="/painel/clinica/pacientes/{{ p.id }}/link/novo" style="margin:0" onsubmit="return confirm('Gerar outro link? O antigo para de abrir.')"><button class="sec">Gerar outro link</button></form>
+      <form method="post" action="/painel/clinica/pacientes/{{ p.id }}/balcao" style="margin:0"><button class="sec">Preencher no balcão</button></form></div>
     <div class="pc-m" style="margin-top:.3rem">O paciente abre com a data de nascimento e preenche cadastro, pré-consulta e termos.</div>{% endif %}</div>
   {% elif p.situacao %}<div class="pc-m" style="margin-top:.6rem">✓ Ficha completa{% if p.situacao.pre_em %} · pré-consulta respondida em {{ p.situacao.pre_em.strftime('%d/%m') }}{% endif %}</div>{% endif %}
   {% if p.situacao and p.situacao.alergia %}<div style="margin-top:.5rem"><span class="pc-tag y">⚠ informou alergia na pré-consulta</span></div>{% endif %}
@@ -299,9 +329,20 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <div><label>E-mail</label><input name="email" type="email" value="{{ p.email }}"></div>
       <div><label>Cidade</label><input name="cidade" value="{{ p.cidade }}" maxlength="80"></div>
       <div><label>UF</label><input name="uf" value="{{ p.uf }}" maxlength="2"></div>
-      <div><label>Endereço</label><input name="endereco" value="{{ p.endereco }}" maxlength="200"></div>
+      <div><label>Nome social</label><input name="nome_social" value="{{ p.nome_social }}" maxlength="80"></div>
+      <div><label>Sexo</label><select name="sexo"><option value="">—</option>{% for v, r in SEXO %}<option value="{{ v }}" {% if p.sexo == v %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
+      <div><label>Profissão</label><input name="profissao" value="{{ p.profissao }}" maxlength="80"></div>
+      <div><label>RG</label><input name="rg" value="{{ p.rg }}" maxlength="20"></div>
+      <div><label>Nome da mãe</label><input name="nome_mae" value="{{ p.nome_mae }}" maxlength="120"></div>
+      <div><label>Rua</label><input name="endereco" value="{{ p.endereco }}" maxlength="200"></div>
+      <div><label>Número</label><input name="numero" value="{{ p.numero }}" maxlength="10"></div>
+      <div><label>Complemento</label><input name="complemento" value="{{ p.complemento }}" maxlength="60"></div>
+      <div><label>Bairro</label><input name="bairro" value="{{ p.bairro }}" maxlength="80"></div>
       <div><label>CEP</label><input name="cep" value="{{ p.cep }}" inputmode="numeric" maxlength="9"></div>
+      <div><label>Contato de emergência</label><input name="contato_emergencia" value="{{ p.contato_emergencia }}" maxlength="120" placeholder="Nome"></div>
+      <div><label>Telefone de emergência</label><input name="fone_emergencia" value="{{ p.fone_emergencia }}" inputmode="tel" maxlength="30"></div>
       <div><label>Como conheceu a clínica</label><input name="como_conheceu" value="{{ p.como_conheceu }}" maxlength="80" placeholder="Instagram, indicação, anúncio…"></div>
+      <div><label>Etiquetas (separe por vírgula)</label><input name="etiquetas" value="{{ p.etiquetas|join(', ') }}" maxlength="300" placeholder="VIP, pós-operatório…"></div>
       <div><label>Responsável (menor de idade)</label><select name="responsavel_id"><option value="">nenhum</option>{% for o in opcoes_resp %}<option value="{{ o.id }}" {% if p.responsavel_id == o.id %}selected{% endif %}>{{ o.nome }}</option>{% endfor %}</select></div>
     </div>
     <div class="pc-m" style="margin-top:.5rem">O responsável é escolhido entre quem usa o mesmo WhatsApp. O CPF é o que vai na nota fiscal.</div>
@@ -320,5 +361,19 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 </div>
 {% endblock %}"""
 
+_TPL_BALCAO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
+<div class="pc-pag">
+  <div class="pc-topo"><div><h2>Preencher no balcão</h2><div class="sub">{{ p.nome_social or p.nome }}</div></div>
+    <div class="pc-acoes"><a href="/painel/clinica/pacientes/{{ p.id }}">‹ Ficha</a></div></div>
+  <div class="pc-cx" style="text-align:center">
+    {% if qr %}<div style="display:inline-block;background:#fff;padding:.6rem;border-radius:10px">{{ qr|safe }}</div>{% endif %}
+    <div style="margin-top:.7rem">Aponte a câmera do tablet (ou do celular do paciente) para o QR, ou abra:</div>
+    <div style="margin-top:.4rem"><input readonly value="{{ url }}" onclick="this.select()" style="max-width:100%;width:560px"></div>
+    <div class="pc-m" style="margin-top:.6rem">Vale uma vez, por {{ minutos }} minutos. Não use um aparelho logado no painel: o paciente preenche cadastro, pré-consulta e termos, e ao terminar a ficha fecha sozinha. As respostas da pré-consulta vão só para o profissional.</div>
+  </div>
+</div>
+{% endblock %}"""
+
 _env.loader.mapping["clinica_pacientes.html"] = _TPL
+_env.loader.mapping["clinica_paciente_balcao.html"] = _TPL_BALCAO
 _env.loader.mapping["clinica_paciente.html"] = _TPL_UM

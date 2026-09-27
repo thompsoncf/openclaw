@@ -36,6 +36,7 @@ def banco(pool):  # noqa: F811
                      alter table titulos add column if not exists tipo text default 'receber';
                      alter table titulos add column if not exists cliente_id bigint""")
         c.execute((BASE / "407_clinica_pacientes.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "413_clinica_ficha_campos.sql").read_text(encoding="utf-8"))
         c.commit()
     return pool
 

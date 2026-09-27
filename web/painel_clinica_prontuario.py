@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from db.conexao import get_pool
@@ -25,6 +25,7 @@ from finance import clinica_agenda as ca
 from finance import clinica_pacientes as cpa
 from finance import clinica_preconsulta as cpc
 from finance import clinica_prontuario as prt
+from finance import clinica_prontuario_arquivos as parq
 from web.painel_clinica_agenda import _acesso, _int
 from web.portal import _env, _render
 
@@ -87,13 +88,122 @@ def prontuario(request: Request, cliente_id: int):
         fc = prt.ficha_clinica(c, conta[0], cliente_id)
         pre = cpc.ultima(c, conta[0], cliente_id)
         evos = prt.historia(c, conta[0], cliente_id, q)
+        arquivos = parq.listar(c, conta[0], cliente_id)
+        imagem_op, imagem_txt = parq.autorizacao_de_imagem(c, conta[0], cliente_id)
         ev = ca.evento(c, conta[0], evento) if evento else None
         if ev and cpa_do_evento(c, conta[0], evento) != cliente_id:
             ev = None                             # atendimento de outro paciente: nada
         c.commit()
     return _render("clinica_prontuario.html", request, titulo=f"Prontuário · {p['nome']}", secao_ativa="pacientes",
                    p=p, fc=fc, pre=pre, evos=evos, q=q, ev=ev, MODELOS=prt.MODELOS,
+                   arquivos=arquivos, cofre=parq.configurado(), imagem_op=imagem_op, imagem_txt=imagem_txt,
                    aviso=request.session.pop("prontuario_aviso", ""), erro=request.session.pop("prontuario_erro", ""))
+
+
+# ------------------------------------------------------------------ fotos e anexos (fase 3)
+
+@router.post(URL + "/{cliente_id}/arquivos")
+async def arquivos(request: Request, cliente_id: int):
+    """Upload: primeiro o tamanho (antes de ler), depois o acesso (antes de ler), só
+    então o arquivo — e lido com teto."""
+    try:
+        tam = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        tam = 0
+    if tam > parq.TETO_CORPO:
+        return Response("Arquivo grande demais.", status_code=413)
+    negado = await run_in_threadpool(_arquivos_pode, request, cliente_id)
+    if negado is not None:
+        return negado
+    form = await request.form()
+    up = form.get("arquivo")
+    campos = {k: str(v) for k, v in form.items() if k != "arquivo"}
+    tipo = "foto" if campos.get("tipo") == "foto" else "anexo"
+    dados = await up.read(parq.TETO[tipo] + 1) if hasattr(up, "read") else b""
+    tipo_mime = getattr(up, "content_type", "") or ""
+    return await run_in_threadpool(_arquivos, request, cliente_id, campos, dados, tipo_mime, tipo)
+
+
+def _arquivos_pode(request: Request, cliente_id: int):
+    with get_pool().connection() as c:
+        _ok, resp = _pode(request, c, cliente_id)
+    return resp
+
+
+def _arquivos(request: Request, cliente_id: int, form: dict, dados: bytes, tipo_mime: str, tipo: str):
+    # 1) o acesso e o termo, numa conexão curta
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, q = ok
+        autorizacao, erro = parq.conferir(c, conta[0], cliente_id, tipo=tipo, mimetype=tipo_mime,
+                                          papel_autorizado=bool(form.get("papel")),
+                                          e_documento=bool(form.get("documento")))
+        c.commit()
+    if erro:
+        return _ir(request, cliente_id, erro=erro)
+    # 2) limpar, cifrar e subir, FORA da conexão
+    pronto, erro = parq.preparar(conta[0], cliente_id, tipo=tipo, dados=dados, mimetype=tipo_mime)
+    if erro:
+        return _ir(request, cliente_id, erro=erro)
+    # 3) o registro no banco
+    with get_pool().connection() as c:
+        aid = parq.registrar_arquivo(c, conta[0], cliente_id, q, pronto, tipo=tipo, autorizacao=autorizacao,
+                                     regiao=form.get("regiao", ""), legenda=form.get("legenda", ""),
+                                     evento_id=_int(form.get("evento")))
+        acc.registrar(c, conta[0], q, cliente_id, f"guardou {'a foto' if tipo == 'foto' else 'o anexo'} #{aid}",
+                      _ip(request))
+        c.commit()
+    return _ir(request, cliente_id, "Foto guardada." if tipo == "foto" else "Anexo guardado.")
+
+
+@router.get(URL + "/{cliente_id}/arquivo/{arquivo_id}")
+def arquivo(request: Request, cliente_id: int, arquivo_id: int):
+    """A foto ou o anexo, decifrado na hora, só pra quem pode ler (e registrado com o
+    número do arquivo). Nunca fica no cache do aparelho."""
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, _q = ok
+        info = parq.localizar(c, conta[0], cliente_id, arquivo_id)
+        if not info:
+            return Response("Arquivo não encontrado.", status_code=404)
+        try:
+            if not acc.ler(c, conta[0], request.session, cliente_id,
+                           f"abriu {'a foto' if info['tipo'] == 'foto' else 'o anexo'} #{arquivo_id}"
+                           + (f" ({info['regiao']})" if info["regiao"] else ""), _ip(request)):
+                return _volta_ficha(cliente_id)
+        except acc.SemRegistro:
+            return Response("Não foi possível abrir agora.", status_code=503)
+        c.commit()
+    try:
+        dados = parq.baixar(info)                      # fora da conexão do banco
+    except ValueError as e:
+        return Response(str(e), status_code=409)
+    return Response(dados, media_type=info["mimetype"],
+                    headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache",
+                             "Content-Security-Policy": "sandbox",
+                             "Content-Disposition": f'inline; filename="prontuario-{arquivo_id}"'})
+
+
+@router.get(URL + "/{cliente_id}/comparar", response_class=HTMLResponse)
+def comparar(request: Request, cliente_id: int):
+    ids = [x for x in (_int(v) for v in request.query_params.getlist("f")) if x][:2]
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, _q = ok
+        todos = {a["id"]: a for a in parq.listar(c, conta[0], cliente_id) if a["tipo"] == "foto"}
+        p = cpa.ficha(c, conta[0], cliente_id, datetime.now(timezone.utc))
+        c.commit()
+    fotos = [todos[i] for i in ids if i in todos]
+    if len(fotos) != 2:
+        return _ir(request, cliente_id, erro="Escolha duas fotos para comparar.")
+    return _render("clinica_comparar.html", request, titulo=f"Comparar · {p['nome']}", secao_ativa="pacientes",
+                   p=p, fotos=sorted(fotos, key=lambda a: a["quando"]))
 
 
 @router.post(URL + "/{cliente_id}/ficha")
@@ -306,6 +416,33 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <form method="post" action="/painel/clinica/prontuario/{{ p.id }}/ficha" class="pr-acoes"><input type="hidden" name="levar_alergia" value="1"><button class="sec">Levar a alergia contada para a ficha clínica</button></form>
   </div>{% endif %}
 
+  <div class="pr-cx" id="fotos"><b>Fotos e anexos</b> <span class="pr-m">· {{ imagem_txt or 'sem termo de imagem aceito' }}</span>
+    {% if arquivos %}<form method="get" action="/painel/clinica/prontuario/{{ p.id }}/comparar">
+      {% for a in arquivos %}<div style="margin-top:.35rem">{% if a.tipo == 'foto' %}<label style="display:inline"><input type="checkbox" name="f" value="{{ a.id }}" style="width:auto"> </label>📷{% else %}📎{% endif %}
+        <a href="/painel/clinica/prontuario/{{ p.id }}/arquivo/{{ a.id }}" target="_blank" rel="noopener">{{ a.quando.strftime('%d/%m/%Y') }}{% if a.regiao %} · {{ a.regiao }}{% endif %}{% if a.legenda %} · {{ a.legenda }}{% endif %}</a>
+        <span class="pr-m">· {{ a.prof }}</span></div>{% endfor %}
+      <div class="pr-acoes"><button class="sec">Comparar as duas fotos marcadas</button></div></form>
+    {% else %}<div class="pr-m" style="margin-top:.3rem">Nenhuma foto ou anexo ainda.</div>{% endif %}
+    {% if cofre %}
+    <form method="post" action="/painel/clinica/prontuario/{{ p.id }}/arquivos" enctype="multipart/form-data" style="margin-top:.7rem">
+      {% if ev %}<input type="hidden" name="evento" value="{{ ev.id }}">{% endif %}
+      <div class="pr-3">
+        <label>O quê<select name="tipo"><option value="foto">Foto clínica (câmera)</option><option value="anexo">Anexo (exame em PDF ou foto do papel)</option></select></label>
+        <label>Região<input name="regiao" maxlength="80" placeholder="face, dorso, mão direita…"></label>
+        <label>Legenda<input name="legenda" maxlength="200" placeholder="antes, 6ª semana, resultado do exame…"></label>
+      </div>
+      <label>Arquivo<input type="file" name="arquivo" id="arq" accept="image/*" capture="environment" required></label>
+      <label style="display:flex;gap:.4rem;align-items:center" id="doc-cx" hidden><input type="checkbox" name="documento" value="1" style="width:auto"> É foto de documento ou exame (não do paciente)</label>
+      <script>(function(){var s=document.querySelector('select[name=tipo]'),a=document.getElementById('arq'),d=document.getElementById('doc-cx');
+      function ajusta(){if(s.value==='foto'){a.setAttribute('capture','environment');a.accept='image/*';d.hidden=true;}else{a.removeAttribute('capture');a.accept='image/*,application/pdf';d.hidden=false;}}
+      s.addEventListener('change',ajusta);ajusta();})();</script>
+      {% if imagem_op == 'nao' %}<div class="erro" style="margin-top:.4rem">O paciente não autorizou fotos (termo de imagem). Anexos continuam: PDF, ou foto de documento ou exame.</div>
+      {% elif not imagem_op %}<label style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" name="papel" value="1" style="width:auto"> O paciente autorizou as fotos em papel (anexe o termo)</label>{% endif %}
+      <div class="pr-acoes"><button class="sec">Guardar</button></div>
+      <div class="pr-m">No celular, a câmera abre direto e a foto não vai para a galeria. O Zaq tira a localização e os dados do aparelho, cifra e guarda: só quem pode ler o prontuário abre, e cada abertura fica registrada.</div>
+    </form>{% else %}<div class="pr-m" style="margin-top:.5rem">O cofre das fotos ainda não está ligado nesta instalação.</div>{% endif %}
+  </div>
+
   <div class="pr-cx"><b>Nova evolução</b>{% if ev %} <span class="pr-m">· do atendimento de {{ ev.hora }} ({{ ev.tipo }})</span>{% endif %}
     <form method="post" action="/painel/clinica/prontuario/{{ p.id }}/evolucao/nova" class="pr-acoes">
       {% if ev %}<input type="hidden" name="evento" value="{{ ev.id }}">{% endif %}
@@ -345,6 +482,7 @@ _TPL_EVO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="pr-acoes"><button class="sec">Salvar rascunho</button>
       <button formaction="/painel/clinica/prontuario/{{ p.id }}/evolucao/{{ e.id }}/assinar" onclick="return confirm('Assinar? Depois de assinada, a evolução não muda: a correção é um adendo.')">Assinar e finalizar</button>
       <button class="sec" formaction="/painel/clinica/prontuario/{{ p.id }}/evolucao/{{ e.id }}/descartar" formnovalidate onclick="return confirm('Descartar este rascunho? Ele ainda não é prontuário e some.')">Descartar rascunho</button></div>
+    <div class="pr-m"><a href="/painel/clinica/prontuario/{{ p.id }}{% if ev %}?evento={{ ev.id }}{% endif %}#fotos">+ Foto ou anexo deste atendimento</a></div>
     <div class="pr-m">O rascunho se salva sozinho e só você vê. Assinada, fica com a hora do servidor, seu conselho e a impressão digital do texto.</div>
   </form>
 </div>
@@ -356,5 +494,16 @@ fetch(f.action,{method:'POST',body:d,credentials:'same-origin'}).then(function(r
 </script>
 {% endblock %}"""
 
+_TPL_COMPARAR = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
+<div class="pr-pag">
+  <div class="pr-topo"><div><h2>Comparar · {{ p.nome_social or p.nome }}</h2></div>
+    <div class="pr-acoes"><a href="/painel/clinica/prontuario/{{ p.id }}#fotos">‹ Prontuário</a></div></div>
+  <div class="pr-3" style="margin-top:.8rem">{% for a in fotos %}<div class="pr-cx" style="margin:0">
+    <b>{{ a.quando.strftime('%d/%m/%Y') }}</b>{% if a.regiao %} · {{ a.regiao }}{% endif %}{% if a.legenda %} · {{ a.legenda }}{% endif %}
+    <img src="/painel/clinica/prontuario/{{ p.id }}/arquivo/{{ a.id }}" alt="foto clínica" style="width:100%;margin-top:.4rem;border-radius:8px"></div>{% endfor %}</div>
+</div>
+{% endblock %}"""
+
 _env.loader.mapping["clinica_prontuario.html"] = _TPL
+_env.loader.mapping["clinica_comparar.html"] = _TPL_COMPARAR
 _env.loader.mapping["clinica_evolucao.html"] = _TPL_EVO

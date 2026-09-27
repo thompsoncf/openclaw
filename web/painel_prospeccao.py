@@ -15026,7 +15026,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                ('quem é chamado para desconto e ' ~ ('sinal' if regra_eventos else 'fechamento')) if r.aviso_dono_membro_id in regra_ia_ids else '',
                'a anfitriã' if (regra_eventos and r.visita and r.visita.anfitria_id in regra_ia_ids) else '',
                'quem confere o orçamento' if (regra_eventos and r.orcamento and r.orcamento.conferente_id in regra_ia_ids) else ''] | select | list %}
-          {% if ia_aviso %}<div class="distalerta">⚠️ <b>Alguns avisos desta regra vão para a IA</b> ({{ ia_aviso | join(', ') }}). A IA não tem celular: ninguém recebe o aviso{% if 'quem confere o orçamento' in ia_aviso %}, e o orçamento que ela monta ficaria sem ninguém de verdade conferindo{% endif %}. Escolha uma pessoa da equipe e salve.</div>{% endif %}
+          {# O aviso sai pro WhatsApp do CADASTRO do membro. O membro da IA com um número
+             cadastrado (na Prime, o do dono) recebe de verdade — dizer "ninguém recebe"
+             ali era falso. Só sem número o aviso se perde. #}
+          {% set ia_zaps = dist_membros | selectattr('id', 'in', regra_ia_ids) | map(attribute='whatsapp') | select | list %}
+          {% if ia_aviso %}<div class="distalerta">⚠️ <b>Alguns avisos desta regra vão para a IA</b> ({{ ia_aviso | join(', ') }}). {% if ia_zaps %}Eles não se perdem: saem pro WhatsApp cadastrado no membro da IA (final {% for z in ia_zaps %}{{ z[-4:] }}{{ ', ' if not loop.last }}{% endfor %}){% if 'quem confere o orçamento' in ia_aviso %}, inclusive a conferência do orçamento{% endif %}. Se esse número é de quem acompanha a IA, pode deixar assim; senão, escolha uma pessoa da equipe e salve.{% else %}O membro da IA não tem WhatsApp cadastrado: ninguém recebe o aviso{% if 'quem confere o orçamento' in ia_aviso %}, e o orçamento que ela monta ficaria sem ninguém de verdade conferindo{% endif %}. Escolha uma pessoa da equipe e salve.{% endif %}</div>{% endif %}
         {% endif %}
         <div class="agrow"><div class="lab"><b>Regra ligada</b><div>Desligada, o contato novo deste número volta para o rodízio.</div></div>
           <label class="sw"><input type="checkbox" name="ativa" {% if r and r.ativa %}checked{% endif %}><span></span></label></div>

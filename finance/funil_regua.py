@@ -56,6 +56,9 @@ EVENTOS = {
     "contrato_assinado": "contrato assinado no link público",
     "negociacao_valores": "orçamento enviado, OU a equipe passou preço na conversa e o cliente respondeu",
     "preco_enviado":     "a equipe passou preço na conversa (com ou sem resposta do cliente)",
+    # o funil novo de eventos (docs/mockups/funil_novo_eventos.html, 27/09/2026)
+    "ficha_completa":    "a ficha ficou completa: tipo de festa, data e convidados",
+    "festa_passou":      "a data da festa passou (a venda volta pro pós-festa no dia seguinte)",
 }
 
 _PADRAO = {
@@ -355,10 +358,13 @@ _SQL_EVENTO = {
     # COMPROMISSO É A VISITA/REUNIÃO, NUNCA A FESTA (24/09/2026): a festa aprovada
     # passou a nascer ligada ao card, e sem `tipo_evento is null` ela dispararia o
     # gatilho como se alguém tivesse marcado uma visita.
+    # A visita em que o cliente FALTOU não conta: ela continua 'ativa' na agenda, e
+    # contada ela seguraria o `min` no instante antigo — a visita nova, remarcada
+    # depois do "Faltou" (`card_pela_visita`), nunca passaria da TRAVA 3.
     "compromisso": """
         select prospeccao_id, min(criado_em) from eventos_agenda
          where conta_id=%(conta)s and prospeccao_id is not null and status='ativo'
-           and tipo_evento is null
+           and tipo_evento is null and desfecho is distinct from 'nao_realizado'
          group by prospeccao_id""",
     "compromisso_feito": """
         select prospeccao_id, max(coalesce(fim, inicio)) from eventos_agenda
@@ -421,7 +427,100 @@ _SQL_EVENTO = {
         union all""" + _SQL_RESPONDEU_PRECO + """
         ) u group by u.lead""",
     "preco_enviado": _SQL_PRECO_ENVIADO,
+    # A FICHA COMPLETA (migração 412): o instante em que tipo de festa, data e
+    # convidados ficaram os três preenchidos — gravado pelo próprio banco
+    # (`prospeccao.ficha_completa_em`, gatilho de linha), qualquer que seja o caminho
+    # que preencheu: o leitor da conversa, a IA, a ficha, o orçamento. Um instante que
+    # não anda: `atualizado_em` andaria a cada mexida no card e atravessaria a TRAVA 3.
+    "ficha_completa": """
+        select p.id, p.ficha_completa_em from prospeccao p
+         where p.conta_id=%(conta)s and p.ficha_completa_em is not null""",
+    # A FESTA PASSOU: a venda fechada volta pro quadro no dia seguinte à festa, pro
+    # pós-festa (agradecer, avaliação, indicação). Só venda FECHADA — o lead que
+    # ainda negociava uma data que passou não é pós-festa de ninguém. O instante é a
+    # meia-noite do dia seguinte, em Brasília: fixo, e depois de qualquer movimento
+    # de quando a venda fechou.
+    "festa_passou": """
+        select p.id, ((p.evento_em + 1)::timestamp at time zone 'America/Sao_Paulo')
+          from prospeccao p
+         where p.conta_id=%(conta)s and p.evento_em is not null
+           and p.evento_em < (now() at time zone 'America/Sao_Paulo')::date
+           and p.status in (select fe.chave from funil_etapas fe
+                             where fe.conta_id = p.conta_id and fe.fase = 'fechamento'
+                               and fe.chave <> 'perdido'
+                            union all select 'ganho')""",
 }
+
+
+def card_pela_visita(c, conta_id: int, evento_id: int, desfecho: str,
+                     membro_id: int | None = None) -> str | None:
+    """O CARD ANDA QUANDO A VISITA ACONTECE — OU NÃO (funil novo de eventos,
+    docs/mockups/funil_novo_eventos.html). Quem recebeu marca na agenda, e o card
+    vai na hora. Devolve a etapa nova, ou None.
+
+        realizado       Visita marcada → Visita feita
+        nao_realizado   Visita marcada → Qualificado (ou Contatado, sem essa coluna),
+                        com a nota "faltou, remarcar". Faltar não é desistir.
+
+    O movimento sai como 'agenda' — que conta como mão humana na TRAVA 3 (é o mesmo
+    desenho de `clinica_agenda.card_pela_agenda`). É o que impede o gatilho da visita
+    criada de devolver o card pra "Visita marcada" no ciclo seguinte: a visita que
+    faltou continua 'ativa' na agenda.
+
+    Só mexe no card que está NA coluna da visita marcada (ou, no "realizado", antes
+    dela): quem já foi levado pra Proposta, Data segurada, Fechado ou Perdido não
+    volta nem pula por causa da agenda. Só em conta com as colunas (as que têm o
+    gatilho da visita): nas outras, não faz nada. Tolerante: nunca levanta."""
+    try:
+        with c.transaction():
+            r = c.execute("""select e.prospeccao_id, p.status, to_char(e.inicio at time zone
+                                    'America/Sao_Paulo', 'DD/MM')
+                               from eventos_agenda e
+                               join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                              where e.id=%s and e.conta_id=%s and e.tipo_evento is null""",
+                          (evento_id, conta_id)).fetchone()
+            if not r:
+                return None
+            lead, atual, quando = r
+            todas = etapas(c, conta_id)
+            por_gatilho = {e["gatilho"]: e for e in todas if e["gatilho"]}
+            marcada, feita = por_gatilho.get("compromisso"), por_gatilho.get("compromisso_feito")
+            if not marcada or not feita:
+                return None
+            ordem = {e["chave"]: e["ordem"] for e in todas}
+            destino, nota = None, None
+            if desfecho == "realizado" and ordem.get(atual, -1) <= marcada["ordem"]:
+                destino = feita["chave"]
+            elif desfecho == "nao_realizado" and atual == marcada["chave"]:
+                # outra visita marcada pra frente? o card fica onde está
+                outra = c.execute("""select 1 from eventos_agenda
+                                      where conta_id=%s and prospeccao_id=%s and id<>%s
+                                        and tipo_evento is null and status='ativo'
+                                        and desfecho is null and inicio > now() limit 1""",
+                                  (conta_id, lead, evento_id)).fetchone()
+                if outra:
+                    return None
+                qual = por_gatilho.get("ficha_completa")
+                destino = qual["chave"] if qual else ("contatado" if "contatado" in ordem else None)
+                nota = f"Faltou à visita de {quando}: remarcar."
+            if not destino or destino == atual:
+                return None
+            c.execute("""update prospeccao set status=%s, atualizado_em=now()
+                          where id=%s and conta_id=%s""", (destino, lead, conta_id))
+            registrar_movimento(c, conta_id, lead, atual, destino, "agenda", membro_id)
+            if nota:
+                try:
+                    with c.transaction():   # a nota é o enfeite; o card anda sem ela
+                        c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id,
+                                                                        tipo, descricao)
+                                     values (%s,%s,'nota',%s)""", (lead, membro_id, nota))
+                except Exception:  # noqa: BLE001
+                    pass
+            return destino
+    except Exception as ex:  # noqa: BLE001 — a agenda já gravou; o card é enfeite dela
+        _log.warning("card_pela_visita conta=%s evento=%s: %s: %s", conta_id, evento_id,
+                     type(ex).__name__, ex)
+        return None
 
 
 def etapas(c, conta_id: int) -> list[dict]:

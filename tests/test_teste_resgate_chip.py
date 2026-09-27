@@ -94,6 +94,11 @@ def test_a_ia_sai_das_listas_de_quem_e_chamado():
         assert "m.id not in regra_ia_ids" in sel, campo
         assert "⚠️ é a IA" in sel, campo
     assert "Alguns avisos desta regra vão para a IA" in tpl
+    # o aviso sai pro WhatsApp do cadastro: o membro da IA COM número recebe (na
+    # Prime, o dono) — "ninguém recebe" só vale pra quem não tem número
+    assert "A IA não tem celular" not in tpl
+    assert "Eles não se perdem: saem pro WhatsApp cadastrado no membro da IA" in tpl
+    assert "O membro da IA não tem WhatsApp cadastrado: ninguém recebe o aviso" in tpl
     # o dono da regra É a IA: essa lista continua com ela
     dono = tpl[tpl.index('name="membro_id"><option value="">escolha</option>'):]
     assert "regra_ia_ids" not in dono[:dono.index("</select>")]

@@ -1247,6 +1247,12 @@ def marcar_desfecho(pool, conta_id: int, evento_id: int, desfecho: str, agora: d
             "where id=%s and conta_id=%s and status='ativo' and inicio <= %s",
             (desfecho, evento_id, conta_id, agora),
         )
+        # a VISITA que aconteceu (ou não) leva o card junto, no funil de eventos
+        # (docs/mockups/funil_novo_eventos.html): Visita feita, ou de volta pra
+        # remarcar. Só em conta com essas colunas; nas outras não faz nada.
+        if cur.rowcount > 0:
+            from finance import funil_regua as _fr
+            _fr.card_pela_visita(c, conta_id, evento_id, desfecho)
         c.commit()
         return cur.rowcount > 0
 

@@ -9080,7 +9080,16 @@ def regua_pagina(request: Request):
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    espelho=espelho, equipe_espelho=_vendedores(get_pool(), ctx["conta_id"]),
                    rotinas_festa=rotinas_festa, festa_cfg=festa_cfg,
+                   est_por_dia=cfg_est.get("por_dia") or 10,
+                   est_dias_txt=_dias_br(cfg_est.get("dias") or (1, 3, 7)),
                    aviso=request.session.pop("prosp_aviso", None))
+
+
+def _dias_br(dias) -> str:
+    """(1, 3, 7) → "1, 3 e 7". O texto da Esteira na Régua era fixo em "dia 1, 3 e
+    7" (e "10 leads"): quem mudasse a escada lia na tela o número antigo."""
+    d = [str(x) for x in dias]
+    return d[0] if len(d) == 1 else ", ".join(d[:-1]) + " e " + d[-1]
 
 
 @router.post("/painel/prospeccao/regua/espelho")
@@ -18210,8 +18219,9 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         ('confirmar', 'Confirmar as visitas da equipe', 'Ao marcar, na véspera às 18h e 2h antes, em nome da empresa (as da IA a IA já confirma). Se o ' ~ voc.cliente ~ ' pedir pra remarcar, quem atende é avisado. Ninguém confirmou até 1h30 antes: quem recebe é avisado.'),
         ('perguntar_veio', 'Perguntar "veio?"', '1h depois do horário, a quem recebeu a visita (na visita da IA, a anfitriã). Sem resposta, de novo às 18h.'),
         ('depois_visita', 'Depois da visita', 'Veio e ninguém escreveu em 2h: o vendedor é lembrado; na visita da IA, a IA agradece e oferece o orçamento. Faltou: o dono do card fica sabendo.')] %}
-    <label style="display:flex;align-items:flex-start;gap:.8rem;padding:.75rem 0;border-top:1px solid var(--borda);cursor:pointer">
-      <input type="checkbox" id="rf_{{ campo }}" name="{{ campo }}" value="1" {% if rotinas_festa[campo] %}checked{% endif %} style="margin-top:.2rem">
+    <label style="display:flex;align-items:flex-start;gap:.8rem;margin:0;padding:.75rem 0;border-top:1px solid var(--borda);cursor:pointer">
+      <input type="checkbox" id="rf_{{ campo }}" name="{{ campo }}" value="1" {% if rotinas_festa[campo] %}checked{% endif %}
+             style="width:auto;min-height:0;margin:.2rem 0 0;flex:0 0 auto;accent-color:var(--verde)">
       <span style="flex:1"><span style="font-size:.9rem;font-weight:600;display:block">{{ nome }}</span>
         <span class="mut" style="font-size:.79rem;line-height:1.5">{{ desc }}</span></span>
     </label>
@@ -18230,8 +18240,9 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <span class="mut" style="font-size:.79rem;line-height:1.5">Se outro {{ voc.cliente }} pedir a mesma data, a reserva passa a vencer em tantas horas e quem segura é avisado. Em branco ou 0: não encurta (o aviso sai igual).</span></span>
         <span><input class="fld" id="rf_disputada" name="disputada_h" inputmode="numeric" style="width:5rem" value="{{ festa_cfg.reserva_disputada_h or '' }}" placeholder="—"> horas</span>
       </div>
-      <label style="display:flex;align-items:flex-start;gap:.8rem;cursor:pointer">
-        <input type="checkbox" id="rf_pos_festa" name="pos_festa" value="1" {% if festa_cfg.pos_festa %}checked{% endif %} style="margin-top:.2rem">
+      <label style="display:flex;align-items:flex-start;gap:.8rem;margin:0;cursor:pointer">
+        <input type="checkbox" id="rf_pos_festa" name="pos_festa" value="1" {% if festa_cfg.pos_festa %}checked{% endif %}
+               style="width:auto;min-height:0;margin:.2rem 0 0;flex:0 0 auto;accent-color:var(--verde)">
         <span style="flex:1"><span style="font-size:.9rem;font-weight:600;display:block">Pós-festa</span>
           <span class="mut" style="font-size:.79rem;line-height:1.5">No dia seguinte à festa: o vendedor recebe o texto pronto pra agradecer e pedir a avaliação e a indicação; no {{ voc.cliente }} da IA, a IA manda.</span></span>
       </label>
@@ -18253,7 +18264,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor'),
         ('teto_modo','Teto de dias na etapa','avisa antes de vencer e trava a renovação sem justificativa'),
         ('perdido_modo','Perdido automático','fecha quem passou do prazo E não respondeu aos toques — nunca fecha quem está esperando você'),
-        ('esteira_modo','Esteira da cobrança','10 leads por vendedor por dia, com os nomes no WhatsApp · cobra no dia 1, 3 e 7 e avisa no último')] %}
+        ('esteira_modo','Esteira da cobrança',(est_por_dia|default(10)) ~ ' ' ~ voc.leads ~ ' por vendedor por dia, com os nomes no WhatsApp · cobra no dia ' ~ (est_dias_txt|default('1, 3 e 7')) ~ ' e avisa no último')] %}
     {#- O Follow-up automático SAIU daqui em 07/09/2026, por decisão do dono: ele
         se liga na própria aba Follow-up. A tela de lá dizia "ligue na Régua do
         funil" — mandava a pessoa embora pra ligar o que ela estava olhando. -#}
@@ -18368,8 +18379,8 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </select>
         <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente = o {{ voc.cliente }}
           falou há pouco. Frio = não respondeu às tentativas, ou sumiu.
-          <b>Hoje todo {{ voc.lead }} é carimbado quente ao entrar no funil e nada esfria.</b>
-          Comece pelo ensaio.</p>
+          {% if cfg.temperatura_modo not in ('observando','ligado') %}<b>Desligada, todo {{ voc.lead }} é carimbado quente ao entrar no funil e nada esfria.</b>
+          Comece pelo ensaio.{% endif %}</p>
       </div>
       <div>
         <label class="lbl lblp">Horas desde a fala do {{ voc.cliente }} que ainda é quente
@@ -18468,8 +18479,11 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                agora carrega três controles: com o seletor de fase, em tela estreita
                a linha estouraria a coluna em vez de quebrar. -->
           <span style="display:flex;align-items:center;gap:.5rem;min-width:0;flex-wrap:wrap">
-            <input class="fld" name="rotulo" value="{{ e.rotulo }}" style="max-width:240px;min-width:0">
-            <code class="mut" style="font-size:.68rem">{{ e.chave }}</code>
+            <!-- a CHAVE saiu da vista em 27/09/2026 e ficou na dica: depois das
+                 renomeações do funil novo ela contradizia o nome ("Visita marcada ·
+                 qualificado", "Data segurada · evento_realizado"). -->
+            <input class="fld" name="rotulo" value="{{ e.rotulo }}" style="max-width:240px;min-width:0"
+                   title="chave interna: {{ e.chave }}">
             {% if e.fixa %}<span class="rg-tag" style="background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut)">fixa</span>
             {% else %}
             <!-- A FASE, editável desde 12/09/2026. Antes só se escolhia ao criar a
@@ -18488,7 +18502,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               {% for u, r in unidades %}<option value="{{ u }}" {% if e.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
             </select>
           </span>
-          <span class="num" style="text-align:right;font-size:.95rem;color:{{ 'var(--txt-mut)' if not e.n else 'var(--txt)' }}">{{ e.n }}</span>
+          <span class="num" style="text-align:right;font-size:.95rem;color:{{ 'var(--txt-mut)' if not e.n else 'var(--txt)' }}">{{ e.n }}<span class="mut" style="display:block;font-size:.66rem;line-height:1.1">{{ voc.lead if e.n == 1 else voc.leads }}</span></span>
         </div>
         <div style="display:flex;align-items:center;gap:.5rem;margin:.45rem 0 0 1.35rem;flex-wrap:wrap">
           <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--txt-mut);cursor:pointer">

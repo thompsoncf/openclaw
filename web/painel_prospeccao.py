@@ -1197,6 +1197,20 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         tri_det = {}
     if not tri_barra:
         rsg_col, _no_rsg, filtro_tri = [], set(), ""
+    # OS PRÓXIMOS DA FILA (27/09/2026, o dono no primeiro teste: "faltou o funil
+    # resgate, não vi"): com o resgate em Ensaio ou Ligado a coluna aparece SEMPRE, e
+    # embaixo dos que estão em andamento vêm os próximos que a IA chama — no Ensaio,
+    # é tudo o que ela tem. Eles continuam no card do vendedor, na etapa deles: aqui
+    # é uma linha que abre a ficha, não um segundo card (o card é um por lead).
+    rsg_mostra = bool(tri_barra and tri_barra["rsg"]["modo"] != "off" and ctx["gerencia"]
+                      and filtro_tri in ("", "rsg") and not filtro_vend)
+    rsg_fila: list[dict] = []
+    if rsg_mostra and not busca:
+        for x in tri_barra["rsg"]["proximos"]:
+            rsg_fila.append(dict(x, vendedor=(curtos_vend.get(x["vendedor_id"]) or
+                                              _nomes_vend.get(x["vendedor_id"]) or ""),
+                                 etapa_rot=(rotulo_etapa.get(x["status"]) or
+                                            (x["status"] or "").replace("_", " ").capitalize())))
 
     colunas = {chave: [cc for cc in cards if _no_quadro(cc) and cc["id"] not in _no_rsg]
                for chave, cards in colunas.items()}
@@ -1323,7 +1337,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    empresa_nome=empresa_nome,
                    vend_cont=vend_cont, vend_total=vend_total, criticos=criticos,
                    tri_barra=tri_barra, tri_urls=tri_urls, filtro_tri=filtro_tri,
-                   tri_det=tri_det, rsg_col=rsg_col,
+                   tri_det=tri_det, rsg_col=rsg_col, rsg_mostra=rsg_mostra, rsg_fila=rsg_fila,
                    mes_vazio=mes_vazio,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
                    totais_col=totais_col, modo_evento=modo_evento,
@@ -12354,7 +12368,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
      presas no topo ao rolar, e cada uma diz em verde quantos clientes esperam
      resposta ali (●7) — o vendedor escolhe a etapa pelo que pede ação. -#}
   <div class="kbtabs" id="kbtabs">
-    {% if rsg_col %}<button type="button" class="kbtab" data-tab="_resgate" onclick="kbTab('_resgate')"><span class="r">♻️ Resgate</span><span class="n"><span class="c">{{ rsg_col|length }}</span></span></button>{% endif %}
+    {% if rsg_col or rsg_mostra %}<button type="button" class="kbtab" data-tab="_resgate" onclick="kbTab('_resgate')"><span class="r">♻️ Resgate</span><span class="n"><span class="c">{{ rsg_col|length + (rsg_fila|length) }}</span></span></button>{% endif %}
     {% for s, rot in (vista_cols or colunas_tpl) %}{% set _tgs = (grupos or {}).get(s, []) %}{% set _tesp = (_tgs | selectattr('tipo', 'equalto', 'esperando') | sum(attribute='n')) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')"><span class="r">{{ rot }}</span><span class="n"><span class="c">{{ _tgs | sum(attribute='n') if vista_mes else colunas[s]|length }}</span>{% if _tesp %}<i class="e" title="{{ _tesp }} esperando resposta">●{{ _tesp }}</i>{% endif %}</span></button>{% endfor %}
   </div>
 
@@ -12439,11 +12453,23 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     {#- A COLUNA RESGATE (seção 2 do mockup): quem está com o resgate em andamento,
        de onde veio e em que etapa está. Não recebe card arrastado — é uma visão, a
        etapa do lead não muda. -#}
-    {% if rsg_col %}
+    {% if rsg_col or rsg_mostra %}{% set _rb = (tri_barra or {}).get('rsg') or {} %}
     <div class="kbcol kbcol-rsg" data-status="_resgate">
-      <h4 title="Resgate da IA · em andamento"><span>♻️ Resgate</span><span class="kbcnt">{{ rsg_col|length }}</span></h4>
-      <div class="kbcolsub"><span class="v">em andamento · a etapa não muda</span></div>
-      <div class="kbdrop">{% for c in rsg_col %}{{ kbcard(c) }}{% endfor %}</div>
+      <h4 title="Resgate da IA"><span>♻️ Resgate{% if _rb.modo == 'ensaio' %} <i class="kbrsg-modo">Ensaio</i>{% endif %}</span><span class="kbcnt">{% if rsg_col %}{{ rsg_col|length }}{% if _rb.fila %} <i>+{{ _rb.fila }} na fila</i>{% endif %}{% else %}{{ _rb.fila or 0 }} <i>na fila</i>{% endif %}</span></h4>
+      <div class="kbcolsub"><span class="v">{% if rsg_col %}em andamento · {% endif %}a etapa não muda</span></div>
+      <div class="kbdrop">
+        {% if rsg_col %}<div class="kbgrp">Em andamento <b>{{ rsg_col|length }}</b><span class="ln"></span></div>{% endif %}
+        {% for c in rsg_col %}{{ kbcard(c) }}{% endfor %}
+        {% if rsg_fila %}<div class="kbgrp">{% if _rb.modo == 'ensaio' %}Os próximos que a IA chamaria{% else %}Na fila · próximos{% endif %} <b>{{ rsg_fila|length }}</b><span class="ln"></span></div>
+        {% for f in rsg_fila %}<a class="kbrsg-fila" href="/painel/prospeccao/{{ f.id }}" title="Abrir a ficha">
+          <span class="nm">{{ f.quem|e }}</span>
+          <span class="de">{{ f.origem_txt }}{% if f.vendedor %} · de {{ f.vendedor|e }}{% endif %} · {{ f.parado_dias }} dias parado</span>
+          <span class="etp">etapa: {{ f.etapa_rot }}{% if f.evento_em %} · festa {{ f.evento_em.strftime('%d/%m') }}{% endif %}</span>
+          <span class="ps">{{ f.faixa_txt }}{% if f.uma_vez %} · uma mensagem só{% endif %} · {{ 'prévia no Ensaio' if _rb.modo == 'ensaio' else 'sai quando chegar a vez' }}</span>
+        </a>{% endfor %}
+        {% if _rb.fila and _rb.fila > rsg_fila|length %}<div class="kbempty">e mais {{ _rb.fila - rsg_fila|length }} na fila</div>{% endif %}
+        {% elif not rsg_col %}<div class="kbempty">ninguém na fila hoje</div>{% endif %}
+      </div>
     </div>
     {% endif %}
     {% for s, rot in (vista_cols or colunas_tpl) %}
@@ -12526,6 +12552,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbtri.ia{background:#1a1422;color:#e3ccf2;border:1px solid #3e2e4e;padding:.1rem .4rem}
 .kbtri.ia b{color:#f0a9a2}
 .kbcol-rsg{border-color:#5a4520}
+.kbrsg-modo{font-style:normal;font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;border:1px solid #5a4520;color:#f2c66e;border-radius:4px;padding:0 .3rem;margin-left:.3rem;font-weight:600}
+.kbrsg-fila{display:flex;flex-direction:column;gap:.08rem;border:1px dashed #5a4520;border-radius:9px;padding:.4rem .5rem;margin:.3rem 0;text-decoration:none;font-size:.68rem;color:#b8a27a}
+.kbrsg-fila:hover{border-style:solid}
+.kbrsg-fila .nm{font-weight:700;font-size:.8rem;color:var(--txt)}
+.kbrsg-fila .de{color:#f2c66e}
+.kbrsg-fila .etp{font-family:var(--mono,ui-monospace,monospace);font-size:.62rem}
+.kbrsg-fila .ps{color:var(--txt-mut)}
 .kbcol-rsg h4{color:#f2c66e}
 @media (max-width:760px){.kbtri-bar{grid-template-columns:1fr 1fr}.kbtri-det .er{grid-template-columns:110px 1fr 30px}}
 

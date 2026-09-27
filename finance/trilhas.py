@@ -30,6 +30,11 @@ _log = logging.getLogger(__name__)
 _BRT = timezone(timedelta(hours=-3))
 
 TRILHAS = ("vend", "ia", "rsg")
+
+#: a origem de quem AINDA está na fila (ainda não passou): "vem do follow-up"
+_ORIGEM_FILA = {"follow_up": "vem do follow-up", "perdido_vendedor": "vem dos perdidos",
+                "perdido_esteira": "vem dos perdidos (esteira)",
+                "ia_numero": "vem da IA do número (30 dias depois)"}
 ROTULO = {"vend": "Vendedores", "ia": "IA do número", "rsg": "Resgate da IA"}
 
 #: "conversando" = a IA falou com o cliente há menos disto; mais que isso, com a
@@ -177,7 +182,7 @@ def barra(c, conta_id: int, cards: list[dict], tri: dict, agora: datetime | None
            "ia": {"conversando": ia_conv, "sumido": ia_sumido, "gente": ia_gente,
                   "nome": "", "insiste": False},
            "rsg": {"modo": cfg_rg.get("modo", "off"), "pausado": bool(cfg_rg.get("pausado_em")),
-                   "andamento": rsg_and, "fila": None, "hoje": 0,
+                   "andamento": rsg_and, "fila": None, "proximos": [], "hoje": 0,
                    "teto": int(cfg_rg.get("teto_dia") or 20), "responderam": 0},
            "vend": {"esteira": None, "tratados": None}}
     # o nome do membro IA e se ele insiste (a chave da 401)
@@ -194,7 +199,18 @@ def barra(c, conta_id: int, cards: list[dict], tri: dict, agora: datetime | None
     # o resgate: a fila, o que saiu hoje e quem respondeu
     if cfg_rg.get("modo") in ("ensaio", "ligado"):
         try:
-            out["rsg"]["fila"] = len(rg.fila(c, conta_id, cfg_rg, agora))
+            fila = rg.fila(c, conta_id, cfg_rg, agora)
+            out["rsg"]["fila"] = len(fila)
+            # OS PRÓXIMOS DA FILA na coluna Resgate (a "Olga · na fila · sai hoje" do
+            # mockup): quantos cabem no teto do dia. No Ensaio é tudo o que a coluna
+            # tem — nenhum lead muda de dono —, e é justamente o que o dono quer ver
+            out["rsg"]["proximos"] = [
+                {"id": x["id"], "quem": x["quem"], "vendedor_id": x["vendedor_id"],
+                 "status": x["status"], "origem_txt": _ORIGEM_FILA.get(x.get("origem") or "", ""),
+                 "parado_dias": max(1, (agora - x["desde"]).days),
+                 "faixa_txt": rg.FAIXAS.get(x["faixa"], ""), "evento_em": x.get("evento_em"),
+                 "uma_vez": bool(x.get("uma_vez"))}
+                for x in fila[:int(cfg_rg.get("teto_dia") or 20)]]
             with c.transaction():
                 out["rsg"]["hoje"] = rg._contagem_hoje(c, conta_id, rg.ENVIOS, agora)
                 out["rsg"]["responderam"] = c.execute(

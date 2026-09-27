@@ -7,7 +7,7 @@
 #     zaq-waqr-va                  (o WhatsApp por QR; aqui embaixo esta' como
 #                                   "openclaw-waqr", que NAO existe no Render)
 #     openclaw-monitor-saldos-bcu3-va (o cron de saldos)
-#     openclaw-cron-diario-va      (cron a parte)
+#     openclaw-cron-diario-va      (cron diario: resumo da Fase B + faxina do conversas_log)
 #     openclaw-relatorios-semanais-follow-up-va
 #
 # O SUFIXO -va E' A REGIAO (20/09/2026): os servicos foram recriados em VIRGINIA
@@ -278,4 +278,29 @@ services:
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
+        sync: false
+
+  - type: cron
+    # No Render: "openclaw-cron-diario-va" (crn-dao00j6gekts73ad03eg), gerenciado
+    # na mao — § 3. O resumo da Fase B no Telegram do admin e a faxina do
+    # conversas_log (30 dias).
+    #
+    # O Start Command la' era `python -c "from web.app import _setup; ..."`, que
+    # carrega o painel inteiro. Desde o #740 o painel exige PORTAL_SECRET no
+    # Render, e o cron nao tem (nem deve ter: e' a chave que assina o login de
+    # toda conta). Resultado: falhou todo dia de 21/09 a 27/09/2026. O comando
+    # certo e' o de baixo, que so' abre o banco. ATENCAO (§ 3): mudar esta linha
+    # NAO muda o Render — o campo Start Command tem que ser editado na mao.
+    name: openclaw-cron-diario
+    runtime: python
+    plan: starter
+    schedule: "0 12 * * *"   # 12:00 UTC (~09:00 BRT) todo dia
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m scripts.cron_diario
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: ADMIN_TELEGRAM_ID
         sync: false

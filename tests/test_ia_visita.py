@@ -788,3 +788,26 @@ def test_quem_pediu_pra_parar_nao_recebe_a_vespera(pool, prime, envios):
                   "values (%s,'whatsapp','in','lead','por favor não me mande mais mensagem')", (conv,))
         c.commit()
     assert iv.rodar(pool, _amanha_as(18, 5, dias=0))["vesperas"] == 0 and envios == []
+
+
+def test_a_visita_da_ia_remarcada_pelo_app_recomeca_o_relogio(pool, prime, envios):
+    """Revisão de 27/09/2026: o vendedor remarca pelo app a visita que a IA marcou. O
+    relógio da IA tem que recomeçar no horário novo — a véspera já mandada pro
+    horário velho calava a do novo, e o "confirmado" antigo valia pro dia novo."""
+    from finance import cockpit as ck
+    lead, conv = _lead(pool, prime)
+    a = iv.marcar(pool, EMPRESA, prime["regra"], prime["cfg"], lead, conv, _dia(1, 9), QUA_10)
+    with pool.connection() as c:
+        c.execute("update ia_visitas set vespera_em=now(), confirmado_em=now(), "
+                  "marcado_em=now() - interval '3 days'")
+        c.commit()
+    novo = _dia(3, 10).astimezone(BRT)
+    r = ck.remarcar_visita(pool, EMPRESA, None, a["evento_id"], data=novo.strftime("%Y-%m-%d"),
+                           hora=novo.strftime("%H:%M"), avisar_cliente=False, gestao=True)
+    assert r["ok"]
+    with pool.connection() as c:
+        vesp, conf, rem, marcado = c.execute(
+            "select vespera_em, confirmado_em, remarcacoes, marcado_em > now() - interval '1 minute' "
+            "from ia_visitas").fetchone()
+    assert vesp is None and conf is None and marcado
+    assert rem == 0                  # o teto é do que a IA remarca sozinha

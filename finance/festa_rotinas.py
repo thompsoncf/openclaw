@@ -36,7 +36,7 @@ from finance import agenda as ag
 _log = logging.getLogger(__name__)
 
 #: vizinho das travas das rotinas da visita (771173)
-_LOCK = 771174
+_LOCK = 771183          # única (revisão de 27/09/2026)
 
 HORAS_CLIENTE = (9, 20)
 HORAS_EQUIPE = (8, 21)
@@ -153,6 +153,13 @@ def _chave_segurada(c, conta_id: int) -> str | None:
 
 def _avisar(pool, conta_id: int, membro_id, titulo: str, corpo: str, url: str) -> bool:
     from finance import visita_rotinas as _vr
+    # de madrugada o aviso espera o dia (a disputa pode nascer às 3h, quando o outro
+    # cliente escreve); a reserva já encolheu — só o aviso espera (revisão de 27/09)
+    from finance import aviso_noite as _an
+    if membro_id and not _an.dentro() and _an.adiar(pool, conta_id, membro_id=membro_id,
+                                                     titulo=titulo, corpo=corpo, url=url,
+                                                     destino="festa"):
+        return True
     return _vr.avisar(pool, conta_id, membro_id, titulo, corpo, url, origem="festa")
 
 

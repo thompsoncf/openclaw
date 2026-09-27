@@ -60,7 +60,7 @@ from finance import agenda as ag
 _log = logging.getLogger(__name__)
 
 #: vizinho da trava do `ia_visita` (771171/771172)
-_LOCK = 771173
+_LOCK = 771182          # era 771173, a mesma do relógio do sinal (ia_orcamento) — revisão de 27/09/2026
 
 #: as três chaves da conta (migração 414). Cada uma liga uma família de rotinas.
 CHAVES = ("confirmar", "perguntar_veio", "depois_visita")
@@ -73,6 +73,10 @@ INTERVALO_FALHA = timedelta(minutes=15)
 #: se ainda faltar pelo menos isto pra ela
 AO_MARCAR_JANELA = timedelta(hours=2)
 AO_MARCAR_ANTES = timedelta(hours=3)
+#: e só depois de 3 min: quem marca pelo app já avisa o cliente, e a mensagem dele
+#: leva alguns segundos pra sair e ser gravada — sem a espera, o relógio podia passar
+#: nesse meio tempo e mandar a mesma notícia de novo (revisão de 27/09/2026)
+AO_MARCAR_ESPERA = timedelta(minutes=3)
 #: o "veio?": 1h depois do horário; a 2ª vez às 18h do mesmo dia
 VEIO_DEPOIS = timedelta(hours=1)
 VEIO_HORA_2 = 18
@@ -237,12 +241,15 @@ def acompanhar(c, conta_id: int, agora: datetime) -> int:
         {"conta": conta_id, "de": agora - JANELA_PASSADO,
          "ate": agora + timedelta(days=15)}).rowcount
     zera = ", ".join(f"{col}=null" for col in _PASSOS_DO_HORARIO)
+    # `remarcado_em`: a véspera do horário novo não sai logo depois de remarcar (o
+    # remarcar já avisou o cliente: "sua visita mudou de data")
     c.execute(f"""update visita_rotinas v set inicio_visto=e.inicio, {zera},
-                                          envio_falhas=0, envio_falhou_em=null
+                                          envio_falhas=0, envio_falhou_em=null,
+                                          remarcado_em=%s
                     from eventos_agenda e
                    where e.id = v.evento_id and e.conta_id = v.conta_id and v.conta_id=%s
                      and v.inicio_visto is not null and v.inicio_visto <> e.inicio""",
-              (conta_id,))
+              (agora, conta_id))
     # a linha que nasceu da marcação manual ("o cliente já confirmou") não tinha horário
     c.execute("""update visita_rotinas v set inicio_visto=e.inicio
                    from eventos_agenda e
@@ -255,7 +262,7 @@ _COLS = ("evento_id", "conta_id", "lead", "da_ia", "ao_marcar_em", "vespera_em",
          "duas_horas_em", "confirmado_em", "pede_remarcar_em", "sem_resposta_em",
          "veio_1_em", "veio_2_em", "depois_em", "depois_acao", "falta_aviso_em",
          "inicio", "criado_em", "desfecho", "local", "membro_id", "hora_sugerida",
-         "vendedor_id", "quem", "tipo", "convidados", "fechado")
+         "vendedor_id", "quem", "tipo", "convidados", "fechado", "remarcado_em")
 
 
 def _visitas(c, conta_id: int, agora: datetime) -> list[dict]:
@@ -277,7 +284,8 @@ def _visitas(c, conta_id: int, agora: datetime) -> list[dict]:
                   -- mais sai pro cliente sobre esta visita (revisão de 27/09/2026 — a
                   -- véspera ia pra lead perdido)
                   coalesce(p.status in """ + fr.sql_encerradas("p") + """
-                           or p.status = 'lista_espera', false)
+                           or p.status = 'lista_espera', false),
+                  v.remarcado_em
              from visita_rotinas v
              join eventos_agenda e on e.id = v.evento_id and e.conta_id = v.conta_id
              left join prospeccao p on p.id = v.prospeccao_id and p.conta_id = v.conta_id
@@ -515,9 +523,14 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
         if v["pede_remarcar_em"]:
             return
         marcada_em = v["criado_em"] or ini
+        # o horário ATUAL foi combinado quando? na criação ou na última remarcação —
+        # é o que diz se a véspera e o "2h antes" ainda fazem sentido
+        combinada_em = max(marcada_em, v["remarcado_em"] or marcada_em)
         if (not v["ao_marcar_em"] and cliente_ok and cfg["ligado_em"]
                 and marcada_em >= cfg["ligado_em"] and agora - marcada_em <= AO_MARCAR_JANELA
                 and ini - agora > AO_MARCAR_ANTES):
+            if agora - marcada_em < AO_MARCAR_ESPERA:
+                return                  # o aviso de quem marcou pode estar saindo agora
             # MARCAR PELO APP JÁ AVISA O CLIENTE ("Sua visita ao … está marcada", com o
             # convite .ics — `cockpit.agendar_visita`). Se alguém já escreveu desde que a
             # visita nasceu, o "ao marcar" fica feito sem sair: seria a mesma notícia duas
@@ -536,7 +549,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
             return
         momento = _momento_vespera(ini, False)
         if (not v["vespera_em"] and not v["confirmado_em"] and agora >= momento
-                and marcada_em < momento and ini - agora > timedelta(hours=2, minutes=30)
+                and combinada_em < momento and ini - agora > timedelta(hours=2, minutes=30)
                 and cliente_ok):
             if _mandar_cli("vespera_em",
                            texto_vespera(ini, nome, agora, esp["nome"])):
@@ -544,7 +557,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
                 out["enviadas"] += 1
             return
         if (not v["duas_horas_em"] and ini - agora <= timedelta(hours=2)
-                and marcada_em < ini - timedelta(hours=2) and cliente_ok):
+                and combinada_em < ini - timedelta(hours=2) and cliente_ok):
             if _mandar_cli("duas_horas_em",
                            texto_duas_horas(ini, esp["nome"],
                                             v["local"] or esp["endereco"] or esp["nome"],

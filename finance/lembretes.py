@@ -59,14 +59,18 @@ def _expirar_pre_reservas(pool, agora) -> int:
     except Exception as e:  # noqa: BLE001
         _log.info("lembretes: expirar pré-reservas falhou: %s: %s", type(e).__name__, e)
         return 0
+    from finance import aviso_noite as _an
     for ev in expiradas:
         try:
             quando = ag.fmt_hora(ev)
-            notificar.enviar_para_dono(
-                pool, ev["conta_id"],
-                f"📅 A pré-reserva de *{ev['titulo']}* — {quando} venceu: o sinal não foi "
-                "confirmado no prazo e a data está livre de novo. "
-                "Se o cliente aparecer, dá pra reabrir pelo orçamento.")
+            texto = (f"📅 A pré-reserva de *{ev['titulo']}* — {quando} venceu: o sinal não foi "
+                     "confirmado no prazo e a data está livre de novo. "
+                     "Se o cliente aparecer, dá pra reabrir pelo orçamento.")
+            # a data é liberada AGORA; o aviso ao dono espera o dia (revisão de 27/09)
+            if not _an.dentro(agora) and _an.adiar(pool, ev["conta_id"], membro_id=None,
+                                                    titulo="", corpo=texto, destino="dono"):
+                continue
+            notificar.enviar_para_dono(pool, ev["conta_id"], texto)
         except Exception:  # noqa: BLE001 — aviso nunca segura a liberação da data
             _log.info("lembretes: não deu pra avisar da pré-reserva %s", ev.get("id"))
     return len(expiradas)
@@ -79,6 +83,11 @@ def _rodar(pool, agora) -> dict:
             return {"resumo": 0, "aviso": 0, "aniversario": 0, "renovacao": 0}
         try:
             _expirar_pre_reservas(pool, agora)
+            try:
+                from finance import aviso_noite as _an
+                _an.soltar(pool, agora)          # os avisos que esperaram a noite passar
+            except Exception as e:  # noqa: BLE001
+                _log.info("lembretes: soltar avisos da noite falhou: %s", e)
             with pool.connection() as c:
                 cfgs = c.execute(
                     "select conta_id, resumo_ativo, hora_resumo, aviso_antes_min, avisar_convidados "

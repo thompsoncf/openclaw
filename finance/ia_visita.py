@@ -341,6 +341,36 @@ def visita_viva(c, conta_id: int, lead_id: int) -> dict | None:
 MAX_REMARCACOES = 2
 
 
+def recomecar(c, conta_id: int, evento_id: int, ini: datetime) -> bool:
+    """A VISITA DA IA FOI REMARCADA POR GENTE (o app, o painel): o relógio recomeça no
+    horário novo, como na remarcação da própria IA (`marcar`). Sem isto, a véspera já
+    mandada pro horário velho calava a do novo, e o "confirmado" de terça valia pra
+    quinta (revisão de 27/09/2026). `remarcacoes` não muda: é o teto do que a IA
+    remarca sozinha. Devolve True se a visita era da IA. Savepoint: nunca derruba."""
+    try:
+        with c.transaction():
+            r = c.execute("select conversa_id from ia_visitas where evento_id=%s and conta_id=%s",
+                          (evento_id, conta_id)).fetchone()
+            if not r:
+                return False
+            conf = None
+            if r[0]:
+                from finance import chip_regra as _cr
+                reg = _cr.regra_da_conversa(c, conta_id, r[0])
+                cfg = config(c, reg) if reg else None
+                if cfg:
+                    conf = estado(cfg["grade"], ini) == CONF_DIA
+            c.execute("""update ia_visitas set vespera_em=null, duas_horas_em=null,
+                                confirmado_em=null, pede_remarcar_em=null, sem_resposta_em=null,
+                                falta_em=null, envio_falhas=0, envio_falhou_em=null,
+                                marcado_em=now(), conf_no_dia=coalesce(%s, conf_no_dia)
+                          where evento_id=%s and conta_id=%s""", (conf, evento_id, conta_id))
+            return True
+    except Exception:  # noqa: BLE001
+        _log.warning("ia_visita.recomecar: evento %s", evento_id, exc_info=True)
+        return False
+
+
 def _nome(c, conta_id: int, membro_id) -> str:
     if not membro_id:
         return ""

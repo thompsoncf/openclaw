@@ -122,6 +122,7 @@ def prime(pool, rec):
                "ZAQ": _membro(c, "ZAQ SDR", "5586900000009")}
         c.execute((BASE / "414_visita_rotinas.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "425_revisao_motores_parte1.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "432_revisao_motores_parte2.sql").read_text(encoding="utf-8"))
         c.execute("update visita_rotinas_config set ligado_em=%s where conta_id=%s",
                   (QUA_10 - timedelta(days=3), PRIME))
         c.commit()
@@ -307,10 +308,47 @@ def test_remarcar_recomeca_a_confirmacao_no_horario_novo(pool, rec, prime):
     with pool.connection() as c:
         c.execute("update eventos_agenda set inicio=%s where id=%s", (novo, ev))
         c.commit()
-    vr.rodar(pool, datetime(2026, 10, 1, 18, 3, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 29, 19, 0, tzinfo=BRT))     # o ciclo seguinte vê
     st = _estado(pool, ev)
     assert st["confirmado_em"] is None and st["inicio_visto"] == novo
+    vr.rodar(pool, datetime(2026, 10, 1, 18, 3, tzinfo=BRT))
     assert "Amanhã às 10h" in rec["cliente"][-1][1]
+
+
+def test_remarcar_depois_das_18h_pra_amanha_nao_manda_a_vespera_na_hora(pool, rec, prime):
+    """Revisão de 27/09/2026: o remarcar já avisou ("sua visita mudou de data"); a
+    pergunta da véspera logo em seguida era a mesma notícia outra vez. O "2h antes"
+    continua saindo."""
+    lead, conv, ev = _visita(pool, prime["JAC"], inicio=datetime(2026, 10, 5, 10, 0, tzinfo=BRT),
+                             criado=datetime(2026, 9, 28, 10, 0, tzinfo=BRT))
+    vr.rodar(pool, datetime(2026, 9, 30, 12, 0, tzinfo=BRT))      # acompanhada
+    novo = datetime(2026, 10, 1, 11, 0, tzinfo=BRT)
+    with pool.connection() as c:
+        c.execute("update eventos_agenda set inicio=%s where id=%s", (novo, ev))
+        c.commit()
+    antes = len(rec["cliente"])
+    vr.rodar(pool, datetime(2026, 9, 30, 18, 22, tzinfo=BRT))     # remarcou às 18h20
+    vr.rodar(pool, datetime(2026, 9, 30, 18, 40, tzinfo=BRT))
+    assert len(rec["cliente"]) == antes
+    vr.rodar(pool, datetime(2026, 10, 1, 9, 5, tzinfo=BRT))
+    assert rec["cliente"][-1][1].startswith("Daqui a pouco, às 11h")
+
+
+def test_o_ao_marcar_espera_o_aviso_de_quem_marcou_sair(pool, rec, prime):
+    """Revisão de 27/09/2026: quem marca pelo app avisa o cliente, e o aviso leva
+    segundos pra sair e ser gravado. O relógio espera 3 min antes de decidir."""
+    criado = datetime(2026, 9, 29, 10, 59, tzinfo=BRT)
+    lead, conv, ev = _visita(pool, prime["JAC"], criado=criado)
+    vr.rodar(pool, datetime(2026, 9, 29, 11, 0, tzinfo=BRT))      # 1 min depois: espera
+    assert rec["cliente"] == []
+    with pool.connection() as c:                                   # o aviso do app chegou
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em) "
+                  "values (%s,'whatsapp','out','humano','Sua visita está marcada',%s)",
+                  (conv, datetime(2026, 9, 29, 11, 0, 30, tzinfo=BRT)))
+        c.commit()
+    vr.rodar(pool, datetime(2026, 9, 29, 11, 3, tzinfo=BRT))
+    assert rec["cliente"] == []                                    # não repete a notícia
+    assert _estado(pool, ev)["ao_marcar_em"] is not None
 
 
 # ══════════════════════════════════════════════ o que não se confirma

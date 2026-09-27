@@ -852,6 +852,33 @@ def test_observando_conta_sem_mandar_nada(pool):
         assert (r["simulados"], r["avisos"], r["pendentes"]) == (1, 0, [])
 
 
+def test_o_lead_na_esteira_nao_e_cobrado_duas_vezes(pool):
+    """Revisão de 27/09/2026: a esteira já cobra o lead parado (3 vezes em 7 dias); a
+    régua cobrava o mesmo card de novo. O cliente ESPERANDO resposta continua sendo
+    cobrado pela régua — isso a esteira não olha."""
+    with pool.connection() as c:
+        c.execute("""create table if not exists follow_up_esteira (id bigserial primary key,
+                       conta_id bigint, prospeccao_id bigint, resolvido_em timestamptz,
+                       fechado_em timestamptz)""")
+        v = _vendedor(c)
+        sumiu = _lead(c, "SUMIU", vend=v)
+        conv = _conversa(c, sumiu)
+        _msg(c, conv, "in", AGORA - timedelta(days=9))
+        _msg(c, conv, "out", AGORA - timedelta(days=8))           # a bola é do cliente
+        esperando = _esperando(c, 30, v)
+        for lead in (sumiu, esperando):
+            c.execute("insert into follow_up_esteira (conta_id, prospeccao_id) values (%s,%s)",
+                      (CONTA, lead))
+        _ligar_cobranca(c)
+        c.commit()
+        r = _cobrar(c)
+        assert [(p["lead_id"], p["estado"]) for p in r["pendentes"]] == [(esperando, "bola_nossa")]
+        # a esteira resolveu: a régua volta a olhar o lead
+        c.execute("update follow_up_esteira set resolvido_em=now() where prospeccao_id=%s", (sumiu,))
+        c.commit()
+        assert sumiu in [p["lead_id"] for p in _cobrar(c)["pendentes"]]
+
+
 def test_lead_fechado_nao_e_cobrado(pool):
     with pool.connection() as c:
         v = _vendedor(c)

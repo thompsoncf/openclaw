@@ -603,10 +603,19 @@ def avisar(pool, conta_id: int, r: dict, motivo: str, *, prospeccao_id=None,
     return mid
 
 
-def notificar(pool, conta_id: int, membro_id: int, titulo: str, corpo: str, url: str) -> bool:
+def notificar(pool, conta_id: int, membro_id: int, titulo: str, corpo: str, url: str,
+              adiar_de_noite: bool = True) -> bool:
     """Avisa uma pessoa da equipe de algo que a IA FEZ (marcou, remarcou uma visita) —
     sem entrar em `ia_avisos`, que é a conta de quando a IA PRECISOU de gente. Nunca
-    levanta."""
+    levanta.
+
+    DE NOITE ESPERA O DIA (revisão de 27/09/2026): fora das 8h às 21h o aviso é
+    guardado e sai no primeiro ciclo da manhã (`finance.aviso_noite`)."""
+    if adiar_de_noite:
+        from finance import aviso_noite as _an
+        if not _an.dentro() and _an.adiar(pool, conta_id, membro_id=membro_id, titulo=titulo,
+                                          corpo=corpo, url=url):
+            return True
     try:
         with pool.connection() as c:
             m = c.execute("select coalesce(nullif(nome,''), email), email, coalesce(whatsapp,'') "
@@ -641,8 +650,11 @@ def _enviar_aviso(pool, conta_id: int, mid: int, m, titulo: str, corpo: str, url
             pass
     if (wa or "").strip():
         try:
-            from finance import whatsapp_out as wo
-            with pool.connection() as c2:
-                wo.enviar(c2, conta_id, wa, f"{titulo}\n\n{corpo}" + (f"\n\n{link}" if link else ""))
+            # PELO CHIP DOS AVISOS (`follow_up._mandar_zap`, o mesmo da esteira e das
+            # rotinas da visita), e não pelo chip padrão — que numa empresa com número
+            # de campanha é o que atende cliente (revisão de 27/09/2026)
+            from finance import follow_up as _fu
+            _fu._mandar_zap(pool, conta_id, wa,
+                            f"{titulo}\n\n{corpo}" + (f"\n\n{link}" if link else ""))
         except Exception as e:  # noqa: BLE001
             _log.info("chip_regra.avisar: WhatsApp não saiu (conta=%s): %s", conta_id, e)

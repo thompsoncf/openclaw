@@ -9062,6 +9062,9 @@ def regua_pagina(request: Request):
                     "ph": str(padrao.get("fu_teto_dia") or 15),
                     "herda": "fu_teto_dia" not in escolhidas}}
     janela_herda = not ({"janela_dias", "janela_abre", "janela_fecha"} & escolhidas)
+    # o resumo e o cartão do follow-up dizem se ele está ligado; a chave de ligar
+    # continua na aba Follow-up (07/09/2026), então a Régua só lê
+    fu_ligado = (cfg.get("follow_up_modo") or "off") != "off"
     cfg = dict(cfg, **{k: v for k, v in cfg_temp.items() if k.startswith("temp")})
     cfg = dict(cfg, **{k: v for k, v in cfg_perd.items() if k.startswith("perdido")})
     cfg = dict(cfg, **{k: v for k, v in cfg_est.items() if k.startswith("esteira")})
@@ -9080,6 +9083,7 @@ def regua_pagina(request: Request):
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    espelho=espelho, equipe_espelho=_vendedores(get_pool(), ctx["conta_id"]),
                    rotinas_festa=rotinas_festa, festa_cfg=festa_cfg,
+                   fu_ligado=fu_ligado,
                    est_por_dia=cfg_est.get("por_dia") or 10,
                    est_dias_txt=_dias_br(cfg_est.get("dias") or (1, 3, 7)),
                    aviso=request.session.pop("prosp_aviso", None))
@@ -18160,7 +18164,73 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .rg-grp{display:flex;align-items:center;gap:.6rem;margin:1.1rem 0 .35rem}
 .rg-grp b{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}
 .rg-grp span{flex:1;height:1px;background:var(--borda)}
-.rg-r1{display:grid;grid-template-columns:12px 1fr 150px 62px;gap:.6rem;align-items:center}
+/* A RÉGUA REORGANIZADA (27/09/2026): índice, resumo, a etapa em uma linha e um
+   cartão por motor. Os `min-height:0` e `margin:0` desfazem o input/label do CSS
+   geral do app (web/portal.py), que esticava as caixinhas das rotinas. */
+.rg-ind{display:flex;gap:6px;flex-wrap:wrap;margin-top:.8rem}
+.rg-ind a{font-size:.76rem;color:var(--txt-mut);text-decoration:none;border:1px solid var(--borda);border-radius:999px;padding:.2rem .7rem;background:var(--card)}
+.rg-ind a:hover,.rg-ind a:focus-visible{color:var(--txt);border-color:var(--neon-borda)}
+.rg-ind a b{color:var(--verde-claro);font-weight:500;font-size:.7rem}
+.rg-pills{display:flex;gap:6px;flex-wrap:wrap}
+.rg-pill{font-size:.74rem;border-radius:999px;padding:.18rem .6rem;border:1px solid var(--borda);color:var(--txt-mut);display:inline-flex;gap:.35rem;align-items:center}
+.rg-pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--txt-mut);opacity:.6}
+.rg-pill.on{border-color:var(--neon-borda);color:var(--verde-claro);background:var(--neon-fraco)}
+.rg-pill.on::before{background:var(--verde);opacity:1}
+.rg-pill.obs{border-color:var(--azul-borda);color:var(--azul);background:var(--azul-fundo)}
+.rg-pill.obs::before{background:var(--azul);opacity:1}
+.rg-cab,.rg-lin{display:grid;grid-template-columns:12px minmax(0,1fr) minmax(0,1.7fr) 120px 58px 64px;gap:.6rem;align-items:center}
+.rg-cab{font-family:var(--mono);font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;color:var(--txt-mut);padding:.4rem 0 0}
+.rg-etapa{padding:.55rem 0;border-top:1px solid var(--borda)}
+.rg-selos{display:flex;gap:4px;flex-wrap:wrap}
+.rg-selos:not(:empty){margin-top:.3rem}
+.rg-selo{font-size:.64rem;border-radius:4px;padding:.02rem .35rem;border:1px solid var(--borda);color:var(--txt-mut);white-space:nowrap}
+.rg-selo.c{border-color:var(--coral);color:var(--coral)}
+.rg-selo.v{border-color:var(--neon-borda);color:var(--verde-claro)}
+.rg-gat{display:flex;align-items:center;gap:.45rem;min-width:0}
+.rg-so-cel{display:none}
+.rg-teto{font-size:.78rem;color:var(--txt-mut)}
+.rg-teto b{color:var(--txt)}
+.rg-n{text-align:right;font-size:.95rem;line-height:1.1}
+.rg-n span{display:block;font-size:.66rem}
+.rg-mais,.rg-saidas,.rg-num,.rg-fora{font-size:.76rem;color:var(--txt-mut)}
+.rg-mais>summary,.rg-saidas>summary,.rg-num>summary{cursor:pointer;color:var(--azul);font-size:.74rem;margin-top:.35rem}
+.rg-mais{margin-left:calc(12px + .6rem)}
+.rg-mais-c{display:flex;flex-direction:column;gap:.5rem;margin-top:.45rem;padding:.6rem .7rem;border:1px dashed var(--borda);border-radius:10px;background:var(--bg)}
+.rg-li{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.rg-li select,.rg-li .fld,.rg-nova select{width:auto;min-height:0;max-width:100%}
+.rg-cx{display:inline-flex!important;align-items:center;gap:.35rem;margin:0!important;cursor:pointer;font-size:.74rem;color:var(--txt-mut)}
+.rg-saidas>summary b{color:var(--txt);font-weight:500}
+.rg-salvar{display:flex;justify-content:flex-end}
+.rg-salvar .pbtn{margin:0;width:auto}
+.rg-fora{margin-top:.8rem;border-top:1px solid var(--borda);padding-top:.6rem}
+.rg-fora>summary{cursor:pointer;font-size:.8rem}
+.rg-fora>summary b{color:var(--txt)}
+.rg-motores{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem;margin-top:.3rem}
+.rg-mo{border:1px solid var(--borda);border-radius:12px;background:var(--bg);padding:.75rem .85rem;display:flex;flex-direction:column;gap:.55rem;min-width:0}
+.rg-mo.off{background:transparent;border-style:dashed}
+.rg-mo.largo{grid-column:1/-1}
+.rg-mo-t{display:flex;justify-content:space-between;gap:.7rem;align-items:flex-start;flex-wrap:wrap}
+.rg-mo-t h5{margin:0;font-size:.92rem;font-weight:600}
+.rg-mo-t p{margin:.15rem 0 0;font-size:.77rem;color:var(--txt-mut);max-width:60ch;line-height:1.5}
+.rg-mo-t p b{color:var(--txt)}
+.rg-cps{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.7rem}
+.rg-obs{margin:0;font-size:.74rem;color:var(--txt-mut)}
+.rg-esp{border-top:1px solid var(--borda);padding-top:.6rem}
+.rg-bola{display:grid;grid-template-columns:1fr auto 150px;gap:.6rem;align-items:center;padding:.45rem 0;border-top:1px solid var(--borda)}
+@media(max-width:820px){
+  .rg-motores{grid-template-columns:1fr}
+  .rg-cab{display:none}
+  .rg-lin{grid-template-columns:12px minmax(0,1fr) 58px}
+  .rg-gat,.rg-teto{grid-column:2/-1}
+  .rg-n{grid-row:1;grid-column:3}
+  .rg-salvar{grid-column:2/-1}
+  .rg-so-cel{display:inline}
+  .rg-mais{margin-left:0}
+  .rg-bola{grid-template-columns:1fr 130px}
+  .rg-bola .rg-proc{display:none}
+  .rg-grp{flex-wrap:wrap}
+  .rg-grp .mut{flex:1 1 100%!important;height:auto!important;background:none!important}
+}
 /* procedência do campo (migração 228): herdado do ramo × escolhido pela empresa.
    Sem isso o dono olha "4 horas" e não tem como saber se foi ele quem pôs. */
 .lblp{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
@@ -18191,24 +18261,313 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
-  {#- O ESPELHO DO VENDEDOR (mockup docs/mockups/funil_tres_trilhas.html, seção 5,
-      aprovado em 27/09/2026): um vendedor por vez, a cópia no WhatsApp de quem
-      pediu. Só com a esteira fora de "Desligado" — sem ela, não há o que copiar. -#}
-  {% if cfg.esteira_modo and cfg.esteira_modo != 'off' %}
-  <form method="post" action="/painel/prospeccao/regua/espelho" class="fsec" id="espelho" style="margin-top:1rem">
-    <div class="sh"><b>🪞 Espelho do vendedor</b><span class="mut" style="font-size:.76rem">a cobrança do jeito que ela chega na mão da equipe</span></div>
-    <p class="mut" style="font-size:.8rem;line-height:1.55;margin:.2rem 0 .7rem">Uma cópia do que o vendedor recebe (a cobrança da manhã, o aviso do último dia e o aviso do resgate) vai pro WhatsApp de quem você escolher, marcada como cópia. Não conta no teto dele, não vira cobrança de ninguém, e ele não fica sabendo. Um vendedor por vez.</p>
-    <div class="egrid">
-      <div><label class="lbl">De quem</label><select class="fld" name="espelho_de"><option value="">ninguém (desligado)</option>
-        {% for m in equipe_espelho %}<option value="{{ m.id }}" {% if espelho.de == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
-      <div><label class="lbl">Pra quem (WhatsApp)</label><select class="fld" name="espelho_para"><option value="">escolha</option>
-        {% for m in equipe_espelho %}<option value="{{ m.id }}" {% if espelho.para == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;margin-top:.6rem"><button class="pbtn">Salvar o espelho</button></div>
-  </form>
-  {% endif %}
+  {#- A RÉGUA REORGANIZADA (mockup docs/mockups/regua_funil_reorganizada.html,
+      aprovado em 27/09/2026). O PDF da régua da Prime tinha 18 páginas: cada motor
+      que entrou deixou os números num bloco solto, e as etapas eram formulários de
+      seis linhas. A ordem agora é o resumo, as etapas, as automações (um cartão por
+      motor, com a chave e os números dele), as rotinas de festa e os motivos.
+      Os campos e as rotas de salvar são os mesmos de antes. -#}
+  {% set modos = [('gatilhos_modo','Gatilhos das etapas'),('teto_modo','Teto de dias'),
+                  ('esteira_modo','Esteira da cobrança'),('temperatura_modo','Temperatura'),
+                  ('cobranca_modo','Cobrança por prazo'),('perdido_modo','Perdido automático')] %}
+  {% set com_gatilho = etapas | selectattr('gatilho_ativo') | list %}
+  {% set com_teto = etapas | selectattr('teto_dias') | list %}
+  {% set no_quadro = etapas | rejectattr('sai_do_quadro') | list %}
+  {% set fora_quadro = etapas | selectattr('sai_do_quadro') | list %}
+  <nav class="rg-ind" aria-label="Seções da régua">
+    <a href="#etapas">Etapas <b>{{ no_quadro|length }}</b></a>
+    <a href="#automacoes">Automações</a>
+    {% if rotinas_festa is defined and rotinas_festa is not none %}<a href="#rotinas">Rotinas de festa</a>{% endif %}
+    <a href="#motivos">Por que perdemos</a>
+  </nav>
 
-  {#- AS ROTINAS DA VISITA (mockup docs/mockups/funil_novo_rotinas.html, aprovado em
+  <!-- ---------------- o resumo: o que está agindo agora ---------------- -->
+  <div class="fsec" style="margin-top:.8rem">
+    <div class="sh"><b>O que está agindo agora</b><a class="mut" href="/painel/prospeccao/regua/ritmo" style="font-size:.76rem">📈 ver o ritmo real</a></div>
+    <div class="rg-pills">
+      {% for campo, nome in modos[:4] %}<span class="rg-pill {{ 'on' if cfg[campo]=='ligado' else ('obs' if cfg[campo]=='observando' else '') }}">{{ nome }}</span>{% endfor %}
+      <span class="rg-pill {{ 'on' if fu_ligado else '' }}">Follow-up</span>
+      {% for campo, nome in modos[4:] %}<span class="rg-pill {{ 'on' if cfg[campo]=='ligado' else ('obs' if cfg[campo]=='observando' else '') }}">{{ nome }}</span>{% endfor %}
+    </div>
+    <p class="mut" style="font-size:.74rem;margin:.55rem 0 0">Verde é ligado, azul é observando. O histórico já roda de qualquer jeito: <b class="num" style="color:var(--txt)">{{ n_mov }}</b> movimento(s) gravado(s).</p>
+  </div>
+
+  <!-- ---------------- etapas ---------------- -->
+  <div class="fsec" id="etapas" style="margin-top:1rem">
+    <div class="sh"><b>As etapas do funil</b><span class="mut" style="font-size:.76rem">{% if not modelo.itens %}<span id="modelo" title="{{ modelo.colunas|join(' · ') }}">igual ao modelo de {{ rot_ramo }} ✓</span> · {% endif %}cada linha salva sozinha · ligue um gatilho de cada vez</span></div>
+
+    <!-- o modelo do ramo: as colunas que o RAMO usa (finance.raio_x_perfil.etapas_padrao).
+         Nada é aplicado sem marcar, e NENHUMA etapa é apagada — a que não está no
+         modelo é proposta pra sair do quadro, com os leads intactos. Igual ao modelo,
+         vira só o selo no título, acima. -->
+    {% if modelo.itens %}
+    <div id="modelo" style="background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem .85rem;margin:.3rem 0 .6rem">
+      <p class="mut" style="margin:0 0 .6rem;font-size:.85rem">
+        O modelo de {{ rot_ramo }} é <b>{{ modelo.colunas|join(' · ') }}</b>{% if modelo.fora %},
+        com <b>{{ modelo.fora|join(' · ') }}</b> fora do quadro{% endif %}.
+        Marque o que quiser adotar — <b>nada é apagado</b>: etapa que sai do quadro
+        continua no cadastro, na busca, nos relatórios e na ficha.
+      </p>
+      <form method="post" action="/painel/prospeccao/regua/modelo">
+        {% for it in modelo.itens %}
+        <label class="chk mod-l" style="display:flex;align-items:flex-start;gap:.55rem;margin:0;padding:.5rem 0;border-top:1px solid var(--borda);cursor:pointer">
+          <input type="checkbox" name="itens" value="{{ it.id }}" {% if it.marcado %}checked{% endif %}
+                 style="width:auto;min-height:0;margin:.2rem 0 0;accent-color:var(--verde);flex:0 0 auto">
+          <span style="flex:1;min-width:0">
+            <span style="font-size:.86rem">{{ it.texto }}</span>
+            {% if it.leads %}<span class="mut" style="font-size:.74rem"> · {{ it.leads }} {{ voc.lead }}{% if it.leads != 1 %}s{% endif %}</span>{% endif %}
+            {% if it.nota %}<br><span class="mut" style="font-size:.74rem">{{ it.nota }}</span>{% endif %}
+          </span>
+        </label>
+        {% endfor %}
+        <div style="display:flex;justify-content:flex-end;margin-top:.8rem">
+          <button class="pbtn">Adotar o que marquei</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="rg-cab"><span></span><span>etapa</span><span>entra sozinha quando</span><span>teto na etapa</span><span style="text-align:right">no quadro</span><span></span></div>
+    {% set fases = [('venda','Fase · Venda','o lead ainda está sendo conquistado'),
+                    ('fechamento','Fase · Fechamento','relatório e comissão contam a partir daqui'),
+                    ('pos','Fase · Pós-venda','já é cliente — continua contando como fechado')] %}
+    {% for fchave, ftit, fnota in fases %}
+      {% set doFase = no_quadro | selectattr('fase','equalto',fchave) | list %}
+      {% if doFase %}
+      <div class="rg-grp"><b style="color:var(--txt-mut)">{{ ftit }}</b><span></span><span class="mut" style="font-size:.72rem;flex:0 0 auto">{{ fnota }}</span></div>
+      {% for e in doFase %}{% include "regua_etapa_linha" %}{% endfor %}
+      {% endif %}
+    {% endfor %}
+
+    {#- FORA DO QUADRO: a etapa que o quadro não mostra (o Fechado, a coluna
+        Follow-up que a parte 1 do funil novo tirou) continua configurável, só não
+        ocupa a tela nem as listas de cima. -#}
+    {% if fora_quadro %}
+    <details class="rg-fora">
+      <summary><b>Fora do quadro:</b> {% for e in fora_quadro %}{{ e.rotulo }} ({{ e.n }}){{ ' · ' if not loop.last }}{% endfor %}</summary>
+      {% for e in fora_quadro %}{% include "regua_etapa_linha" %}{% endfor %}
+    </details>
+    {% endif %}
+
+    <form method="post" action="/painel/prospeccao/etapas/nova" class="rg-nova" style="display:flex;gap:.5rem;align-items:center;margin-top:1rem;padding-top:.85rem;border-top:1px solid var(--borda);flex-wrap:wrap">
+      <input class="fld" name="rotulo" placeholder="Nome da etapa nova" style="max-width:230px">
+      <select class="rg-uni" name="fase"><option value="venda">na fase de venda</option><option value="pos">na pós-venda</option></select>
+      <button class="pbtn novo">+ Nova etapa</button>
+      <span class="mut" style="font-size:.78rem">só remove etapa vazia · as fixas só renomeiam</span>
+    </form>
+  </div>
+
+  {#- O ESPELHO DO VENDEDOR tem o formulário próprio, mas mora dentro do cartão da
+      Esteira (é de lá que ele copia). Formulário não pode ficar dentro de outro, então
+      os campos do espelho apontam pra este pelo atributo `form`. -#}
+  <form method="post" action="/painel/prospeccao/regua/espelho" id="f-espelho"></form>
+
+  <!-- ---------------- automações ---------------- -->
+  <form method="post" action="/painel/prospeccao/regua/config">
+  <div class="fsec" id="automacoes" style="margin-top:1rem">
+    <div class="sh"><b>Automações</b><span class="mut" style="font-size:.76rem"><b style="color:var(--azul)">Observando</b> roda o motor e anota o que <i>teria</i> feito, sem mover card nem avisar ninguém</span></div>
+    {% macro chave(campo) -%}
+      <span class="rg-seg">
+        {% for v, r in [('off','Desligado'),('observando','Observando'),('ligado','Ligado')] %}
+        <input type="radio" id="{{ campo }}_{{ v }}" name="{{ campo }}" value="{{ v }}" {% if cfg[campo]==v %}checked{% endif %}>
+        <label for="{{ campo }}_{{ v }}">{{ r }}</label>
+        {% endfor %}
+      </span>
+    {%- endmacro %}
+    <div class="rg-motores">
+
+      <!-- ESTEIRA: o teto do dia e a escada são os mesmos números do follow-up
+           (finance.esteira.config reaproveita fu_teto_dia e fu_toques_dias), então
+           ficam sempre à vista, mesmo com a esteira desligada. -->
+      <div class="rg-mo largo {{ 'off' if cfg.esteira_modo not in ('observando','ligado') }}">
+        <div class="rg-mo-t"><div><h5>Esteira da cobrança</h5>
+          <p>Cobra {{ est_por_dia|default(10) }} {{ voc.leads }} por vendedor por dia, com os nomes no WhatsApp · cobra no dia {{ est_dias_txt|default('1, 3 e 7') }} e avisa no último.</p></div>{{ chave('esteira_modo') }}</div>
+        <div class="rg-cps">
+          <div>
+            <label class="lbl lblp">Teto de {{ voc.leads }} cobrados por vendedor / dia
+              <span class="rg-proc {% if not fup.teto.herda %}seu{% endif %}">{% if fup.teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+            <input class="fld" name="fu_teto_dia" value="{{ fup.teto.v }}" placeholder="{{ fup.teto.ph }}">
+          </div>
+          <div>
+            <label class="lbl lblp">Escada de toques, em dias
+              <span class="rg-proc {% if not fup.toques.herda %}seu{% endif %}">{% if fup.toques.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+            <input class="fld" name="fu_toques_dias" value="{{ fup.toques.v }}" placeholder="{{ fup.toques.ph }}">
+            <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Separe por vírgula. <b>1,3,7</b> = três tentativas em D1, D3 e D7. Vale pro follow-up também.</p>
+          </div>
+        </div>
+        {#- O ESPELHO DO VENDEDOR (mockup docs/mockups/funil_tres_trilhas.html, seção 5):
+            um vendedor por vez, a cópia no WhatsApp de quem pediu. Só com a esteira
+            fora de "Desligado" — sem ela, não há o que copiar. -#}
+        {% if cfg.esteira_modo and cfg.esteira_modo != 'off' %}
+        <div class="rg-esp" id="espelho">
+          <div style="font-size:.84rem;font-weight:600">🪞 Espelho do vendedor <span class="mut" style="font-weight:400;font-size:.74rem">· a cobrança do jeito que ela chega na mão da equipe</span></div>
+          <p class="mut" style="font-size:.76rem;line-height:1.5;margin:.2rem 0 .5rem">Uma cópia do que o vendedor recebe (a cobrança da manhã, o aviso do último dia e o aviso do resgate) vai pro WhatsApp de quem você escolher, marcada como cópia. Não conta no teto dele, não vira cobrança de ninguém, e ele não fica sabendo. Um vendedor por vez.</p>
+          <div class="egrid">
+            <div><label class="lbl" for="espelho_de">De quem</label><select class="fld" id="espelho_de" name="espelho_de" form="f-espelho"><option value="">ninguém (desligado)</option>
+              {% for m in equipe_espelho %}<option value="{{ m.id }}" {% if espelho.de == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+            <div><label class="lbl" for="espelho_para">Pra quem (WhatsApp)</label><select class="fld" id="espelho_para" name="espelho_para" form="f-espelho"><option value="">escolha</option>
+              {% for m in equipe_espelho %}<option value="{{ m.id }}" {% if espelho.para == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:.5rem"><button class="pbtn ghost" form="f-espelho" style="padding:.35rem .8rem;font-size:.78rem">Salvar o espelho</button></div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- PRAZOS DO FOLLOW-UP: a chave de ligar fica na aba Follow-up (decisão do
+           dono em 07/09/2026) — aqui só os números. -->
+      <div class="rg-mo">
+        <div class="rg-mo-t"><div><h5>Prazos do follow-up</h5>
+          <p>A chave de ligar fica na aba <a href="/painel/follow-up">Follow-up</a> ({{ 'ligado' if fu_ligado else 'desligado' }}). Aqui só os números; a escada é a da esteira.</p></div></div>
+        <div class="rg-cps">
+          <div>
+            <label class="lbl lblp">Proposta parada cobra depois de (dias)
+              <span class="rg-proc {% if not fup.proposta.herda %}seu{% endif %}">{% if fup.proposta.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+            <input class="fld" name="fu_proposta_dias" value="{{ fup.proposta.v }}" placeholder="{{ fup.proposta.ph }}">
+          </div>
+          {% if fup.festa.tem %}
+          <div>
+            <label class="lbl lblp">Data do evento perto aperta o prazo (dias)
+              <span class="rg-proc {% if not fup.festa.herda %}seu{% endif %}">{% if fup.festa.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+            <input class="fld" name="fu_festa_dias" value="{{ fup.festa.v }}" placeholder="{{ fup.festa.ph }}">
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- TEMPERATURA: modo próprio (seletor), os três limiares e a ordem da fila,
+           que só muda alguma coisa com a temperatura calculando. -->
+      <div class="rg-mo {{ 'off' if cfg.temperatura_modo not in ('observando','ligado') }}">
+        <div class="rg-mo-t"><div><h5>Temperatura pelos fatos da conversa</h5>
+          <p>Quente = o {{ voc.cliente }} falou há pouco. Frio = não respondeu às tentativas, ou sumiu.
+          {% if cfg.temperatura_modo not in ('observando','ligado') %}<b>Desligada, todo {{ voc.lead }} é carimbado quente ao entrar no funil e nada esfria.</b> Comece pelo ensaio.{% endif %}</p></div>
+          <select class="rg-sel" name="temperatura_modo" style="width:auto;min-height:0">
+            <option value="off" {% if cfg.temperatura_modo not in ('observando','ligado') %}selected{% endif %}>desligada</option>
+            <option value="observando" {% if cfg.temperatura_modo == 'observando' %}selected{% endif %}>em ensaio — calcula e mostra, não grava</option>
+            <option value="ligado" {% if cfg.temperatura_modo == 'ligado' %}selected{% endif %}>ligada — grava, com histórico</option>
+          </select></div>
+        <details class="rg-num" {% if cfg.temperatura_modo in ('observando','ligado') %}open{% endif %}>
+          <summary>os números</summary>
+          <div class="rg-cps">
+            <div>
+              <label class="lbl lblp">Horas desde a fala do {{ voc.cliente }} que ainda é quente
+                <span class="rg-proc {% if 'temp_quente_h' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_quente_h' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+              <input class="fld" name="temp_quente_h" value="{{ cfg.temp_quente_h if 'temp_quente_h' in escolhidas_tpl else '' }}"
+                     placeholder="{{ padrao_tpl.temp_quente_h or 48 }}" inputmode="numeric">
+            </div>
+            <div>
+              <label class="lbl lblp">Dias sem o {{ voc.cliente }} falar até esfriar
+                <span class="rg-proc {% if 'temp_morno_dias' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_morno_dias' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+              <input class="fld" name="temp_morno_dias" value="{{ cfg.temp_morno_dias if 'temp_morno_dias' in escolhidas_tpl else '' }}"
+                     placeholder="{{ padrao_tpl.temp_morno_dias or 7 }}" inputmode="numeric">
+            </div>
+            <div>
+              <label class="lbl lblp">Tentativas sem resposta que esfriam
+                <span class="rg-proc {% if 'temp_frio_tentativas' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_frio_tentativas' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+              <input class="fld" name="temp_frio_tentativas" value="{{ cfg.temp_frio_tentativas if 'temp_frio_tentativas' in escolhidas_tpl else '' }}"
+                     placeholder="{{ padrao_tpl.temp_frio_tentativas or 3 }}" inputmode="numeric">
+            </div>
+            <div>
+              <label class="lbl">Ordem da fila do vendedor</label>
+              <select class="rg-sel" name="fila_modo" style="width:100%">
+                <option value="prazo" {% if cfg.fila_modo != 'temperatura' %}selected{% endif %}>por prazo — a de sempre</option>
+                <option value="temperatura" {% if cfg.fila_modo == 'temperatura' %}selected{% endif %}>por temperatura — quente primeiro</option>
+              </select>
+              <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente esperando você · tarefa atrasada · quente vencendo · respondeu e espera · morno com chance · o resto. <b>Muda o que a equipe vê primeiro de manhã.</b></p>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="rg-mo {{ 'off' if cfg.gatilhos_modo not in ('observando','ligado') }}">
+        <div class="rg-mo-t"><div><h5>Gatilhos das etapas</h5>
+          <p>Movem o card sozinhos quando o fato acontece, a qualquer hora. <b>{{ com_gatilho|length }} etapa{{ 's' if com_gatilho|length != 1 }}</b> com gatilho escolhido.</p></div>{{ chave('gatilhos_modo') }}</div>
+        <p class="rg-obs">O gatilho de cada etapa se escolhe na linha dela, em <a href="#etapas">As etapas do funil</a>.</p>
+      </div>
+
+      <div class="rg-mo {{ 'off' if cfg.teto_modo not in ('observando','ligado') }}">
+        <div class="rg-mo-t"><div><h5>Teto de dias na etapa</h5>
+          <p>Avisa antes de vencer e trava a renovação sem justificativa.{% if com_teto %} Hoje em {% for e in com_teto %}<b>{{ e.rotulo }}</b> ({{ e.teto_total }} dias){{ ', ' if not loop.last }}{% endfor %}.{% endif %}</p></div>{{ chave('teto_modo') }}</div>
+        <p class="rg-obs">O teto de cada etapa se põe em "mais regras", na linha dela.</p>
+      </div>
+
+      <!-- COBRANÇA POR PRAZO: estes números só valem pra ela (a bola, o
+           escalonamento, o teto de avisos e o prazo em horas de cada etapa).
+           Desligada, ficam recolhidos — e continuam no formulário, então salvar
+           não apaga nada. -->
+      <div class="rg-mo {{ 'off' if cfg.cobranca_modo not in ('observando','ligado') }}">
+        <div class="rg-mo-t"><div><h5>Cobrança por prazo</h5>
+          <p>Avisa o vendedor quando a conversa ou a etapa passa do prazo, e escala pro gestor.</p></div>{{ chave('cobranca_modo') }}</div>
+        <details class="rg-num" {% if cfg.cobranca_modo in ('observando','ligado') %}open{% endif %}>
+          <summary>os números · {% for b in conv %}{{ b.rotulo|lower }} {{ b.n or b.ph }} {{ (unidades|selectattr(0,'equalto',b.u)|map(attribute=1)|first) or b.u }}{{ ' · ' }}{% endfor %}escala em {{ esc.n or esc.ph }} · até {{ teto.v or teto.ph }} avisos/dia</summary>
+          <div class="rg-bolas">
+            <div class="mut" style="font-size:.74rem;padding:.2rem 0 .3rem">Quando a bola está com a gente · lido da conversa, inclusive do celular do vendedor</div>
+            {% for b in conv %}
+            <div class="rg-bola">
+              <div style="font-size:.84rem;font-weight:600">{{ b.rotulo }}</div>
+              <span class="rg-proc {% if not b.herda %}seu{% endif %}">{% if b.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span>
+              <div style="display:flex;gap:.3rem">
+                <input class="fld" style="text-align:right" name="{{ b.chave }}_n" value="{{ b.n }}" placeholder="{{ b.ph }}">
+                <select class="rg-uni" name="{{ b.chave }}_u">
+                  {% for u, r in unidades %}<option value="{{ u }}" {% if b.u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+                </select>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="rg-cps" style="margin-top:.6rem">
+            <div>
+              <label class="lbl lblp">Escala pro gestor depois de, sem toque
+                <span class="rg-proc {% if not esc.herda %}seu{% endif %}">{% if esc.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+              <div style="display:flex;gap:.3rem">
+                <input class="fld" style="text-align:right" name="escala_n" value="{{ esc.n }}" placeholder="{{ esc.ph }}">
+                <select class="rg-uni" name="escala_u">
+                  {% for u, r in unidades %}<option value="{{ u }}" {% if esc.u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="lbl lblp">Avisos por vendedor / dia
+                <span class="rg-proc {% if not teto.herda %}seu{% endif %}">{% if teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+              <input class="fld" name="teto" value="{{ teto.v }}" placeholder="{{ teto.ph }}">
+              <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Passou do teto, vira um resumo só no fim do expediente.</p>
+            </div>
+          </div>
+          <p class="mut" style="font-size:.73rem;margin:.5rem 0 0">Campo em branco usa o padrão do seu ramo (o número cinza). O prazo de cada etapa fica em "mais regras", na linha dela.</p>
+        </details>
+      </div>
+
+      <div class="rg-mo {{ 'off' if cfg.perdido_modo not in ('observando','ligado') }}">
+        <div class="rg-mo-t"><div><h5>Perdido automático</h5>
+          <p>Fecha quem passou do prazo E não respondeu aos toques — nunca fecha quem está esperando você.</p></div>{{ chave('perdido_modo') }}</div>
+        <p class="rg-obs">Usa o teto de cada etapa e a escada da esteira.</p>
+      </div>
+
+      <!-- HORÁRIO: é do mesmo formulário (regua_config grava a janela junto com os
+           modos), e é o relógio de todos os prazos acima. -->
+      <div class="rg-mo largo">
+        <div class="rg-mo-t"><div><h5>Horário de atendimento</h5>
+          <p>Todo prazo desta tela só corre aqui dentro. Gatilho, não: fato é fato a qualquer hora — sinal pago às 23h move o card às 23h.</p></div></div>
+        <div style="display:flex;gap:.8rem;align-items:flex-end;flex-wrap:wrap">
+          <div style="display:flex;gap:.35rem;flex-wrap:wrap">
+            {% for d, r in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
+            <label class="rg-dia {% if d in dias_on %}on{% endif %}" onclick="rgDia(this)">
+              <input type="checkbox" name="dias" value="{{ d }}" {% if d in dias_on %}checked{% endif %}>{{ r }}
+            </label>
+            {% endfor %}
+          </div>
+          <div class="egrid" style="flex:1;min-width:220px;max-width:320px">
+            <div><label class="lbl" for="rg_abre">Abre</label><input class="fld" id="rg_abre" name="abre" value="{{ cfg.janela_abre.strftime('%H:%M') }}"></div>
+            <div><label class="lbl" for="rg_fecha">Fecha</label><input class="fld" id="rg_fecha" name="fecha" value="{{ cfg.janela_fecha.strftime('%H:%M') }}"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:.9rem"><button class="pbtn">Salvar as automações</button></div>
+  </div>
+  </form>
+
+  {#- AS ROTINAS DE FESTA (mockup docs/mockups/funil_novo_rotinas.html, aprovado em
       27/09/2026): só pra quem vende festa. As mensagens ao cliente saem pelo chip da
       conversa dele; os avisos à equipe, pelo WhatsApp de avisos e pelo push. -#}
   {% if rotinas_festa is defined and rotinas_festa is not none %}
@@ -18255,354 +18614,11 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </form>
   {% endif %}
 
-  <form method="post" action="/painel/prospeccao/regua/config">
-  <!-- ---------------- estado ---------------- -->
-  <div class="fsec" style="margin-top:1rem;border-color:var(--azul-borda)">
-    <div class="sh"><b>Estado</b><span class="mut" style="font-size:.76rem">tudo construído · você decide quando cada parte age</span></div>
-    {% for campo, nome, desc in [
-        ('gatilhos_modo','Gatilhos das etapas','movem o card sozinhos quando o fato acontece'),
-        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor'),
-        ('teto_modo','Teto de dias na etapa','avisa antes de vencer e trava a renovação sem justificativa'),
-        ('perdido_modo','Perdido automático','fecha quem passou do prazo E não respondeu aos toques — nunca fecha quem está esperando você'),
-        ('esteira_modo','Esteira da cobrança',(est_por_dia|default(10)) ~ ' ' ~ voc.leads ~ ' por vendedor por dia, com os nomes no WhatsApp · cobra no dia ' ~ (est_dias_txt|default('1, 3 e 7')) ~ ' e avisa no último')] %}
-    {#- O Follow-up automático SAIU daqui em 07/09/2026, por decisão do dono: ele
-        se liga na própria aba Follow-up. A tela de lá dizia "ligue na Régua do
-        funil" — mandava a pessoa embora pra ligar o que ela estava olhando. -#}
-    <div style="display:flex;align-items:center;gap:1rem;padding:.8rem 0;border-top:1px solid var(--borda);flex-wrap:wrap">
-      <div style="flex:1;min-width:240px">
-        <div style="font-size:.9rem;font-weight:600">{{ nome }}</div>
-        <div class="mut" style="font-size:.79rem;margin-top:.15rem">{{ desc }}</div>
-      </div>
-      <span class="rg-seg">
-        {% for v, r in [('off','Desligado'),('observando','Observando'),('ligado','Ligado')] %}
-        <input type="radio" id="{{ campo }}_{{ v }}" name="{{ campo }}" value="{{ v }}" {% if cfg[campo]==v %}checked{% endif %}>
-        <label for="{{ campo }}_{{ v }}">{{ r }}</label>
-        {% endfor %}
-      </span>
-    </div>
-    {% endfor %}
-    <div style="display:flex;align-items:center;gap:.6rem;padding-top:.75rem;border-top:1px solid var(--borda);flex-wrap:wrap">
-      <span class="mut" style="font-size:.79rem;line-height:1.55;flex:1;min-width:280px">
-        <b style="color:var(--azul)">Observando</b> roda o motor inteiro e anota o que <i>teria</i> feito — sem mover card nem avisar ninguém.
-        O histórico já roda de qualquer jeito: <b class="num" style="color:var(--txt)">{{ n_mov }}</b> movimento(s) gravado(s).
-      </span>
-      <a class="pbtn ghost" href="/painel/prospeccao/regua/ritmo" style="white-space:nowrap">📈 Ver o ritmo real</a>
-    </div>
-  </div>
-
-  <!-- ---------------- conversa ---------------- -->
-  <div class="fsec" style="margin-top:.9rem">
-    <div class="sh"><b>Quando a bola está com a gente</b><span class="mut" style="font-size:.76rem">lido da conversa, inclusive do celular do vendedor</span></div>
-    {% for b in conv %}
-    <div style="display:grid;grid-template-columns:1fr auto 150px;gap:.6rem;align-items:center;padding:.62rem 0;border-top:1px solid var(--borda)">
-      <div style="font-size:.89rem;font-weight:600">{{ b.rotulo }}</div>
-      <span class="rg-proc {% if not b.herda %}seu{% endif %}">{% if b.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span>
-      <div style="display:flex;gap:.3rem">
-        <input class="fld" style="text-align:right" name="{{ b.chave }}_n" value="{{ b.n }}" placeholder="{{ b.ph }}">
-        <select class="rg-uni" name="{{ b.chave }}_u">
-          {% for u, r in unidades %}<option value="{{ u }}" {% if b.u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
-        </select>
-      </div>
-    </div>
-    {% endfor %}
-    <p class="mut" style="font-size:.75rem;line-height:1.5;margin:.6rem 0 0;padding-top:.5rem;border-top:1px solid var(--borda)">
-      Campo em branco usa o padrão do seu ramo (o número cinza). Para voltar ao padrão depois de mudar, apague o campo e salve.
-    </p>
-  </div>
-
-  <!-- ---------------- janela + escalonamento ---------------- -->
-  <div class="fgrid" style="grid-template-columns:1.1fr 1fr">
-    <div class="fsec">
-      <div class="sh"><b>Janela de atendimento</b></div>
-      <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin:.3rem 0 .8rem">
-        {% for d, r in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
-        <label class="rg-dia {% if d in dias_on %}on{% endif %}" onclick="rgDia(this)">
-          <input type="checkbox" name="dias" value="{{ d }}" {% if d in dias_on %}checked{% endif %}>{{ r }}
-        </label>
-        {% endfor %}
-      </div>
-      <div class="egrid">
-        <div><label class="lbl">Abre</label><input class="fld" name="abre" value="{{ cfg.janela_abre.strftime('%H:%M') }}"></div>
-        <div><label class="lbl">Fecha</label><input class="fld" name="fecha" value="{{ cfg.janela_fecha.strftime('%H:%M') }}"></div>
-      </div>
-      <p class="mut" style="font-size:.76rem;line-height:1.55;margin:.7rem 0 0">
-        Todo prazo desta tela só corre aqui dentro. Gatilho, não: fato é fato a qualquer hora — sinal pago às 23h move o card às 23h.
-      </p>
-    </div>
-    <div class="fsec">
-      <div class="sh"><b>Escalonamento</b></div>
-      <label class="lbl lblp" style="margin-top:.3rem">Depois de quanto tempo sem toque escala pro gestor
-        <span class="rg-proc {% if not esc.herda %}seu{% endif %}">{% if esc.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
-      <div style="display:flex;gap:.3rem">
-        <input class="fld" style="text-align:right" name="escala_n" value="{{ esc.n }}" placeholder="{{ esc.ph }}">
-        <select class="rg-uni" name="escala_u">
-          {% for u, r in unidades %}<option value="{{ u }}" {% if esc.u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
-        </select>
-      </div>
-      <label class="lbl lblp" style="margin-top:.7rem">Teto de avisos por vendedor / dia
-        <span class="rg-proc {% if not teto.herda %}seu{% endif %}">{% if teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
-      <input class="fld" name="teto" value="{{ teto.v }}" placeholder="{{ teto.ph }}">
-      <p class="mut" style="font-size:.76rem;line-height:1.5;margin:.55rem 0 0">Passou do teto, vira um resumo só no fim do expediente.</p>
-    </div>
-  </div>
-
-  <!-- ---------------- follow-up ----------------
-       Estes quatro números existiam desde 07/09 e NÃO tinham tela: mudar a escada
-       de toques era deploy. Parametrizar só vale se o dono alcançar o número. -->
-  <div class="fsec" style="margin-top:.9rem">
-    <div class="sh"><b>Prazos do follow-up</b><span class="mut" style="font-size:.76rem">a chave de ligar fica na aba Follow-up — aqui só os números</span></div>
-    <div class="fgrid" style="grid-template-columns:repeat(2,1fr);gap:.8rem;margin-top:.5rem">
-      <div>
-        <label class="lbl lblp">Proposta parada cobra depois de (dias)
-          <span class="rg-proc {% if not fup.proposta.herda %}seu{% endif %}">{% if fup.proposta.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
-        <input class="fld" name="fu_proposta_dias" value="{{ fup.proposta.v }}" placeholder="{{ fup.proposta.ph }}">
-      </div>
-      <div>
-        <label class="lbl lblp">Escada de toques, em dias
-          <span class="rg-proc {% if not fup.toques.herda %}seu{% endif %}">{% if fup.toques.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
-        <input class="fld" name="fu_toques_dias" value="{{ fup.toques.v }}" placeholder="{{ fup.toques.ph }}">
-        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Separe por vírgula. <b>1,3,7</b> = três tentativas em D1, D3 e D7.</p>
-      </div>
-      {% if fup.festa.tem %}
-      <div>
-        <label class="lbl lblp">Data do evento perto aperta o prazo (dias)
-          <span class="rg-proc {% if not fup.festa.herda %}seu{% endif %}">{% if fup.festa.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
-        <input class="fld" name="fu_festa_dias" value="{{ fup.festa.v }}" placeholder="{{ fup.festa.ph }}">
-      </div>
-      {% endif %}
-      <div>
-        <label class="lbl">Temperatura pelos fatos da conversa</label>
-        <select class="rg-sel" name="temperatura_modo" style="width:100%">
-          <option value="off" {% if cfg.temperatura_modo not in ('observando','ligado') %}selected{% endif %}>desligada — a de hoje</option>
-          <option value="observando" {% if cfg.temperatura_modo == 'observando' %}selected{% endif %}>em ensaio — calcula e mostra, não grava</option>
-          <option value="ligado" {% if cfg.temperatura_modo == 'ligado' %}selected{% endif %}>ligada — grava, com histórico</option>
-        </select>
-        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente = o {{ voc.cliente }}
-          falou há pouco. Frio = não respondeu às tentativas, ou sumiu.
-          {% if cfg.temperatura_modo not in ('observando','ligado') %}<b>Desligada, todo {{ voc.lead }} é carimbado quente ao entrar no funil e nada esfria.</b>
-          Comece pelo ensaio.{% endif %}</p>
-      </div>
-      <div>
-        <label class="lbl lblp">Horas desde a fala do {{ voc.cliente }} que ainda é quente
-          <span class="rg-proc {% if 'temp_quente_h' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_quente_h' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
-        <input class="fld" name="temp_quente_h" value="{{ cfg.temp_quente_h if 'temp_quente_h' in escolhidas_tpl else '' }}"
-               placeholder="{{ padrao_tpl.temp_quente_h or 48 }}" inputmode="numeric">
-      </div>
-      <div>
-        <label class="lbl lblp">Dias sem o {{ voc.cliente }} falar até esfriar
-          <span class="rg-proc {% if 'temp_morno_dias' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_morno_dias' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
-        <input class="fld" name="temp_morno_dias" value="{{ cfg.temp_morno_dias if 'temp_morno_dias' in escolhidas_tpl else '' }}"
-               placeholder="{{ padrao_tpl.temp_morno_dias or 7 }}" inputmode="numeric">
-      </div>
-      <div>
-        <label class="lbl lblp">Tentativas sem resposta que esfriam
-          <span class="rg-proc {% if 'temp_frio_tentativas' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_frio_tentativas' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
-        <input class="fld" name="temp_frio_tentativas" value="{{ cfg.temp_frio_tentativas if 'temp_frio_tentativas' in escolhidas_tpl else '' }}"
-               placeholder="{{ padrao_tpl.temp_frio_tentativas or 3 }}" inputmode="numeric">
-      </div>
-      <div>
-        <label class="lbl">Ordem da fila do vendedor</label>
-        <select class="rg-sel" name="fila_modo" style="width:100%">
-          <option value="prazo" {% if cfg.fila_modo != 'temperatura' %}selected{% endif %}>por prazo — a de sempre</option>
-          <option value="temperatura" {% if cfg.fila_modo == 'temperatura' %}selected{% endif %}>por temperatura — quente primeiro</option>
-        </select>
-        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente esperando você ·
-          tarefa atrasada · quente vencendo · respondeu e espera · morno com chance · o resto.
-          <b>Muda o que a equipe vê primeiro de manhã.</b></p>
-      </div>
-      <div>
-        <label class="lbl lblp">Teto de {{ voc.leads }} cobrados por vendedor / dia
-          <span class="rg-proc {% if not fup.teto.herda %}seu{% endif %}">{% if fup.teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
-        <input class="fld" name="fu_teto_dia" value="{{ fup.teto.v }}" placeholder="{{ fup.teto.ph }}">
-      </div>
-    </div>
-  </div>
-
-  <div style="margin-top:1rem"><button class="pbtn">Salvar régua</button></div>
-  </form>
-
-  <!-- ---------------- o modelo do ramo ----------------
-       As colunas que o RAMO usa (finance.raio_x_perfil.etapas_padrao). Conta nova
-       já nasce assim; quem já existe vê aqui o que mudaria e marca o que quer.
-       Nada é aplicado sem marcar, e NENHUMA etapa é apagada — a que não está no
-       modelo é proposta pra sair do quadro, com os leads intactos. -->
-  <div class="fsec" id="modelo" style="margin-top:1.1rem">
-    <div class="sh"><b>O modelo do seu ramo</b><span class="mut" style="font-size:.76rem">as colunas que {{ rot_ramo }} costuma usar</span></div>
-    {% if not modelo.itens %}
-    <p class="mut" style="margin:.5rem 0 0;font-size:.85rem">
-      Seu funil já está igual ao modelo de {{ rot_ramo }}: {{ modelo.colunas|join(' · ') }}.
-      {% if modelo.fora %}<br>Fora do quadro: {{ modelo.fora|join(' · ') }}.{% endif %}
-    </p>
-    {% else %}
-    <p class="mut" style="margin:.5rem 0 .7rem;font-size:.85rem">
-      O modelo de {{ rot_ramo }} é <b>{{ modelo.colunas|join(' · ') }}</b>{% if modelo.fora %},
-      com <b>{{ modelo.fora|join(' · ') }}</b> fora do quadro{% endif %}.
-      Marque o que quiser adotar — <b>nada é apagado</b>: etapa que sai do quadro
-      continua no cadastro, na busca, nos relatórios e na ficha.
-    </p>
-    <form method="post" action="/painel/prospeccao/regua/modelo">
-      {% for it in modelo.itens %}
-      <label class="chk mod-l" style="display:flex;align-items:flex-start;gap:.55rem;padding:.5rem 0;border-top:1px solid var(--borda);cursor:pointer">
-        <input type="checkbox" name="itens" value="{{ it.id }}" {% if it.marcado %}checked{% endif %}
-               style="width:auto;margin:.2rem 0 0;accent-color:var(--verde);flex:0 0 auto">
-        <span style="flex:1;min-width:0">
-          <span style="font-size:.86rem">{{ it.texto }}</span>
-          {% if it.leads %}<span class="mut" style="font-size:.74rem"> · {{ it.leads }} {{ voc.lead }}{% if it.leads != 1 %}s{% endif %}</span>{% endif %}
-          {% if it.nota %}<br><span class="mut" style="font-size:.74rem">{{ it.nota }}</span>{% endif %}
-        </span>
-      </label>
-      {% endfor %}
-      <div style="display:flex;justify-content:flex-end;margin-top:.8rem">
-        <button class="pbtn">Adotar o que marquei</button>
-      </div>
-    </form>
-    {% endif %}
-  </div>
-
-  <!-- ---------------- etapas ---------------- -->
-  <div class="fsec" style="margin-top:1.1rem">
-    <div class="sh"><b>As etapas do funil</b><span class="mut" style="font-size:.76rem">cada linha salva sozinha · ligue um gatilho de cada vez</span></div>
-    {% set fases = [('venda','Fase · Venda','o lead ainda está sendo conquistado'),
-                    ('fechamento','Fase · Fechamento','relatório e comissão contam a partir daqui'),
-                    ('pos','Fase · Pós-venda','já é cliente — continua contando como fechado · muda pelo seletor na linha')] %}
-    {% for fchave, ftit, fnota in fases %}
-      {% set doFase = etapas | selectattr('fase','equalto',fchave) | list %}
-      {% if doFase %}
-      <div class="rg-grp"><b style="color:var(--txt-mut)">{{ ftit }}</b><span></span><span class="mut" style="font-size:.72rem;flex:0 0 auto">{{ fnota }}</span></div>
-      {% for e in doFase %}
-      <form class="rg-etapa" onsubmit="return rgSalvar(event)"
-            action="/painel/prospeccao/regua/etapa/{{ e.id }}" method="post"
-            style="padding:.65rem 0;border-top:1px solid var(--borda)">
-        <div class="rg-r1">
-          <span class="tdot" style="background:{{ '#25D366' if e.fase!='venda' else '#229ED9' }}"></span>
-          <!-- `flex-wrap` porque esta célula é o `1fr` de um grid de 4 colunas e
-               agora carrega três controles: com o seletor de fase, em tela estreita
-               a linha estouraria a coluna em vez de quebrar. -->
-          <span style="display:flex;align-items:center;gap:.5rem;min-width:0;flex-wrap:wrap">
-            <!-- a CHAVE saiu da vista em 27/09/2026 e ficou na dica: depois das
-                 renomeações do funil novo ela contradizia o nome ("Visita marcada ·
-                 qualificado", "Data segurada · evento_realizado"). -->
-            <input class="fld" name="rotulo" value="{{ e.rotulo }}" style="max-width:240px;min-width:0"
-                   title="chave interna: {{ e.chave }}">
-            {% if e.fixa %}<span class="rg-tag" style="background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut)">fixa</span>
-            {% else %}
-            <!-- A FASE, editável desde 12/09/2026. Antes só se escolhia ao criar a
-                 etapa, e "Evento A Realizar" da Prime ficou presa em 'venda' — as 5
-                 festas já contratadas dela não contavam nos ganhos do mês. -->
-            <select class="rg-uni" name="fase" title="o que está aqui já está vendido?">
-              <option value="venda" {% if e.fase=='venda' %}selected{% endif %}>ainda é venda</option>
-              <option value="pos" {% if e.fase=='pos' %}selected{% endif %}>já vendido · pós-venda</option>
-            </select>
-            {% endif %}
-          </span>
-          <span style="display:flex;gap:.3rem">
-            <input class="fld" name="prazo_n" value="{{ e.prazo_n }}" style="text-align:right;width:56px"
-                   {% if e.chave in ('ganho','perdido') %}disabled placeholder="—"{% endif %}>
-            <select class="rg-uni" name="prazo_u" {% if e.chave in ('ganho','perdido') %}disabled{% endif %}>
-              {% for u, r in unidades %}<option value="{{ u }}" {% if e.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
-            </select>
-          </span>
-          <span class="num" style="text-align:right;font-size:.95rem;color:{{ 'var(--txt-mut)' if not e.n else 'var(--txt)' }}">{{ e.n }}<span class="mut" style="display:block;font-size:.66rem;line-height:1.1">{{ voc.lead if e.n == 1 else voc.leads }}</span></span>
-        </div>
-        <div style="display:flex;align-items:center;gap:.5rem;margin:.45rem 0 0 1.35rem;flex-wrap:wrap">
-          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--txt-mut);cursor:pointer">
-            <input type="checkbox" name="gatilho_ativo" value="1" {% if e.gatilho_ativo %}checked{% endif %}
-                   style="width:auto;margin:0;accent-color:var(--azul)">
-            entra sozinho quando
-          </label>
-          <select class="rg-sel" name="gatilho" style="flex:1;min-width:260px">
-            <option value="">— só na mão —</option>
-            {% for ev, rot in eventos %}<option value="{{ ev }}" {% if e.gatilho==ev %}selected{% endif %}>{{ rot }}</option>{% endfor %}
-          </select>
-        </div>
-        {% if e.chave not in ('ganho','perdido') %}
-        <!-- O TETO DE DIAS. É propriedade de QUALQUER etapa, não "a regra do
-             Contactado": o teto de 21 dias da Prime é 7 dias × 2 renovações
-             preenchido aqui, e outra empresa põe outro número — ou nenhum. -->
-        <div style="display:flex;align-items:center;gap:.5rem;margin:.45rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
-          <span>no máximo</span>
-          <input class="fld" name="teto_dias" value="{{ e.teto_dias or '' }}" placeholder="—"
-                 style="width:54px;text-align:right" inputmode="numeric">
-          <span>dias aqui, com</span>
-          <input class="fld" name="renovacoes_max" value="{{ e.renovacoes_max or 0 }}"
-                 style="width:46px;text-align:right" inputmode="numeric">
-          <span>renovação(ões){% if e.teto_dias %} · total de <b style="color:var(--txt)">{{ e.teto_total }} dias</b>{% endif %}</span>
-          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
-            <input type="checkbox" name="exige_justificativa" value="1" {% if e.exige_justificativa %}checked{% endif %}
-                   style="width:auto;margin:0;accent-color:var(--ambar)">
-            exigir justificativa pra renovar
-          </label>
-          <span class="mut" style="font-size:.7rem">em branco = sem teto</span>
-        </div>
-        <!-- AS SAÍDAS (migração 232). Nenhuma marcada = pode ir pra qualquer lugar,
-             que é como o funil sempre funcionou. A trava é do servidor: esconder a
-             coluna na tela não impediria o arrastar, que é um POST. -->
-        <div style="display:flex;align-items:center;gap:.5rem;margin:.4rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
-          <span>daqui a mão só leva para</span>
-          {% for d in etapas if d.chave != e.chave %}
-          <label class="chk" style="display:inline-flex;align-items:center;gap:.3rem;cursor:pointer">
-            <input type="checkbox" name="saidas" value="{{ d.chave }}"
-                   {% if d.chave in e.saidas_lista %}checked{% endif %}
-                   style="width:auto;margin:0;accent-color:var(--verde)">{{ d.rotulo }}
-          </label>
-          {% endfor %}
-          <span class="mut" style="font-size:.7rem">nenhuma marcada = qualquer uma</span>
-        </div>
-        <!-- AS TENTATIVAS COMO TAREFAS (migração 233). Preenchido, a escada passa a
-             ser contada da ENTRADA nesta etapa — é o "D1, D3 e D7, total de 7 dias"
-             do documento. Vazio, vale a escada relativa à conversa de sempre. -->
-        <div style="display:flex;align-items:center;gap:.5rem;margin:.4rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
-          <span>tentativas em (dias após entrar aqui)</span>
-          <input class="fld" name="toques_dias" value="{{ e.toques_dias or '' }}" placeholder="ex.: 1,3,7"
-                 style="width:110px">
-          <span class="mut" style="font-size:.7rem">em branco = usa a escada do Follow-up</span>
-          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
-            <input type="checkbox" name="exige_motivo" value="1" {% if e.exige_motivo %}checked{% endif %}
-                   style="width:auto;margin:0;accent-color:var(--coral)">
-            exigir motivo pra entrar aqui
-          </label>
-          <span>·</span>
-          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
-            <input type="checkbox" name="sai_do_quadro" value="1" {% if e.sai_do_quadro %}checked{% endif %}
-                   style="width:auto;margin:0;accent-color:var(--azul)">
-            não mostrar no quadro
-          </label>
-          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
-            <input type="checkbox" name="agenda_ao_entrar" value="1" {% if e.agenda_ao_entrar %}checked{% endif %}
-                   style="width:auto;margin:0;accent-color:var(--verde)">
-            criar o compromisso na Agenda
-          </label>
-          <span>·</span>
-          <span>se o {{ voc.cliente }} voltar a falar daqui, leva para</span>
-          <select class="rg-uni" name="reativa_para">
-            <option value="">— não reativa —</option>
-            {% for d in etapas if d.chave != e.chave %}
-            <option value="{{ d.chave }}" {% if e.reativa_para==d.chave %}selected{% endif %}>{{ d.rotulo }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        {% endif %}
-        <div style="display:flex;justify-content:flex-end;margin-top:.4rem">
-          <button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem">Salvar</button>
-        </div>
-      </form>
-      {% endfor %}
-      {% endif %}
-    {% endfor %}
-
-    <form method="post" action="/painel/prospeccao/etapas/nova" style="display:flex;gap:.5rem;align-items:center;margin-top:1rem;padding-top:.85rem;border-top:1px solid var(--borda);flex-wrap:wrap">
-      <input class="fld" name="rotulo" placeholder="Nome da etapa nova" style="max-width:230px">
-      <select class="rg-uni" name="fase"><option value="venda">na fase de venda</option><option value="pos">na pós-venda</option></select>
-      <button class="pbtn novo">+ Nova etapa</button>
-      <span class="mut" style="font-size:.78rem">só remove etapa vazia · as fixas só renomeiam</span>
-    </form>
-  </div>
-
   <!-- ---------------- motivos de perda ----------------
        A lista é DA CONTA (migração 235). Nasce com a do ramo e daqui em diante é
        dela: liga, desliga, renomeia, reordena e acrescenta. A CHAVE nunca muda —
        é ela que está gravada em todo lead já perdido. -->
-  <div class="fsec" style="margin-top:1.1rem">
+  <div class="fsec" id="motivos" style="margin-top:1.1rem">
     <div class="sh"><b>Por que perdemos</b><span class="mut" style="font-size:.76rem">a lista que o vendedor escolhe ao encerrar um {{ voc.lead }} · cada linha salva sozinha</span></div>
     {# O MODELO DO RAMO, PROS MOTIVOS (14/09/2026). As etapas tinham isto desde
        11/09; esta lista não tinha nada, então quem trocou de ramo — ou abriu a tela
@@ -18672,6 +18688,150 @@ function rgSalvar(ev){ev.preventDefault();var f=ev.target;
 {% endblock %}"""
 
 _env.loader.mapping["prospeccao_regua"] = _REGUA_TPL
+
+#: UMA ETAPA NA RÉGUA (27/09/2026, mockup docs/mockups/regua_funil_reorganizada.html).
+#: Era um formulário de seis linhas por etapa — a maior parte das 18 páginas do PDF da
+#: Prime. Agora é uma linha (nome, quando entra sozinha, teto, leads) e o resto em
+#: "mais regras", recolhido. Regra em uso vira selo na linha, pra ninguém precisar
+#: abrir pra saber. Os campos e a rota são os mesmos: recolher não tira do formulário,
+#: então salvar continua mandando tudo.
+#:
+#: Fechado e Perdido (as de resultado) não têm "mais regras": só rótulo e gatilho,
+#: como antes. As regras deles aparecem como selo e o servidor as mantém ao salvar
+#: (`regua_etapa`, conserto do mesmo dia).
+_REGUA_ETAPA_TPL = """
+<form class="rg-etapa" onsubmit="return rgSalvar(event)"
+      action="/painel/prospeccao/regua/etapa/{{ e.id }}" method="post">
+  {% set resultado = e.chave in ('ganho','perdido') %}
+  <div class="rg-lin">
+    <span class="tdot" style="background:{{ '#25D366' if e.fase!='venda' else '#229ED9' }}"></span>
+    <div style="min-width:0">
+      {# a CHAVE saiu da vista em 27/09/2026 e ficou na dica: depois das
+           renomeações do funil novo ela contradizia o nome ("Visita marcada ·
+           qualificado", "Data segurada · evento_realizado"). #}
+      <input class="fld" name="rotulo" value="{{ e.rotulo }}" style="max-width:220px;min-width:0"
+             title="chave interna: {{ e.chave }}">
+      <div class="rg-selos">
+        {% if e.exige_motivo %}<span class="rg-selo c">pede motivo</span>{% endif %}
+        {% if e.reativa_para %}<span class="rg-selo c">reabre em {% for d in etapas if d.chave == e.reativa_para %}{{ d.rotulo }}{% else %}{{ e.reativa_para }}{% endfor %} se voltar a falar</span>{% endif %}
+        {% if e.agenda_ao_entrar %}<span class="rg-selo v">cria compromisso</span>{% endif %}
+        {% if e.saidas_lista %}<span class="rg-selo">só leva pra {{ e.saidas_lista|length }} etapa{{ 's' if e.saidas_lista|length != 1 }}</span>{% endif %}
+        {% if e.toques_dias %}<span class="rg-selo">tentativas em {{ e.toques_dias }}</span>{% endif %}
+        {% if e.prazo_n %}<span class="rg-selo">prazo {{ e.prazo_n }} {{ (unidades|selectattr(0,'equalto',e.prazo_u)|map(attribute=1)|first) or e.prazo_u }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="rg-gat">
+      <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;margin:0;font-size:.74rem;color:var(--txt-mut);cursor:pointer;flex:0 0 auto" title="entra sozinho quando">
+        <input type="checkbox" name="gatilho_ativo" value="1" {% if e.gatilho_ativo %}checked{% endif %}
+               style="width:auto;min-height:0;margin:0;accent-color:var(--azul)">
+        <span class="rg-so-cel">entra sozinho quando</span>
+      </label>
+      <select class="rg-sel" name="gatilho" style="flex:1;min-width:0">
+        <option value="">— só na mão —</option>
+        {% for ev, rot in eventos %}<option value="{{ ev }}" {% if e.gatilho==ev %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="rg-teto">{% if resultado %}—{% elif e.teto_dias %}<b>{{ e.teto_dias }}</b> dias{% if e.renovacoes_max %} × {{ e.renovacoes_max + 1 }} = {{ e.teto_total }}{% endif %}{% if e.exige_justificativa %}<span class="rg-selo" style="display:table;margin-top:.2rem">pede justificativa</span>{% endif %}{% else %}sem teto{% endif %}</div>
+    <div class="num rg-n" style="color:{{ 'var(--txt-mut)' if not e.n else 'var(--txt)' }}">{{ e.n }}<span class="mut">{{ voc.lead if e.n == 1 else voc.leads }}</span></div>
+    <div class="rg-salvar"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.76rem">Salvar</button></div>
+  </div>
+  {% if not resultado %}
+  <details class="rg-mais">
+    <summary>mais regras</summary>
+    <div class="rg-mais-c">
+      {# O TETO DE DIAS. É propriedade de QUALQUER etapa, não "a regra do
+           Contactado": o teto de 21 dias da Prime é 7 dias × 2 renovações
+           preenchido aqui, e outra empresa põe outro número — ou nenhum. #}
+      <div class="rg-li">
+        <span>no máximo</span>
+        <input class="fld" name="teto_dias" value="{{ e.teto_dias or '' }}" placeholder="—"
+               style="width:54px;text-align:right" inputmode="numeric">
+        <span>dias aqui, com</span>
+        <input class="fld" name="renovacoes_max" value="{{ e.renovacoes_max or 0 }}"
+               style="width:46px;text-align:right" inputmode="numeric">
+        <span>renovação(ões){% if e.teto_dias %} · total de <b style="color:var(--txt)">{{ e.teto_total }} dias</b>{% endif %}</span>
+        <label class="chk rg-cx">
+          <input type="checkbox" name="exige_justificativa" value="1" {% if e.exige_justificativa %}checked{% endif %}
+                 style="width:auto;min-height:0;margin:0;accent-color:var(--ambar)">
+          exigir justificativa pra renovar
+        </label>
+        <span class="mut" style="font-size:.7rem">em branco = sem teto</span>
+      </div>
+      {# AS TENTATIVAS COMO TAREFAS (migração 233). Preenchido, a escada passa a
+           ser contada da ENTRADA nesta etapa. Vazio, vale a escada da esteira. #}
+      <div class="rg-li">
+        <span>tentativas em (dias após entrar aqui)</span>
+        <input class="fld" name="toques_dias" value="{{ e.toques_dias or '' }}" placeholder="ex.: 1,3,7"
+               style="width:110px">
+        <span class="mut" style="font-size:.7rem">em branco = usa a escada da esteira</span>
+      </div>
+      <div class="rg-li">
+        <label class="chk rg-cx">
+          <input type="checkbox" name="exige_motivo" value="1" {% if e.exige_motivo %}checked{% endif %}
+                 style="width:auto;min-height:0;margin:0;accent-color:var(--coral)">
+          exigir motivo pra entrar aqui
+        </label>
+        <label class="chk rg-cx">
+          <input type="checkbox" name="agenda_ao_entrar" value="1" {% if e.agenda_ao_entrar %}checked{% endif %}
+                 style="width:auto;min-height:0;margin:0;accent-color:var(--verde)">
+          criar o compromisso na Agenda
+        </label>
+        <label class="chk rg-cx">
+          <input type="checkbox" name="sai_do_quadro" value="1" {% if e.sai_do_quadro %}checked{% endif %}
+                 style="width:auto;min-height:0;margin:0;accent-color:var(--azul)">
+          não mostrar no quadro
+        </label>
+      </div>
+      <div class="rg-li">
+        <span>se o {{ voc.cliente }} voltar a falar daqui, leva para</span>
+        <select class="rg-uni" name="reativa_para">
+          <option value="">— não reativa —</option>
+          {% for d in etapas if d.chave != e.chave %}
+          <option value="{{ d.chave }}" {% if e.reativa_para==d.chave %}selected{% endif %}>{{ d.rotulo }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {# AS SAÍDAS (migração 232). Nenhuma marcada = pode ir pra qualquer lugar,
+           que é como o funil sempre funcionou. A trava é do servidor: esconder a
+           coluna na tela não impediria o arrastar, que é um POST. Em 27/09/2026
+           nenhuma etapa de nenhuma conta usava — por isso a lista abre só se pedir. #}
+      <details class="rg-saidas" {% if e.saidas_lista %}open{% endif %}>
+        <summary>daqui a mão só leva para: <b>{% if e.saidas_lista %}{% for d in etapas if d.chave in e.saidas_lista %}{{ d.rotulo }}{{ ', ' if not loop.last }}{% endfor %}{% else %}qualquer etapa{% endif %}</b></summary>
+        <div class="rg-li" style="margin-top:.35rem">
+          {% for d in etapas if d.chave != e.chave %}
+          <label class="chk rg-cx">
+            <input type="checkbox" name="saidas" value="{{ d.chave }}"
+                   {% if d.chave in e.saidas_lista %}checked{% endif %}
+                   style="width:auto;min-height:0;margin:0;accent-color:var(--verde)">{{ d.rotulo }}
+          </label>
+          {% endfor %}
+          <span class="mut" style="font-size:.7rem">nenhuma marcada = qualquer uma</span>
+        </div>
+      </details>
+      <div class="rg-li">
+        {% if e.fixa %}<span class="rg-tag" style="background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut)">fixa</span>
+        {% else %}
+        {# A FASE, editável desde 12/09/2026. Antes só se escolhia ao criar a
+             etapa, e "Evento A Realizar" da Prime ficou presa em 'venda' — as 5
+             festas já contratadas dela não contavam nos ganhos do mês. #}
+        <span>o que está aqui</span>
+        <select class="rg-uni" name="fase" title="o que está aqui já está vendido?">
+          <option value="venda" {% if e.fase=='venda' %}selected{% endif %}>ainda é venda</option>
+          <option value="pos" {% if e.fase=='pos' %}selected{% endif %}>já vendido · pós-venda</option>
+        </select>
+        {% endif %}
+        <span>· prazo pra Cobrança por prazo</span>
+        <input class="fld" name="prazo_n" value="{{ e.prazo_n }}" style="text-align:right;width:56px" placeholder="—">
+        <select class="rg-uni" name="prazo_u">
+          {% for u, r in unidades %}<option value="{{ u }}" {% if e.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+        <span class="mut" style="font-size:.7rem">{{ 'desligada' if cfg.cobranca_modo not in ('observando','ligado') else 'em branco = sem prazo' }}</span>
+      </div>
+    </div>
+  </details>
+  {% endif %}
+</form>"""
+_env.loader.mapping["regua_etapa_linha"] = _REGUA_ETAPA_TPL
 
 
 _RITMO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """

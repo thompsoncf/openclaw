@@ -3442,6 +3442,33 @@ def cockpit_excluir_tela(request: Request, ev_id: int):
     return _page("Excluir visita", corpo)
 
 
+@router.post("/cockpit/lead/{lead_id}/lista-espera")
+def cockpit_lista_espera(request: Request, lead_id: int):
+    """O cliente aceitou esperar a data que pediu (lista de espera, funil novo parte
+    2b): o card vai pra coluna Lista de espera. Só o dono do card ou a gestão."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    from finance import lista_espera as _le
+    pool = get_pool()
+    if not g:
+        with pool.connection() as c:
+            dono = c.execute("select vendedor_id from prospeccao where id=%s and conta_id=%s",
+                             (lead_id, conta_id)).fetchone()
+        if not dono or dono[0] != membro_id:
+            request.session["ck_err"] = "Esse card não é seu."
+            return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
+    r = _le.aceitar(pool, conta_id, lead_id, membro_id)
+    if r.get("ok"):
+        request.session["ck_ok"] = (f"Na lista de espera de {r['data']:%d/%m} ✓ "
+                                    "Você é avisado quando a data abrir.")
+    else:
+        request.session["ck_err"] = r.get("erro") or "Não deu pra pôr na lista de espera."
+    return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
+
+
 @router.post("/cockpit/agenda/{ev_id}/confirmada")
 def cockpit_visita_confirmada(request: Request, ev_id: int):
     """O vendedor já confirmou a visita pelo celular dele: as mensagens de
@@ -6469,7 +6496,8 @@ def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
         dia = d.get("evento_em")
         if not conta_id or not dia:
             return ""
-        st = _le.data_tomada(get_pool(), conta_id, dia)
+        # do ponto de vista DESTE lead: a pré-reserva dele não é "data tomada"
+        st = _le.tomada_para(get_pool(), conta_id, lead_id, dia)
         if st is None:
             return ""
         esperando = _le.esperando_por(get_pool(), conta_id, lead_id)
@@ -6482,7 +6510,16 @@ def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
         chips = "".join(
             f"<span>{x['data']:%d/%m}</span>" for x in livres)
         o_que = esc(st["o_que"]) if st["o_que"] else "festa"
-        na_lista = ("<span>Na lista de espera desta data ✓</span>" if dia in esperando else "")
+        # A COLUNA LISTA DE ESPERA (funil novo, parte 2b): o card só vai pra ela
+        # quando o cliente ACEITA esperar — é o botão. Quem já está nela vê isso.
+        if d.get("status") == _le.COLUNA:
+            na_lista = "<span>⏳ Na coluna Lista de espera ✓ O sistema avisa quando a data abrir.</span>"
+        else:
+            na_lista = (f"<form method=post action='{_BASE}/lead/{lead_id}/lista-espera' "
+                        "style='margin:0'><button class=pb2 type=submit>⏳ O "
+                        + _p('cliente') + " aceita esperar esta data</button></form>")
+        if st.get("reserva_vence"):
+            o_que += f" (a reserva vence {st['reserva_vence']:%d/%m})"
         return ("<div class=le>"
                 f"<span>📅 <b>Data tomada</b> — {dia:%d/%m} já tem {o_que}.</span>"
                 + (f"<span>Datas livres perto:</span><div class=liv>{chips}</div>" if chips else "")

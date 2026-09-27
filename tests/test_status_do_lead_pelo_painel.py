@@ -368,3 +368,32 @@ def test_nenhuma_funcao_usa_um_nome_antes_do_import_local_dele():
                            f"`import` local da linha {imp}")
     assert lidos > 100, f"a varredura leu só {lidos} arquivos — o caminho mudou?"
     assert not achados, "\n".join(achados)
+
+
+# ─────────────────────────────── arrastar pra Lista de espera (revisão de 27/09/2026)
+
+def test_arrastar_pra_lista_de_espera_passa_pelo_aceitar(pool, monkeypatch):
+    """Arrastar é o mesmo que o botão "esperar": o card entra na fila da data, ou não
+    entra e o quadro diz por quê. Antes ele caía na coluna sem posição na fila, e 2
+    min depois voltava pra Proposta com a nota "a data mudou"."""
+    from finance import lista_espera as le
+    with pool.connection() as c:
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa, fase, semeado_de)
+                     select %s, 'lista_espera', 'Lista de espera', 908, false, 'venda', 'dono'
+                      where not exists (select 1 from funil_etapas
+                                         where conta_id=%s and chave='lista_espera')""",
+                  (CONTA, CONTA))
+        c.commit()
+    lid = _lead(pool, status="contatado")
+    chamadas = []
+    monkeypatch.setattr(le, "usa_lista", lambda pool_, conta: True)
+    monkeypatch.setattr(le, "aceitar", lambda pool_, conta, lead, membro=None: chamadas.append(lead)
+                        or {"ok": False, "erro": "A data 13/02 está livre: dá pra seguir a venda."})
+    r = _mudar(_cliente(monkeypatch), lid, le.COLUNA)
+    assert r.status_code == 400 and r.json()["msg"] == "A data 13/02 está livre: dá pra seguir a venda."
+    assert chamadas == [lid]
+    assert _estado(pool, lid)[0] == "contatado"                 # não se moveu
+    assert _movimentos(pool, lid) == []
+    monkeypatch.setattr(le, "aceitar", lambda pool_, conta, lead, membro=None: {"ok": True})
+    r = _mudar(_cliente(monkeypatch), lid, le.COLUNA)
+    assert r.status_code == 200 and r.json()["ok"] is True

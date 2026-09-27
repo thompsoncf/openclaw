@@ -1200,12 +1200,23 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             _cf.commit()
     except Exception:  # noqa: BLE001
         selo_festa = {}
+    # A FESTA ACONTECEU? (revisão de 27/09/2026, finance/festa_aconteceu.py): a festa
+    # passou e ninguém respondeu — o selo com os três botões. Tolerante como os outros.
+    selo_aconteceu: dict = {}
+    try:
+        from finance import festa_aconteceu as _fac
+        with pool.connection() as _cf:
+            selo_aconteceu = _fac.selos(_cf, conta_id, [x["id"] for x in todos_cards + outros_vend])
+            _cf.commit()
+    except Exception:  # noqa: BLE001
+        selo_aconteceu = {}
     for cc in todos_cards + outros_vend:
         cc["tri"] = tri_por.get(cc["id"]) or {"trilha": "vend"}
         cc["sup"] = cc["id"] in sup_ids
         cc["selo_visita"] = selo_visita.get(cc["id"])
         cc["selo_data"] = selo_data.get(cc["id"])
         cc["selo_festa"] = selo_festa.get(cc["id"])
+        cc["selo_aconteceu"] = selo_aconteceu.get(cc["id"])
 
     def _no_quadro(cc, com_trilha=True):
         return (_visivel(cc) and _passa_mes(cc) and _busca_bate(cc, busca_n, busca_dig)
@@ -9139,6 +9150,33 @@ def prospeccao_lista_espera(request: Request, lead_id: int):
     return RedirectResponse("/painel/prospeccao", status_code=303)
 
 
+@router.post("/painel/prospeccao/{lead_id}/festa-aconteceu")
+def prospeccao_festa_aconteceu(request: Request, lead_id: int, resposta: str = Form("")):
+    """A FESTA ACONTECEU? (finance/festa_aconteceu.py, revisão de 27/09/2026): a
+    resposta da equipe, pelo selo do card. A gestão, ou o dono do card. Síncrona:
+    o banco não roda no event loop (tests/test_event_loop_nao_trava.py)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    from finance import festa_aconteceu as _fac
+    pool = get_pool()
+    if not ctx["gerencia"]:
+        with pool.connection() as c:
+            dono = c.execute("select vendedor_id from prospeccao where id=%s and conta_id=%s",
+                             (lead_id, ctx["conta_id"])).fetchone()
+        if not dono or dono[0] != ctx.get("membro_id"):
+            request.session["prosp_aviso"] = "Esse card não é seu."
+            return RedirectResponse("/painel/prospeccao", status_code=303)
+    r = _fac.responder(pool, ctx["conta_id"], lead_id, resposta, ctx.get("membro_id"))
+    request.session["prosp_aviso"] = (
+        ("A festa aconteceu ✓ O card foi pro Pós-festa e o agradecimento sai."
+         if r.get("para") else "A festa aconteceu ✓")
+        if r.get("ok") and resposta == "aconteceu"
+        else "Anotado ✓ O card fica onde está, com a nota." if r.get("ok")
+        else (r.get("erro") or "Não deu pra registrar."))
+    return RedirectResponse("/painel/prospeccao", status_code=303)
+
+
 @router.post("/painel/prospeccao/regua/rotinas-festa")
 def regua_rotinas_festa(request: Request, confirmar: str = Form(""),
                         perguntar_veio: str = Form(""), depois_visita: str = Form(""),
@@ -10302,7 +10340,22 @@ async def prospeccao_status(request: Request, alvo_id: int):
     with pool.connection() as c:
         recusa = _fr.recusa_de_saida(c, ctx["conta_id"], alvo["status"], status)
     if recusa:
+        # o quadro recarrega na recusa: o motivo vai no aviso do topo, senão o card
+        # voltava pra coluna de origem sem uma palavra (revisão de 27/09/2026)
+        request.session["prosp_aviso"] = recusa
         return JSONResponse({"ok": False, "erro": "saida", "msg": recusa}, status_code=400)
+    # ARRASTAR PRA LISTA DE ESPERA É O MESMO QUE O BOTÃO "esperar" (revisão de
+    # 27/09/2026): o card entra na fila da data — ou não entra, e o quadro diz por quê.
+    # Antes ele caía na coluna sem posição na fila, e 2 min depois `fora_da_espera` o
+    # devolvia pra Proposta com a nota "a data mudou", que não era verdade.
+    from finance import lista_espera as _le
+    if status == _le.COLUNA and alvo["status"] != _le.COLUNA and _le.usa_lista(pool, ctx["conta_id"]):
+        r = _le.aceitar(pool, ctx["conta_id"], alvo_id, ctx.get("membro_id"))
+        if not r.get("ok"):
+            request.session["prosp_aviso"] = r.get("erro") or "Não deu pra pôr na lista de espera."
+            return JSONResponse({"ok": False, "erro": "saida", "msg": request.session["prosp_aviso"]},
+                                status_code=400)
+        return JSONResponse({"ok": True, "status": status, "estagio": "lead"})
     # O MOTIVO, ANTES DE MOVER (migração 235). Perguntar antes é o ponto: mover o
     # card e só então descobrir que falta o motivo deixaria o lead em Perdido sem
     # ninguém ter dito por quê — que é exatamente o "limpar o funil" que a regra 5
@@ -13126,6 +13179,9 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
           {% if c.sup %}<div class="kbtri sup" title="É o número do supervisor do Resgate: não é {{ voc.cliente }} e não conta no Desafio nem no Raio-X">🧪 número do supervisor</div>{% endif %}
           {% if c.selo_visita %}<div class="kbvis {{ c.selo_visita[1] }}" title="A visita (rotinas da visita, Funil › Régua)">📍 {{ c.selo_visita[0] }}</div>{% endif %}
           {% if c.selo_festa %}<div class="kbvis {{ c.selo_festa[1] }}" title="A proposta e a data segurada (rotinas de festa, Funil › Régua)">{{ c.selo_festa[0] }}</div>{% endif %}
+          {#- A FESTA ACONTECEU? (revisão de 27/09/2026): o agradecimento ao cliente só
+             sai depois do "Aconteceu". Três botões, cada um um POST. -#}
+          {% if c.selo_aconteceu %}<div class="kbvis at" title="O card só vai pro Pós-festa, e o agradecimento só sai, depois do Aconteceu">{{ c.selo_aconteceu }}<form method="post" action="/painel/prospeccao/{{ c.id }}/festa-aconteceu" style="display:inline;margin:0" onclick="event.stopPropagation()"><button type="submit" name="resposta" value="aconteceu" class="kbperg">aconteceu</button><button type="submit" name="resposta" value="remarcou" class="kbperg">remarcou</button><button type="submit" name="resposta" value="cancelou" class="kbperg">cancelou</button></form></div>{% endif %}
           {% if c.selo_data %}<div class="kbvis {{ c.selo_data[1] }}" title="{% if c.selo_data[1] == 'bad' %}Outro {{ voc.cliente }} já tem esta data. Ofereça outra; se ele aceitar esperar, ponha na lista de espera{% else %}Lista de espera: o sistema avisa quando a data abrir{% endif %}">{{ c.selo_data[0] }}{% if c.selo_data[1] == 'bad' %}<form method="post" action="/painel/prospeccao/{{ c.id }}/lista-espera" style="display:inline;margin:0" onclick="event.stopPropagation()"><button type="submit" class="kbperg" title="O {{ voc.cliente }} aceita esperar esta data: o card vai pra Lista de espera">esperar</button></form>{% endif %}</div>{% endif %}
           <div class="kbl2">
           {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}

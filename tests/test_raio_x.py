@@ -1101,3 +1101,39 @@ def test_parado_em_casa_ignora_o_que_ainda_nao_saiu(pool):
 
     s = rx.sua_semana(pool, conta, v, ini, fim)
     assert s["parado_em_casa"] == 6 and s["parado_em_casa_n"] == 1
+
+
+def test_o_raio_x_le_as_colunas_em_jogo_do_funil_da_conta(pool):
+    """Revisão de 27/09/2026: a lista fixa (novo, contatado, qualificado, proposta)
+    deixava de fora as colunas do funil novo — 42 leads da Prime em Qualificado e
+    Visita feita. A lista passa a vir do funil da conta, menos a Lista de espera, que
+    espera a data abrir e não o vendedor."""
+    hoje = SEGUNDA_10H.date()
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        c.execute("""create table if not exists funil_etapas (id bigserial primary key,
+                       conta_id bigint, chave text, ordem int, fase text default 'venda')""")
+        for chave, ordem, fase in (("novo", 0, "venda"), ("contatado", 10, "venda"),
+                                   ("ficha_completa", 20, "venda"), ("qualificado", 30, "venda"),
+                                   ("visita_feita", 35, "venda"), ("proposta", 40, "venda"),
+                                   ("ganho", 900, "fechamento"), ("lista_espera", 908, "venda"),
+                                   ("perdido", 910, "fechamento")):
+            c.execute("insert into funil_etapas (conta_id, chave, ordem, fase) values (%s,%s,%s,%s)",
+                      (conta, chave, ordem, fase))
+        assert sorted(rx.abertos(c, conta)) == sorted(
+            ["novo", "contatado", "ficha_completa", "qualificado", "visita_feita", "proposta"])
+        # Qualificado com festa em 20 dias e sem proposta: é urgência (antes, invisível)
+        _lead(c, conta, v, "Nina", status="ficha_completa", evento_em=hoje + timedelta(days=20),
+              evento_tipo="15 anos")
+        # Visita feita com pergunta sem resposta: entra
+        ot = _lead(c, conta, v, "Otto", status="visita_feita")
+        cv = _conversa(c, conta, ot, _t(1)); _msg(c, cv, "out", _t(1)); _msg(c, cv, "in", _t(3 / 24), "e o valor?")
+        # Lista de espera com pergunta: fica fora (espera a data, não o vendedor)
+        pia = _lead(c, conta, v, "Pia", status="lista_espera")
+        cv = _conversa(c, conta, pia, _t(1)); _msg(c, cv, "out", _t(1)); _msg(c, cv, "in", _t(2 / 24), "abriu?")
+        c.commit()
+    h = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=EVENTOS)
+    assert sorted((i["faixa"], i["nome"]) for i in h["itens"]) == [("festa", "Nina"), ("pergunta", "Otto")]
+    # e a conta sem funil próprio continua com a lista padrão
+    with pool.connection() as c:
+        assert rx.abertos(c, 999999) == list(rx.ABERTOS)

@@ -1054,6 +1054,17 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
             logging.getLogger("servicos.salvar").warning(
                 "não deu pra ligar o lead %s ao orçamento %s", dados.lead_id, oid,
                 exc_info=True)
+    elif oid:
+        # O RASCUNHO FEITO FORA DO CARD (revisão de 27/09/2026): procura o card pelo
+        # telefone/e-mail, como o envio faz — um card só, sem outra proposta em cima,
+        # que não seja venda fechada. Não cria card: rascunho não é cliente novo.
+        # Idempotente (o que já tem card fica como está) e tolerante.
+        try:
+            from finance import proposta_lead as _pl
+            _pl.garantir(pool, conta[0], oid, _ator(request)[0], criar=False)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("servicos.salvar").warning(
+                "não deu pra achar o card do orçamento %s", oid, exc_info=True)
     resp = {"ok": True, "id": oid, "token": tok, "cliente_id": cliente_id}
     if reabriu and oid:
         try:

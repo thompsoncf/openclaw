@@ -203,8 +203,13 @@ def _criar(c, conta_id: int, orc: dict, membro_id: int | None) -> int:
 
 
 def garantir(pool, conta_id: int, orcamento_id: int,
-             membro_id: int | None = None) -> dict:
-    """Garante que esta proposta tem card no funil. Chamado NO ENVIO.
+             membro_id: int | None = None, criar: bool = True) -> dict:
+    """Garante que esta proposta tem card no funil. Chamado NO ENVIO — e, com
+    `criar=False`, AO SALVAR O RASCUNHO (revisão de 27/09/2026): o rascunho feito
+    direto em Orçamentos, sem sair do card, só se ligava no envio; na Prime, três do
+    Thiago ficaram soltos e o Raio-X dizia que ele não tinha orçado as visitas que
+    orçou. Sem `criar`, acha e amarra, mas nunca faz card novo — rascunho não é
+    cliente novo no funil.
 
     Devolve {"lead_id": int|None, "como": str} — `como` é um de:
       'ja_tinha'  o orçamento já estava ligado;
@@ -253,6 +258,8 @@ def garantir(pool, conta_id: int, orcamento_id: int,
                 # um card duplicado da mesma pessoa.
                 return {"lead_id": None, "como": "empate"}
 
+            if not criar:
+                return {"lead_id": None, "como": "sem_card"}
             if not (orc["empresa"] or orc["cliente"]):
                 return {"lead_id": None, "como": "sem_dados"}
             novo = _criar(c, conta_id, orc, membro_id)

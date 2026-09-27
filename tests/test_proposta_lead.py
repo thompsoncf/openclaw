@@ -553,3 +553,29 @@ def test_a_festa_da_aprovacao_acha_o_card_e_o_cliente_do_orcamento(pool):
         c.commit()
     assert prop._card_e_cliente(pool, CONTA, oid) == (lid, 94)
     assert prop._card_e_cliente(pool, CONTA + 1, oid) == (None, None)
+
+
+# ═══════════════════ o rascunho feito fora do card (revisão de 27/09/2026) ══════════
+
+def test_o_rascunho_salvo_fora_do_card_se_liga_pelo_telefone_sem_criar_card(pool):
+    """Três rascunhos do Thiago ficaram soltos na Prime: feitos direto em Orçamentos,
+    só se ligariam no envio, e o Raio-X dizia que ele não orçou as visitas que orçou.
+    Ao salvar, o rascunho acha o card pelo telefone — e nunca cria um card novo."""
+    lid = _lead(pool, empresa="Juelane", whatsapp="+55 86 98888-2564", status="visita_feita")
+    oid = _orc(pool, empresa="Juelane da Silva", whatsapp="86988882564")
+    r = pl.garantir(pool, CONTA, oid, criar=False)
+    assert r == {"lead_id": lid, "como": "ligado"}
+    assert _lead_do(pool, oid)[0] == lid
+    # sem card com o telefone: fica solto, e nenhum card nasce do rascunho
+    solto = _orc(pool, empresa="Cliente Nova", whatsapp="86977770000")
+    assert pl.garantir(pool, CONTA, solto, criar=False) == {"lead_id": None, "como": "sem_card"}
+    assert _lead_do(pool, solto) is None
+    # o card que já tem outra proposta não é roubado
+    outro = _orc(pool, empresa="Juelane de novo", whatsapp="86988882564")
+    assert pl.garantir(pool, CONTA, outro, criar=False)["lead_id"] is None
+    assert _lead_do(pool, oid)[0] == lid
+
+
+def test_salvar_o_orcamento_fora_do_card_chama_o_vinculo_sem_criar():
+    src = (Path(__file__).resolve().parents[1] / "web" / "painel_servicos.py").read_text(encoding="utf-8")
+    assert "_pl.garantir(pool, conta[0], oid, _ator(request)[0], criar=False)" in src

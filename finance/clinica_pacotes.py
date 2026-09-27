@@ -284,6 +284,15 @@ def ao_finalizar(c, conta_id: int, evento_id: int, retorno_dias: int | None = No
                             atualizado_em = now()
                       where id=%s and conta_id=%s""", (k, conta_id))
         out["pacote"] = k
+    out["retorno"] = agendar_retorno(c, conta_id, ev, retorno_dias)
+    return out
+
+
+def agendar_retorno(c, conta_id: int, ev: dict, retorno_dias: int | None) -> int | None:
+    """O retorno pedido no atendimento (a recepção ao finalizar, ou o profissional na
+    evolução assinada depois). O primeiro que chega vale (um retorno por atendimento)."""
+    out = {"retorno": None}
+    evento_id = ev["id"]
     if retorno_dias and 1 <= int(retorno_dias) <= 730:
         vence = ca.local(ev["inicio"]).date() + timedelta(days=int(retorno_dias))
         try:
@@ -297,7 +306,7 @@ def ao_finalizar(c, conta_id: int, evento_id: int, retorno_dias: int | None = No
                 out["retorno"] = r[0] if r else None
         except Exception:  # noqa: BLE001 — sem a 381
             pass
-    return out
+    return out["retorno"]
 
 
 def atrasado(c, conta_id: int, k: dict, hoje: date | None = None) -> bool:

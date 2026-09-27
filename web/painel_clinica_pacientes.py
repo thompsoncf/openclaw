@@ -131,7 +131,7 @@ def ver(request: Request, cliente_id: int):
                    aviso=_AVISOS.get(request.query_params.get("aviso") or "", ""),
                    erro=request.session.pop("pacientes_erro", ""), p=p, aba=aba,
                    abas=abas, opcoes_resp=opcoes, brl=cc.reais, gerencia=gerencia, hoje=ca.hoje_br(agora),
-                   pre=pre, pre_erro=pre_erro, ficha_ligado=ligado, link_ficha=link, SEXO=cpa.SEXO,
+                   pre=pre, pre_erro=pre_erro, ficha_ligado=ligado, link_ficha=link, SEXO=cpa.SEXO, pode_ler=pode_ler,
                    ve_registro=ve_registro)
 
 
@@ -307,7 +307,7 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="pc-topo"><div><h2>{{ p.nome_social or p.nome }}</h2>{% if p.nome_social %}<div class="sub">nome civil: {{ p.nome }}</div>{% endif %}
     <div class="sub">{% if p.idade is not none %}{{ p.idade }} anos · {% endif %}{% if p.cidade %}{{ p.cidade }} · {% endif %}{% if p.desde %}paciente desde {{ p.desde.strftime('%m/%Y') }}{% endif %}{% if p.responsavel %} · responsável: <a href="/painel/clinica/pacientes/{{ p.responsavel.id }}">{{ p.responsavel.nome }}</a>{% endif %}</div>
     {% if p.etiquetas %}<div style="margin-top:.3rem">{% for e in p.etiquetas %}<a class="pc-tag" href="/painel/clinica/pacientes?etiqueta={{ e|urlencode }}">{{ e }}</a>{% endfor %}</div>{% endif %}</div>
-    <div class="pc-acoes"><a href="/painel/clinica/pacientes">‹ Pacientes</a><a href="/painel/clinica/agenda/novo?cliente={{ p.id }}">Agendar</a>{% if ve_registro %}<a href="/painel/clinica/registro?paciente={{ p.id }}">Registro de acesso</a>{% endif %}{% if p.conversa_id %}<a href="/painel/prospeccao/comunicacao?abrir={{ p.conversa_id }}">WhatsApp</a>{% endif %}</div></div>
+    <div class="pc-acoes"><a href="/painel/clinica/pacientes">‹ Pacientes</a><a href="/painel/clinica/agenda/novo?cliente={{ p.id }}">Agendar</a>{% if pode_ler %}<a href="/painel/clinica/prontuario/{{ p.id }}">Prontuário</a>{% endif %}{% if ve_registro %}<a href="/painel/clinica/registro?paciente={{ p.id }}">Registro de acesso</a>{% endif %}{% if p.conversa_id %}<a href="/painel/prospeccao/comunicacao?abrir={{ p.conversa_id }}">WhatsApp</a>{% endif %}</div></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
   {% if p.falta %}<div class="alerta" style="margin-top:.8rem">{{ p.ficha_txt|capitalize }}. <a href="/painel/clinica/pacientes/{{ p.id }}?aba=cadastro">Completar aqui</a>
@@ -317,7 +317,7 @@ _TPL_UM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <form method="post" action="/painel/clinica/pacientes/{{ p.id }}/balcao" style="margin:0"><button class="sec">Preencher no balcão</button></form></div>
     <div class="pc-m" style="margin-top:.3rem">O paciente abre com a data de nascimento e preenche cadastro, pré-consulta e termos.</div>{% endif %}</div>
   {% elif p.situacao %}<div class="pc-m" style="margin-top:.6rem">✓ Ficha completa{% if p.situacao.pre_em %} · pré-consulta respondida em {{ p.situacao.pre_em.strftime('%d/%m') }}{% endif %}</div>{% endif %}
-  {% if p.situacao and p.situacao.alergia %}<div style="margin-top:.5rem"><span class="pc-tag y">⚠ informou alergia na pré-consulta</span></div>{% endif %}
+  {% if p.situacao and p.situacao.alergia %}<div style="margin-top:.5rem"><span class="pc-tag y">⚠ alergia (o profissional vê qual)</span></div>{% endif %}
   <div class="pc-abas">{% for k, r in abas %}<a class="{% if aba == k %}on{% endif %}" href="/painel/clinica/pacientes/{{ p.id }}?aba={{ k }}">{{ r }}</a>{% endfor %}</div>
 
   {% if aba == 'resumo' %}

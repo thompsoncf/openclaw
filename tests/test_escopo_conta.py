@@ -174,6 +174,8 @@ TABELAS: dict[str, tuple[str, ...]] = {
     "clinica_termos_aceites": ('conta_id',),  # 411: os termos aceitos no link da ficha
     "clinica_termos_modelos": ('conta_id',),  # 417: o texto dos termos da clínica
     "clinica_acessos": ('conta_id',),  # 421: o registro de acesso ao prontuário
+    "clinica_ficha_clinica": ('conta_id',),  # 423: alergias, medicamentos, problemas
+    "clinica_evolucoes": ('conta_id',),  # 423: a evolução de cada atendimento
     "clinica_pacotes": ('conta_id',),       # 381: o saldo de sessões
     "clinica_pacote_consumos": ('conta_id',),
     "clinica_retornos": ('conta_id',),

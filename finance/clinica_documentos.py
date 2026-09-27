@@ -186,9 +186,17 @@ def no_link(c, conta_id: int, cliente_id: int, agora: datetime) -> list[dict]:
     return [_doc(r) for r in rows]
 
 
-def pdf(c, conta_id: int, cliente_id: int, d: dict) -> bytes | None:
+def pdf(c, conta_id: int, cliente_id: int, d: dict, assinatura: dict | None = None) -> bytes | None:
+    """O PDF do documento emitido. Assinado com o certificado (fase 4), é o PDF assinado
+    guardado. Com `assinatura` ({titular, quando, codigo, url}) é o que VAI ser assinado:
+    sem a linha pra assinar à mão, com o QR e o código da farmácia."""
     if d["status"] != "assinado" or d["tipo"] == "notificacao":
         return None
+    if assinatura is None:
+        from finance import clinica_certificado as cert
+        feito = cert.pdf_assinado(c, conta_id, "documento", d["id"])
+        if feito:
+            return feito
     r = c.execute("""select coalesce(ct.nome,''), coalesce(p.nome, k.nome, '') from contas ct
                        left join clientes k on k.id=%s and k.dono_id = ct.id
                        left join pessoas p on p.id = k.pessoa_id
@@ -198,25 +206,53 @@ def pdf(c, conta_id: int, cliente_id: int, d: dict) -> bytes | None:
     corpo = "".join("<p>" + e(par).replace("\n", "<br>") + "</p>" for par in d["corpo"].split("\n\n") if par.strip())
     q = d["assinado_em"]
     via = (["1ª via — farmácia", "2ª via — paciente"] if d["tipo"] == "receita_controle" else [""])
-    paginas = []
-    for v in via:
-        paginas.append(
-            f"<h2>{e(empresa)}</h2>{'<p><b>' + e(v) + '</b></p>' if v else ''}<h3>{e(d['titulo'])}</h3>"
-            f"<p><b>Paciente:</b> {e(paciente)} · <b>Data:</b> {q:%d/%m/%Y}</p>{corpo}<hr>"
-            f"<p>{e(d['prof'])} · {e(d['conselho'])}<br>Emitido pelo Zaq em {q:%d/%m/%Y às %H:%M} · código "
-            f"{e(d['hash'][:16])}</p>"
-            "<p><i>Documento sem certificado digital: imprima e assine à mão.</i></p><p>&nbsp;</p>"
-            "<p>_______________________________________<br>assinatura</p>")
+    imagens = {}
+    if assinatura:
+        a = assinatura
+        rodape = (f"<p>{e(d['prof'])} · {e(d['conselho'])}<br>Assinado digitalmente (ICP-Brasil) por "
+                  f"<b>{e(a['titular'])}</b> em {ca.local(a['quando']):%d/%m/%Y às %H:%M}</p>")
+        if a.get("url") and a.get("codigo"):
+            imagens["qr.png"] = _qr(a["url"])
+            rodape += ("<table><tr><td><img src='qr.png' width='90' height='90'></td><td style='padding-left:10px'>"
+                       "Confira a assinatura em <b>validar.iti.gov.br</b>: leia o QR e informe o código "
+                       f"<b>{e(a['codigo'])}</b> (ou envie este PDF).</td></tr></table>")
+        else:
+            rodape += "<p>Confira a assinatura em <b>validar.iti.gov.br</b> (envie este PDF).</p>"
+    else:
+        rodape = (f"<p>{e(d['prof'])} · {e(d['conselho'])}<br>Emitido pelo Zaq em {q:%d/%m/%Y às %H:%M} · código "
+                  f"{e(d['hash'][:16])}</p>"
+                  "<p><i>Documento sem certificado digital: imprima e assine à mão.</i></p><p>&nbsp;</p>"
+                  "<p>_______________________________________<br>assinatura</p>")
+    paginas = [f"<h2>{e(empresa)}</h2>{'<p><b>' + e(v) + '</b></p>' if v else ''}<h3>{e(d['titulo'])}</h3>"
+               f"<p><b>Paciente:</b> {e(paciente)} · <b>Data:</b> {q:%d/%m/%Y}</p>{corpo}<hr>{rodape}" for v in via]
+    return render_pdf(paginas, imagens)
+
+
+def _qr(url: str) -> bytes:
+    import segno
+    buf = io.BytesIO()
+    segno.make(url, error="m").save(buf, kind="png", scale=6, border=2)
+    return buf.getvalue()
+
+
+def render_pdf(paginas: list[str], imagens: dict[str, bytes] | None = None) -> bytes | None:
+    """Cada item de `paginas` (HTML simples) começa numa página A4 nova."""
     try:
         import pymupdf
     except Exception:  # noqa: BLE001
         return None
+    arquivo = None
+    if imagens:
+        arquivo = pymupdf.Archive()
+        for nome, dados in imagens.items():
+            arquivo.add(dados, nome)
     buf = io.BytesIO()
     writer = pymupdf.DocumentWriter(buf)
     pagina = pymupdf.paper_rect("a4")
     onde = pagina + (50, 50, -50, -50)
     for conteudo in paginas:
-        story = pymupdf.Story(html=f"<body style='font-family:sans-serif;font-size:11pt'>{conteudo}</body>")
+        story = pymupdf.Story(html=f"<body style='font-family:sans-serif;font-size:11pt'>{conteudo}</body>",
+                              archive=arquivo)
         mais = 1
         while mais:
             dev = writer.begin_page(pagina)

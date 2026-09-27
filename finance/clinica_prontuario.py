@@ -244,6 +244,29 @@ def _confere(r, cliente_id: int) -> bool:
     return _impressao(e, cliente_id, r[9], e["conselho"], r[11] or "") == e["hash"]
 
 
+def pdf_evolucao(c, conta_id: int, cliente_id: int, e: dict, assinatura: dict) -> bytes | None:
+    """O PDF da evolução assinada que o certificado assina (fase 4): o que foi escrito,
+    quem, quando e o código da assinatura simples (liga o PDF à linha do banco)."""
+    import html
+    from finance import clinica_documentos as cdoc
+    r = c.execute("""select coalesce(ct.nome,''), coalesce(p.nome, k.nome, '') from contas ct
+                       left join clientes k on k.id=%s and k.dono_id = ct.id
+                       left join pessoas p on p.id = k.pessoa_id
+                      where ct.id=%s""", (cliente_id, conta_id)).fetchone()
+    empresa, paciente = (r[0], r[1]) if r else ("", "")
+    x = html.escape
+    linhas = "".join(f"<p><b>{x(rot)}</b><br>{x(txt).replace(chr(10), '<br>')}</p>" for rot, txt in e["linhas"])
+    extra = "".join(f"<p><b>{x(a)}:</b> {x(str(b))}</p>" for a, b in
+                    (("CID", e["cid"]), ("Retorno", f"{e['retorno_dias']} dias" if e["retorno_dias"] else ""),
+                     ("Adendo da evolução", f"#{e['adendo_de']}" if e["adendo_de"] else "")) if b)
+    q = e["assinado_em"]
+    return cdoc.render_pdf([
+        f"<h2>{x(empresa)}</h2><h3>Evolução · {x(e['modelo_txt'])}</h3>"
+        f"<p><b>Paciente:</b> {x(paciente)} · <b>Data:</b> {q:%d/%m/%Y às %H:%M}</p>{linhas}{extra}<hr>"
+        f"<p>{x(e['prof'])} · {x(e['conselho'])} · código {x(e['hash'][:16])}<br>Assinado digitalmente (ICP-Brasil) "
+        f"por <b>{x(assinatura['titular'])}</b> em {ca.local(assinatura['quando']):%d/%m/%Y às %H:%M}</p>"])
+
+
 def adendo(c, conta_id: int, cliente_id: int, evo_id: int, quem: dict, texto: str, agora: datetime) -> str | None:
     """A correção de uma evolução assinada: ligada a ela, assinada na hora."""
     e = evolucao(c, conta_id, cliente_id, evo_id)

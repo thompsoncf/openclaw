@@ -76,6 +76,11 @@ def _chaves() -> tuple[int | None, dict[int, bytes]]:
     return None, todas
 
 
+def chave_configurada() -> bool:
+    """Só a chave (o certificado guarda no banco, sem o bucket)."""
+    return _chaves()[0] is not None
+
+
 def configurado() -> bool:
     from finance import comprovantes
     return _chaves()[0] is not None and comprovantes.configurado()

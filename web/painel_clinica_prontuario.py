@@ -22,11 +22,13 @@ from starlette.concurrency import run_in_threadpool
 from db.conexao import get_pool
 from finance import clinica_acesso_clinico as acc
 from finance import clinica_agenda as ca
+from finance import clinica_certificado as cert
 from finance import clinica_pacientes as cpa
 from finance import clinica_preconsulta as cpc
 from finance import clinica_prontuario as prt
 from finance import clinica_documentos as cdoc
 from finance import clinica_prontuario_arquivos as parq
+from web import painel_clinica_certificado as wcert
 from web.painel_clinica_agenda import _acesso, _int
 from web.portal import _env, _render
 
@@ -93,6 +95,8 @@ def prontuario(request: Request, cliente_id: int):
         docs = cdoc.listar(c, conta[0], cliente_id, q)
         for d in docs:
             d["integro"] = cdoc.integro(d, cliente_id, conta[0]) if d["status"] == "assinado" else None
+        cx = wcert.contexto(request, c, conta[0], q, agora)
+        _marcar_icp(c, conta[0], evos, docs, cx)
         imagem_op, imagem_txt = parq.autorizacao_de_imagem(c, conta[0], cliente_id)
         ev = ca.evento(c, conta[0], evento) if evento else None
         if ev and cpa_do_evento(c, conta[0], evento) != cliente_id:
@@ -101,8 +105,22 @@ def prontuario(request: Request, cliente_id: int):
     return _render("clinica_prontuario.html", request, titulo=f"Prontuário · {p['nome']}", secao_ativa="pacientes",
                    p=p, fc=fc, pre=pre, evos=evos, q=q, ev=ev, MODELOS=prt.MODELOS,
                    arquivos=arquivos, cofre=parq.configurado(), imagem_op=imagem_op, imagem_txt=imagem_txt,
-                   docs=docs, TIPOS_DOC=cdoc.TIPOS,
+                   docs=docs, TIPOS_DOC=cdoc.TIPOS, cx=cx,
                    aviso=request.session.pop("prontuario_aviso", ""), erro=request.session.pop("prontuario_erro", ""))
+
+
+def _marcar_icp(c, conta_id: int, evos: list[dict], docs: list[dict], cx: dict) -> None:
+    """Quem tem a assinatura com certificado (fase 4), e quem está esperando por ela."""
+    todas = [e for x in evos for e in (x, *x.get("adendos", []))]
+    feitas = cert.assinados(c, conta_id, "evolucao", [e["id"] for e in todas])
+    feitos = cert.assinados(c, conta_id, "documento", [d["id"] for d in docs])
+    esperando = {(p["alvo"], p["id"]) for p in cx["pendentes"]}
+    for e in todas:
+        e["icp"] = feitas.get(e["id"])
+        e["icp_pendente"] = ("evolucao", e["id"]) in esperando
+    for d in docs:
+        d["icp"] = feitos.get(d["id"])
+        d["icp_pendente"] = ("documento", d["id"]) in esperando
 
 
 # ------------------------------------------------------------------ fotos e anexos (fase 3)
@@ -260,8 +278,9 @@ def _documento_salvar(request: Request, cliente_id: int, doc_id: int, form: dict
         if emitir:
             acc.registrar(c, conta[0], q, cliente_id, f"emitiu o documento #{doc_id}", _ip(request))
         c.commit()
+        extra = wcert.depois_de_assinar(request, c, conta[0], q) if emitir else ""
     if emitir:
-        return _ir(request, cliente_id, "Documento emitido.")
+        return _ir(request, cliente_id, "Documento emitido." + extra)
     return RedirectResponse(f"{URL}/{cliente_id}/documento/{doc_id}", status_code=303)
 
 
@@ -450,7 +469,8 @@ def _assinar(request: Request, cliente_id: int, evo_id: int, form: dict):
         acc.registrar(c, conta[0], q, cliente_id, "assinou uma evolução", _ip(request))
         prt.retorno_depois_de_finalizar(c, conta[0], cliente_id, evo_id)
         c.commit()
-    return _ir(request, cliente_id, "Evolução assinada.")
+        extra = wcert.depois_de_assinar(request, c, conta[0], q)
+    return _ir(request, cliente_id, "Evolução assinada." + extra)
 
 
 @router.post(URL + "/{cliente_id}/evolucao/{evo_id}/descartar")
@@ -484,7 +504,33 @@ def _adendo(request: Request, cliente_id: int, evo_id: int, form: dict):
             return _ir(request, cliente_id, erro=erro)
         acc.registrar(c, conta[0], q, cliente_id, "escreveu um adendo", _ip(request))
         c.commit()
-    return _ir(request, cliente_id, "Adendo assinado.")
+        extra = wcert.depois_de_assinar(request, c, conta[0], q)
+    return _ir(request, cliente_id, "Adendo assinado." + extra)
+
+
+@router.get(URL + "/{cliente_id}/evolucao/{evo_id}/pdf")
+def evolucao_pdf(request: Request, cliente_id: int, evo_id: int):
+    """O PDF da evolução assinada com o certificado (fase 4): o que se entrega ou se
+    confere em validar.iti.gov.br."""
+    with get_pool().connection() as c:
+        ok, resp = _pode(request, c, cliente_id)
+        if resp is not None:
+            return resp
+        conta, _q = ok
+        e = prt.evolucao(c, conta[0], cliente_id, evo_id)
+        doc = cert.pdf_assinado(c, conta[0], "evolucao", evo_id) if e else None
+        if not doc:
+            return Response("Esta evolução não tem assinatura com certificado.", status_code=404)
+        try:
+            if not acc.ler(c, conta[0], request.session, cliente_id, f"abriu o PDF assinado da evolução #{evo_id}",
+                           _ip(request)):
+                return _volta_ficha(cliente_id)
+        except acc.SemRegistro:
+            return Response("Não foi possível abrir agora.", status_code=503)
+        c.commit()
+    return Response(doc, media_type="application/pdf",
+                    headers={"Cache-Control": "no-store, max-age=0", "Content-Security-Policy": "sandbox",
+                             "Content-Disposition": f'inline; filename="evolucao-{evo_id}.pdf"'})
 
 
 _CSS = r"""<style>
@@ -515,6 +561,15 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
   {% if fc.alergias %}<div class="pr-alerta">ALERGIA: {{ fc.alergias }}</div>{% endif %}
+  {% if cx.tipo == 'nenhum' %}<div class="pr-m" style="margin-top:.6rem">Assinatura simples (sem certificado digital) · <a href="/painel/clinica/certificado">ligar o certificado</a></div>
+  {% else %}<div class="pr-cx" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap"><b>Certificado</b>
+    <span class="pr-m">{{ 'arquivo (A1)' if cx.tipo == 'a1' else 'nuvem · ' ~ cx.provedor_nome }}{% if cx.validade %} · válido até {{ cx.validade.strftime('%d/%m/%Y') }}{% endif %}{% if cx.liberado_ate %} · liberado até {{ cx.liberado_ate.strftime('%H:%M') }}{% endif %}{% if cx.pendentes %} · {{ cx.pendentes|length }} esperando{% endif %}</span>
+    {% if cx.tipo == 'a1' and not cx.liberado_ate %}<form method="post" action="/painel/clinica/certificado/liberar" class="pr-acoes" style="margin:0;display:flex;gap:.4rem;align-items:center">
+      <input type="hidden" name="volta" value="/painel/clinica/prontuario/{{ p.id }}"><input type="password" name="senha" placeholder="senha do certificado" autocomplete="off" required style="width:auto;margin:0">
+      <button>Liberar até o fim do dia</button></form>
+    {% elif cx.pendentes and (cx.tipo == 'a1' or cx.provedor_ligado) %}<form method="post" action="/painel/clinica/certificado/assinar" class="pr-acoes" style="margin:0">
+      <input type="hidden" name="volta" value="/painel/clinica/prontuario/{{ p.id }}"><button class="sec">{% if cx.tipo == 'nuvem' %}Assinar {{ cx.lote }} no aplicativo{% else %}Assinar {{ cx.lote }}{% endif %}</button></form>{% endif %}
+    <a href="/painel/clinica/certificado" class="pr-m">configurar</a></div>{% endif %}
 
   <div class="pr-cx">
     <div class="pr-3">
@@ -572,6 +627,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <b>{{ d.titulo }}</b> <span class="pr-m">· {{ d.criado_em.strftime('%d/%m/%Y') }}{% if d.tipo == 'notificacao' %} · talão nº {{ d.numero_talao }}{% endif %}</span>
       {% if d.status == 'rascunho' %}<span class="pr-tag y">rascunho</span> <a href="/painel/clinica/prontuario/{{ p.id }}/documento/{{ d.id }}">continuar</a>
       {% else %}{% if d.integro %}<span class="pr-tag g">emitido · íntegro</span>{% else %}<span class="pr-tag r">ALTERADO</span>{% endif %}
+        {% if d.icp %}<span class="pr-tag g">certificado</span>{% elif d.icp_pendente %}<span class="pr-tag y">falta o certificado</span>{% endif %}
         {% if d.tipo != 'notificacao' %}<a href="/painel/clinica/prontuario/{{ p.id }}/documento/{{ d.id }}/pdf" target="_blank" rel="noopener">PDF</a>{% endif %}
         {% if d.enviado_em %}<span class="pr-m">· enviado {{ d.enviado_em.strftime('%d/%m %H:%M') }}</span>{% endif %}{% endif %}</div>{% endfor %}
       <div class="pr-acoes"><button class="sec" onclick="this.disabled=true;this.form.submit()">Mandar os marcados no WhatsApp (link com a data de nascimento)</button></div></form>{% endif %}
@@ -590,11 +646,12 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="pr-cx"><b>Atendimentos</b>
   {% for e in evos %}<div class="pr-evo">
     <h4>{{ e.quando.strftime('%d/%m/%Y') }}{% if e.tipo %} · {{ e.tipo }}{% endif %} · {{ e.prof }} <span class="pr-m">· {{ e.modelo_txt }}</span>
-      {% if e.status == 'rascunho' %}<span class="pr-tag y">rascunho (só você vê)</span>{% elif e.integra %}<span class="pr-tag g">assinado · íntegro</span>{% else %}<span class="pr-tag r">assinado · ALTERADO NO BANCO</span>{% endif %}</h4>
+      {% if e.status == 'rascunho' %}<span class="pr-tag y">rascunho (só você vê)</span>{% elif e.integra %}<span class="pr-tag g">assinado · íntegro</span>{% else %}<span class="pr-tag r">assinado · ALTERADO NO BANCO</span>{% endif %}
+      {% if e.icp %}<span class="pr-tag g">certificado</span> <a href="/painel/clinica/prontuario/{{ p.id }}/evolucao/{{ e.id }}/pdf" target="_blank" rel="noopener" class="pr-m">PDF assinado</a>{% elif e.icp_pendente %}<span class="pr-tag y">falta o certificado</span>{% endif %}</h4>
     {% for rot, txt in e.linhas %}<div style="margin-top:.2rem"><span class="pr-m">{{ rot }}:</span> <span class="pr-txt">{{ txt }}</span></div>{% endfor %}
     {% if e.cid %}<div class="pr-m">CID: {{ e.cid }}</div>{% endif %}{% if e.retorno_dias %}<div class="pr-m">Retorno em {{ e.retorno_dias }} dias</div>{% endif %}
     {% if e.status == 'assinado' %}<div class="pr-m">Assinado por {{ e.prof }} ({{ e.conselho }}) em {{ e.assinado_em.strftime('%d/%m/%Y %H:%M') }} · impressão {{ e.hash[:12] }}</div>{% endif %}
-    {% for a in e.adendos %}<div class="pr-ad"><b>Adendo</b> de {{ a.prof }} em {{ a.assinado_em.strftime('%d/%m/%Y %H:%M') if a.assinado_em else '' }} {% if a.integra %}<span class="pr-tag g">íntegro</span>{% else %}<span class="pr-tag r">ALTERADO</span>{% endif %}
+    {% for a in e.adendos %}<div class="pr-ad"><b>Adendo</b> de {{ a.prof }} em {{ a.assinado_em.strftime('%d/%m/%Y %H:%M') if a.assinado_em else '' }} {% if a.integra %}<span class="pr-tag g">íntegro</span>{% else %}<span class="pr-tag r">ALTERADO</span>{% endif %}{% if a.icp %} <span class="pr-tag g">certificado</span>{% elif a.icp_pendente %} <span class="pr-tag y">falta o certificado</span>{% endif %}
       <div class="pr-txt">{{ a.campos.texto }}</div></div>{% endfor %}
     <div class="pr-acoes">{% if e.meu_rascunho %}<a href="/painel/clinica/prontuario/{{ p.id }}/evolucao/{{ e.id }}">Continuar o rascunho</a>{% endif %}
       {% if e.status == 'assinado' %}<details><summary class="pr-m">Escrever adendo (a correção)</summary>

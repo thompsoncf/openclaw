@@ -1,0 +1,522 @@
+<title>Funil em três trilhas</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde). Tema único de propósito:
+   o painel não tem modo claro, e o mockup mostra a tela como ela vai ficar. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0;text-align:left}
+button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:80ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.quem{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+.pill{font-size:.72rem;border:1px solid var(--line-2);border-radius:999px;padding:.15rem .6rem;color:var(--dim);white-space:nowrap}
+.pill.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.pill.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.pill.warn{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:80ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:84ch;margin:0}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota b{color:var(--text)}
+
+/* o que já foi feito */
+.ver{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.vc{border:1px solid var(--neon-borda);border-radius:12px;background:var(--surface);padding:.9rem 1rem;display:flex;flex-direction:column;gap:.4rem;font-size:.86rem}
+.vc h3{font-size:.96rem}
+.vc p{margin:0;color:var(--dim)}
+.st{font-family:var(--mono);font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;border-radius:4px;padding:.08rem .35rem;background:var(--neon);color:#062312;align-self:flex-start}
+
+/* palco: a tela do produto em tamanho real, rolando de lado no celular */
+.palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
+.tela{width:1240px;padding:22px;display:flex;flex-direction:column;gap:16px}
+.tb{display:flex;align-items:center;gap:.6rem;font-size:.8rem;color:var(--dim)}
+.tb h3{font-size:1.05rem;color:var(--text)}
+.abas{display:flex;gap:4px;margin-left:auto}
+.aba{font-size:.76rem;border:1px solid var(--line-2);border-radius:8px;padding:.25rem .6rem;color:var(--dim)}
+.aba.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+
+/* a barra das trilhas */
+.trilhas{display:grid;grid-template-columns:150px repeat(3,1fr);gap:10px}
+.tr{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.7rem .8rem;display:flex;flex-direction:column;gap:.3rem;font-size:.76rem;color:var(--dim);transition:border-color .15s}
+.tr:hover{border-color:var(--line-2)}
+.tr .t{display:flex;align-items:center;gap:.45rem;font-family:var(--display);font-weight:600;font-size:.9rem;color:var(--text)}
+.tr .t .d{width:9px;height:9px;border-radius:50%;flex:none}
+.tr .n{font-family:var(--display);font-size:1.5rem;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;line-height:1.1}
+.tr .n small{font-family:var(--body);font-size:.72rem;font-weight:400;color:var(--dim)}
+.tr .l{display:flex;justify-content:space-between;gap:.5rem}
+.tr .l b{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums}
+.tr .rg{font-size:.7rem;color:var(--faint);border-top:1px solid var(--line);padding-top:.35rem;margin-top:.15rem}
+.tr.on{box-shadow:0 0 0 1px currentColor}
+.tr.todas.on{color:var(--neon);border-color:var(--neon-borda)}
+.tr.vend .d{background:var(--neon)} .tr.vend.on{color:var(--neon);border-color:var(--neon-borda)}
+.tr.ia .d{background:var(--ia)} .tr.ia.on{color:var(--ia);border-color:var(--ia-borda)}
+.tr.rsg .d{background:var(--ambar)} .tr.rsg.on{color:var(--ambar);border-color:var(--ambar-borda)}
+.tr .modo{font-family:var(--mono);font-size:.58rem;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--ambar-borda);color:var(--ambar-2);border-radius:4px;padding:0 .3rem;margin-left:auto}
+
+/* o quadro */
+.quadro{display:grid;grid-template-columns:1.25fr repeat(5,1fr);gap:10px}
+.col.rsgcol{border-color:var(--ambar-borda);background:linear-gradient(180deg,var(--ambar-fundo),var(--surface) 60%)}
+.col.rsgcol h4{color:var(--ambar-2)}
+.orig{display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.1rem}
+.orig span{font-size:.6rem;border:1px solid var(--ambar-borda);color:var(--ambar-2);border-radius:999px;padding:0 .4rem}
+.card .de{font-size:.66rem;color:var(--ambar-2)}
+.card .etp{font-size:.62rem;font-family:var(--mono);color:var(--faint)}
+.card .rs{font-size:.66rem;color:var(--ia-2);border-top:1px dashed var(--line-2);padding-top:.2rem;margin-top:.1rem}
+.card .rs::before{content:"✨ "}
+.visao{font-size:.62rem;color:var(--faint);font-family:var(--mono);letter-spacing:.04em}
+.col{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.6rem;display:flex;flex-direction:column;gap:7px;min-height:230px}
+.col h4{margin:0 0 .15rem;font-family:var(--display);font-size:.82rem;display:flex;justify-content:space-between;color:var(--text)}
+.col h4 span{color:var(--faint);font-family:var(--mono);font-weight:400;font-size:.72rem}
+.card{border:1px solid var(--line-2);border-radius:9px;background:var(--bg);padding:.45rem .55rem;font-size:.74rem;display:flex;flex-direction:column;gap:.2rem}
+.card .nm{font-weight:600;font-size:.8rem;display:flex;gap:.35rem;align-items:center}
+.card .sb{color:var(--dim)}
+.card .tg{align-self:flex-start;font-size:.62rem;border-radius:999px;padding:.02rem .45rem;border:1px solid}
+.card[data-t=vend] .tg{border-color:var(--neon-borda);color:var(--neon-2);background:var(--neon-fundo)}
+.card[data-t=ia] .tg{border-color:var(--ia-borda);color:var(--ia-2);background:var(--ia-fundo)}
+.card[data-t=rsg] .tg{border-color:var(--ambar-borda);color:var(--ambar-2);background:var(--ambar-fundo)}
+.card[data-t=ia]{border-left:3px solid var(--ia)}
+.card[data-t=rsg]{border-left:3px solid var(--ambar)}
+.card .rel{font-family:var(--mono);font-size:.64rem;color:var(--faint)}
+.card.hide{display:none}
+.mais{font-size:.7rem;color:var(--faint);text-align:center;padding-top:.2rem}
+
+/* o painel de cada trilha */
+.det{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem 1rem;display:none;gap:1rem;grid-template-columns:1.1fr 1fr;font-size:.82rem}
+.det.on{display:grid}
+.det h3{font-size:.95rem;margin-bottom:.35rem}
+.det p{margin:0;color:var(--dim)}
+.det ul{margin:.2rem 0 0;padding-left:1.05rem;color:var(--dim);display:flex;flex-direction:column;gap:.25rem}
+.det li b{color:var(--text)}
+.esc{display:flex;flex-direction:column;gap:6px}
+.er{display:grid;grid-template-columns:170px 1fr 38px;gap:.6rem;align-items:center;font-size:.78rem}
+.er .bar{height:8px;border-radius:5px;background:var(--line)}
+.er .bar i{display:block;height:100%;border-radius:5px}
+.er .q{text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+.det.vend .bar i{background:var(--neon)}
+.det.ia .bar i{background:var(--ia)}
+.det.rsg .bar i{background:var(--ambar)}
+
+/* espelho */
+.dois{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
+.cfg{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:12px;font-size:.82rem}
+.cfg h3{font-size:.98rem;display:flex;align-items:center;gap:.5rem}
+.cfg p{margin:0;color:var(--dim)}
+.cp{display:flex;flex-direction:column;gap:.25rem}
+.cp label{font-size:.68rem;color:var(--faint);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.sel{border:1px solid var(--line-2);background:var(--bg);border-radius:8px;padding:.38rem .6rem;font-size:.8rem;color:var(--text);display:flex;align-items:center;gap:.45rem}
+.sel::after{content:"▾";margin-left:auto;color:var(--faint);font-size:.7rem}
+.sw{display:flex;align-items:center;gap:.55rem;font-size:.8rem}
+.tgl{width:36px;height:20px;border-radius:999px;background:var(--line-2);position:relative;flex:none}
+.tgl::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dim)}
+.tgl.on{background:var(--neon)}
+.tgl.on::after{left:18px;background:#062312}
+.cks{display:flex;flex-direction:column;gap:.35rem}
+.ck{display:flex;gap:.5rem;align-items:center;font-size:.8rem}
+.ck::before{content:"✓";width:16px;height:16px;border-radius:4px;background:var(--neon);color:#062312;font-size:.66rem;display:grid;place-items:center;font-weight:700}
+.ck.off::before{content:"";background:var(--line-2)}
+.aviso{border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2);border-radius:8px;padding:.5rem .65rem;font-size:.76rem}
+.fone{border:1px solid var(--line-2);border-radius:28px;background:var(--bg);padding:9px;box-shadow:0 18px 44px rgba(0,0,0,.45)}
+.fone .in{border-radius:21px;background:var(--bg-2);padding:12px;display:flex;flex-direction:column;gap:8px;font-size:.76rem}
+.fone .top{font-size:.66rem;color:var(--faint);font-family:var(--mono);text-align:center}
+.zap{background:#12241b;border:1px solid var(--neon-borda);border-radius:12px 12px 12px 4px;padding:.55rem .65rem;white-space:pre-line;line-height:1.45}
+.zap .h{display:block;font-size:.6rem;color:var(--faint);text-align:right;margin-top:.2rem}
+.zap.esp{border-color:var(--line-2);background:var(--surface-2)}
+
+/* resumo antes da conversa */
+.fluxo{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.fx{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.7rem .8rem;font-size:.8rem;display:flex;flex-direction:column;gap:.3rem}
+.fx .nn{font-family:var(--mono);font-size:.7rem;color:var(--neon)}
+.fx b{font-size:.86rem}
+.fx p{margin:0;color:var(--dim)}
+.rsm{border:1px solid var(--ia-borda);border-radius:12px;background:var(--ia-fundo);padding:.8rem .9rem;display:flex;flex-direction:column;gap:.45rem;font-size:.8rem}
+.rsm h3{font-size:.92rem;color:var(--ia-2)}
+.rsm .kv{display:grid;grid-template-columns:auto 1fr;gap:.25rem .8rem}
+.rsm .kv span{color:var(--faint)}
+.rsm .fato{color:var(--neon-2)}
+/* perdidos */
+.tabw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:.82rem}
+th,td{padding:.55rem .75rem;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+thead th{font-size:.68rem;color:var(--faint);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+tbody tr:last-child td{border-bottom:0}
+.sim{color:var(--neon-2)} .nao{color:var(--coral-2)} .tal{color:var(--ambar-2)}
+@media (max-width:760px){.fluxo{grid-template-columns:1fr 1fr}}
+
+/* ZAQ */
+.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+
+/* perguntas */
+.dec{display:flex;flex-direction:column;gap:10px}
+.q2{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem}
+.q2 .qn{font-family:var(--mono);font-size:.75rem;color:var(--neon);grid-row:span 3;padding-top:.15rem}
+.q2 h3{font-size:.95rem}
+.q2 p{margin:0;color:var(--dim);font-size:.85rem}
+.rec{font-size:.84rem;color:var(--neon-2)}
+.rec::before{content:"Recomendo: ";color:var(--faint)}
+@media (max-width:760px){
+  .dois{grid-template-columns:1fr}
+  .mini{grid-template-columns:1fr}
+  .er{grid-template-columns:120px 1fr 32px}
+}
+</style>
+
+<div class="wrap">
+
+<header class="head">
+  <span class="k">Mockup pra aprovação · 27/09/2026 · versão 2</span>
+  <h1>O funil em três trilhas</h1>
+  <p>Vendedores, a <b>IA do número</b> (o ZAQ SDR no chip CP Thiago) e o <b>Resgate da IA</b>, cada um
+  com a sua regra e quem acompanha. O quadro continua um só, com as mesmas etapas; em cima dele entra
+  uma <b>barra com as três trilhas</b>, que mostra o que cada uma está fazendo e filtra o quadro.
+  Na frente do quadro, <b>a coluna Resgate</b>, com a origem de cada lead; antes de cada conversa, <b>o
+  resumo</b>; e, pra você seguir testando a cobrança sem ser cobrado como vendedor, o <b>espelho do vendedor</b>.</p>
+  <div class="quem">
+    <span class="pill">Prime (34) · vende festa</span>
+    <span class="pill">ZAQ (3) · vende mensalidade</span>
+    <span class="pill ok">dono e gestor</span>
+    <span class="pill warn">números: produção, só leitura, 27/09</span>
+  </div>
+</header>
+
+<section class="sec">
+  <header><h2>O que já está pronto (a correção desta rodada)</h2>
+    <p>Sai antes da tela, porque tira o conflito agora. Não muda nada no visual do quadro.</p></header>
+  <div class="ver">
+    <div class="vc"><span class="st">pronto</span><h3>A IA saiu da cobrança</h3>
+      <p>A esteira, o follow-up e a régua deixam de cobrar o ZAQ SDR. Chega de cobrança no seu WhatsApp
+      e de lead da IA fechado como "sem tratativa".</p></div>
+    <div class="vc"><span class="st">pronto</span><h3>"Foi pro Resgate" não é crédito</h3>
+      <p>O lead que o Resgate pega sai da esteira do vendedor como <b>foi pro Resgate</b>, separado no
+      fecho do dia. O placar dele não ganha o trabalho da IA.</p></div>
+    <div class="vc"><span class="st">pronto</span><h3>O histórico vale nas duas</h3>
+      <p>O que o vendedor escreve no histórico tira o lead da cobrança, conta como tratado e segura o
+      lead contra o Resgate. É a mesma anotação.</p></div>
+    <div class="vc"><span class="st">pronto</span><h3>A IA do número insiste</h3>
+      <p>Chave nova na regra do chip: cliente sumiu, a IA manda um lembrete no 3º dia e a última chamada
+      no 7º. No 10º, sem resposta, marca perdido. Nasce desligada.</p></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>1. O quadro, com a barra das trilhas</h2>
+    <p>Toque numa trilha: o quadro mostra só os leads dela, e embaixo aparece o que ela está fazendo.
+    <b>Todas</b> é o quadro de hoje, com uma etiqueta colorida em cada card da IA e do Resgate.</p></header>
+
+  <div class="palco"><div class="tela">
+    <div class="tb"><h3>Funil</h3><span>· Prime</span>
+      <div class="abas"><span class="aba on">Quadro</span><span class="aba">Lista</span><span class="aba">Follow-up</span><span class="aba">Raio-X</span></div></div>
+
+    <div class="trilhas" role="tablist" aria-label="Trilhas do funil">
+      <button class="tr todas on" data-f="todas" role="tab" aria-selected="true">
+        <span class="t">Todas</span>
+        <span class="n">423</span>
+        <span class="l">abertos</span>
+        <span class="rg">o quadro de hoje</span>
+      </button>
+      <button class="tr vend" data-f="vend" role="tab" aria-selected="false">
+        <span class="t"><span class="d"></span>Vendedores</span>
+        <span class="n">420 <small>abertos</small></span>
+        <span class="l">na esteira hoje <b>123</b></span>
+        <span class="l">tratados hoje <b>—</b></span>
+        <span class="rg">Esteira: cobra no 1º, 3º e 7º dia e fecha no 7º. No 8º dia sem mensagem, vai pro Resgate.</span>
+      </button>
+      <button class="tr ia" data-f="ia" role="tab" aria-selected="false">
+        <span class="t"><span class="d"></span>IA do número</span>
+        <span class="n">3 <small>abertos · ZAQ SDR</small></span>
+        <span class="l">conversando <b>—</b></span>
+        <span class="l">cliente sumido <b>—</b></span>
+        <span class="rg">A IA responde e insiste no 3º e 7º dia; perdido no 10º. Você é avisado quando ela precisa de gente.</span>
+      </button>
+      <button class="tr rsg" data-f="rsg" role="tab" aria-selected="false">
+        <span class="t"><span class="d"></span>Resgate da IA <span class="modo">Ensaio</span></span>
+        <span class="n">0 <small>com a IA · ~270 na fila</small></span>
+        <span class="l">prévias hoje <b>0 de 20</b></span>
+        <span class="l">responderam <b>—</b></span>
+        <span class="rg">7 dias sem mensagem (14 com visita ou orçamento). 20 por dia, das 9h às 19h.</span>
+      </button>
+    </div>
+
+    <div class="quadro" id="quadro">
+      <div class="col rsgcol" data-t="rsg"><h4>♻️ Resgate <span>em andamento</span></h4>
+        <div class="orig"><span>do follow-up 7</span><span>perdidos 3</span><span>da IA 0</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Duda</span><span class="de">veio do follow-up · era do Pedro · 9 dias parado</span><span class="etp">etapa: Contatado · festa 08/11</span><span class="rel">retomada ontem · 2º toque em 2 dias</span><span class="rs">infantil pra 80 · parou no valor do pacote de domingo</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Olga</span><span class="de">veio dos perdidos · perdido pela esteira em 19/09</span><span class="etp">etapa: Perdido · sem data</span><span class="rel">na fila · sai hoje</span><span class="rs">casamento · pediu cardápio e ninguém mandou</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Paulo</span><span class="de">veio do follow-up · era da Jacqueline · 15 dias (tinha orçamento)</span><span class="etp">etapa: Negociação · festa 14/03</span><span class="rel">última chamada amanhã</span><span class="rs">15 anos · orçamento de R$ 9,8 mil, achou caro</span></div>
+        <span class="visao">a coluna é uma visão: a etapa do lead não muda</span>
+      </div>
+      <div class="col"><h4>Contatado <span>247</span></h4>
+        <div class="card" data-t="vend"><span class="nm">Carla</span><span class="sb">15 anos · 12/12</span><span class="tg">Thiago</span><span class="rel">esteira · dia 3</span></div>
+        <div class="card" data-t="ia"><span class="nm">Bia</span><span class="sb">casamento · sem data</span><span class="tg">🤖 IA do número</span><span class="rel">cliente sumido · lembrete amanhã</span></div>
+        <div class="card" data-t="vend"><span class="nm">Eva</span><span class="sb">debutante · 20/03</span><span class="tg">Jacqueline</span><span class="rel">falou hoje</span></div>
+        <div class="mais">+ 243</div>
+      </div>
+      <div class="col"><h4>Agendado visita <span>13</span></h4>
+        <div class="card" data-t="ia"><span class="nm">Fábio</span><span class="sb">formatura · 06/07/28</span><span class="tg">🤖 IA do número</span><span class="rel">visita marcada pela IA · sáb 10h</span></div>
+        <div class="card" data-t="vend"><span class="nm">Gil</span><span class="sb">15 anos · 14/02</span><span class="tg">Pedro</span><span class="rel">visita qui 15h</span></div>
+        <div class="mais">+ 11</div>
+      </div>
+      <div class="col"><h4>Negociação <span>163</span></h4>
+        <div class="card" data-t="vend"><span class="nm">Hana</span><span class="sb">casamento · 30/05</span><span class="tg">Thiago</span><span class="rel">esteira · último dia</span></div>
+        <div class="card" data-t="rsg"><span class="nm">Ivo</span><span class="sb">infantil · 22/11</span><span class="tg">♻️ veio do Resgate · era da Jacqueline</span><span class="rel">respondeu · voltou pra etapa dele</span></div>
+        <div class="card" data-t="ia"><span class="nm">Júlia</span><span class="sb">15 anos · 18/04</span><span class="tg">🤖 IA do número</span><span class="rel">orçamento esperando conferência</span></div>
+        <div class="mais">+ 160</div>
+      </div>
+      <div class="col"><h4>Contrato assinado <span>12</span></h4>
+        <div class="card" data-t="vend"><span class="nm">Lia</span><span class="sb">casamento · 10/10</span><span class="tg">Jacqueline</span></div>
+        <div class="mais">+ 11</div>
+      </div>
+      <div class="col"><h4>Perdido <span>67</span></h4>
+        <div class="card" data-t="rsg"><span class="nm">Mel</span><span class="sb">infantil</span><span class="tg">♻️ veio do Resgate · era do Thiago</span><span class="rel">3 toques sem resposta · dia 10</span></div>
+        <div class="card" data-t="vend"><span class="nm">Nina</span><span class="sb">15 anos</span><span class="tg">Pedro</span><span class="rel">sem tratativa (esteira)</span></div>
+        <div class="mais">+ 65</div>
+      </div>
+    </div>
+
+    <div class="det vend" id="det-vend">
+      <div><h3>Vendedores · a esteira de hoje</h3>
+        <p>Quem acompanha: <b>a esteira</b>, que cobra o vendedor de manhã e manda o fecho do dia pra você.
+        Conta como tratado: mensagem nossa, card movido, o que ele escreveu no histórico, venda fechada.</p>
+        <ul><li>Lead que <b>foi pro Resgate</b> sai da esteira, sem ponto pra ninguém.</li>
+        <li>Lead da IA <b>não entra</b> na esteira.</li></ul></div>
+      <div class="esc">
+        <div class="er"><span>Thiago</span><span class="bar"><i style="width:100%"></i></span><span class="q">59</span></div>
+        <div class="er"><span>Pedro</span><span class="bar"><i style="width:73%"></i></span><span class="q">43</span></div>
+        <div class="er"><span>Jacqueline</span><span class="bar"><i style="width:36%"></i></span><span class="q">21</span></div>
+        <p class="nota" style="margin-top:.3rem">leads na esteira agora, por vendedor</p>
+      </div>
+    </div>
+
+    <div class="det ia" id="det-ia">
+      <div><h3>IA do número · ZAQ SDR no CP Thiago</h3>
+        <p>Quem acompanha: <b>a própria IA</b>. Ela responde, marca a visita, monta o orçamento e, se o
+        cliente some, insiste sozinha. Você recebe o aviso quando ela precisa de gente (desconto, sinal,
+        visita fora da grade, reclamação).</p>
+        <ul><li><b>Pausada</b>: alguém da equipe respondeu pelo celular. O lead continua da IA, com o selo "gente assumiu".</li></ul></div>
+      <div class="esc">
+        <div class="er"><span>Conversando</span><span class="bar"><i style="width:25%"></i></span><span class="q">1</span></div>
+        <div class="er"><span>Esperando · dia 1 a 2</span><span class="bar"><i style="width:25%"></i></span><span class="q">1</span></div>
+        <div class="er"><span>Lembrete enviado (dia 3)</span><span class="bar"><i style="width:25%"></i></span><span class="q">1</span></div>
+        <div class="er"><span>Última chamada (dia 7)</span><span class="bar"><i style="width:0%"></i></span><span class="q">0</span></div>
+        <div class="er"><span>Visita marcada pela IA</span><span class="bar"><i style="width:0%"></i></span><span class="q">0</span></div>
+        <div class="er"><span>Perdido · não respondeu</span><span class="bar"><i style="width:25%"></i></span><span class="q">1</span></div>
+        <p class="nota" style="margin-top:.3rem">números de exemplo: hoje o ZAQ SDR só tem os 4 leads de teste, e o 1º contato novo do anúncio ainda não chegou</p>
+      </div>
+    </div>
+
+    <div class="det rsg" id="det-rsg">
+      <div><h3>Resgate da IA · em Ensaio</h3>
+        <p>Quem acompanha: <b>a IA</b>, com você de supervisor no WhatsApp (prévias no Ensaio, resumo às 19h,
+        aviso quando pausa). O vendedor é avisado 2 dias antes e segura o lead escrevendo no histórico.</p>
+        <ul><li>No Ensaio nenhum lead muda de dono: só as prévias.</li>
+        <li>O card mostra de quem o lead era ("era do Pedro").</li></ul></div>
+      <div class="esc">
+        <div class="er"><span>Do follow-up (parado)</span><span class="bar"><i style="width:100%"></i></span><span class="q">~270</span></div>
+        <div class="er"><span>Perdido pelo vendedor</span><span class="bar"><i style="width:14%"></i></span><span class="q">~30</span></div>
+        <div class="er"><span>Perdido pela esteira</span><span class="bar"><i style="width:8%"></i></span><span class="q">20</span></div>
+        <div class="er"><span>Da IA do número</span><span class="bar"><i style="width:0%"></i></span><span class="q">—</span></div>
+        <p class="nota" style="margin-top:.3rem">de onde vem a fila; o número exato sai do cartão do Resgate</p>
+      </div>
+    </div>
+  </div></div>
+  <p class="nota"><i>Dado</i><span>Contagens da Prime em 27/09, só leitura: 420 abertos dos vendedores
+  (Contatado 245, Agendado visita 13, Negociação 162), 123 na esteira, 4 no nome do ZAQ SDR (3 abertos e 1 perdido, todos de teste,
+  de antes da regra). "~270 na fila" é a conta grossa de quem está há 7 dias sem mensagem nossa; o número
+  exato sai do Resgate, que desconta visita marcada, festa próxima e o prazo de 14 dias. Os nomes dos
+  cards são inventados.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>2. A coluna Resgate: de onde veio cada lead</h2>
+    <p>Pedido do dono: além da etiqueta no card, <b>uma coluna Resgate</b> pra acompanhar de quem veio.
+    Ela fica na frente do quadro, no <b>Todas</b> e na trilha do Resgate, e mostra quem está com o resgate
+    <b>em andamento</b> (chamado e ainda sem resposta).</p></header>
+  <div class="ver">
+    <div class="vc"><h3>A origem, escrita no card</h3>
+      <p><b>Veio do follow-up</b>: parado com o vendedor ("era do Pedro · 9 dias parado").<br>
+      <b>Veio dos perdidos</b>: perdido pelo vendedor ou pela esteira, com a data.<br>
+      <b>Veio da IA do número</b>: o perdido da IA que volta depois de um tempo (decisão 6).</p></div>
+    <div class="vc"><h3>A coluna é uma visão</h3>
+      <p>A etapa do lead <b>não muda</b>: o card mostra "etapa: Negociação" e continua contando lá no
+      relatório, no Raio-X e no teto da etapa. Mudar a etapa pra "Resgate" apagaria em que pé ele estava.</p></div>
+    <div class="vc"><h3>Quando sai da coluna</h3>
+      <p>O cliente respondeu: o card <b>volta pra coluna da etapa dele</b>, com o selo "♻️ veio do Resgate".
+      Três toques sem resposta: vai pra <b>Perdido</b>, com o mesmo selo. Nos dois casos a origem fica
+      guardada, e o Desafio conta o resultado por origem.</p></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>3. O resumo antes de cada conversa</h2>
+    <p>Hoje a retomada lê só as <b>16 últimas mensagens</b>. Com o resumo, a IA lê a conversa inteira
+    (até 60 mensagens), o orçamento, a visita e, no perdido, <b>o motivo da perda</b>. Primeiro ela entende,
+    depois escreve. É o mesmo ✨ Resumo que o vendedor já usa no card, agora feito sozinho antes de
+    chamar.</p></header>
+  <div class="fluxo">
+    <div class="fx"><span class="nn">1</span><b>Resume</b><p>O ✨ Resumo do lead: o que ele quer, em que pé parou, o que trava. Se já existe e não chegou mensagem nova, reaproveita, sem custo.</p></div>
+    <div class="fx"><span class="nn">2</span><b>Escreve em cima do resumo</b><p>A retomada tem que citar o ponto em que parou ("o valor do pacote de domingo que você pediu"), e não um "oi, tudo bem?" genérico.</p></div>
+    <div class="fx"><span class="nn">3</span><b>Confere</b><p>Valor que não está no orçamento, no catálogo liberado ou na fala do vendedor <b>não sai</b>. A mensagem vai pra você decidir.</p></div>
+    <div class="fx"><span class="nn">4</span><b>Guarda na ficha</b><p>O resumo fica no card. Se o lead voltar pro vendedor, ele abre e já sabe tudo, sem ler 60 mensagens.</p></div>
+  </div>
+  <div class="dois">
+    <div class="rsm">
+      <h3>✨ O que a IA entendeu antes de chamar · Duda</h3>
+      <div class="kv">
+        <span>Quer</span><b>infantil de 5 anos, ~80 convidados, 08/11 (sábado)</b>
+        <span>Parou em</span><b>pediu o valor do pacote de domingo; ninguém respondeu</b>
+        <span>Trava</span><b>preço: comparou com outro buffet</b>
+        <span>Próximo</span><b>mandar o valor de referência e convidar pra visita</b>
+        <span>Fatos</span><b class="fato">era do Pedro · 23 mensagens · última nossa há 9 dias</b>
+      </div>
+      <p class="nota" style="margin:0"><i>Sai</i><span>"Oi, Duda! Aqui é da equipe da Prime 😊 Você tinha
+      perguntado do pacote de domingo pro aniversário de 5 anos: ele sai a partir de R$ 6,2 mil pra até 80
+      convidados. Quer vir conhecer o espaço essa semana?"</span></p>
+    </div>
+    <div class="fone"><div class="in">
+      <span class="top">seu WhatsApp · Ensaio · 09:20</span>
+      <div class="zap esp">🧪 Ensaio do resgate · 3 de 20 hoje
+Duda · veio do follow-up (era do Pedro, 9 dias)
+Festa 08/11
+
+✨ Quer infantil ~80 pessoas. Parou no valor do domingo. Trava: preço.
+
+Mensagem:
+"Oi, Duda! Aqui é da equipe da Prime 😊 Você tinha perguntado do pacote de domingo…"<span class="h">09:20</span></div>
+    </div></div>
+  </div>
+  <p class="nota"><i>Custo</i><span>Um resumo por lead chamado: no máximo 20 por dia, o teto do Resgate.
+  Os toques do 3º e do 7º dia leem o mesmo resumo, sem gerar outro.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>4. Os perdidos: dá pra tratar, conforme o motivo</h2>
+    <p>O Resgate já chama os perdidos, mas por último. Com o motivo lido no resumo, dá pra separar quem
+    vale chamar de quem não se chama.</p></header>
+  <div class="tabw"><table>
+    <thead><tr><th>Motivo da perda</th><th class="n">Prime hoje</th><th>O Resgate</th><th>Como entra</th></tr></thead>
+    <tbody>
+      <tr><td>Sem tratativa (fechado pela esteira)</td><td class="n">20</td><td class="sim">chama</td><td>Ninguém falou com ele: retoma do ponto em que parou, como um aberto.</td></tr>
+      <tr><td>Não respondeu</td><td class="n">8</td><td class="sim">chama</td><td>Com leveza, uma vez só: "ainda faz sentido?". Sem os toques do 3º e do 7º dia.</td></tr>
+      <tr><td>Sem motivo / outro (fechado à mão)</td><td class="n">~18</td><td class="sim">chama</td><td>A IA lê a anotação do vendedor no resumo. Se disser "fechou com outro" ou "desistiu", não chama.</td></tr>
+      <tr><td>Data indisponível</td><td class="n">7</td><td class="tal">decisão 7</td><td>Pergunta se a data é flexível, sem prometer nenhuma. Quem confere a agenda é a anfitriã.</td></tr>
+      <tr><td>Fechou com concorrente</td><td class="n">5</td><td class="nao">não chama</td><td>Fica fora da fila.</td></tr>
+      <tr><td>Fora do escopo</td><td class="n">1</td><td class="nao">não chama</td><td>Fica fora da fila.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="nota"><i>Dado</i><span>Os 67 perdidos da Prime em 27/09, só leitura: 42 fechados à mão, 20 pela
+  esteira, 3 no ajuste do funil e 2 sem registro. "Sem motivo / outro" junta os 18 sem motivo e os
+  "outro" que não vieram da esteira.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>5. O espelho do vendedor</h2>
+    <p>Pra você seguir testando a cobrança como ela chega na mão do vendedor, sem lead de teste e sem
+    ser cobrado: escolha um vendedor, e o que ele recebe chega também no seu WhatsApp, marcado como cópia.
+    Fica na tela <b>Follow-up</b>, no cartão da esteira.</p></header>
+  <div class="dois">
+    <div class="cfg">
+      <h3>🪞 Espelho do vendedor</h3>
+      <p>Uma cópia do que o vendedor recebe, pra você ver a cobrança do jeito que ele vê. Não conta no teto
+      dele, não vira cobrança sua e fica registrada à parte.</p>
+      <div class="sw"><span class="tgl on"></span><b>Ligado</b></div>
+      <div class="cp"><label>De quem</label><span class="sel">Thiago</span></div>
+      <div class="cp"><label>Pra quem</label><span class="sel">Você (dono) · WhatsApp</span></div>
+      <div class="cp"><label>O que copiar</label>
+        <div class="cks"><span class="ck">A cobrança da manhã</span><span class="ck">O aviso do último dia ("fecham hoje")</span>
+        <span class="ck">O aviso do Resgate (2 dias antes de o lead ir pra IA)</span><span class="ck off">As cobranças do follow-up (a esteira já cala o follow-up)</span></div></div>
+      <div class="aviso">O Thiago não fica sabendo do espelho, e nada muda pra ele.</div>
+    </div>
+    <div class="fone"><div class="in">
+      <span class="top">seu WhatsApp · 08:02</span>
+      <div class="zap esp">🪞 Cópia do que o Thiago recebeu
+
+⏱️ THIAGO, 10 para hoje
+Ontem você tratou 7. Na sua esteira: 59.
+
+Cobrança de hoje:
+• Carla (dia 1)
+• Hana (dia 3)
+…e mais 8 na fila.
+
+Resolveu por telefone ou pessoalmente? Escreva no histórico do lead — o que não está escrito não conta.<span class="h">08:02</span></div>
+    </div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>6. Na ZAQ, que vende mensalidade</h2>
+    <p>A ZAQ tem <b>um chip só</b> e a esteira desligada: sem IA do número nem Resgate, a barra <b>não
+    aparece</b> e o quadro fica como está hoje (Novo 231, Contatado 4, Qualificado 1, Proposta 3). Se um
+    dia ela ligar a IA num segundo número, a barra aparece com as palavras dela: <b>reunião</b> no lugar
+    de visita, <b>proposta</b> no lugar de orçamento, e nada de festa ou data. O resumo segue o mesmo
+    perfil: pra ZAQ, ele fala de segmento, porte e reunião.</p></header>
+  <div class="mini">
+    <div class="tr vend on"><span class="t"><span class="d"></span>Vendedores</span><span class="n">239 <small>abertos</small></span><span class="rg">Follow-up da conta, sem esteira.</span></div>
+    <div class="tr ia"><span class="t"><span class="d"></span>IA do número</span><span class="n">— <small>se ligar</small></span><span class="l">reuniões marcadas pela IA <b>—</b></span><span class="rg">Insiste no 3º e 7º dia; perdido no 10º.</span></div>
+    <div class="tr rsg"><span class="t"><span class="d"></span>Resgate da IA</span><span class="n">— <small>se ligar</small></span><span class="l">responderam <b>—</b></span><span class="rg">7 dias sem mensagem (14 com proposta).</span></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>Pra decidir antes de construir</h2></header>
+  <div class="dec">
+    <div class="q2"><span class="qn">1</span><h3>A barra fica em que telas?</h3>
+      <p>No Quadro com certeza. Também na Lista e na Fila do follow-up?</p>
+      <p class="rec">Quadro e Lista. A Fila do follow-up é só dos vendedores, e lá a barra só confundiria.</p></div>
+    <div class="q2"><span class="qn">2</span><h3>O vendedor vê a barra?</h3>
+      <p>Ele só vê os leads dele. A barra mostra a casa inteira.</p>
+      <p class="rec">não. É visão de dono e gestor. O vendedor continua vendo o selo "♻️ Resgate" no lead que era dele.</p></div>
+    <div class="q2"><span class="qn">3</span><h3>O espelho: um vendedor por vez ou todos?</h3>
+      <p>Todos de uma vez seriam 3 mensagens por manhã no seu WhatsApp.</p>
+      <p class="rec">um por vez, trocável no cartão. Dá pra rodar um de cada vez.</p></div>
+    <div class="q2"><span class="qn">4</span><h3>Lead da IA em que alguém da equipe assumiu: fica em qual trilha?</h3>
+      <p>A IA sai da conversa quando alguém responde pelo celular, mas o lead segue no nome do ZAQ SDR.</p>
+      <p class="rec">continua na trilha da IA, com o selo "gente assumiu", até alguém passar o lead pra um vendedor.</p></div>
+    <div class="q2"><span class="qn">5</span><h3>A coluna Resgate fica na frente ou atrás do quadro?</h3>
+      <p>Na frente, ela é a primeira coisa que se vê. Atrás, fica ao lado do Perdido.</p>
+      <p class="rec">na frente, e só no Todas e na trilha do Resgate. Nas outras trilhas ela some.</p></div>
+    <div class="q2"><span class="qn">6</span><h3>O perdido da IA do número volta pelo Resgate?</h3>
+      <p>A IA do número faz os 3 toques e marca perdido no 10º dia. Depois disso, ninguém mais chama esse cliente.</p>
+      <p class="rec">sim, uma vez, depois de 30 dias, com o resumo e a origem "veio da IA do número".</p></div>
+    <div class="q2"><span class="qn">7</span><h3>E o perdido por data indisponível?</h3>
+      <p>São 7 hoje. A data que ele queria estava tomada, mas ele pode aceitar outra.</p>
+      <p class="rec">chamar só se a festa ainda está a mais de 30 dias, perguntando se a data é flexível e chamando a anfitriã pra conferir a agenda.</p></div>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var bts=document.querySelectorAll('.trilhas .tr'), cards=document.querySelectorAll('#quadro .card');
+  function mostra(f){
+    bts.forEach(function(b){var on=b.dataset.f===f;b.classList.toggle('on',on);b.setAttribute('aria-selected',on)});
+    cards.forEach(function(c){c.classList.toggle('hide',f!=='todas'&&c.dataset.t!==f)});
+    var col=document.querySelector('.rsgcol'); col.style.display=(f==='todas'||f==='rsg')?'':'none';
+    document.getElementById('quadro').style.gridTemplateColumns=(f==='todas'||f==='rsg')?'':'repeat(5,1fr)';
+    ['vend','ia','rsg'].forEach(function(k){document.getElementById('det-'+k).classList.toggle('on',k===f)});
+  }
+  bts.forEach(function(b){b.addEventListener('click',function(){mostra(b.dataset.f)})});
+})();
+</script>

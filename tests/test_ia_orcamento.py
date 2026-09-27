@@ -100,7 +100,8 @@ def pool():
         c.execute("""insert into contas (id, nome, chip_de, nicho_id, nome_fantasia, cidade)
                      values (%s,'Prime',null,1,'Prime Eventos','Teresina'),
                             (%s,'CP Thiago',%s,null,null,null)""", (EMPRESA, CHIP2, EMPRESA))
-        for m in ("388_regra_por_chip.sql", "390_ia_marca_visita.sql", "392_ia_orcamento.sql"):
+        for m in ("388_regra_por_chip.sql", "390_ia_marca_visita.sql", "392_ia_orcamento.sql",
+                  "401_ia_fora_da_esteira.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.commit()
     yield p

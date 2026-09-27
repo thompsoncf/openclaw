@@ -1715,3 +1715,20 @@ def test_a_rota_manda_os_nomes_das_etapas_pra_tela():
     import web.painel_follow_up as pfu
     fonte = inspect.getsource(pfu.painel_follow_up)
     assert 'rot_etapa={x["c"]: x["r"] for x in status_tpl}' in fonte
+
+
+def test_o_lead_da_ia_do_numero_nao_e_cobrado(c):
+    """27/09/2026: o dono da regra por número com a IA ligada é a IA — o follow-up
+    cobrava o "ZAQ SDR" no WhatsApp do dono. Quem insiste é a própria IA
+    (finance/ia_insiste.py). Regra com a IA desligada é de gente, e continua cobrada."""
+    ia, pedro = _vend(c, "ZAQ SDR"), _vend(c)
+    c.execute("""create table chip_regra (id bigserial primary key, conta_id bigint,
+                   chip_id bigint, membro_id bigint, ativa boolean default true,
+                   ia_ligada boolean default false)""")
+    c.execute("insert into chip_regra (conta_id, chip_id, membro_id, ia_ligada) values (%s,36,%s,true)",
+              (CONTA, ia))
+    _fala(c, _lead(c, vend=ia, contato="Da IA"), ("in", 12), ("out", 11))
+    _fala(c, _lead(c, vend=pedro, contato="Do Pedro"), ("in", 12), ("out", 11))
+    assert [x["quem"] for x in fu.leads(c, CONTA, EVENTOS, AGORA)] == ["Do Pedro"]
+    c.execute("update chip_regra set ia_ligada=false")
+    assert sorted(x["quem"] for x in fu.leads(c, CONTA, EVENTOS, AGORA)) == ["Da IA", "Do Pedro"]

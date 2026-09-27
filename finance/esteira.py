@@ -111,6 +111,21 @@ def dia_da_esteira(entrou: datetime, agora: datetime) -> int:
 
 # ------------------------------------------------------------------ quem já agiu
 
+#: O lead foi pro resgate da IA depois de entrar na esteira (finance/resgate.py).
+_SQL_RESGATE = """exists (select 1 from resgate_leads rl
+                           where rl.prospeccao_id = e.prospeccao_id
+                             and rl.entrou_em > e.entrou_em)"""
+
+#: O vendedor escreveu no histórico do lead depois da entrada: nota, visita marcada,
+#: "marcado como contatado". Toda linha de `prospeccao_atividades` com membro é ato
+#: de gente — o que o sistema escreve sozinho entra com membro nulo.
+_SQL_HISTORICO = """exists (select 1 from prospeccao_atividades pa
+                             where pa.prospeccao_id = e.prospeccao_id
+                               and pa.membro_id = e.membro_id
+                               and pa.criado_em > e.entrou_em
+                               and length(trim(coalesce(pa.descricao,''))) > 0)"""
+
+
 def resolver(c, conta_id: int, agora: datetime | None = None) -> int:
     """Fecha a linha de quem teve ação depois de entrar. Devolve quantos saíram.
 
@@ -118,31 +133,40 @@ def resolver(c, conta_id: int, agora: datetime | None = None) -> int:
     jeito mais rápido de o vendedor parar de ler o aviso.
     """
     agora = agora or datetime.now(timezone.utc)
+    # O RESGATE VEM PRIMEIRO (27/09/2026): a retomada que a IA manda é mensagem nossa
+    # depois da entrada, e sem esta linha a esteira a contava como 'falou' — o placar
+    # do vendedor ganhava o trabalho da IA. E o HISTÓRICO conta (`_SQL_HISTORICO`): o
+    # aviso da manhã sempre disse "escreva no histórico — o que não está escrito não
+    # conta", e a esteira não lia o histórico.
     n = c.execute(
         """update follow_up_esteira e
               set resolvido_em = %s,
                   resolucao = case
+                    when """ + _SQL_RESGATE + """ then 'resgate'
                     when exists (select 1 from conversas cv join mensagens m on m.conversa_id=cv.id
-                                  where cv.prospeccao_id = e.prospeccao_id
+                                  where cv.prospeccao_id = e.prospeccao_id and cv.conta_id = e.conta_id
                                     and m.direcao='in' and m.criado_em > e.entrou_em) then 'cliente_voltou'
                     when exists (select 1 from funil_movimentos fm
-                                  where fm.prospeccao_id = e.prospeccao_id
+                                  where fm.prospeccao_id = e.prospeccao_id and fm.conta_id = e.conta_id
                                     and fm.criado_em > e.entrou_em
                                     and fm.para in ('perdido','ganho')) then 'fechou'
                     when exists (select 1 from funil_movimentos fm
-                                  where fm.prospeccao_id = e.prospeccao_id
+                                  where fm.prospeccao_id = e.prospeccao_id and fm.conta_id = e.conta_id
                                     and fm.criado_em > e.entrou_em
                                     and fm.motivo not like 'temperatura%%') then 'moveu'
+                    when """ + _SQL_HISTORICO + """ then 'historico'
                     else 'falou' end
             where e.conta_id = %s and e.resolvido_em is null and e.fechado_em is null
-              and (exists (select 1 from conversas cv join mensagens m on m.conversa_id=cv.id
-                            where cv.prospeccao_id = e.prospeccao_id and m.direcao='out'
+              and (""" + _SQL_RESGATE + """
+                or """ + _SQL_HISTORICO + """
+                or exists (select 1 from conversas cv join mensagens m on m.conversa_id=cv.id
+                            where cv.prospeccao_id = e.prospeccao_id and cv.conta_id = e.conta_id and m.direcao='out'
                               and m.criado_em > e.entrou_em)
                 or exists (select 1 from conversas cv join mensagens m on m.conversa_id=cv.id
-                            where cv.prospeccao_id = e.prospeccao_id and m.direcao='in'
+                            where cv.prospeccao_id = e.prospeccao_id and cv.conta_id = e.conta_id and m.direcao='in'
                               and m.criado_em > e.entrou_em)
                 or exists (select 1 from funil_movimentos fm
-                            where fm.prospeccao_id = e.prospeccao_id
+                            where fm.prospeccao_id = e.prospeccao_id and fm.conta_id = e.conta_id
                               and fm.criado_em > e.entrou_em
                               and fm.motivo not like 'temperatura%%'))""",
         (agora, conta_id)).rowcount
@@ -180,6 +204,11 @@ def entrar(c, conta_id: int, agora: datetime | None = None, cfg: dict | None = N
     if not tetos:
         return []
     etapas = list(tetos)
+    # O LEAD DA IA NÃO É COBRADO (27/09/2026): quem acompanha é a própria IA
+    # (finance/ia_insiste.py e os toques do resgate). Cobrar o membro IA mandava a
+    # cobrança pro WhatsApp do dono e fechava o lead dela como "sem tratativa".
+    from finance import chip_regra as _cr
+    ia = sorted(_cr.membros_ia(c, conta_id))
     linhas = c.execute(
         """with tetos as (
              select * from unnest(%(etapas)s::text[], %(dias)s::int[]) as t(chave, dias)),
@@ -199,6 +228,7 @@ def entrar(c, conta_id: int, agora: datetime | None = None, cfg: dict | None = N
                from prospeccao p
                join tetos t on t.chave = p.status
               where p.conta_id = %(conta)s and p.estagio = 'lead'
+                and (p.vendedor_id is null or not (p.vendedor_id = any(%(ia)s::bigint[])))
                 -- ATRASADO: já passou do prazo da própria etapa. O relógio é o
                 -- mesmo do teto (`funil_teto`): a entrada na etapa, nunca
                 -- `atualizado_em`, que qualquer automação encosta.
@@ -229,13 +259,22 @@ def entrar(c, conta_id: int, agora: datetime | None = None, cfg: dict | None = N
                 and coalesce((select max(m.criado_em) filter (where m.direcao='out')
                                 from conversas cv join mensagens m on m.conversa_id = cv.id
                                where cv.prospeccao_id = p.id), '-infinity'::timestamptz)
+                    < %(agora)s - make_interval(days => t.dias)
+                -- ESCREVER NO HISTÓRICO TAMBÉM DESCANSA (27/09/2026): a nota resolve a
+                -- linha (`resolver`), e sem isto o lead entrava de novo no dia seguinte
+                -- — o vendedor que justificou seria cobrado pela mesma justificativa.
+                -- É a mesma nota que segura o lead contra o resgate da IA.
+                and coalesce((select max(pa.criado_em) from prospeccao_atividades pa
+                               where pa.prospeccao_id = p.id and pa.membro_id = p.vendedor_id
+                                 and length(trim(coalesce(pa.descricao,''))) > 0),
+                             '-infinity'::timestamptz)
                     < %(agora)s - make_interval(days => t.dias))
            select f.id, f.vendedor_id, f.status, f.quem
              from fila f left join ja_hoje j on j.membro_id is not distinct from f.vendedor_id
             where f.pos <= (%(por_dia)s - coalesce(j.n, 0))
             order by f.vendedor_id, f.pos""",
         {"conta": conta_id, "etapas": etapas, "dias": [int(tetos[e]) for e in etapas],
-         "por_dia": por_dia, "agora": agora,
+         "por_dia": por_dia, "agora": agora, "ia": ia,
          "inicio": _inicio_do_dia(agora)}).fetchall()
     novos = []
     for lead_id, vend, etapa, quem in linhas:
@@ -269,13 +308,17 @@ def cobrancas(c, conta_id: int, agora: datetime | None = None, cfg: dict | None 
     agora = agora or datetime.now(timezone.utc)
     cfg = cfg or config(c, conta_id)
     dias, final = cfg["dias"], prazo_final(cfg["dias"])
+    from finance import chip_regra as _cr
+    ia = sorted(_cr.membros_ia(c, conta_id))
     linhas = c.execute(
         """select e.id, e.prospeccao_id, e.membro_id, e.entrou_em, e.etapa,
                   coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Lead') as quem,
                   p.evento_em
              from follow_up_esteira e join prospeccao p on p.id = e.prospeccao_id
             where e.conta_id=%s and e.resolvido_em is null and e.fechado_em is null
-            order by e.membro_id, e.entrou_em""", (conta_id,)).fetchall()
+              and (e.membro_id is null or not (e.membro_id = any(%s::bigint[])))
+              and (p.vendedor_id is null or not (p.vendedor_id = any(%s::bigint[])))
+            order by e.membro_id, e.entrou_em""", (conta_id, ia, ia)).fetchall()
     fora = []
     for eid, lead, membro, entrou, etapa, quem, festa in linhas:
         d = dia_da_esteira(entrou, agora)
@@ -304,12 +347,19 @@ def fechar_vencidos(c, conta_id: int, agora: datetime | None = None,
     if cfg.get("esteira_modo") != "ligado" or not _fim_da_janela(agora, cfg):
         return []
     final = prazo_final(cfg["dias"])
+    # o lead que hoje é da IA não fecha pela esteira: o perdido dele é da IA (os
+    # toques), com o motivo que diz a verdade — "não respondeu", não "sem tratativa"
+    from finance import chip_regra as _cr
+    ia = sorted(_cr.membros_ia(c, conta_id))
     linhas = c.execute(
         """select e.id, e.prospeccao_id, e.membro_id, e.entrou_em, e.etapa, p.status,
                   coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Lead')
              from follow_up_esteira e join prospeccao p on p.id = e.prospeccao_id
             where e.conta_id=%s and e.resolvido_em is null and e.fechado_em is null
-              and p.status <> 'perdido'""", (conta_id,)).fetchall()
+              and p.status <> 'perdido'
+              and (e.membro_id is null or not (e.membro_id = any(%s::bigint[])))
+              and (p.vendedor_id is null or not (p.vendedor_id = any(%s::bigint[])))""",
+        (conta_id, ia, ia)).fetchall()
     fechados = []
     for eid, lead, membro, entrou, etapa, status_hoje, quem in linhas:
         if dia_da_esteira(entrou, agora) < final:
@@ -394,6 +444,8 @@ def resumo(c, conta_id: int, membro_id: int | None, agora: datetime | None = Non
                   count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='moveu'),
                   count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='fechou'),
                   count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='cliente_voltou'),
+                  count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='historico'),
+                  count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='resgate'),
                   count(*) filter (where e.fechado_em >= %(desde)s),
                   count(*) filter (where e.resolvido_em is null and e.fechado_em is null),
                   count(*) filter (where e.resolvido_em is null and e.fechado_em is null
@@ -404,12 +456,15 @@ def resumo(c, conta_id: int, membro_id: int | None, agora: datetime | None = Non
               and (%(membro)s::bigint is null or e.membro_id = %(membro)s)""",
         {"conta": conta_id, "membro": membro_id, "desde": desde,
          "amanha": _dia_br(amanha), "final": final}).fetchone()
-    falou, moveu, fechou, voltou, vencidos, abertos, amanha_n = [
-        int(x or 0) for x in (r or (0,) * 7)]
+    falou, moveu, fechou, voltou, historico, resgate, vencidos, abertos, amanha_n = [
+        int(x or 0) for x in (r or (0,) * 9)]
+    # o histórico é trabalho do vendedor e entra no "tratou"; o resgate é da IA e
+    # NÃO entra — sai da esteira, como o cliente que voltou, mas não é crédito dele
     return {"falou": falou, "moveu": moveu, "fechou": fechou, "cliente_voltou": voltou,
+            "historico": historico, "resgate": resgate,
             "fechados_sem_tratativa": vencidos, "na_esteira": abertos,
             "fecham_amanha": amanha_n,
-            "tratou": falou + moveu + fechou}
+            "tratou": falou + moveu + fechou + historico}
 
 
 #: A origem do fecho do dia em `aviso_envios`. Separada da cobrança da manhã pelo
@@ -458,12 +513,14 @@ def fecho_do_dia(pool, conta_id: int, agora: datetime | None = None) -> list[dic
                 (conta_id, _inicio_do_dia(agora))).fetchone()
             if not cobrados or not cobrados[0]:
                 return saida
-            vendedores = c.execute(
+            from finance import chip_regra as _cr
+            ia = _cr.membros_ia(c, conta_id)
+            vendedores = [(mid, nome) for mid, nome in c.execute(
                 """select distinct e.membro_id, coalesce(nullif(m.nome,''), m.email, '?')
                      from follow_up_esteira e
                      join membros m on m.id = e.membro_id
                     where e.conta_id=%s and m.papel='vendedor' and coalesce(m.ativo,true)""",
-                (conta_id,)).fetchall()
+                (conta_id,)).fetchall() if mid not in ia]
             # O DIA, e só ele: "O dia fechou: 7 tratados" somava ontem junto,
             # porque a janela padrão do resumo nasceu pro aviso da manhã.
             hoje = _inicio_do_dia(agora)
@@ -501,7 +558,9 @@ def texto_fecho(casa: dict, placar: list[tuple[str, dict]]) -> tuple[str, str]:
 
     O TEXTO TEM QUE BATER COM A CONTA. Até 19/09/2026 ele dizia que o cliente voltar
     a falar contava como tratado — e `resumo` nunca somou isso: `tratou` é
-    falou + moveu + fechou. O 'cliente_voltou' tira o lead da esteira (quem
+    falou + moveu + fechou + historico. O mesmo vale pro 'resgate' (27/09/2026): o
+    lead sai da esteira porque a IA pegou, e isso não é trabalho do vendedor. O
+    'cliente_voltou' tira o lead da esteira (quem
     respondeu deixou de ser lead parado), mas não é crédito do vendedor, que é o
     que a linha do placar mede. Duas verdades no mesmo aviso é o que faz alguém
     conferir na mão e parar de confiar no número.
@@ -531,9 +590,13 @@ def texto_fecho(casa: dict, placar: list[tuple[str, dict]]) -> tuple[str, str]:
     if casa.get("fechados_sem_tratativa"):
         linhas.append("")
         linhas.append(f"Fechados hoje sem tratativa: {casa['fechados_sem_tratativa']}.")
+    if casa.get("resgate"):
+        linhas.append("")
+        linhas.append(f"Foram pro resgate da IA: {casa['resgate']} (não contam como tratados).")
     linhas.append("")
     linhas.append("Conta como tratado: mensagem nossa (inclusive pelo WhatsApp Web),"
-                  " o card movido à mão, ou a venda fechada."
+                  " o card movido à mão, o que o vendedor escreveu no histórico,"
+                  " ou a venda fechada."
                   " Cliente que voltou a falar sai da esteira, mas não entra nesta conta"
                   " — quem respondeu deixou de ser lead parado sozinho."
                   " Ligação e conversa pessoal só aparecem se o vendedor escrever"

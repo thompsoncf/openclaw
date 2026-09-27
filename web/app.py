@@ -653,6 +653,17 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — resgate da IA falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # A IA do número insiste quando o cliente some (migração 401): lembrete
+                # no dia 3, última chamada no dia 7, perdido no dia 10. Um envio por
+                # ciclo, com teto e espaçamento — o mesmo cuidado do resgate com o chip.
+                from finance import ia_insiste as _iai
+                _ii = _iai.rodar(pool)
+                if any(_ii.values()):
+                    log.info("poller: ciclo #%d — a IA insistiu: %s", ciclo, _ii)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — a IA insistir falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # Vaga liberada da clínica (migração 369): consulta cancelada vira
                 # convite pra quem cabe no horário; lê o 1/2/PARAR e manda a 2ª rodada.
                 from finance import clinica_vagas as _cvg

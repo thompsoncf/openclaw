@@ -164,6 +164,8 @@ def pool():
         c.execute((BASE / "399_novidade_resgate_toques.sql").read_text(encoding="utf-8"))
         # 400: o aviso da chave "IA diz o preço" na lista (portão da 389)
         c.execute((BASE / "400_novidade_ia_preco_na_lista.sql").read_text(encoding="utf-8"))
+        # 402 amplia pela 11ª, com `esteira_ligada` (a esteira da cobrança ligada)
+        c.execute((BASE / "402_novidade_cada_trilha_sua_regra.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1335,9 +1337,11 @@ def test_os_avisos_da_391(pool):
     festa, vendedor incluído — é ele quem marca pelo app. A chave não pode colidir
     com a da 260 ('ia-marca-visita'), senão o `on conflict do nothing` engole o aviso."""
     with pool.connection() as c:
-        # a 391 reescreve o check com a lista DELA, sem o `resgate_ligado` da 397: os
-        # avisos da 397 saem antes, senão o check recusa a tabela
-        c.execute("delete from novidades where publico in ('resgate_ligado','resgate_eventos')")
+        # a 391 reescreve o check com a lista DELA, sem o `resgate_ligado` da 397 nem
+        # o `esteira_ligada` da 402: os avisos delas saem antes, senão o check recusa
+        # a tabela
+        c.execute("delete from novidades where publico in ('resgate_ligado','resgate_eventos',"
+                  "'esteira_ligada')")
         c.execute((BASE / "391_novidade_ia_marca_visita.sql").read_text(encoding="utf-8"))
         rows = {r[0]: r[1:] for r in c.execute(
             """select chave, publico, pra_quem, resumo, link from novidades
@@ -1396,3 +1400,20 @@ def test_o_aviso_da_chave_na_lista_mira_quem_tem_dois_chips(pool):
         r = c.execute("""select publico, pra_quem, resumo, link from novidades
                           where chave='ia-preco-na-lista'""").fetchone()
     assert r[:2] == ("mais_de_um_chip", ["dono", "gestor"]) and r[2] and r[3] == "/painel/servicos"
+
+
+def test_os_avisos_de_cada_trilha_com_a_sua_regra(pool):
+    """A 402: a mudança da esteira mira quem tem a esteira LIGADA, vendedor incluído
+    (é a cobrança dele que muda); a chave da IA que insiste mira quem vê o cartão da
+    regra por número, só a gerência. Os dois saem no site (têm resumo)."""
+    with pool.connection() as c:
+        rows = {r[0]: r[1:] for r in c.execute(
+            """select chave, publico, pra_quem, resumo, link from novidades
+                where chave in ('esteira-historico-e-resgate','ia-insiste-quando-some')""").fetchall()}
+    assert rows["esteira-historico-e-resgate"][:2] == ("esteira_ligada", ["dono", "gestor", "vendedor"])
+    assert rows["esteira-historico-e-resgate"][3] == "/painel/follow-up"
+    assert rows["ia-insiste-quando-some"][:2] == ("mais_de_um_chip", ["dono", "gestor"])
+    assert rows["ia-insiste-quando-some"][3] == "/painel/prospeccao/comunicacao"
+    assert all(r[2] for r in rows.values())
+    # banco sem a esteira (o schema deste arquivo): o portão falha fechado
+    assert nv.alcanca("esteira_ligada", "eventos", pool, 1) is False

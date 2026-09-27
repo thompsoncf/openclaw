@@ -89,7 +89,7 @@ def pool(monkeypatch):
                      values (%s,'Prime',null,1,'Prime Eventos','Rua A, 10','Teresina','PI'),
                             (%s,'CP Thiago',%s,null,null,null,null,null)""",
                   (EMPRESA, CHIP2, EMPRESA))
-        for m in ("388_regra_por_chip.sql", "390_ia_marca_visita.sql"):
+        for m in ("388_regra_por_chip.sql", "390_ia_marca_visita.sql", "401_ia_fora_da_esteira.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.commit()
     # o cadastro do cliente e os avisos pro celular não são o assunto aqui

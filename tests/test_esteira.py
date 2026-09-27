@@ -26,6 +26,8 @@ from finance import esteira as es
 MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 CONTA = 13
 VEND, OUTRO = 71, 72
+#: o membro IA: dono da regra por número com a IA ligada (27/09/2026)
+IA = 73
 #: 10h em Brasília — dentro da janela (08:00–19:00)
 AGORA = datetime(2026, 9, 19, 13, 0, tzinfo=timezone.utc)
 
@@ -60,6 +62,16 @@ create table contas (id bigint primary key, nome text,
   resumo_semanal_vendedor boolean not null default true,
   resumo_semanal_dia text not null default 'segunda',
   resumo_semanal_dono_emails text not null default '');
+-- o histórico do lead e o resgate da IA (27/09/2026): a nota do vendedor resolve a
+-- linha e descansa o lead; o lead que foi pro resgate sai como 'resgate'
+create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint,
+  membro_id bigint, tipo text, resultado text, descricao text not null default '',
+  criado_em timestamptz not null default now());
+create table resgate_leads (prospeccao_id bigint primary key, conta_id bigint,
+  membro_id bigint, entrou_em timestamptz not null default now(), ativo boolean default true);
+-- a regra por número (388), só o que diz quem é a IA (`chip_regra.membros_ia`)
+create table chip_regra (id bigserial primary key, conta_id bigint, chip_id bigint,
+  membro_id bigint, ativa boolean default true, ia_ligada boolean default false);
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text not null default 'off', cobranca_modo text not null default 'off',
   janela_dias text, janela_abre time, janela_fecha time,
@@ -87,14 +99,14 @@ def pool():
         for nome in ("209_raio_x_dono.sql", "213_perda_motivo_por_perfil.sql",
                      "230_funil_teto_da_etapa.sql", "235_motivos_de_perda_da_conta.sql",
                      "238_etapa_sai_do_quadro.sql", "254_funil_semeado_de.sql",
-                     "292_esteira_da_cobranca.sql"):
+                     "292_esteira_da_cobranca.sql", "401_ia_fora_da_esteira.sql"):
             c.execute((MIG / nome).read_text(encoding="utf-8"))
         for ch, o in (("novo", 0), ("contatado", 10), ("proposta", 30), ("perdido", 910)):
             c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem) values (%s,%s,%s,%s)",
                       (CONTA, ch, ch.capitalize(), o))
         c.execute("update funil_etapas set teto_dias=7 where conta_id=%s and chave in ('contatado','proposta')",
                   (CONTA,))
-        for mid, nome in ((VEND, "Vendedor"), (OUTRO, "Outro")):
+        for mid, nome in ((VEND, "Vendedor"), (OUTRO, "Outro"), (IA, "ZAQ SDR")):
             c.execute("insert into membros (id, conta_id, nome) values (%s,%s,%s)", (mid, CONTA, nome))
         # o DONO, que é quem recebe o fecho do dia (19/09/2026)
         c.execute("insert into membros (id, conta_id, nome, email, papel) "
@@ -108,7 +120,8 @@ def pool():
 def c(pool):
     with pool.connection() as con:
         for t in ("follow_up_esteira", "funil_movimentos", "mensagens", "conversas",
-                  "prospeccao", "funil_regua", "aviso_envios"):
+                  "prospeccao", "funil_regua", "aviso_envios", "prospeccao_atividades",
+                  "resgate_leads", "chip_regra"):
             con.execute(f"delete from {t}")
         con.execute("update membros set email=null where conta_id=%s and papel='vendedor'", (CONTA,))
         con.execute("update membros set email='dono@x.com' where conta_id=%s and papel='dono'", (CONTA,))
@@ -934,3 +947,144 @@ def test_a_344_nao_mexe_em_quem_ja_estava_resolvido(c):
     r = c.execute("select resolucao, resolvido_em from follow_up_esteira "
                   "where prospeccao_id=%s", (lid,)).fetchone()
     assert r == ("moveu", antes), "a 344 reescreveu uma resolução que já existia"
+
+
+# ------------------------------------------------------------------ cada trilha com a sua regra
+# Decisão do dono em 27/09/2026. Medido na produção antes: a esteira tratava o membro IA
+# como vendedor (9 entradas, 66 cobranças no WhatsApp do dono, um lead dele fechado
+# "sem tratativa"), e o lead que ia pro resgate fechava como 'falou' — o placar do
+# vendedor ganhava a mensagem da IA.
+
+def _ia_do_numero(c, ligada=True):
+    c.execute("insert into chip_regra (conta_id, chip_id, membro_id, ia_ligada) values (%s,36,%s,%s)",
+              (CONTA, IA, ligada))
+
+
+def test_lead_da_ia_nao_entra_na_esteira(c):
+    _ia_do_numero(c)
+    _com_bola_nossa(c, vend=IA, nome="Da IA")
+    humano = _com_bola_nossa(c, nome="Do vendedor")
+    assert [n["id"] for n in es.entrar(c, CONTA, AGORA)] == [humano]
+
+
+def test_regra_com_a_ia_desligada_e_de_gente(c):
+    """O chip do Pedro com o Pedro atendendo: ele é cobrado como qualquer vendedor."""
+    _ia_do_numero(c, ligada=False)
+    lid = _com_bola_nossa(c, vend=IA, nome="Do dono do chip")
+    assert [n["id"] for n in es.entrar(c, CONTA, AGORA)] == [lid]
+
+
+def test_lead_que_virou_da_ia_nao_e_cobrado_nem_fechado(c):
+    """Entrou na esteira do vendedor e depois foi pra IA (o gestor passou, ou o
+    resgate): a cobrança some e a esteira não fecha — o perdido é da IA."""
+    lid = _com_bola_nossa(c)
+    es.entrar(c, CONTA, AGORA)
+    _entrou_ha(c, lid, 6)
+    _ia_do_numero(c)
+    c.execute("update prospeccao set vendedor_id=%s where id=%s", (IA, lid))
+    assert es.cobrancas(c, CONTA, AGORA) == []
+    assert es.fechar_vencidos(c, CONTA, _fim_do_dia()) == []
+    assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "contatado"
+
+
+def test_o_lead_que_foi_pro_resgate_sai_como_resgate_e_nao_e_credito(c):
+    lid = _com_bola_nossa(c)
+    es.entrar(c, CONTA, AGORA)
+    # o resgate pega e manda a retomada — mensagem nossa DEPOIS da entrada
+    c.execute("insert into resgate_leads (prospeccao_id, conta_id, membro_id, entrou_em) "
+              "values (%s,%s,%s,%s)", (lid, CONTA, IA, AGORA + timedelta(hours=1)))
+    _msg(c, lid, "out", quando=AGORA + timedelta(hours=1))
+    assert es.resolver(c, CONTA, AGORA + timedelta(hours=2)) == 1
+    assert c.execute("select resolucao from follow_up_esteira where prospeccao_id=%s",
+                     (lid,)).fetchone()[0] == "resgate"
+    r = es.resumo(c, CONTA, VEND, AGORA + timedelta(hours=2))
+    assert r["resgate"] == 1 and r["tratou"] == 0 and r["falou"] == 0
+
+
+def test_resgate_de_antes_da_entrada_nao_conta(c):
+    """Uma passagem antiga (devolvida) não é o que tirou o lead da esteira hoje."""
+    lid = _com_bola_nossa(c)
+    c.execute("insert into resgate_leads (prospeccao_id, conta_id, membro_id, entrou_em, ativo) "
+              "values (%s,%s,%s,%s,false)", (lid, CONTA, IA, AGORA - timedelta(days=40)))
+    es.entrar(c, CONTA, AGORA)
+    _msg(c, lid, "out", quando=AGORA + timedelta(hours=1))
+    es.resolver(c, CONTA, AGORA + timedelta(hours=2))
+    assert c.execute("select resolucao from follow_up_esteira where prospeccao_id=%s",
+                     (lid,)).fetchone()[0] == "falou"
+
+
+def _nota(c, lead, membro, quando, texto="Liguei, ele pediu pra falar em outubro"):
+    c.execute("insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao, criado_em) "
+              "values (%s,%s,'nota',%s,%s)", (lead, membro, texto, quando))
+
+
+def test_escrever_no_historico_resolve_e_conta_como_tratado(c):
+    """O aviso da manhã sempre disse "escreva no histórico — o que não está escrito
+    não conta". Agora o que está escrito conta."""
+    lid = _com_bola_nossa(c)
+    es.entrar(c, CONTA, AGORA)
+    _nota(c, lid, VEND, AGORA + timedelta(hours=1))
+    assert es.resolver(c, CONTA, AGORA + timedelta(hours=2)) == 1
+    assert c.execute("select resolucao from follow_up_esteira where prospeccao_id=%s",
+                     (lid,)).fetchone()[0] == "historico"
+    r = es.resumo(c, CONTA, VEND, AGORA + timedelta(hours=2))
+    assert r["historico"] == 1 and r["tratou"] == 1
+
+
+def test_nota_do_sistema_de_outro_ou_vazia_nao_resolve(c):
+    lid = _com_bola_nossa(c)
+    es.entrar(c, CONTA, AGORA)
+    _nota(c, lid, None, AGORA + timedelta(hours=1), "Passou pro resgate da IA")
+    _nota(c, lid, OUTRO, AGORA + timedelta(hours=1))
+    _nota(c, lid, VEND, AGORA + timedelta(hours=1), "   ")
+    assert es.resolver(c, CONTA, AGORA + timedelta(hours=2)) == 0
+
+
+def test_a_nota_descansa_o_lead_como_a_mensagem(c):
+    """Sem o descanso, o lead justificado entrava de novo no dia seguinte."""
+    lid = _com_bola_nossa(c)
+    es.entrar(c, CONTA, AGORA)
+    _nota(c, lid, VEND, AGORA + timedelta(hours=1))
+    es.resolver(c, CONTA, AGORA + timedelta(hours=2))
+    assert es.entrar(c, CONTA, AGORA + timedelta(days=1)) == []
+    # passado o teto da etapa (7 dias), volta a ser cobrado
+    assert [n["id"] for n in es.entrar(c, CONTA, AGORA + timedelta(days=8))] == [lid]
+
+
+def test_o_fecho_conta_o_resgate_a_parte_e_o_historico_como_tratado():
+    titulo, corpo = es.texto_fecho({"tratou": 2, "na_esteira": 3, "resgate": 4}, [])
+    assert "Foram pro resgate da IA: 4" in corpo and "não contam como tratados" in corpo
+    assert "histórico" in corpo.split("Conta como tratado")[1]
+
+
+def test_o_fecho_do_dia_nao_poe_a_ia_no_placar(pool, c, monkeypatch):
+    from finance import email_sender as em
+    from finance import follow_up as fu
+    monkeypatch.setattr(em, "enviar_aviso", lambda *a, **k: True)
+    monkeypatch.setattr(fu, "_mandar_zap", lambda *a, **k: {"ok": True, "erro": "", "sid": "S1"})
+    monkeypatch.setattr(fu, "_zap_do_membro", lambda *a, **k: "86999990000")
+    corpos = []
+    real = es.texto_fecho
+    monkeypatch.setattr(es, "texto_fecho", lambda casa, placar: corpos.append(placar) or real(casa, placar))
+    _ia_do_numero(c)
+    _com_bola_nossa(c, nome="Ana")
+    es.avaliar(c, CONTA, AGORA)
+    # uma linha antiga do membro IA, de antes da regra (o que existe na produção)
+    velho = _lead(c, vend=IA, nome="Teste")
+    c.execute("insert into follow_up_esteira (conta_id, prospeccao_id, membro_id, etapa, entrou_em) "
+              "values (%s,%s,%s,'contatado',%s)", (CONTA, velho, IA, AGORA - timedelta(days=9)))
+    _cobrou_hoje(c)
+    c.commit()
+    es.fecho_do_dia(pool, CONTA, _fim_do_expediente())
+    assert corpos and "ZAQ SDR" not in [nome for nome, _ in corpos[0]]
+
+
+def test_lead_sem_vendedor_continua_cobrado_e_fechado(c):
+    """`membro_id = any(ia)` com membro nulo é nulo, e `not nulo` some com a linha:
+    a trava da IA não pode levar junto o lead sem dono."""
+    _ia_do_numero(c)
+    lid = _com_bola_nossa(c, vend=None, nome="Sem dono")
+    assert [n["id"] for n in es.entrar(c, CONTA, AGORA)] == [lid]
+    _entrou_ha(c, lid, 6)
+    assert [x["id"] for x in es.cobrancas(c, CONTA, AGORA)] == [lid]
+    assert [x["id"] for x in es.fechar_vencidos(c, CONTA, _fim_do_dia())] == [lid]

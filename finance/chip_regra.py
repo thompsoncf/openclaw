@@ -45,10 +45,10 @@ MOTIVOS = {
 
 _COLS = ("id, conta_id, chip_id, ativa, membro_id, ia_ligada, ia_horario, ia_dias, "
          "ia_hora_ini, ia_hora_fim, coalesce(ia_fora_texto,''), coalesce(ia_apresentacao,''), "
-         "aviso_agenda_membro_id, aviso_dono_membro_id, vale_desde")
+         "aviso_agenda_membro_id, aviso_dono_membro_id, vale_desde, ia_insiste")
 _CHAVES = ("id", "conta_id", "chip_id", "ativa", "membro_id", "ia_ligada", "ia_horario",
            "ia_dias", "ia_hora_ini", "ia_hora_fim", "ia_fora_texto", "ia_apresentacao",
-           "aviso_agenda_membro_id", "aviso_dono_membro_id", "vale_desde")
+           "aviso_agenda_membro_id", "aviso_dono_membro_id", "vale_desde", "ia_insiste")
 
 #: A marca, em `mensagens.status`, do recado de fora do horário. Pela marca e não pelo
 #: texto: o dono pode reescrever o recado com conversas esperando, e o texto antigo
@@ -113,6 +113,36 @@ def regra_da_conversa(c, conta_id: int, conversa_id: int) -> dict | None:
     if not r or not r["membro_id"] or cv[1] != r["membro_id"]:
         return None
     return r
+
+
+def membros_ia(c, conta_id: int) -> set[int]:
+    """OS MEMBROS QUE SÃO A IA: o dono de uma regra por número com a IA ligada, e o
+    membro do resgate. A esteira, o follow-up e a cobrança da régua pulam o lead
+    deles — cobrar o "ZAQ SDR" como vendedor mandava a cobrança pro WhatsApp do dono
+    (66 avisos até 27/09/2026) e fechava lead da IA como "sem tratativa". Quem
+    acompanha o lead da IA é a própria IA (finance/ia_insiste.py e os toques do
+    resgate), com o supervisor avisado.
+
+    Não existe marca de "IA" no cadastro do membro: é a regra que diz. Regra com a IA
+    DESLIGADA não conta — o dono dela pode ser gente (o chip do Pedro, com o Pedro
+    atendendo). Tolerante: sem as tabelas, ninguém é IA e tudo segue como antes."""
+    try:
+        with c.transaction():
+            ids = {int(r[0]) for r in c.execute(
+                """select membro_id from chip_regra
+                    where conta_id=%s and membro_id is not null and ia_ligada""",
+                (conta_id,)).fetchall()}
+    except Exception:  # noqa: BLE001 — banco sem a 388
+        return set()
+    try:
+        with c.transaction():
+            r = c.execute("select membro_id from resgate_config where conta_id=%s "
+                          "and membro_id is not null and modo <> 'off'", (conta_id,)).fetchone()
+        if r:
+            ids.add(int(r[0]))
+    except Exception:  # noqa: BLE001 — banco sem a 396
+        pass
+    return ids
 
 
 def tem_mais_de_um_chip(pool, conta_id: int) -> bool:
@@ -428,6 +458,8 @@ def salvar(c, conta_id: int, chip_id: int, f: dict) -> dict:
         return {"ok": False, "erro": "No horário próprio, escolha os dias e um início antes do fim."}
     if ini >= fim:
         ini, fim = 8, 22
+    # a insistência é da IA: sem a IA ligada, não há quem insista
+    insiste = bool(f.get("ia_insiste")) and ia
     fora = (f.get("ia_fora_texto") or "").strip()[:500] or None
     apres = (f.get("ia_apresentacao") or "").strip()[:160] or None
     antes = c.execute("select ativa from chip_regra where conta_id=%s and chip_id=%s",
@@ -438,8 +470,9 @@ def salvar(c, conta_id: int, chip_id: int, f: dict) -> dict:
     c.execute(
         """insert into chip_regra (conta_id, chip_id, ativa, membro_id, ia_ligada, ia_horario,
                                    ia_dias, ia_hora_ini, ia_hora_fim, ia_fora_texto,
-                                   ia_apresentacao, aviso_agenda_membro_id, aviso_dono_membro_id)
-           values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                   ia_apresentacao, aviso_agenda_membro_id, aviso_dono_membro_id,
+                                   ia_insiste)
+           values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            on conflict (conta_id, chip_id) do update set
              ativa=excluded.ativa, membro_id=excluded.membro_id, ia_ligada=excluded.ia_ligada,
              ia_horario=excluded.ia_horario, ia_dias=excluded.ia_dias,
@@ -447,9 +480,10 @@ def salvar(c, conta_id: int, chip_id: int, f: dict) -> dict:
              ia_fora_texto=excluded.ia_fora_texto, ia_apresentacao=excluded.ia_apresentacao,
              aviso_agenda_membro_id=excluded.aviso_agenda_membro_id,
              aviso_dono_membro_id=excluded.aviso_dono_membro_id,
+             ia_insiste=excluded.ia_insiste,
              atualizado_em=now()""",
         (conta_id, chip_id, ativa, membro or None, ia, horario, dias or [0, 1, 2, 3, 4, 5],
-         ini, fim, fora, apres, agenda or None, dono or None))
+         ini, fim, fora, apres, agenda or None, dono or None, insiste))
     if religou:
         c.execute("update chip_regra set vale_desde=now() where conta_id=%s and chip_id=%s",
                   (conta_id, chip_id))

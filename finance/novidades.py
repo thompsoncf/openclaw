@@ -230,6 +230,22 @@ def _resgate_eventos(pool, conta_id: int) -> bool:
         return False
 
 
+def _esteira_ligada(pool, conta_id: int) -> bool:
+    """A ESTEIRA DA COBRANÇA está ligada (migração 292, finance/esteira.py)? É só aí
+    que o vendedor recebe a cobrança da manhã e o dono o fecho do dia — a mesma coluna
+    que o motor lê (`esteira.config`). Lida direto: o `config` do motor semeia a linha
+    da régua, e um portão de aviso não escreve nada. Falha fechada."""
+    try:
+        with pool.connection() as c:
+            r = c.execute("select coalesce(esteira_modo,'off') from funil_regua where conta_id=%s",
+                          (conta_id,)).fetchone()
+            return bool(r and r[0] == "ligado")
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ver a esteira da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
 # O REGISTRO. Cada chave aponta pro portão que já decide quem vê a funcionalidade.
 # Acrescentar um público aqui EXIGE mexer no check da migração — e um teste
 # compara as duas listas, pra deriva virar falha em vez de surpresa.
@@ -260,6 +276,7 @@ PUBLICOS_CONTA = {
     "visita_da_ia": _visita_da_ia,
     "resgate_ligado": _resgate_ligado,
     "resgate_eventos": _resgate_eventos,
+    "esteira_ligada": _esteira_ligada,
 }
 
 # A lista completa — é ela que o check da migração espelha.

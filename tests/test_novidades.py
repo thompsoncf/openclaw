@@ -166,6 +166,8 @@ def pool():
         c.execute((BASE / "400_novidade_ia_preco_na_lista.sql").read_text(encoding="utf-8"))
         # 402 amplia pela 11ª, com `esteira_ligada` (a esteira da cobrança ligada)
         c.execute((BASE / "402_novidade_cada_trilha_sua_regra.sql").read_text(encoding="utf-8"))
+        # 404: os avisos das três trilhas e do espelho (portões da 389 e da 402)
+        c.execute((BASE / "404_novidade_tres_trilhas.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1417,3 +1419,15 @@ def test_os_avisos_de_cada_trilha_com_a_sua_regra(pool):
     assert all(r[2] for r in rows.values())
     # banco sem a esteira (o schema deste arquivo): o portão falha fechado
     assert nv.alcanca("esteira_ligada", "eventos", pool, 1) is False
+
+
+def test_os_avisos_das_tres_trilhas(pool):
+    """A 404: a barra e a coluna Resgate só existem com a IA do número ou o resgate
+    (dois chips); o espelho mora na esteira. Os dois pra gerência, e no site."""
+    with pool.connection() as c:
+        rows = {r[0]: r[1:] for r in c.execute(
+            """select chave, publico, pra_quem, resumo, link from novidades
+                where chave in ('funil-tres-trilhas','espelho-do-vendedor')""").fetchall()}
+    assert rows["funil-tres-trilhas"][:2] == ("mais_de_um_chip", ["dono", "gestor"])
+    assert rows["espelho-do-vendedor"][:2] == ("esteira_ligada", ["dono", "gestor"])
+    assert all(r[2] and r[3] for r in rows.values())

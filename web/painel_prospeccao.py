@@ -666,7 +666,7 @@ def _promover_para_lead(c, conta_id, pros_id) -> None:
 
 @router.get("/painel/prospeccao", response_class=HTMLResponse)
 def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista: str = "",
-                      entrou: str = "", fora: str | None = None, q: str = ""):
+                      entrou: str = "", fora: str | None = None, q: str = "", trilha: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -1144,10 +1144,61 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         if _visivel(cc) and cc["status"] != "perdido":
             k = _evl.mes_chave(cc["evento_em"]) if cc.get("evento_em") else None
             contagens[k] = contagens.get(k, 0) + 1
-    def _no_quadro(cc):
-        return _visivel(cc) and _passa_mes(cc) and _busca_bate(cc, busca_n, busca_dig)
+    # AS TRÊS TRILHAS (mockup docs/mockups/funil_tres_trilhas.html, aprovado em
+    # 27/09/2026): de quem é cada card — vendedor, IA do número ou resgate — e os
+    # selos. Uma consulta pro quadro inteiro (finance/trilhas.py), tolerante: sem as
+    # tabelas, todo card é de vendedor e a barra não aparece.
+    from finance import trilhas as _tri
+    filtro_tri = (trilha or "").strip() if ctx["gerencia"] else ""
+    if filtro_tri not in _tri.TRILHAS:
+        filtro_tri = ""
+    tri_por: dict = {}
+    try:
+        with pool.connection() as _ct:
+            tri_por = _tri.do_quadro(_ct, conta_id, todos_cards + outros_vend, agora)
+            _ct.commit()
+    except Exception:  # noqa: BLE001 — o quadro abre sem as trilhas
+        _log.warning("trilhas do quadro falharam na conta %s", conta_id, exc_info=True)
+        tri_por = {}
+    for cc in todos_cards + outros_vend:
+        cc["tri"] = tri_por.get(cc["id"]) or {"trilha": "vend"}
 
-    colunas = {chave: [cc for cc in cards if _no_quadro(cc)]
+    def _no_quadro(cc, com_trilha=True):
+        return (_visivel(cc) and _passa_mes(cc) and _busca_bate(cc, busca_n, busca_dig)
+                and (not com_trilha or not filtro_tri or cc["tri"]["trilha"] == filtro_tri))
+
+    # A COLUNA RESGATE (seção 2 do mockup): quem está com o resgate EM ANDAMENTO,
+    # na frente do quadro, no Todas e na trilha do Resgate. Ela ignora o período:
+    # o lead resgatado entrou meses atrás, e é justamente o que a coluna quer mostrar.
+    # A etapa dele não muda — o card sai da coluna da etapa só na tela.
+    rsg_col: list[dict] = []
+    # com um vendedor escolhido, a coluna sai: o lead do resgate é da IA, não dele
+    if ctx["gerencia"] and filtro_tri in ("", "rsg") and not filtro_vend:
+        rsg_col = [cc for cc in todos_cards + outros_vend
+                   if cc["tri"].get("andamento") and _busca_bate(cc, busca_n, busca_dig)]
+        _no_rsg = {cc["id"] for cc in rsg_col}
+    else:
+        _no_rsg = set()
+    tri_barra = None
+    if ctx["gerencia"]:
+        try:
+            with pool.connection() as _ct:
+                tri_barra = _tri.barra(_ct, conta_id,
+                                       [cc for cc in todos_cards + outros_vend
+                                        if _no_quadro(cc, com_trilha=False) or cc["id"] in _no_rsg],
+                                       tri_por, agora)
+                tri_det = (_tri.detalhe(_ct, conta_id, filtro_tri, todos_cards + outros_vend, tri_por)
+                           if filtro_tri and tri_barra else {})
+                _ct.commit()
+        except Exception:  # noqa: BLE001
+            _log.warning("barra das trilhas falhou na conta %s", conta_id, exc_info=True)
+            tri_barra, tri_det = None, {}
+    else:
+        tri_det = {}
+    if not tri_barra:
+        rsg_col, _no_rsg, filtro_tri = [], set(), ""
+
+    colunas = {chave: [cc for cc in cards if _no_quadro(cc) and cc["id"] not in _no_rsg]
                for chave, cards in colunas.items()}
     n_quadro = sum(len(v) for v in colunas.values())
     entrou_itens = _evl.meses_entrada(todos_cards, hoje)
@@ -1198,7 +1249,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     from urllib.parse import urlencode as _urlencode
 
     def _kb_url(**over):
-        q = {"vendedor": filtro_vend, "mes": filtro_mes, "vista": "mes" if vista_mes else ""}
+        q = {"vendedor": filtro_vend, "mes": filtro_mes, "vista": "mes" if vista_mes else "",
+             "trilha": filtro_tri}
         q.update(over)
         return "/painel/prospeccao?" + _urlencode({k: v for k, v in q.items() if v not in ("", None)})
 
@@ -1214,6 +1266,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # busca vai em todos os meses) e o "✕ limpar" dela
     busca_base = _kb_url(mes="")
     busca_limpa = _kb_url()
+    tri_urls = {k: _kb_url(trilha=("" if filtro_tri == k else k)) for k in _tri.TRILHAS}
+    tri_urls["todas"] = _kb_url(trilha="")
     fora_urls = {k: _kb_url(fora=",".join(sorted((set(fora_on) ^ {k}))) or "") for k in ("esperando", "festa30")}
     # `fora=` vazio precisa chegar na URL pra limpar — o urlencode acima o descarta
     for k, u in fora_urls.items():
@@ -1268,6 +1322,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    busca=busca, busca_base=busca_base, busca_limpa=busca_limpa,
                    empresa_nome=empresa_nome,
                    vend_cont=vend_cont, vend_total=vend_total, criticos=criticos,
+                   tri_barra=tri_barra, tri_urls=tri_urls, filtro_tri=filtro_tri,
+                   tri_det=tri_det, rsg_col=rsg_col,
                    mes_vazio=mes_vazio,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
                    totais_col=totais_col, modo_evento=modo_evento,
@@ -8787,6 +8843,9 @@ def regua_pagina(request: Request):
                 cfg_est = _est.config(c, ctx["conta_id"])
         except Exception:  # noqa: BLE001
             cfg_est = {"esteira_modo": "off"}
+        # o espelho do vendedor (migração 403): quem é copiado e quem recebe
+        from finance import esteira as _est2
+        espelho = _est2.espelho(c, ctx["conta_id"])
         # o perdido automático (migração 282) também tem config própria, e pelo
         # mesmo motivo: a config da régua não conhece as colunas novas. O savepoint
         # é o que impede um deploy pela metade de derrubar a tela inteira.
@@ -8861,7 +8920,28 @@ def regua_pagina(request: Request):
                    escolhidas_tpl=escolhidas, padrao_tpl=padrao,
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
+                   espelho=espelho, equipe_espelho=_vendedores(get_pool(), ctx["conta_id"]),
                    aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.post("/painel/prospeccao/regua/espelho")
+def regua_espelho(request: Request, espelho_de: str = Form(""), espelho_para: str = Form("")):
+    """O ESPELHO DO VENDEDOR (mockup das três trilhas, aprovado em 27/09/2026): um
+    vendedor por vez; a cópia do que ele recebe vai pro WhatsApp de quem pediu."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    from finance import esteira as _est
+    with get_pool().connection() as c:
+        r = _est.salvar_espelho(c, ctx["conta_id"], espelho_de, espelho_para)
+        if r.get("ok"):
+            c.commit()
+        else:
+            c.rollback()
+    request.session["prosp_aviso"] = ("Espelho salvo ✓" if r.get("ok") else r.get("erro"))
+    return RedirectResponse("/painel/prospeccao/regua#espelho", status_code=303)
 
 
 @router.post("/painel/prospeccao/regua/config")
@@ -11994,6 +12074,34 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     {% for v in criticos %}<a href="{{ v.url|e }}" class="kbcc{% if v.on %} on{% endif %}" title="{% if v.on %}Ver todos os vendedores{% else %}Ver só os cards de {{ v.nome|e }}{% endif %}"><b>{{ v.n }}</b> {{ v.nome|e }}</a>{% endfor %}
     <a class="lk" href="/painel/follow-up">ver fila →</a></div>{% endif %}
 
+  {#- AS TRÊS TRILHAS (docs/mockups/funil_tres_trilhas.html, aprovado em 27/09/2026):
+     vendedores, a IA do número e o resgate, cada uma com a sua regra. Só pra dono e
+     gestor (decisão 2), e só em conta com IA ou resgate — sem os dois, a barra não
+     existe. Tocar numa trilha filtra o quadro; tocar de novo solta. -#}
+  {% if tri_barra %}{% set tb = tri_barra %}
+  <nav class="kbtri-bar" aria-label="Trilhas do funil">
+    <a class="kbtr todas{% if not filtro_tri %} on{% endif %}" href="{{ tri_urls.todas|e }}"{% if not filtro_tri %} aria-current="true"{% endif %}>
+      <span class="t">Todas</span><span class="n">{{ tb.todas }}</span><span class="l">abertos no quadro</span></a>
+    <a class="kbtr vend{% if filtro_tri == 'vend' %} on{% endif %}" href="{{ tri_urls.vend|e }}">
+      <span class="t"><i class="d"></i>Vendedores</span><span class="n">{{ tb.abertos.vend }} <small>abertos</small></span>
+      {% if tb.vend.esteira is not none %}<span class="l">na esteira <b>{{ tb.vend.esteira }}</b> · tratados hoje <b>{{ tb.vend.tratados }}</b></span>{% endif %}
+      <span class="rg">A esteira cobra o vendedor{% if tb.rsg.modo != 'off' %}; 7 dias sem mensagem, vai pro Resgate{% endif %}.</span></a>
+    <a class="kbtr ia{% if filtro_tri == 'ia' %} on{% endif %}" href="{{ tri_urls.ia|e }}">
+      <span class="t"><i class="d"></i>IA do número</span><span class="n">{{ tb.abertos.ia }} <small>abertos{% if tb.ia.nome %} · {{ tb.ia.nome|e }}{% endif %}</small></span>
+      <span class="l">conversando <b>{{ tb.ia.conversando }}</b> · sumiu <b>{{ tb.ia.sumido }}</b>{% if tb.ia.gente %} · gente assumiu <b>{{ tb.ia.gente }}</b>{% endif %}</span>
+      <span class="rg">A IA responde{% if tb.ia.insiste %} e insiste no 3º e 7º dia; perdido no 10º{% else %} · a insistência está desligada{% endif %}.</span></a>
+    <a class="kbtr rsg{% if filtro_tri == 'rsg' %} on{% endif %}" href="{{ tri_urls.rsg|e }}">
+      <span class="t"><i class="d"></i>Resgate da IA{% if tb.rsg.modo != 'off' %} <span class="modo">{{ 'pausado' if tb.rsg.pausado else ('Ensaio' if tb.rsg.modo == 'ensaio' else 'Ligado') }}</span>{% endif %}</span>
+      <span class="n">{{ tb.abertos.rsg }} <small>com a IA{% if tb.rsg.fila is not none %} · {{ tb.rsg.fila }} na fila{% endif %}</small></span>
+      <span class="l">em andamento <b>{{ tb.rsg.andamento }}</b> · hoje <b>{{ tb.rsg.hoje }} de {{ tb.rsg.teto }}</b> · responderam <b>{{ tb.rsg.responderam }}</b></span>
+      <span class="rg">{% if tb.rsg.modo == 'off' %}Desligado · ligue em Comunicação › Agente{% else %}7 dias sem mensagem (14 com {{ 'visita' if modo_evento else 'reunião' }} ou orçamento){% endif %}.</span></a>
+  </nav>
+  {% if filtro_tri and tri_det and tri_det.linhas %}<div class="kbtri-det {{ filtro_tri }}"><span class="rot">{{ tri_det.rotulo }}</span>
+    {% set _mx = (tri_det.linhas | map(attribute='n') | max) or 1 %}
+    {% for l in tri_det.linhas %}<div class="er"><span>{{ l.nome|e }}</span><span class="bar"><i style="width:{{ (100 * l.n / _mx)|round|int }}%"></i></span><span class="q">{{ l.n }}</span></div>{% endfor %}
+  </div>{% endif %}
+  {% endif %}
+
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
   <!-- painel de captação: gaveta à direita, por cima do quadro (desde 25/09/2026) -->
@@ -12246,6 +12354,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
      presas no topo ao rolar, e cada uma diz em verde quantos clientes esperam
      resposta ali (●7) — o vendedor escolhe a etapa pelo que pede ação. -#}
   <div class="kbtabs" id="kbtabs">
+    {% if rsg_col %}<button type="button" class="kbtab" data-tab="_resgate" onclick="kbTab('_resgate')"><span class="r">♻️ Resgate</span><span class="n"><span class="c">{{ rsg_col|length }}</span></span></button>{% endif %}
     {% for s, rot in (vista_cols or colunas_tpl) %}{% set _tgs = (grupos or {}).get(s, []) %}{% set _tesp = (_tgs | selectattr('tipo', 'equalto', 'esperando') | sum(attribute='n')) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')"><span class="r">{{ rot }}</span><span class="n"><span class="c">{{ _tgs | sum(attribute='n') if vista_mes else colunas[s]|length }}</span>{% if _tesp %}<i class="e" title="{{ _tesp }} esperando resposta">●{{ _tesp }}</i>{% endif %}</span></button>{% endfor %}
   </div>
 
@@ -12270,6 +12379,14 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              tabindex="0" onkeydown="if(event.key==='Enter'&&event.target===this)kbAbrirLead(event,{{ c.id }},this)"
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
           <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav kbvn{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="Responsável: {{ (c.vendedor or 'ninguém')|e }} · clique pra trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor_curto or c.vendedor or ('livre' if not c.vendedor_id else 'sem nome'))|e }}</button>{% elif gerencia and c.vendedor %}<span class="kbav kbvn" title="Responsável: {{ c.vendedor|e }}">{{ (c.vendedor_curto or c.vendedor)|e }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
+          {#- A TRILHA NO CARD (mockup das três trilhas): de onde veio o lead do
+             resgate, a etapa em que ele está (a coluna Resgate é uma visão) e o
+             próximo passo; o selo da IA do número; e o "veio do Resgate" no card que
+             já saiu da coluna. -#}
+          {% set _t = c.tri or {} %}
+          {% if _t.andamento %}<div class="kbtri rsg"><span class="de">{{ _t.origem_txt }}{% if _t.era %} · era de {{ _t.era|e }}{% endif %}{% if _t.parado_dias %} · {{ _t.parado_dias }} dias parado{% endif %}</span><span class="etp">etapa: {{ c.etapa_rot }}</span>{% if _t.passo %}<span class="ps">{{ _t.passo }}</span>{% endif %}{% if _t.resumo %}<span class="rs">✨ {{ _t.resumo|e }}</span>{% endif %}</div>
+          {% elif _t.trilha == 'ia' %}<div class="kbtri ia">🤖 IA do número{% if _t.gente %} · <b>gente assumiu</b>{% endif %}</div>
+          {% elif _t.veio %}<div class="kbtri rsg veio">♻️ veio do Resgate{% if _t.era %} · era de {{ _t.era|e }}{% endif %}</div>{% endif %}
           <div class="kbl2">
           {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
@@ -12319,6 +12436,16 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
      da festa não muda de arrastar) — o drop fica desligado e a contagem é a soma
      dos grupos. Mudar a etapa continua pelo balão do lead. #}
   <div class="kbrow{% if vista_mes %} vmes{% endif %}" id="kbrow">
+    {#- A COLUNA RESGATE (seção 2 do mockup): quem está com o resgate em andamento,
+       de onde veio e em que etapa está. Não recebe card arrastado — é uma visão, a
+       etapa do lead não muda. -#}
+    {% if rsg_col %}
+    <div class="kbcol kbcol-rsg" data-status="_resgate">
+      <h4 title="Resgate da IA · em andamento"><span>♻️ Resgate</span><span class="kbcnt">{{ rsg_col|length }}</span></h4>
+      <div class="kbcolsub"><span class="v">em andamento · a etapa não muda</span></div>
+      <div class="kbdrop">{% for c in rsg_col %}{{ kbcard(c) }}{% endfor %}</div>
+    </div>
+    {% endif %}
     {% for s, rot in (vista_cols or colunas_tpl) %}
     {#- A COLUNA (24/09/2026): largura de verdade (232–300 px, calculada pelo
        kbLayout), altura presa à tela e rolagem própria — o cabeçalho fica parado.
@@ -12367,6 +12494,41 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 
 <style>
+/* ---- as três trilhas (27/09/2026, docs/mockups/funil_tres_trilhas.html) ---- */
+.kbtri-bar{display:grid;grid-template-columns:minmax(110px,.6fr) repeat(3,minmax(0,1fr));gap:8px;margin-top:.7rem}
+.kbtr{border:1px solid var(--borda);border-radius:11px;background:var(--bg);padding:.5rem .65rem;display:flex;flex-direction:column;gap:.15rem;font-size:.72rem;color:var(--txt-mut);text-decoration:none;min-width:0}
+.kbtr:hover{border-color:#2f4439}
+.kbtr .t{display:flex;align-items:center;gap:.35rem;font-weight:700;font-size:.82rem;color:var(--txt)}
+.kbtr .t .d{width:8px;height:8px;border-radius:50%;flex:none}
+.kbtr .n{font-size:1.15rem;font-weight:700;color:var(--txt);font-variant-numeric:tabular-nums;line-height:1.15}
+.kbtr .n small{font-size:.68rem;font-weight:400;color:var(--txt-mut)}
+.kbtr .l b{color:var(--txt);font-weight:600}
+.kbtr .rg{font-size:.66rem;color:#5e6f66;border-top:1px solid var(--borda);padding-top:.25rem;margin-top:.1rem}
+.kbtr .modo{font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;border:1px solid #5a4520;color:#f2c66e;border-radius:4px;padding:0 .3rem;margin-left:auto;font-weight:600}
+.kbtr.vend .d{background:var(--verde)} .kbtr.ia .d{background:#c9a3e0} .kbtr.rsg .d{background:#e0a32e}
+.kbtr.on{box-shadow:0 0 0 1px currentColor}
+.kbtr.todas.on,.kbtr.vend.on{color:var(--verde);border-color:#1e4a3a}
+.kbtr.ia.on{color:#c9a3e0;border-color:#3e2e4e}
+.kbtr.rsg.on{color:#e0a32e;border-color:#5a4520}
+.kbtri-det{display:flex;flex-direction:column;gap:5px;margin-top:.5rem;padding:.55rem .7rem;border:1px solid var(--borda);border-radius:10px;font-size:.74rem;max-width:560px}
+.kbtri-det .rot{color:var(--txt-mut);font-size:.68rem}
+.kbtri-det .er{display:grid;grid-template-columns:150px 1fr 34px;gap:.5rem;align-items:center}
+.kbtri-det .bar{height:7px;border-radius:5px;background:#1e2a23}
+.kbtri-det .bar i{display:block;height:100%;border-radius:5px;background:var(--verde)}
+.kbtri-det.rsg .bar i{background:#e0a32e} .kbtri-det.ia .bar i{background:#c9a3e0}
+.kbtri-det .q{text-align:right;font-variant-numeric:tabular-nums}
+.kbtri{display:flex;flex-direction:column;gap:.1rem;font-size:.68rem;line-height:1.35;border-radius:6px;padding:.25rem .4rem}
+.kbtri.rsg{background:#241c0f;color:#f2c66e;border:1px solid #5a4520}
+.kbtri.rsg .etp{font-family:var(--mono,ui-monospace,monospace);font-size:.62rem;color:#b8a27a}
+.kbtri.rsg .ps{color:#eaf2ed}
+.kbtri.rsg .rs{color:#e3ccf2;border-top:1px dashed #5a4520;padding-top:.15rem}
+.kbtri.rsg.veio{padding:.1rem .4rem}
+.kbtri.ia{background:#1a1422;color:#e3ccf2;border:1px solid #3e2e4e;padding:.1rem .4rem}
+.kbtri.ia b{color:#f0a9a2}
+.kbcol-rsg{border-color:#5a4520}
+.kbcol-rsg h4{color:#f2c66e}
+@media (max-width:760px){.kbtri-bar{grid-template-columns:1fr 1fr}.kbtri-det .er{grid-template-columns:110px 1fr 30px}}
+
 /* ---- o próximo passo no card (16/09/2026; em TEXTO desde 24/09/2026) ----
    Era pílula colorida com borda e fundo em todo card aberto; com 118 de 208 em
    "Crítico" na Prime, mais da metade do quadro gritava igual. Agora é uma
@@ -17620,6 +17782,23 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  {#- O ESPELHO DO VENDEDOR (mockup docs/mockups/funil_tres_trilhas.html, seção 5,
+      aprovado em 27/09/2026): um vendedor por vez, a cópia no WhatsApp de quem
+      pediu. Só com a esteira fora de "Desligado" — sem ela, não há o que copiar. -#}
+  {% if cfg.esteira_modo and cfg.esteira_modo != 'off' %}
+  <form method="post" action="/painel/prospeccao/regua/espelho" class="fsec" id="espelho" style="margin-top:1rem">
+    <div class="sh"><b>🪞 Espelho do vendedor</b><span class="mut" style="font-size:.76rem">a cobrança do jeito que ela chega na mão da equipe</span></div>
+    <p class="mut" style="font-size:.8rem;line-height:1.55;margin:.2rem 0 .7rem">Uma cópia do que o vendedor recebe (a cobrança da manhã, o aviso do último dia e o aviso do resgate) vai pro WhatsApp de quem você escolher, marcada como cópia. Não conta no teto dele, não vira cobrança de ninguém, e ele não fica sabendo. Um vendedor por vez.</p>
+    <div class="egrid">
+      <div><label class="lbl">De quem</label><select class="fld" name="espelho_de"><option value="">ninguém (desligado)</option>
+        {% for m in equipe_espelho %}<option value="{{ m.id }}" {% if espelho.de == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+      <div><label class="lbl">Pra quem (WhatsApp)</label><select class="fld" name="espelho_para"><option value="">escolha</option>
+        {% for m in equipe_espelho %}<option value="{{ m.id }}" {% if espelho.para == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:.6rem"><button class="pbtn">Salvar o espelho</button></div>
+  </form>
+  {% endif %}
 
   <form method="post" action="/painel/prospeccao/regua/config">
   <!-- ---------------- estado ---------------- -->

@@ -99,7 +99,8 @@ def pool():
         for nome in ("209_raio_x_dono.sql", "213_perda_motivo_por_perfil.sql",
                      "230_funil_teto_da_etapa.sql", "235_motivos_de_perda_da_conta.sql",
                      "238_etapa_sai_do_quadro.sql", "254_funil_semeado_de.sql",
-                     "292_esteira_da_cobranca.sql", "401_ia_fora_da_esteira.sql"):
+                     "292_esteira_da_cobranca.sql", "401_ia_fora_da_esteira.sql",
+                     "403_resgate_origem_e_espelho.sql"):
             c.execute((MIG / nome).read_text(encoding="utf-8"))
         for ch, o in (("novo", 0), ("contatado", 10), ("proposta", 30), ("perdido", 910)):
             c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem) values (%s,%s,%s,%s)",
@@ -1088,3 +1089,53 @@ def test_lead_sem_vendedor_continua_cobrado_e_fechado(c):
     _entrou_ha(c, lid, 6)
     assert [x["id"] for x in es.cobrancas(c, CONTA, AGORA)] == [lid]
     assert [x["id"] for x in es.fechar_vencidos(c, CONTA, _fim_do_dia())] == [lid]
+
+
+
+# ------------------------------------------------------------------ o espelho do vendedor
+# Mockup das três trilhas, seção 5 (aprovado em 27/09/2026): um vendedor por vez, a
+# cópia no WhatsApp de quem pediu — o dono testando a cobrança sem ser cobrado.
+
+def _zaps(monkeypatch, numeros=None):
+    from finance import follow_up as fu
+    saiu = []
+    numeros = numeros or {99: "86999990000", VEND: "86988880000"}
+    monkeypatch.setattr(fu, "_zap_do_membro", lambda c, conta, mid: numeros.get(mid, ""))
+    monkeypatch.setattr(fu, "_mandar_zap",
+                        lambda pool, conta, numero, texto: saiu.append((numero, texto)) or {"ok": True, "sid": "S"})
+    return saiu
+
+
+def test_o_espelho_manda_a_copia_so_do_vendedor_escolhido(pool, c, monkeypatch):
+    saiu = _zaps(monkeypatch)
+    assert es.salvar_espelho(c, CONTA, VEND, 99)["ok"]
+    c.commit()
+    assert es.copiar(pool, CONTA, VEND, "VENDEDOR SILVA", "⏱️ VENDEDOR, 10 para hoje", "• Ana (dia 1)")
+    assert saiu[-1][0] == "86999990000"
+    assert saiu[-1][1].startswith("🪞 Cópia do que Vendedor recebeu") and "Ana (dia 1)" in saiu[-1][1]
+    assert not es.copiar(pool, CONTA, OUTRO, "Outro", "t", "c")          # o outro não é copiado
+    with pool.connection() as con:
+        assert con.execute("select origem, membro_id from aviso_envios where origem='espelho'").fetchone() \
+            == ("espelho", 99)
+
+
+def test_o_espelho_desliga_e_confere_quem_recebe(pool, c, monkeypatch):
+    _zaps(monkeypatch, {VEND: "86988880000"})
+    assert es.salvar_espelho(c, CONTA, VEND, 99) == {
+        "ok": False, "erro": "Quem recebe a cópia precisa ter WhatsApp no cadastro."}
+    assert not es.salvar_espelho(c, CONTA, VEND, 12345)["ok"]              # de outra conta
+    assert es.salvar_espelho(c, CONTA, "", "")["ok"]
+    assert es.espelho(c, CONTA) == {"de": None, "para": None}
+
+
+def test_a_cobranca_da_manha_sai_com_a_copia(pool, c, monkeypatch):
+    saiu = _zaps(monkeypatch)
+    from finance import cockpit as ck
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 0)
+    es.salvar_espelho(c, CONTA, VEND, 99)
+    _lead(c, nome="Ana")
+    es.avaliar(c, CONTA, AGORA)
+    c.commit()
+    es.notificar(pool, CONTA, es.cobrancas(c, CONTA, AGORA))
+    assert [n for n, _t in saiu] == ["86988880000", "86999990000"]
+    assert saiu[1][1].startswith("🪞 Cópia do que Vendedor recebeu")

@@ -32,6 +32,7 @@ from web.painel_prospeccao import NAVBAR_CSS, _navbar
 from web.portal import _env, _render, conta_logada, nicho_da_conta
 
 import logging
+from urllib.parse import urlencode
 
 _log = logging.getLogger("openclaw.painel_follow_up")
 
@@ -87,7 +88,7 @@ def _tempo(horas) -> str:
     return _t(horas)
 
 
-def _entrega(pool, conta_id: int) -> dict | None:
+def _entrega(pool, conta_id: int, grupo: str | None = None) -> dict | None:
     """O resumo de entrega e leitura dos avisos, pronto pro card.
 
     Devolve `None` quando NÃO HÁ NADA que ele possa dizer — conta que nunca mandou
@@ -109,7 +110,13 @@ def _entrega(pool, conta_id: int) -> dict | None:
         t = max(1, v["total"])
         v["pct_lido"] = round(100 * v["lidos"] / t)
         v["pct_entregue"] = round(100 * v["entregues"] / t)
-    r["hist"] = _historico(pool, conta_id)
+    # O FILTRO POR TIPO (revisão de 27/09/2026): cobrança, visita, festa, resgate,
+    # espelho, testes — só os que têm aviso no período
+    r["hist_grupos"] = _al.contagem(pool, conta_id)
+    grupos = {x["grupo"] for x in r["hist_grupos"]}
+    r["hist_grupo"] = grupo if grupo in grupos else None
+    r["hist_total"] = sum(x["n"] for x in r["hist_grupos"])
+    r["hist"] = _historico(pool, conta_id, r["hist_grupo"])
     return r
 
 
@@ -141,7 +148,7 @@ def _sinal(evs: list[dict]) -> tuple[str, str]:
     return ("r", "não saiu")
 
 
-def _historico(pool, conta_id: int) -> list[dict]:
+def _historico(pool, conta_id: int, grupo: str | None = None) -> list[dict]:
     """A lista de pessoas do card, cada uma com o histórico pronto pra abrir.
 
     Junta três leituras que já existem: o histórico (`aviso_log.historico`), o
@@ -152,7 +159,7 @@ def _historico(pool, conta_id: int) -> list[dict]:
     try:
         from finance import aviso_log as _al
         from finance import aviso_saude as _as
-        pessoas = _al.historico(pool, conta_id)
+        pessoas = _al.historico(pool, conta_id, grupo=grupo)
         alertas = _as.por_membro(pool, conta_id)
     except Exception:  # noqa: BLE001 — o histórico é enfeite; a fila é o produto
         _log.info("follow-up: histórico do aviso falhou (ok)", exc_info=True)
@@ -224,7 +231,8 @@ def painel_follow_up(request: Request):
     # COMO OS AVISOS CHEGARAM (migração 284). Só pra quem decide: o vendedor não vê
     # o card. Fora do `with` de cima de propósito — é leitura independente, e uma
     # falha dela não pode levar junto a fila, que é o produto da tela.
-    entrega = _entrega(pool, conta_id) if papel in ("dono", "gestor") else None
+    entrega = (_entrega(pool, conta_id, (q.get("aviso") or "").strip() or None)
+               if papel in ("dono", "gestor") else None)
     # QUEM NÃO ESTÁ SENDO AVISADO (18/09/2026). Vem junto do card e pelo mesmo
     # motivo dele: medir o envio só serve se alguém for avisado quando o envio
     # parar. Também só pra quem decide — é ele que corrige cadastro.
@@ -263,6 +271,8 @@ def painel_follow_up(request: Request):
                    gestao=(fu.por_vendedor(linhas) if papel != "vendedor" else []),
                    modo=cfg["follow_up_modo"], zap=bool(cfg.get("fu_zap")),
                    entrega=entrega, sem_aviso=sem_aviso,
+                   # os outros filtros da fila continuam quando se troca o tipo do aviso
+                   qs_sem_aviso=urlencode([(k, v) for k, v in q.multi_items() if k != "aviso"]),
                    rotulo=fu.ROTULO, emoji=fu.EMOJI,
                    por_temp=por_temp, rot_prio=fu.ROTULO_PRIORIDADE,
                    br=_br, tempo=_tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO,
@@ -611,6 +621,14 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
 .fu-ev .nota{display:block;font-size:.69rem;color:var(--text-faint)}
 .fu-ev .tag{font:500 .61rem var(--mono);border:1px solid var(--line);border-radius:4px;
   padding:0 .25rem;color:var(--text-faint);margin-left:.25rem}
+.fu-ev .tag.tp-c{color:var(--ambar);border-color:var(--ambar-borda)}
+.fu-ev .tag.tp-v{color:var(--verde-claro);border-color:var(--neon-borda)}
+.fu-tipos{display:flex;gap:.4rem;flex-wrap:wrap;padding:.1rem .85rem .6rem}
+.fu-tipos a{font-size:.72rem;border:1px solid var(--line);border-radius:999px;padding:.12rem .6rem;
+  color:var(--text-dim);text-decoration:none}
+.fu-tipos a b{font-variant-numeric:tabular-nums;font-weight:600;margin-left:.2rem}
+.fu-tipos a.on{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.fu-tipos a:focus-visible{outline:2px solid var(--neon);outline-offset:1px}
 .fu-mais{font-size:.72rem;color:var(--text-faint)}
 .fu-mais>summary{cursor:pointer;list-style:none;color:var(--azul)}
 .fu-mais>summary::-webkit-details-marker{display:none}
@@ -787,10 +805,10 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
         está escrita na nota do `_RADAR_BALDES`, em web/painel_prospeccao). -#}
   {% macro ev(e, canal) %}
     {% if not e.ok %}
-    <div class="fu-ev r"><span class="h">{{ br(e.quando) }}</span><span class="t"><b>Não saiu</b>
+    <div class="fu-ev r"><span class="h">{{ br(e.quando) }}</span><span class="t"><b>Não saiu</b>{% set _tp = e.tipo or ('teste' if e.teste else '') %}{% if _tp %}<span class="tag tp-{{ 'c' if e.grupo == 'cobranca' else ('v' if e.grupo in ('visita', 'festa') else 'o') }}">{{ _tp }}</span>{% endif %}
       {% if e.motivo %}<span class="nota">{{ e.motivo }}</span>{% endif %}</span></div>
     {% else %}
-    <div class="fu-ev"><span class="h">{{ br(e.quando) }}</span><span class="t"><b>Enviado</b>{% if e.teste %}<span class="tag">teste</span>{% endif %}
+    <div class="fu-ev"><span class="h">{{ br(e.quando) }}</span><span class="t"><b>Enviado</b>{% set _tp = e.tipo or ('teste' if e.teste else '') %}{% if _tp %}<span class="tag tp-{{ 'c' if e.grupo == 'cobranca' else ('v' if e.grupo in ('visita', 'festa') else 'o') }}">{{ _tp }}</span>{% endif %}
       {% if e.n_leads %}<span class="nota">{{ e.n_leads }} {{ voc.lead }}{{ 's' if e.n_leads > 1 }}</span>{% endif %}</span></div>
       {% if e.entregue_em %}
       <div class="fu-ev g"><span class="h">{{ br(e.entregue_em) }}</span><span class="t"><b>Entregue ✓✓</b></span></div>
@@ -816,6 +834,14 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
     {% if entrega.hist %}
     <div class="fu-hist">
       <div class="ct">O aviso de cada pessoa</div>
+      {#- O FILTRO POR TIPO (revisão de 27/09/2026): links, e não JS — o filtro
+          sobrevive ao refresh e cada tipo tem endereço próprio. -#}
+      {% if entrega.hist_grupos|length > 1 %}
+      <div class="fu-tipos" aria-label="Filtrar por tipo de aviso">
+        <a href="?{{ qs_sem_aviso }}" class="{{ 'on' if not entrega.hist_grupo }}">Todos <b>{{ entrega.hist_total }}</b></a>
+        {% for g in entrega.hist_grupos %}<a href="?{{ qs_sem_aviso }}{{ '&' if qs_sem_aviso }}aviso={{ g.grupo }}" class="{{ 'on' if entrega.hist_grupo == g.grupo }}">{{ g.rotulo }} <b>{{ g.n }}</b></a>{% endfor %}
+      </div>
+      {% endif %}
       {% for p in entrega.hist %}
       <details class="fu-p">
         <summary>

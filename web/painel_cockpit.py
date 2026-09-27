@@ -3469,6 +3469,34 @@ def cockpit_lista_espera(request: Request, lead_id: int):
     return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
 
 
+@router.post("/cockpit/lead/{lead_id}/festa-aconteceu")
+def cockpit_festa_aconteceu(request: Request, lead_id: int, resposta: str = Form("")):
+    """A resposta à pergunta "a festa aconteceu?" (finance/festa_aconteceu.py). Só o
+    dono do card ou a gestão."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    from finance import festa_aconteceu as _fac
+    pool = get_pool()
+    if not g:
+        with pool.connection() as c:
+            dono = c.execute("select vendedor_id from prospeccao where id=%s and conta_id=%s",
+                             (lead_id, conta_id)).fetchone()
+        if not dono or dono[0] != membro_id:
+            request.session["ck_err"] = "Esse card não é seu."
+            return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
+    r = _fac.responder(pool, conta_id, lead_id, resposta, membro_id)
+    if r.get("ok"):
+        request.session["ck_ok"] = ("A festa aconteceu ✓ O agradecimento ao cliente sai."
+                                    if resposta == "aconteceu"
+                                    else "Anotado ✓ O card fica onde está, com a nota.")
+    else:
+        request.session["ck_err"] = r.get("erro") or "Não deu pra registrar."
+    return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
+
+
 @router.post("/cockpit/agenda/{ev_id}/confirmada")
 def cockpit_visita_confirmada(request: Request, ev_id: int):
     """O vendedor já confirmou a visita pelo celular dele: as mensagens de
@@ -6529,6 +6557,34 @@ def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
         return ""
 
 
+def _bloco_aconteceu(request: Request, lead_id: int) -> str:
+    """A FESTA ACONTECEU? (finance/festa_aconteceu.py, revisão de 27/09/2026): a
+    festa passou e ninguém respondeu. É pra cá que a pergunta das 9h traz o vendedor.
+    Best-effort: a conversa nunca cai por isto."""
+    try:
+        from finance import festa_aconteceu as _fac
+        conta_id = request.session.get("conta_id")
+        if not conta_id:
+            return ""
+        with get_pool().connection() as c:
+            txt = _fac.selos(c, conta_id, [lead_id]).get(lead_id)
+            c.commit()
+        if not txt:
+            return ""
+        bts = "".join(
+            f"<button class=pb2 type=submit name=resposta value={v}>{rot}</button>"
+            for v, rot in (("aconteceu", "✅ Aconteceu"), ("remarcou", "Remarcou"),
+                           ("cancelou", "Cancelou")))
+        return ("<div class=le>"
+                f"<span><b>{esc(txt)}</b> O agradecimento ao " + _p('cliente')
+                + " só sai depois do ✅.</span>"
+                f"<form method=post action='{_BASE}/lead/{lead_id}/festa-aconteceu' "
+                f"style='margin:0;display:flex;gap:.4rem;flex-wrap:wrap'>{bts}</form></div>")
+    except Exception as e:  # noqa: BLE001
+        _log.info("a festa aconteceu? na tela do lead: %s: %s", type(e).__name__, e)
+        return ""
+
+
 def _bloco_resgate(request: Request, lead_id: int) -> str:
     """O lead está a caminho do RESGATE DA IA (finance/resgate.py)? Diz quando, e dá
     o jeito de segurar: escrever o motivo, que vai pro histórico da ficha como nota do
@@ -6564,8 +6620,8 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     # o evento na frente de tudo: é o que se precisa ver antes de responder (197)
     if d.get("evento_fmt"):
         sub = d["evento_fmt"] + (" · " + sub if sub else "")
-    espera = (_bloco_resgate(request, lead_id) + _bloco_visita(request, lead_id)
-              + _bloco_espera(request, lead_id, d))
+    espera = (_bloco_aconteceu(request, lead_id) + _bloco_resgate(request, lead_id)
+              + _bloco_visita(request, lead_id) + _bloco_espera(request, lead_id, d))
 
     bolhas = []
     # (o _midia_html mora fora daqui pra o polling do JS desenhar igual — ver cxMid)

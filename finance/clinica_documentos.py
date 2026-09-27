@@ -1,6 +1,6 @@
 """Documentos da consulta (prontuário, fase 5): receita, atestado, pedido de exame, laudo…
 
-Desenho aprovado: docs/mockups/clinica_prontuario.html, seção 06 e 11.7. Migração 432.
+Desenho aprovado: docs/mockups/clinica_prontuario.html, seção 06 e 11.7. Migração 440.
 
   - O profissional liberado (finance/clinica_acesso_clinico) escreve e EMITE: vira
     imutável, com a hora do servidor, o conselho e a impressão digital (sha256). O PDF

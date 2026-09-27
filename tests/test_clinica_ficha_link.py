@@ -31,7 +31,7 @@ def banco(_banco_pacientes):  # noqa: F811
         c.execute((BASE / "421_clinica_acesso_clinico.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "423_clinica_prontuario.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "430_clinica_prontuario_arquivos.sql").read_text(encoding="utf-8"))
-        c.execute((BASE / "432_clinica_documentos.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "440_clinica_documentos.sql").read_text(encoding="utf-8"))
         c.commit()
     return _banco_pacientes
 

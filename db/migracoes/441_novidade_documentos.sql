@@ -1,5 +1,5 @@
--- 433_novidade_documentos.sql
--- O aviso da fase 5 do prontuário (documentos, migração 432), seguindo a seção 5 do
+-- 441_novidade_documentos.sql
+-- O aviso da fase 5 do prontuário (documentos, migração 440), seguindo a seção 5 do
 -- CLAUDE.md.
 --
 -- PÚBLICO `clinica`. PRA QUEM: dono, gestor e vendedor (a recepção manda o link).

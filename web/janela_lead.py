@@ -319,7 +319,11 @@ body.lp-aberta .wa-suporte{visibility:hidden}
 .lpia-voto button.on{border-color:var(--roxo);background:#1c1428}
 .lp-ab.lpia-ab{background:#1c1428;border-color:#4a3163;color:#E3CCF2;cursor:pointer;width:auto;margin:0;font-family:inherit}"""
 
-JS = r"""// O ESCAPE, SEM DEPENDER DO BALÃO DE CONVERSA (19/09/2026). `cxEscK` nasceu em
+JS = r"""// O NOME DE QUEM COMPRA (26/09/2026): "cliente"/"lead", ou "paciente" na clínica.
+// Vem do `window.VOC` que o `base` do portal põe (finance/raio_x_perfil). Sem ele
+// (outra página), a própria palavra.
+function jVoc(k){var v=window.VOC||{};return v[k]||k;}
+// O ESCAPE, SEM DEPENDER DO BALÃO DE CONVERSA (19/09/2026). `cxEscK` nasceu em
 // web/balao_conversa.py, e este módulo o usava emprestado — o que funcionava só
 // porque as duas telas que abriam a janela (funil e Follow-up) carregam os DOIS
 // módulos. A Comunicação carrega só este, e sem o escape uma aspa no nome de um
@@ -443,7 +447,7 @@ function kbLeadHtml(d,id){
   var h='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
     +'<div class="lp-h"><div class="top">'
     +'<span class="tdot" style="width:12px;height:12px;background:'+cxEscK(d.temp_cor||'#7a7a7a')+'"></span>'
-    +'<h3>'+cxEscK(d.empresa||'Lead')+'</h3>';
+    +'<h3>'+cxEscK(d.empresa||jVoc('Lead'))+'</h3>';
   if(d.temperatura)h+='<span class="tpill" style="background:'+cxEscK(d.temp_pill[0])+';color:'+cxEscK(d.temp_pill[1])+'">'+cxEscK(d.temperatura)+'</span>';
   h+='</div>';
   var sub=[d.segmento,(d.cidade?(d.cidade+(d.uf?('/'+d.uf):'')):'')].filter(Boolean).join(' · ');
@@ -978,7 +982,7 @@ function _lpiaLista(itens){
 function _lpiaPinta(pop){
   var d=pop._d||{}, L=d.lead||{}, F=d.fatos||{}, R=d.resumo, B=F.bola||{};
   var h='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
-    +'<div class="lp-h"><div class="top"><span class="lpia-ic">✨</span><h3>'+cxEscK(L.nome||'Lead')+'</h3>'
+    +'<div class="lp-h"><div class="top"><span class="lpia-ic">✨</span><h3>'+cxEscK(L.nome||jVoc('Lead'))+'</h3>'
     +(R&&!pop._gerando?'<button type="button" class="lpia-re" title="Ler a conversa de novo" onclick="kbResumoIARefazer()">↻</button>':'')
     +'</div>';
   var sub=[L.etapa,L.vendedor].filter(function(x){return !!x;}).join(' · ');
@@ -998,7 +1002,7 @@ function _lpiaPinta(pop){
   else if(!d.ia)h+='<div class="lpia-le">A IA não está ligada nesta conta.</div>';
   h+='</div>';
   if(R&&!pop._gerando&&d.tem_conversa){
-    h+='<div class="lp-foot"><span>A IA leu só a conversa e o card deste lead. Nada é enviado sozinho.</span>'
+    h+='<div class="lp-foot"><span>A IA leu só a conversa e o card deste '+jVoc('lead')+'. Nada é enviado sozinho.</span>'
       +'<span class="lpia-voto"><button type="button" title="Ajudou" class="'+(d.voto===1?'on':'')+'" onclick="kbResumoIAVoto(1)">👍</button>'
       +'<button type="button" title="Não ajudou" class="'+(d.voto===-1?'on':'')+'" onclick="kbResumoIAVoto(-1)">👎</button></span></div>';
   }
@@ -1007,7 +1011,7 @@ function _lpiaPinta(pop){
 }
 function _lpiaResumoHtml(R,d){
   var h='';
-  if(R.quer)h+='<div class="lpia-bl"><div class="lpia-rot">✨ O que o cliente quer</div><div>'+cxEscK(R.quer)+'</div></div>';
+  if(R.quer)h+='<div class="lpia-bl"><div class="lpia-rot">✨ O que o '+jVoc('cliente')+' quer</div><div>'+cxEscK(R.quer)+'</div></div>';
   if((R.em_que_pe||[]).length)h+='<div class="lpia-bl"><div class="lpia-rot">✨ Em que pé está</div>'+_lpiaLista(R.em_que_pe)+'</div>';
   if((R.pode_travar||[]).length)h+='<div class="lpia-bl"><div class="lpia-rot">✨ O que pode travar</div>'+_lpiaLista(R.pode_travar)+'</div>';
   if(R.proximo_passo)h+='<div class="lpia-passo"><div class="lpia-rot">✨ Próximo passo</div><b>'+cxEscK(R.proximo_passo)+'</b></div>';
@@ -1022,7 +1026,7 @@ function _lpiaResumoHtml(R,d){
   return h;
 }
 function _lpiaSemConversa(pop){
-  var h='<div class="lpia-bl"><div>Este lead ainda não trocou mensagem, então não há conversa pra resumir.</div>';
+  var h='<div class="lpia-bl"><div>Este '+jVoc('lead')+' ainda não trocou mensagem, então não há conversa pra resumir.</div>';
   if(pop._primeira){
     h+='<div class="lpia-rot">✨ Primeira mensagem · dá pra editar</div>'
       +'<textarea class="lpia-caixa" id="lpia-msg" aria-label="Primeira mensagem">'+cxEscK(pop._primeira.texto||'')+'</textarea>'

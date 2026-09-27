@@ -110,3 +110,36 @@ def test_o_render_poe_o_voc_do_perfil_da_conta():
     src = (RAIZ / "web/portal.py").read_text(encoding="utf-8")
     assert 'ctx["voc"] = ctx["raio_x_perfil"].get("vocab")' in src
     assert '_env.globals["voc"]' in src
+
+
+# ------------------------------------------------------------------ 2ª leva: Cockpit e janela
+
+def test_o_cockpit_fala_paciente_na_clinica():
+    """O app do celular monta HTML em Python: a conta liga o vocabulário ao entrar
+    (`_sessao`/`_gerencia`) e o texto pergunta por `_p`. O JS lê `window.VOC`."""
+    from web import painel_cockpit as pc
+    tok = pc._VOC.set(rxp.perfil("clinica")["vocab"])
+    try:
+        assert (pc._p("lead"), pc._P("leads"), pc._p("cliente")) == ("paciente", "Pacientes", "paciente")
+        assert pc._erro({"erro": "escopo"}) == "Esse paciente não é seu."
+        pagina = pc._page("x", "").body.decode()
+        assert '"Lead": "Paciente"' in pagina and '"cliente": "paciente"' in pagina
+    finally:
+        pc._VOC.reset(tok)
+    # fora da clínica (e sem conta): o de sempre
+    assert (pc._p("lead"), pc._erro({"erro": "escopo"})) == ("lead", "Esse lead não é seu.")
+
+
+def test_o_cockpit_nao_escreve_lead_a_mao_nos_textos_trocados():
+    src = (RAIZ / "web/painel_cockpit.py").read_text(encoding="utf-8")
+    for velho in ("O cliente apareceu?", "Nenhum lead aberto agora", "Leads da equipe\"",
+                  "Esse lead não tem WhatsApp", "Enviar na conversa do lead", "De onde veio o cliente"):
+        assert velho not in src, velho
+
+
+def test_a_janela_do_contato_le_o_voc_da_pagina():
+    from web import janela_lead as jl
+    from web import portal
+    assert "function jVoc(k)" in jl.JS and "O que o '+jVoc('cliente')+' quer" in jl.JS
+    base = portal._env.get_template("base").render(voc=rxp.perfil("clinica")["vocab"])
+    assert '"Lead":"Paciente"' in base.replace(" ", "")

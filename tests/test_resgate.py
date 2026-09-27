@@ -1390,3 +1390,75 @@ def test_redigir_devolve_nao_chamar(pool, equipe, monkeypatch):
         _lead(c, equipe["PEDRO"], dias=10)
         lead = rg.fila(c, EMPRESA)[0]
     assert rg.redigir(pool, EMPRESA, lead, None) == {"nao_chamar": True, "motivo": "fechou com outro"}
+
+
+# ══════════════════════════════════════════════ o "Testar comigo" marca a visita
+# 27/09/2026, o dono no teste: "não gostei, ele não tá agendando a visita". O teste
+# era só conversa ("pergunte o dia e diga que a equipe confirma"); agora usa a mesma
+# grade e a mesma agenda da regra — oferece os livres com as letras e confirma o
+# escolhido — sem gravar nada.
+
+def _teste_aberto(pool, equipe, monkeypatch, respostas):
+    """Um teste aberto, a regra marcando visita (grade e agenda de mentira) e uma IA
+    que devolve, em ordem, os JSONs de `respostas`."""
+    from finance import ia_visita as iv
+    BRT = iv.ag.BRT
+    livres = [datetime(2026, 9, 29, 9, tzinfo=BRT), datetime(2026, 9, 30, 10, tzinfo=BRT)]
+    monkeypatch.setattr(rg, "_teste_visita", lambda *a, **k: {"grade": {}, "min_h": 3, "max_dias": 14})
+    monkeypatch.setattr(iv, "ofertas", lambda *a, **k: list(livres))
+    monkeypatch.setattr(iv, "cabe", lambda pool, conta, cfg, ini, agora, **k: (ini in livres, "ocupado"))
+    monkeypatch.setattr(rg, "_system", lambda *a, **k: "sistema")
+    from finance import ia_uso
+    monkeypatch.setattr(ia_uso, "registrar", lambda *a, **k: None)
+    import core.brain as cb
+    fila = list(respostas)
+    pedidos = []
+
+    class _B:
+        model = "fake"
+
+        def chamar(self, system, mensagens, **k):
+            pedidos.append(mensagens[0]["content"])
+            return _Resp(fila.pop(0))
+    monkeypatch.setattr(cb, "Brain", _B)
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+        c.execute("insert into resgate_teste (conta_id, numero8, prospeccao_id, historico) "
+                  "values (%s,%s,%s,'[]'::jsonb)", (EMPRESA, rg.chave_do_numero(SUPERVISOR), lid))
+        c.commit()
+    return livres, pedidos
+
+
+def test_o_teste_oferece_os_horarios_livres_com_as_letras(pool, equipe, duble, monkeypatch):
+    livres, pedidos = _teste_aberto(pool, equipe, monkeypatch, [
+        '{"resposta": "Que tal conhecer o espaço?", "oferecer_horarios": true}'])
+    rg.responder_supervisor(pool, EMPRESA, "quero ver o espaço", "M1")
+    txt = duble["saiu"][-1]["texto"]
+    assert "Que tal conhecer o espaço?" in txt
+    assert "A) terça 29/09 às 9h" in txt and "B) quarta 30/09 às 10h" in txt
+    assert "oferecer_horarios=true" in pedidos[0]          # a IA sabe que marca
+
+
+def test_a_letra_escolhida_confirma_sem_gravar_nada(pool, equipe, duble, monkeypatch):
+    livres, pedidos = _teste_aberto(pool, equipe, monkeypatch, [
+        '{"resposta": "Olha os horários:", "oferecer_horarios": true}'])
+    rg.responder_supervisor(pool, EMPRESA, "quero visitar", "M1")
+    rg.responder_supervisor(pool, EMPRESA, "B", "M2")
+    txt = duble["saiu"][-1]["texto"]
+    assert txt.startswith("Prontinho! Sua visita ficou marcada pra quarta 30/09 às 10h ✅")
+    assert "Nada foi gravado" in txt
+    assert len(pedidos) == 1                                # a letra não chama a IA
+    with pool.connection() as c:
+        assert c.execute("select count(*) from eventos_agenda").fetchone()[0] == 0
+
+
+def test_o_horario_que_o_cliente_diz_e_conferido_na_agenda(pool, equipe, duble, monkeypatch):
+    livres, _ = _teste_aberto(pool, equipe, monkeypatch, [
+        '{"resposta": "", "visita": {"data": "2026-09-29", "hora": "15:00"}}',
+        '{"resposta": "Te espero lá!", "visita": {"data": "2026-09-29", "hora": "09:00"}}'])
+    rg.responder_supervisor(pool, EMPRESA, "amanhã às 15h", "M1")
+    assert duble["saiu"][-1]["texto"].startswith("Esse horário não está livre 😕 Tenho estes:\nA) terça 29/09 às 9h")
+    rg.responder_supervisor(pool, EMPRESA, "então terça 9h", "M2")
+    txt = duble["saiu"][-1]["texto"]
+    assert "marcada pra terça 29/09 às 9h ✅" in txt and "Te espero lá!" in txt

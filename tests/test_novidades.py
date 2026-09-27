@@ -168,6 +168,7 @@ def pool():
         c.execute((BASE / "402_novidade_cada_trilha_sua_regra.sql").read_text(encoding="utf-8"))
         # 404: os avisos das três trilhas e do espelho (portões da 389 e da 402)
         c.execute((BASE / "404_novidade_tres_trilhas.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "405_novidade_tres_trilhas_fila.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1431,3 +1432,15 @@ def test_os_avisos_das_tres_trilhas(pool):
     assert rows["funil-tres-trilhas"][:2] == ("mais_de_um_chip", ["dono", "gestor"])
     assert rows["espelho-do-vendedor"][:2] == ("esteira_ligada", ["dono", "gestor"])
     assert all(r[2] and r[3] for r in rows.values())
+
+
+def test_o_aviso_das_trilhas_fala_da_fila_e_da_visita_no_teste(pool):
+    """A 405 corrige o texto da 404 no mesmo dia: a coluna aparece com a fila."""
+    with pool.connection() as c:
+        # outro teste deste arquivo recria a 404 (on conflict do nothing): a 405 roda
+        # de novo aqui — é ela que está em teste, e ela é idempotente
+        c.execute((BASE / "404_novidade_tres_trilhas.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "405_novidade_tres_trilhas_fila.sql").read_text(encoding="utf-8"))
+        c.commit()
+        corpo = c.execute("select corpo from novidades where chave='funil-tres-trilhas'").fetchone()[0]
+    assert "os próximos da fila" in corpo and "TESTAR COMIGO" in corpo

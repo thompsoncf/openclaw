@@ -1660,10 +1660,71 @@ def testar(pool, conta_id: int) -> dict:
     return {"ok": True}
 
 
+def _teste_visita(pool, c, conta_id: int, cfg: dict, festa: bool):
+    """A config da visita da regra do membro IA (`ia_visita.config`), quando ela marca
+    visita — o "Testar comigo" usa a MESMA grade e a MESMA agenda. None sem isso."""
+    if not festa or not cfg.get("membro_id"):
+        return None
+    try:
+        from finance import ia_visita as _iv
+        regra = regra_do_membro(c, conta_id, cfg["membro_id"])
+        return _iv.config(c, regra) if regra else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _visita_do_teste(pool, conta_id: int, vcfg: dict, d: dict, texto: str, ofertas: list,
+                     agora: datetime) -> tuple[str | None, list]:
+    """O que o teste faz com a visita, SEM gravar nada (nem agenda, nem anfitriã): o
+    cliente respondeu uma letra da última oferta, ou a IA devolveu o horário que ele
+    escolheu → confere na grade e na agenda de verdade (`ia_visita.cabe`) e confirma;
+    não cabe → oferece os livres. A IA pediu a lista → vão os livres com as letras.
+    Devolve (texto pronto ou None, ofertas novas)."""
+    from finance import ia_visita as _iv
+    quando = None
+    m = _iv._RE_LETRA.match(texto or "")
+    if m and ofertas:
+        i = "abc".index(m.group(1).lower())
+        if i < len(ofertas):
+            quando = datetime.fromisoformat(ofertas[i])
+    v = d.get("visita") if isinstance(d.get("visita"), dict) else None
+    if quando is None and v and v.get("data"):
+        try:
+            hh, mm = (str(v.get("hora") or "09:00") + ":00").split(":")[:2]
+            y, mo, dd = (int(x) for x in str(v["data"])[:10].split("-"))
+            quando = datetime(y, mo, dd, int(hh), int(mm), tzinfo=_iv.ag.BRT)
+        except (TypeError, ValueError):
+            quando = None
+    if quando is not None:
+        ok, _motivo = _iv.cabe(pool, conta_id, vcfg, quando, agora)
+        if ok:
+            resto = (d.get("resposta") or "").strip()
+            return (f"Prontinho! Sua visita ficou marcada pra {_iv.fmt(quando)} ✅"
+                    + (f"\n\n{resto}" if resto else "")
+                    + "\n\n🧪 Teste: no atendimento de verdade, aqui a visita entra na agenda e "
+                      "a anfitriã é avisada. Nada foi gravado."), []
+        livres = _iv.ofertas(pool, conta_id, vcfg, agora)
+        if not livres:
+            return "Vou ver com a equipe um horário pra você e já te retorno 😊", []
+        return ("Esse horário não está livre 😕 Tenho estes:\n" + _iv.texto_ofertas(livres)
+                + "\nQual fica melhor? É só responder a letra."), [x.isoformat() for x in livres]
+    if d.get("oferecer_horarios"):
+        livres = _iv.ofertas(pool, conta_id, vcfg, agora)
+        if livres:
+            base = (d.get("resposta") or "").strip()
+            return ((base + "\n" if base else "") + _iv.texto_ofertas(livres)
+                    + "\nÉ só responder a letra 😊"), [x.isoformat() for x in livres]
+    return None, []
+
+
 def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None) -> None:
     """O supervisor escreveu. Com um teste aberto, a IA responde como responderia ao
-    cliente (sem marcar visita nem mandar orçamento: é só a conversa). Sem teste, um
-    lembrete de como testar — no máximo um a cada 6 horas. Nunca levanta.
+    cliente — e, quando a regra dela marca visita, MARCA como marcaria (27/09/2026, o
+    dono no teste: "não tá agendando a visita"): oferece os horários livres da grade e
+    da agenda de verdade, com as letras, e confirma o escolhido — sem gravar nada, nem
+    agenda nem aviso à anfitriã (`_visita_do_teste`). Orçamento continua fora do teste.
+    Sem teste aberto, um lembrete de como testar — no máximo um a cada 6 horas. Nunca
+    levanta.
 
     A mensagem fica GUARDADA (`resgate_envios`, tipo 'do_supervisor'): não vira
     conversa da empresa, mas também não some. E é por ela que a reentrega do wa-qr (a
@@ -1706,28 +1767,64 @@ def responder_supervisor(pool, conta_id: int, texto: str, sid: str | None = None
                              (t[1], conta_id)).fetchone()
             antes = _historico(c, conv[0]) if conv else "(conversa vazia)"
             system = _system(pool, c, conta_id, festa)
+            vcfg = _teste_visita(pool, c, conta_id, cfg, festa)
             c.commit()
-        agora_txt = "\n".join(("Cliente: " if h["quem"] == "cliente" else "Você: ") + h["texto"]
-                              for h in hist)
-        passo = "a visita ao espaço" if festa else "uma conversa com a equipe"
-        from finance import calendario as _cal
-        pedido = (f"Conversa antiga com o cliente:\n{antes}\n\nA RETOMADA (você voltou a falar):\n"
-                  f"{agora_txt}{_cal.bloco(antes, agora_txt)}\n\nResponda a última mensagem do cliente. Preço só o liberado, "
-                  f"sempre \"a partir de\". O próximo passo é {passo}: pergunte o dia e o "
-                  "horário de preferência e diga que a equipe confirma. Mensagem curta.\n"
-                  'Retorne APENAS JSON: {"resposta":"texto"}')
-        brain = Brain()
-        resp = brain.chamar(system=system, mensagens=[{"role": "user", "content": pedido}])
-        txt = "".join(getattr(b, "text", "") for b in resp.content
-                      if getattr(b, "type", None) == "text").strip()
-        resposta = _cal.corrigir((ag._extrair_json(txt).get("resposta") or "").strip()[:1200])
+        from finance import ia_visita as _iv
+        agora = datetime.now(timezone.utc)
+        # a última oferta de horários do teste (as letras que o "cliente" leu)
+        ofertas = next((h.get("horarios") or [] for h in reversed(hist) if h.get("quem") == "ofertas"), [])
+        # respondeu só a letra de uma oferta: confirma direto, sem pedir nada à IA
+        if vcfg and ofertas and _iv._RE_LETRA.match(texto or ""):
+            resposta, novas = _visita_do_teste(pool, conta_id, vcfg, {}, texto, ofertas, agora)
+            resp, brain = None, None
+        else:
+            agora_txt = "\n".join(("Cliente: " if h["quem"] == "cliente" else "Você: ") + h["texto"]
+                                  for h in hist if h.get("quem") in ("cliente", "ia"))
+            from finance import calendario as _cal
+            if vcfg:
+                livres = _iv.ofertas(pool, conta_id, vcfg, agora)
+                visita = (
+                    "- VISITA AO ESPAÇO: você MARCA. Convide o cliente a conhecer o espaço."
+                    + (f" Há horário livre a partir de {_iv.fmt(livres[0])}." if livres else "")
+                    + " Pra oferecer horários, NÃO os escreva: devolva oferecer_horarios=true e "
+                    "o sistema põe a lista com as letras no fim da sua mensagem.\n"
+                    "- Quando o cliente escolher um dia e hora (aceita meia hora, ex.: 9h30), "
+                    "devolva visita.data e visita.hora; o sistema confere a agenda e confirma — "
+                    "em resposta escreva só o que vem depois, ou deixe vazio. Nunca diga que "
+                    "marcou sem visita.\n"
+                    'Retorne APENAS JSON: {"resposta":"texto","oferecer_horarios":false,'
+                    '"visita":{"data":"AAAA-MM-DD","hora":"HH:MM"}} (visita só quando ele escolheu)')
+            else:
+                passo = "a visita ao espaço" if festa else "uma conversa com a equipe"
+                visita = (f"O próximo passo é {passo}: pergunte o dia e o horário de preferência "
+                          "e diga que a equipe confirma.\n"
+                          'Retorne APENAS JSON: {"resposta":"texto"}')
+            pedido = (f"Conversa antiga com o cliente:\n{antes}\n\nA RETOMADA (você voltou a falar):\n"
+                      f"{agora_txt}{_cal.bloco(antes, agora_txt)}\n\nResponda a última mensagem do "
+                      "cliente. Preço só o liberado, sempre \"a partir de\". Mensagem curta.\n"
+                      + visita)
+            brain = Brain()
+            resp = brain.chamar(system=system, mensagens=[{"role": "user", "content": pedido}])
+            txt = "".join(getattr(b, "text", "") for b in resp.content
+                          if getattr(b, "type", None) == "text").strip()
+            d = ag._extrair_json(txt)
+            resposta, novas = (None, [])
+            if vcfg:
+                resposta, novas = _visita_do_teste(pool, conta_id, vcfg, d, texto, ofertas, agora)
+            if resposta is None:
+                resposta = (d.get("resposta") or "").strip()
+            resposta = _cal.corrigir(resposta[:1500])
         if not resposta:
             return
         with pool.connection() as c:
-            from finance import ia_uso as _iu
-            _iu.registrar(c, conta_id, None, t[1], getattr(brain, "model", None), resp)
+            if resp is not None:
+                from finance import ia_uso as _iu
+                _iu.registrar(c, conta_id, None, t[1], getattr(brain, "model", None), resp)
+            novo = [{"quem": "ia", "texto": resposta}]
+            if novas:
+                novo.append({"quem": "ofertas", "texto": "", "horarios": novas})
             c.execute("update resgate_teste set historico = historico || %s::jsonb where id=%s",
-                      (json.dumps([{"quem": "ia", "texto": resposta}], ensure_ascii=False), t[0]))
+                      (json.dumps(novo, ensure_ascii=False), t[0]))
             c.commit()
         supervisor(pool, conta_id, resposta, tipo="teste", lead=t[1], cfg=cfg)
     except Exception as e:  # noqa: BLE001

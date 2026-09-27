@@ -124,6 +124,7 @@ body.lp-aberta .wa-suporte{visibility:hidden}
 .lp-h .top{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
 .lp-h h3{font-size:1rem;margin:0}
 .lp-h .sub{color:var(--txt-mut);font-size:.78rem;margin-top:.2rem}
+.lp-h .sub.lp-sup{color:#e3ccf2}
 .lp-canais{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.5rem}
 .lp-canal{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;padding:.14rem .5rem;border-radius:999px;
   border:1px solid var(--verde);background:rgba(62,224,166,.10);color:var(--verde-claro)}
@@ -453,6 +454,8 @@ function kbLeadHtml(d,id){
   var sub=[d.segmento,(d.cidade?(d.cidade+(d.uf?('/'+d.uf):'')):'')].filter(Boolean).join(' · ');
   if(d.vendedor_nome)sub+=(sub?' · ':'')+'👤 '+d.vendedor_nome;
   if(sub)h+='<div class="sub">'+cxEscK(sub)+'</div>';
+  // o número do supervisor do resgate (o dono testando): não é cliente
+  if(d.supervisor)h+='<div class="sub lp-sup" title="Não conta no Desafio nem no Raio-X">🧪 número do supervisor do Resgate</div>';
   if(d.canais_contato&&d.canais_contato.length){
     h+='<div class="lp-canais">';
     d.canais_contato.forEach(function(ch){h+='<span class="lp-canal">'+cxEscK(ch.ic)+' '+cxEscK(ch.label)+(ch.respondeu?' ✓':'')+'</span>';});

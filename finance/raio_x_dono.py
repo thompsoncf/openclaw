@@ -560,6 +560,13 @@ def _where_orcamento(f: dict) -> tuple[str, list]:
     return ((" and " + " and ".join(conds)) if conds else ""), vals
 
 
+def _fora_do_supervisor(c, conta_id: int) -> tuple[str, list]:
+    """O lead do número do supervisor do resgate não é cliente (27/09/2026): sai do
+    Raio-X inteiro, como sai do Desafio. Vai junto do `_where`, sobre `prospeccao p`."""
+    from finance import resgate as _rg
+    return _rg.sql_fora_do_supervisor(c, conta_id)
+
+
 def _dia(dt):
     return dt.astimezone(_TZ).date() if dt else None
 
@@ -574,6 +581,8 @@ def da_visita(c, conta_id: int, f: dict, ini, fim, festa: bool = False) -> dict:
     A conversão da visita (resposta do dono): a visita REALIZADA no período, e se
     aquele lead tem orçamento, feito antes ou depois dela."""
     w, wv = _where(f)
+    fs, fsv = _fora_do_supervisor(c, conta_id)
+    w, wv = w + fs, wv + fsv
     wc, wcv = _where_contrato(f)
     wo, wov = _where_orcamento(f)
     wvis, wvisv = _where_visita(f)
@@ -792,6 +801,9 @@ def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: di
     ini, fim, rot = janela_f(f, a)
     ant_ini, ant_fim = _anterior(ini, fim)
     w, wv = _where(f)
+    with pool.connection() as c:
+        fs, fsv = _fora_do_supervisor(c, conta_id)
+    w, wv = w + fs, wv + fsv
     wc, wcv = _where_contrato(f)
     wvis, wvisv = _where_visita(f)
     # quem vende festa conta visita só pelo título (ver finance/visita.py)

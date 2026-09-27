@@ -1,0 +1,297 @@
+<title>Funil de atendimento</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde). Tema único de propósito:
+   o painel não tem modo claro, e o mockup mostra a tela como ela vai ficar. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0}
+button:focus-visible{outline:2px solid var(--neon);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:80ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:80ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:84ch;margin:0}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota b{color:var(--text)}
+code{font-family:var(--mono);font-size:.8em;color:var(--ia-2)}
+
+/* a linha do tempo da Renata */
+.tl{display:flex;flex-direction:column;gap:0;border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.tl .ev{display:grid;grid-template-columns:4.2rem 7.5rem 1fr;gap:.8rem;padding:.6rem .9rem;border-top:1px solid var(--line);font-size:.84rem;align-items:start}
+.tl .ev:first-child{border-top:0}
+.tl .h{font-family:var(--mono);font-size:.74rem;color:var(--faint);padding-top:.1rem}
+.tl .ch{font-size:.72rem;border-radius:999px;padding:.05rem .5rem;border:1px solid var(--line-2);color:var(--dim);justify-self:start;white-space:nowrap}
+.tl .ch.th{border-color:var(--ia-borda);color:var(--ia-2);background:var(--ia-fundo)}
+.tl .tx{color:var(--dim)}
+.tl .tx b{color:var(--text)}
+.tl .ev.mal{background:var(--coral-fundo)}
+.tl .ev.mal .tx b{color:var(--coral-2)}
+
+.dois{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.vc{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem 1rem;display:flex;flex-direction:column;gap:.45rem;font-size:.86rem;min-width:0}
+.vc h3{font-size:.98rem;display:flex;gap:.5rem;align-items:center}
+.vc p{margin:0;color:var(--dim)}
+.vc p b{color:var(--text)}
+.vc.ok{border-color:var(--neon-borda)} .vc.mal{border-color:var(--coral-borda)}
+.st{font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;border-radius:4px;padding:.08rem .35rem}
+.st.ok{background:var(--neon);color:#062312} .st.no{background:var(--coral);color:#1b0707}
+
+/* o palco: o funil em tamanho real, rolando de lado no celular */
+.palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
+.tela{width:1080px;padding:20px;display:flex;flex-direction:column;gap:12px}
+.tt{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
+.tt h3{font-size:1.2rem}
+.tt .num{font-size:.8rem;color:var(--dim)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:999px;padding:2px;background:var(--bg)}
+.seg span{font-size:.78rem;padding:.25rem .8rem;border-radius:999px;color:var(--dim)}
+.seg span.on{background:var(--neon);color:#062312;font-weight:600}
+.fil{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;font-size:.76rem;color:var(--dim)}
+.pl{border:1px solid var(--line-2);border-radius:999px;padding:.12rem .6rem;white-space:nowrap}
+.pl.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.pl.ia.on{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+
+/* a régua IA × equipe por etapa */
+.regua{display:grid;grid-template-columns:8.5rem repeat(6,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);font-size:.76rem}
+.regua>div{padding:.45rem .55rem;border-top:1px solid var(--line)}
+.regua>div:nth-child(-n+7){border-top:0;background:var(--surface-2);font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.regua .quem{font-weight:600}
+.regua .quem.ia{color:var(--ia-2)}
+.regua .n{font-variant-numeric:tabular-nums}
+.regua .n small{color:var(--faint);margin-left:.25rem}
+.regua .bar{height:5px;border-radius:4px;background:#1e2a23;margin-top:.25rem;overflow:hidden}
+.regua .bar i{display:block;height:100%;background:var(--neon)}
+.regua .ia .bar i,.regua .bar.ia i{background:var(--ia)}
+
+.cols{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.col{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.45rem;display:flex;flex-direction:column;gap:6px;min-height:230px}
+.col h4{margin:0;font-family:var(--display);font-size:.78rem;display:flex;justify-content:space-between;gap:.3rem}
+.col h4 span{color:var(--faint);font-family:var(--mono);font-weight:400}
+.col .sub{font-size:.64rem;color:var(--faint);margin-top:-.2rem}
+.col.saida{background:var(--bg);border-style:dashed}
+.card{border:1px solid var(--line-2);border-radius:8px;background:var(--bg);padding:.35rem .45rem;font-size:.68rem;display:flex;flex-direction:column;gap:.15rem}
+.card b{font-size:.75rem}
+.card .m{color:var(--dim)}
+.who{align-self:flex-start;font-size:.6rem;border-radius:999px;padding:0 .45rem;border:1px solid var(--line-2);color:var(--dim)}
+.who.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.who.gente{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.tempo{font-family:var(--mono);font-size:.6rem;color:var(--faint)}
+.tempo.lento{color:var(--ambar-2)}
+
+/* vocabulário por nicho */
+.voc{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.voc .l{display:grid;grid-template-columns:1.1fr 1.4fr 1.4fr;border-top:1px solid var(--line)}
+.voc .l:first-child{border-top:0;background:var(--surface-2);font-family:var(--mono);font-size:.64rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+.voc .l>div{padding:.5rem .75rem;font-size:.8rem;min-width:0}
+.voc .l>div+div{border-left:1px solid var(--line)}
+.voc .l>div:first-child{font-weight:600}
+.voc .l>div span{display:block;color:var(--dim);font-size:.72rem;font-weight:400}
+
+.passos{display:flex;flex-direction:column;gap:8px;counter-reset:p}
+.ps{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.65rem .85rem;display:grid;grid-template-columns:auto 1fr;gap:.15rem .75rem;font-size:.84rem}
+.ps::before{counter-increment:p;content:counter(p);grid-row:span 2;font-family:var(--mono);font-size:.75rem;color:var(--neon);padding-top:.1rem}
+.ps p{margin:0;color:var(--dim);font-size:.8rem}
+.ps p b{color:var(--text)}
+
+.q2{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem}
+.q2 .qn{font-family:var(--mono);font-size:.75rem;color:var(--neon);grid-row:span 3;padding-top:.15rem}
+.q2 h3{font-size:.95rem}
+.q2 p{margin:0;color:var(--dim);font-size:.85rem}
+.rec{font-size:.84rem;color:var(--neon-2)}
+.rec::before{content:"Recomendo: ";color:var(--faint)}
+
+@media (max-width:760px){
+  .dois{grid-template-columns:1fr}
+  .tl .ev{grid-template-columns:3.4rem 1fr}
+  .tl .ev .tx{grid-column:1/-1}
+  .voc .l{grid-template-columns:1fr}
+  .voc .l>div+div{border-left:0;border-top:1px dashed var(--line)}
+  .voc .l:first-child{display:none}
+}
+</style>
+
+<div class="wrap">
+
+<header class="head">
+  <span class="k">Mockup pra aprovação · 27/09/2026</span>
+  <h1>O funil de atendimento</h1>
+  <p>O dono: <b>"no funil não consigo ver o que atende vendedor e o IA — não seria legal colocar o atendimento
+  num funil pra gente até medir depois as etapas?"</b>. E antes disso, o teste de hoje: a Renata mandou mensagem
+  pros dois chips, e o ZAQ SDR não respondeu. Abaixo, primeiro o porquê; depois, o funil.</p>
+</header>
+
+<section class="sec">
+  <header><h2>Por que o ZAQ SDR não respondeu a Renata</h2>
+    <p>Conferido na produção, só leitura. São <b>duas</b> coisas, e a segunda vai acontecer com todo cliente de
+    verdade que escrever pro chip Thiago.</p></header>
+  <div class="tl">
+    <div class="ev"><span class="h">11:17</span><span class="ch">CP Zarb</span>
+      <span class="tx">Renata: "Olá, gostaria de mais informações". O CP Zarb não tem IA: o rodízio dá o lead
+      <b>#1479</b> pra Jacqueline. Certo.</span></div>
+    <div class="ev mal"><span class="h">11:20</span><span class="ch th">chip Thiago</span>
+      <span class="tx">A mesma mensagem, agora no chip Thiago. Nasce a ficha #1480, mas o número <b>já é
+      lead da Jacqueline</b> pelo outro chip (3 minutos antes). A regra combinada em 26/09 manda o
+      cliente ficar com quem já atende, <b>sem IA</b>. A IA nem foi chamada.</span></div>
+    <div class="ev mal"><span class="h">11:20</span><span class="ch th">chip Thiago</span>
+      <span class="tx">10 segundos depois sai do celular do chip: "Olá, tudo bem? me chamo Thiago Pinheiro e sou o
+      gerente de vendas…". É a <b>saudação automática do WhatsApp Business</b>: o mesmo texto saiu em 31/08,
+      09/09, 13/09 e 24/09, sempre segundos depois de um contato novo.</span></div>
+    <div class="ev"><span class="h">11:21</span><span class="ch th">chip Thiago</span>
+      <span class="tx">Renata: "Dia 02/01/2027 tem vaga??". Sem resposta: a conversa é da Jacqueline, sem IA.</span></div>
+  </div>
+  <div class="dois">
+    <div class="vc ok"><h3><span class="st ok">regra</span> Mandar pros dois chips estraga o teste</h3>
+      <p>Com a Renata escrevendo <b>primeiro</b> pro CP Zarb, ela virou cliente da Jacqueline, e o chip Thiago
+      respeitou isso. Pra testar o ZAQ SDR, o número tem que escrever <b>só pro chip Thiago</b>, e ser um
+      número que ainda não é lead na Prime.</p></div>
+    <div class="vc mal"><h3><span class="st no">conflito</span> A saudação automática cala a IA</h3>
+      <p>Pro sistema, a saudação é <b>alguém da equipe respondendo pelo celular</b>, e quando gente responde, a
+      IA sai da conversa (pra não falarem as duas vozes). Então, <b>mesmo com um cliente novo de verdade</b>, a
+      saudação sai em 10 segundos e a IA pausa antes de dizer "oi". Desde que a regra foi ligada (hoje, 07:28),
+      nenhum cliente novo chegou no chip Thiago, então isso ainda não apareceu.</p></div>
+  </div>
+  <p class="nota"><i>já</i> <span><b>O que resolve agora, sem código:</b> no celular do chip Thiago, WhatsApp Business →
+  Ferramentas comerciais → <b>Mensagem de saudação → desligar</b>, enquanto o ZAQ SDR atende esse número. A
+  apresentação passa a ser a da IA ("Sou Zaq Assistente Virtual da Prime"). A proteção no código está na
+  pergunta 1, no fim.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>A ideia: o funil tem duas vistas, Vendas e Atendimento</h2>
+    <p>O funil de hoje é o de <b>vendas</b>: etapas que a equipe move à mão (contatado, negociação, visita,
+    contrato…). Ele não diz <b>quem atendeu</b> nem <b>como foi o começo da conversa</b>. A proposta é uma
+    segunda vista, <b>Atendimento</b>, no mesmo lugar, com um toque:</p></header>
+  <div class="dois">
+    <div class="vc"><h3>Vendas (como hoje)</h3>
+      <p>As etapas da empresa, movidas à mão. Ganha uma pílula <b>Quem atende: todos · 🤖 IA · 👤 equipe</b>,
+      que já existe como selo no card, mas não como filtro.</p></div>
+    <div class="vc"><h3>Atendimento (novo)</h3>
+      <p>As etapas do <b>começo da conversa</b>, que <b>ninguém arrasta</b>: o sistema move sozinho, lendo a
+      conversa e a agenda. Cada card diz quem está atendendo, e o topo compara IA × equipe etapa por etapa.
+      É isso que dá pra medir.</p></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>Como fica a vista Atendimento (Prime, que vende festa)</h2>
+    <p>Os leads que chegaram no período (este mês, por padrão), em seis colunas. Os números abaixo são
+    ilustrativos: o ZAQ SDR ainda não atendeu ninguém.</p></header>
+  <div class="palco"><div class="tela">
+    <div class="tt"><h3>Funil</h3><span class="seg"><span>Vendas</span><span class="on">Atendimento</span></span>
+      <span class="num">Prime Eventos · 86 chegaram em setembro</span></div>
+    <div class="fil">Quem atende: <span class="pl on">todos</span><span class="pl ia">🤖 IA</span><span class="pl">👤 equipe</span>
+      <span style="width:.8rem"></span>Chip: <span class="pl on">todos</span><span class="pl">CP Zarb</span><span class="pl">Thiago</span>
+      <span style="width:.8rem"></span>Período: <span class="pl on">setembro</span><span class="pl">7 dias</span></div>
+    <div class="regua">
+      <div>quem</div><div>chegou</div><div>respondido</div><div>qualificado</div><div>visita ofertada</div><div>visita marcada</div><div>1ª resposta</div>
+      <div class="quem ia">🤖 ZAQ SDR</div>
+        <div class="n">12</div>
+        <div class="n">12 <small>100%</small><div class="bar ia"><i style="width:100%"></i></div></div>
+        <div class="n">9 <small>75%</small><div class="bar ia"><i style="width:75%"></i></div></div>
+        <div class="n">7 <small>58%</small><div class="bar ia"><i style="width:58%"></i></div></div>
+        <div class="n">4 <small>33%</small><div class="bar ia"><i style="width:33%"></i></div></div>
+        <div class="n">1 min</div>
+      <div class="quem">👤 equipe</div>
+        <div class="n">74</div>
+        <div class="n">70 <small>95%</small><div class="bar"><i style="width:95%"></i></div></div>
+        <div class="n">41 <small>55%</small><div class="bar"><i style="width:55%"></i></div></div>
+        <div class="n">30 <small>41%</small><div class="bar"><i style="width:41%"></i></div></div>
+        <div class="n">17 <small>23%</small><div class="bar"><i style="width:23%"></i></div></div>
+        <div class="n">38 min</div>
+    </div>
+    <div class="cols">
+      <div class="col"><h4>Chegou <span>3</span></h4><span class="sub">ninguém respondeu ainda</span>
+        <div class="card"><span class="who gente">👤 Jacqueline</span><b>Renata</b><span class="m">CP Zarb · "gostaria de mais informações"</span><span class="tempo lento">esperando 18 min</span></div>
+        <div class="card"><span class="who ia">🤖 ZAQ SDR</span><b>Bruno</b><span class="m">chip Thiago · "tem data em março?"</span><span class="tempo">esperando 1 min</span></div></div>
+      <div class="col"><h4>Respondido <span>14</span></h4><span class="sub">falta saber festa, data e convidados</span>
+        <div class="card"><span class="who ia">🤖 ZAQ SDR</span><b>Luana</b><span class="m">15 anos · data ?</span><span class="tempo">respondida em 40 s</span></div>
+        <div class="card"><span class="who gente">👤 Pedro</span><b>Carlos</b><span class="m">casamento · convidados ?</span><span class="tempo">respondida em 12 min</span></div></div>
+      <div class="col"><h4>Qualificado <span>9</span></h4><span class="sub">festa, data e convidados</span>
+        <div class="card"><span class="who ia">🤖 ZAQ SDR</span><b>Mariana</b><span class="m">15 anos · 14/03 · 150</span></div>
+        <div class="card"><span class="who gente">👤 Thiago</span><b>Hana</b><span class="m">formatura · 06/07 · 200</span></div></div>
+      <div class="col"><h4>Visita ofertada <span>6</span></h4><span class="sub">convidado a conhecer o espaço</span>
+        <div class="card"><span class="who ia">🤖 ZAQ SDR</span><b>Paula</b><span class="m">A) ter 9h · B) qua 10h</span></div></div>
+      <div class="col"><h4>Visita marcada <span>5</span></h4><span class="sub">está na agenda</span>
+        <div class="card"><span class="who ia">🤖 → 👤 Jacqueline</span><b>Nina</b><span class="m">visita qua 30/09 10h · passou pra anfitriã</span></div></div>
+      <div class="col saida"><h4>Parou <span>11</span></h4><span class="sub">sumiu, não quer, ou foi perdido</span>
+        <div class="card"><span class="who ia">🤖 ZAQ SDR</span><b>Iara</b><span class="m">sumiu depois de "Respondido" · 4 dias</span></div></div>
+    </div>
+  </div></div>
+  <p class="nota"><i>ler</i> <span>A <b>régua do topo</b> é a medida pedida: das que chegaram, quantas cada lado respondeu,
+  qualificou, convidou pra visita e marcou, e em quanto tempo respondeu a primeira. Um toque numa linha filtra
+  o quadro. <b>Parou</b> mostra em que etapa o cliente sumiu, e é por ela que se descobre onde o atendimento
+  perde gente.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>De onde sai cada etapa (ninguém precisa mover card)</h2></header>
+  <div class="passos">
+    <div class="ps"><b>Chegou</b><p>A 1ª mensagem do cliente no período. Quem atende é quem tem o lead: o ZAQ SDR (regra do chip) ou o vendedor.</p></div>
+    <div class="ps"><b>Respondido</b><p>A 1ª resposta da empresa, da IA ou de gente. A <b>saudação automática não conta</b> como resposta de gente, e o tempo é o mesmo que o Desafio já mede.</p></div>
+    <div class="ps"><b>Qualificado</b><p>Os campos que o leitor de conversa já preenche na ficha: <b>tipo de festa, data e convidados</b>. Os três, qualificado.</p></div>
+    <div class="ps"><b>Visita ofertada</b><p>A IA mandou os horários com as letras, ou alguém da equipe falou em visita (o mesmo leitor).</p></div>
+    <div class="ps"><b>Visita marcada</b><p>Está na agenda, pela mesma régua de visita do Raio-X e do Relatório. Aqui a IA passa pra gente, e o card mostra pra quem.</p></div>
+    <div class="ps"><b>Parou</b><p>Sem mensagem do cliente há 3 dias sem ter chegado na visita, marcado como perdido, ou pediu pra parar. Fica marcado <b>em que etapa</b> parou.</p></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>Cada nicho com as suas etapas (§6)</h2>
+    <p>O Atendimento lê o perfil da conta, como o Raio-X. Festa só pra quem vende festa. Quem vende produto não
+    ganha a vista, porque não tem funil.</p></header>
+  <div class="voc">
+    <div class="l"><div>etapa</div><div>eventos (Prime)</div><div>recorrente (ZAQ)</div></div>
+    <div class="l"><div>Qualificado</div><div>tipo de festa, data e convidados</div><div>segmento, porte e o que precisa</div></div>
+    <div class="l"><div>Ofertada</div><div>visita ao espaço</div><div>reunião</div></div>
+    <div class="l"><div>Marcada</div><div>visita na agenda</div><div>reunião na agenda</div></div>
+    <div class="l"><div>Parou</div><div>igual</div><div>igual</div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>E o Desafio IA × equipe?</h2>
+    <p>Ele existe (<code>/painel/prospeccao/desafio-ia</code>, feito na etapa 4, com a aba Resgate), mas o único
+    caminho até ele é um botão escondido em <b>Comunicação → Agente</b>, dentro do cartão da regra. Por isso
+    parece que não foi feito. E hoje ele está vazio de IA: o ZAQ SDR ainda não atendeu ninguém.</p></header>
+  <div class="dois">
+    <div class="vc"><h3>Na vista Atendimento</h3><p>A régua do topo é o resumo do Desafio. Ao lado, o link <b>"ver o Desafio completo →"</b>, com o mês a mês, custo e aba Resgate.</p></div>
+    <div class="vc"><h3>Em Relatórios</h3><p>O Desafio ganha lugar no menu de <b>Relatórios</b>, pra quem tem a IA ligada num número. Sai de dentro da Comunicação.</p></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>Pra você decidir</h2></header>
+  <div class="q2"><span class="qn">1</span><h3>A saudação automática do celular deve calar a IA?</h3>
+    <p>Hoje, qualquer mensagem que sai do celular pausa a IA. A proteção: o texto que o próprio celular já mandou
+    igual pra outros contatos novos, segundos depois da 1ª mensagem, é reconhecido como <b>saudação</b>, não
+    pausa a IA e não conta como "respondido por gente". Resposta digitada de verdade continua pausando.</p>
+    <span class="rec">desligar a saudação no celular já, e fazer a proteção junto com o funil.</span></div>
+  <div class="q2"><span class="qn">2</span><h3>A vista Atendimento é pra quem?</h3>
+    <p>Dono e gestor medem. O vendedor, na vista dele, veria só os leads dele, com a régua dele contra a da IA.</p>
+    <span class="rec">dono e gestor primeiro. O vendedor entra depois, se fizer sentido.</span></div>
+  <div class="q2"><span class="qn">3</span><h3>A pílula "Quem atende" também na vista Vendas?</h3>
+    <p>É pequena e resolve o "não consigo ver o que atende vendedor e IA" no quadro de sempre.</p>
+    <span class="rec">sim, junto.</span></div>
+</section>
+
+</div>

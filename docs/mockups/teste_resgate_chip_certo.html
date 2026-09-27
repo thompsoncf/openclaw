@@ -1,0 +1,332 @@
+<title>Teste no chip certo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde). Tema único de propósito:
+   o painel não tem modo claro, e o mockup mostra a tela como ela vai ficar. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,select:focus-visible{outline:2px solid var(--neon);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:80ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.quem{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+.pill{font-size:.72rem;border:1px solid var(--line-2);border-radius:999px;padding:.15rem .6rem;color:var(--dim);white-space:nowrap}
+.pill.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.pill.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.pill.warn{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:80ch}
+.sec h2{font-size:1.25rem}
+.sec h2 .lt{font-family:var(--mono);font-size:.8rem;color:var(--bg);background:var(--neon);border-radius:5px;padding:.05rem .45rem;margin-right:.45rem;vertical-align:.15em}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:84ch;margin:0}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota b{color:var(--text)}
+code{font-family:var(--mono);font-size:.8em;color:var(--ia-2)}
+
+.dois{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.caso{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.caso .rot{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;padding:.55rem .8rem;border-bottom:1px solid var(--line)}
+.caso.antes .rot{color:var(--coral-2)} .caso.depois .rot{color:var(--neon-2)}
+.caso .corpo{padding:14px;display:flex;flex-direction:column;gap:10px}
+.caso p{margin:0;font-size:.8rem;color:var(--dim)}
+.caso p b{color:var(--text)}
+
+/* o WhatsApp do supervisor */
+.zap{border:1px solid var(--line-2);border-radius:12px;background:#0B141A;overflow:hidden}
+.zap .top{display:flex;align-items:center;gap:.5rem;padding:.45rem .7rem;background:#1F2C33;font-size:.78rem}
+.zap .top .av{width:24px;height:24px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;font-size:.7rem}
+.zap .top small{color:var(--dim);font-size:.66rem;display:block;line-height:1.2}
+.zap .msgs{padding:.6rem;display:flex;flex-direction:column;gap:.35rem}
+.bb{max-width:86%;border-radius:8px;padding:.35rem .55rem;font-size:.76rem;line-height:1.4}
+.bb small{display:block;text-align:right;color:rgba(255,255,255,.45);font-size:.6rem}
+.bb.eu{align-self:flex-end;background:#005C4B}
+.bb.ele{align-self:flex-start;background:#202C33}
+.bb.errado{box-shadow:0 0 0 1.5px var(--coral)}
+.sys{align-self:center;font-size:.64rem;color:var(--dim);background:#182229;border-radius:6px;padding:.1rem .5rem}
+
+/* a regra de quem atende */
+.tab{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.tab .l{display:grid;grid-template-columns:1.25fr 1fr 1fr;border-top:1px solid var(--line)}
+.tab .l:first-child{border-top:0;background:var(--surface-2);font-family:var(--mono);font-size:.66rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+.tab .l>div{padding:.6rem .8rem;font-size:.82rem;min-width:0}
+.tab .l>div+div{border-left:1px solid var(--line)}
+.tab .l .c1 b{display:block}
+.tab .l .c1 span{color:var(--dim);font-size:.76rem}
+.tab .no{color:var(--coral-2)} .tab .ok{color:var(--neon-2)} .tab .ig{color:var(--dim)}
+
+/* o painel: cartão do Resgate */
+.palco{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--bg-2)}
+.tela{width:860px;padding:20px;display:flex;flex-direction:column;gap:12px}
+.rg{border:1px solid var(--line-2);border-radius:12px;background:var(--surface)}
+.rg .sm{display:flex;align-items:center;gap:.6rem;padding:.7rem .9rem;border-bottom:1px solid var(--line);font-size:.86rem}
+.rg .sm .nm{font-weight:600}
+.rg .sm .tagn{font-size:.6rem;background:var(--neon);color:#062312;border-radius:4px;padding:0 .3rem;margin-left:.2rem}
+.rg .sm .zp{font-size:.68rem;border-radius:999px;padding:.05rem .5rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2)}
+.rg .sm .rs{color:var(--dim);font-size:.78rem;margin-left:auto}
+.rg .cp{padding:.8rem .9rem;display:flex;flex-direction:column;gap:.6rem}
+.teste{border:1px solid var(--ia-borda);background:var(--ia-fundo);border-radius:10px;padding:.65rem .8rem;display:grid;grid-template-columns:auto 1fr auto;gap:.2rem .7rem;align-items:center}
+.teste .ic{font-size:1.2rem;grid-row:span 2}
+.teste b{color:var(--ia-2)}
+.teste .mt{font-size:.76rem;color:var(--dim);grid-column:2}
+.teste .mt b{color:var(--text);font-weight:500}
+.teste .acts{grid-row:span 2;grid-column:3;display:flex;gap:.4rem}
+.btn{border:1px solid var(--line-2);border-radius:8px;padding:.3rem .7rem;font-size:.76rem;background:var(--bg)}
+.btn.pri{background:var(--neon);color:#062312;border-color:var(--neon);font-weight:600}
+.btn.cor{border-color:var(--coral-borda);color:var(--coral-2)}
+.dn{font-size:.76rem;color:var(--dim);border-left:2px solid var(--line-2);padding-left:.6rem}
+.dn b{color:var(--text)}
+.al{font-size:.76rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar-2);border-radius:8px;padding:.45rem .6rem}
+.al b{color:var(--text)}
+.rodape{display:flex;justify-content:flex-end;gap:.5rem}
+.fld{display:flex;flex-direction:column;gap:.2rem;font-size:.72rem;color:var(--dim)}
+.fld .in{border:1px solid var(--line-2);border-radius:7px;padding:.35rem .5rem;background:var(--bg);color:var(--text);font-size:.8rem}
+.grade{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem}
+
+/* o card do funil */
+.cardk{width:230px;border:1px solid var(--line-2);border-radius:8px;background:var(--bg);padding:.45rem .55rem;font-size:.72rem;display:flex;flex-direction:column;gap:.15rem}
+.cardk b{font-size:.8rem}
+.cardk .m{color:var(--dim)}
+.selo{align-self:flex-start;font-size:.6rem;border-radius:999px;padding:0 .45rem;border:1px solid var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.selo.sdr{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+
+.passos{display:flex;flex-direction:column;gap:8px;counter-reset:p}
+.ps{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.65rem .85rem;display:grid;grid-template-columns:auto 1fr;gap:.15rem .75rem;font-size:.84rem}
+.ps::before{counter-increment:p;content:counter(p);grid-row:span 2;font-family:var(--mono);font-size:.75rem;color:var(--neon);padding-top:.1rem}
+.ps p{margin:0;color:var(--dim);font-size:.8rem}
+.ps p b{color:var(--text)}
+
+.q2{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem}
+.q2 .qn{font-family:var(--mono);font-size:.75rem;color:var(--neon);grid-row:span 3;padding-top:.15rem}
+.q2 h3{font-size:.95rem}
+.q2 p{margin:0;color:var(--dim);font-size:.85rem}
+.rec{font-size:.84rem;color:var(--neon-2)}
+.rec::before{content:"Recomendo: ";color:var(--faint)}
+
+@media (max-width:760px){
+  .dois{grid-template-columns:1fr}
+  .tab .l{grid-template-columns:1fr}
+  .tab .l>div+div{border-left:0;border-top:1px dashed var(--line)}
+  .tab .l:first-child{display:none}
+  .tab .l .c2::before{content:"Hoje: ";color:var(--faint)}
+  .tab .l .c3::before{content:"Proposta: ";color:var(--faint)}
+}
+</style>
+
+<div class="wrap">
+
+<header class="head">
+  <span class="k">Mockup pra aprovação · 27/09/2026</span>
+  <h1>O teste do Resgate no chip certo</h1>
+  <p>O dono: <b>"eu mandei mensagem pro chip Thiago e o CP Zarb respondeu pro meu número"</b>. Não foi o
+  ZAQ SDR que respondeu. Foi o "Testar comigo" do Resgate, que ainda estava aberto e sempre fala pelo
+  CP Zarb. Aqui estão as três mudanças aprovadas (a, b e c) e como elas aparecem pra você.</p>
+  <div class="quem"><span class="pill">Prime Eventos</span><span class="pill">chip CP Zarb · principal</span>
+    <span class="pill ia">chip Thiago · ZAQ SDR</span><span class="pill warn">Resgate em Ensaio</span>
+    <span class="pill">pra quem: dono e gestor (o supervisor do Resgate)</span></div>
+</header>
+
+<section class="sec">
+  <header><h2>O que aconteceu hoje, às 10:48</h2>
+    <p>Seu número é o <b>supervisor do Resgate</b>. Hoje, mensagem do supervisor é pega <b>em qualquer chip</b>
+    da empresa, antes de tudo, e nunca chega na regra do chip. Às 09:58 você tinha aberto um teste fazendo o
+    papel da Gabriela (lead #595), e o teste renova por 2h a cada mensagem sua.</p></header>
+  <div class="dois">
+    <div class="caso antes"><span class="rot">Hoje · o que você viu</span>
+      <div class="corpo">
+        <div class="zap"><div class="top"><span class="av">T</span><div>Thiago · Prime<small>chip Thiago</small></div></div>
+          <div class="msgs"><div class="bb eu">oi gostaria de mais informações<small>10:48</small></div>
+            <span class="sys">sem resposta por aqui</span></div></div>
+        <div class="zap"><div class="top"><span class="av">P</span><div>Prime Eventos<small>chip CP Zarb</small></div></div>
+          <div class="msgs"><div class="bb ele errado">Oi Gabi! 😊 Claro, estou aqui pra ajudar! Você quer saber mais sobre o espaço em geral, ou tem alguma dúvida específica sobre o brunch de 28/11?<small>10:48</small></div></div></div>
+        <p>Você escreveu num número e a resposta veio de <b>outro</b>, te chamando de <b>Gabi</b>. Nada indicava
+        que era o teste do Resgate, e o ZAQ SDR nem ficou sabendo da mensagem.</p>
+      </div></div>
+    <div class="caso depois"><span class="rot">Proposta · o que você vai ver</span>
+      <div class="corpo">
+        <div class="zap"><div class="top"><span class="av">T</span><div>Thiago · Prime<small>chip Thiago</small></div></div>
+          <div class="msgs"><div class="bb eu">oi gostaria de mais informações<small>10:48</small></div>
+            <div class="bb ele">Olá! 😊 Sou Zaq Assistente Virtual da Prime. Me conta: é pra qual tipo de festa e pra quando?<small>10:48</small></div></div></div>
+        <div class="zap"><div class="top"><span class="av">P</span><div>Prime Eventos<small>chip CP Zarb</small></div></div>
+          <div class="msgs"><span class="sys">o teste da Gabriela segue aqui, só se você escrever aqui</span></div></div>
+        <p>O chip Thiago responde <b>pelo próprio chip</b>, com o ZAQ SDR, como faria com um cliente. O teste do
+        Resgate não se mete, porque ele mora no CP Zarb.</p>
+      </div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2><span class="lt">a</span>Quem atende uma mensagem do seu número</h2>
+    <p>A regra passa a olhar <b>em qual chip</b> a mensagem chegou. O Resgate só segura o seu número no chip
+    onde ele fala com você; nos outros, o chip trata você como trataria qualquer pessoa.</p></header>
+  <div class="tab">
+    <div class="l"><div>Você escreve…</div><div>Hoje</div><div>Proposta</div></div>
+    <div class="l"><div class="c1"><b>No chip do teste aberto</b><span>o CP Zarb, onde está a conversa da Gabriela</span></div>
+      <div class="c2 ig">🧪 teste do Resgate</div><div class="c3 ok">🧪 teste do Resgate (igual)</div></div>
+    <div class="l"><div class="c1"><b>No chip principal, sem teste aberto</b><span>o CP Zarb, respondendo um aviso do Resgate</span></div>
+      <div class="c2 ig">guardada como resposta ao aviso + lembrete de como testar</div><div class="c3 ok">igual</div></div>
+    <div class="l"><div class="c1"><b>Em outro chip</b><span>o chip Thiago</span></div>
+      <div class="c2 no">desviada pro teste do Resgate, respondida pelo CP Zarb</div>
+      <div class="c3 ok">atendimento normal do chip: o ZAQ SDR responde pelo chip Thiago</div></div>
+  </div>
+  <div class="dois">
+    <div class="caso depois"><span class="rot">No funil · o seu número já é lead, desde agosto</span>
+      <div class="corpo">
+        <div class="cardk"><span class="selo">🧪 número do supervisor</span><b>lead #760 · você</b>
+          <span class="m">chip Thiago · ZAQ SDR · 150 mensagens desde 21/08</span><span class="selo sdr">IA · SDR</span></div>
+        <div class="cardk"><span class="selo">🧪 número do supervisor</span><b>lead #673 · você</b>
+          <span class="m">CP Zarb · ZAQ SDR · desde 15/08</span></div>
+        <p>O banco mostra que os seus testes de agosto já deixaram <b>dois leads com o seu número</b>, os dois
+        com o ZAQ SDR. A mensagem no chip Thiago cai na conversa do <b>#760</b>, não abre lead novo. Os dois
+        ganham o selo <b>🧪 número do supervisor</b> no card e na ficha, pra ninguém da equipe achar que é cliente.</p>
+        <p><b>Um ajuste a mais, necessário:</b> a regra do chip só atende contato <b>novo</b> (lead que ela
+        mesma deu). O #760 é de antes da regra, então hoje a IA ficaria calada nele. Pro número do supervisor, a
+        regra passa a valer também na conversa antiga, desde que o lead já seja do dono da regra (o #760 é do
+        ZAQ SDR). Com qualquer outro número, a regra continua só pra contato novo.</p></div></div>
+    <div class="caso depois"><span class="rot">O que NÃO muda</span>
+      <div class="corpo">
+        <p>• O número de um vendedor ou de um cliente nunca é afetado: a regra vale só pro número cadastrado
+        como supervisor.</p>
+        <p>• No chip principal, seu número continua <b>nunca</b> virando lead. As respostas aos avisos do Resgate
+        continuam guardadas como hoje.</p>
+        <p>• Com o Resgate desligado, seu número é tratado como qualquer um em todos os chips, como já é hoje.</p>
+        <p>• Nenhuma conexão, sessão ou chip é tocado. A mudança é só na rota da mensagem, depois que ela
+        já chegou.</p></div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2><span class="lt">b</span>O teste responde pelo chip certo, e sempre com 🧪</h2>
+    <p>O "Testar comigo" passa a abrir <b>pelo chip onde está a conversa do lead do teste</b>, que é o mesmo
+    por onde a retomada de verdade sairia. A Gabriela conversou pelo CP Zarb, então o teste dela é no CP Zarb.
+    Um lead do chip Thiago seria testado pelo chip Thiago. E toda resposta do teste leva o 🧪 na frente.</p></header>
+  <div class="dois">
+    <div class="caso depois"><span class="rot">Proposta · no WhatsApp do supervisor</span>
+      <div class="corpo">
+        <div class="zap"><div class="top"><span class="av">P</span><div>Prime Eventos<small>chip CP Zarb</small></div></div>
+          <div class="msgs">
+            <div class="bb ele">🧪 <b>Testar comigo</b> · você é Gabriela (lead #595), pelo <b>CP Zarb</b>, o número onde a conversa dela está.<br>Responda como a cliente responderia. Nada vai pra cliente nem vira lead. O teste fecha sozinho 2h depois da sua última mensagem, ou no botão Encerrar, no painel.<small>09:58</small></div>
+            <div class="bb ele">🧪 Oi Gabriela! 😊 Sou Zaq, Assistente Virtual da Prime Eventos…<small>09:58</small></div>
+            <div class="bb eu">quero mais opções<small>10:48</small></div>
+            <div class="bb ele">🧪 Claro, Gabi! 😊 Temos outras opções de horário pra visita:<br>A) segunda 28/09 às 17h<br>B) terça 29/09 às 9h<br>É só responder a letra.<small>10:48</small></div>
+          </div></div></div></div>
+    <div class="caso depois"><span class="rot">Ao encerrar · pelo painel ou sozinho</span>
+      <div class="corpo">
+        <div class="zap"><div class="top"><span class="av">P</span><div>Prime Eventos<small>chip CP Zarb</small></div></div>
+          <div class="msgs"><div class="bb ele">🧪 <b>Teste encerrado</b> (Gabriela, lead #595). Daqui pra frente, o que você mandar neste número é resposta de supervisor, não da cliente.<small>11:02</small></div></div></div>
+        <p>O aviso de fim sai <b>só quando você encerra</b> pelo painel. Quando o teste fecha sozinho, por
+        tempo, não sai mensagem nenhuma. Se você escrever depois disso, vem o lembrete de sempre ("use o
+        botão Testar comigo"), já com o 🧪.</p></div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2><span class="lt">c</span>O cartão do Resgate mostra o teste aberto</h2>
+    <p>Em <b>Comunicação → Resgate da IA</b>. Enquanto houver teste aberto, uma faixa lilás no topo do cartão diz
+    quem você está fingindo ser, por qual chip, e até quando. Um toque em <b>Encerrar teste</b> fecha na hora.</p></header>
+  <div class="palco"><div class="tela">
+    <div class="rg">
+      <div class="sm"><span class="nm">🤖 Resgate da IA <span class="tagn">novo</span></span><span class="zp">ensaio</span>
+        <span class="rs">31 leads parados na fila · 2 segurados com justificativa</span></div>
+      <div class="cp">
+        <div class="teste"><span class="ic">🧪</span>
+          <span><b>Teste aberto · você é Gabriela (lead #595)</b></span>
+          <span class="mt">pelo <b>CP Zarb</b> · 6 mensagens · última às <b>10:48</b> · fecha sozinho às <b>12:48</b></span>
+          <span class="acts"><button class="btn">Ver a conversa</button><button class="btn cor">Encerrar teste</button></span></div>
+        <div class="dn">No 8º dia sem mensagem nossa, o lead passa para a IA, que volta a chamar o cliente com as regras dela…</div>
+        <div class="grade">
+          <label class="fld">Situação<span class="in">Ensaio</span></label>
+          <label class="fld">Vai para<span class="in">ZAQ SDR</span></label>
+          <label class="fld">Supervisor (WhatsApp, com DDD)<span class="in">(86) •••••-••••</span></label>
+        </div>
+        <div class="dn">🧪 <b>O seu número só é o "cliente do teste" no chip do teste.</b> Mandou pra outro chip da
+        empresa, como o chip Thiago? Ele atende você como atende qualquer contato novo. É assim que se testa o
+        ZAQ SDR de verdade.</div>
+        <div class="rodape"><button class="btn">🧪 Testar comigo</button><button class="btn pri">Salvar resgate</button></div>
+      </div>
+    </div>
+  </div></div>
+  <p class="nota"><i>ver</i> <span><b>Ver a conversa</b> abre, numa gaveta, o que você e a IA trocaram no teste: o
+  mesmo histórico que a IA leu pra responder. Com teste aberto, o botão <b>Testar comigo</b> pergunta antes
+  "Já tem um teste aberto com a Gabriela. Começar outro?", pra não trocar de lead sem você perceber.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2><span class="lt">d</span>Recomendação extra · os avisos do chip Thiago vão pra IA</h2>
+    <p>Visto no mesmo diagnóstico, fora do que foi pedido. Na regra do chip Thiago, <b>aviso de agenda</b>,
+    <b>aviso ao dono</b> e <b>quem confere o orçamento</b> estão todos no <b>ZAQ SDR</b>. A IA não tem
+    celular, então os avisos não chegam em ninguém, e o orçamento que a IA monta seria "conferido" por
+    ela mesma.</p></header>
+  <div class="palco"><div class="tela">
+    <div class="rg"><div class="sm"><span class="nm">📱 chip Thiago</span><span class="rs">regra ligada · IA atendendo · ZAQ SDR</span></div>
+      <div class="cp">
+        <div class="al">⚠️ <b>Os avisos desta regra vão para o ZAQ SDR, que é a IA.</b> Ninguém recebe o aviso de visita
+        marcada nem o pedido de conferência do orçamento. Escolha uma pessoa da equipe.</div>
+        <div class="grade">
+          <label class="fld">Aviso de visita marcada<span class="in" style="border-color:var(--ambar-borda)">ZAQ SDR ⚠️</span></label>
+          <label class="fld">Aviso ao dono<span class="in" style="border-color:var(--ambar-borda)">ZAQ SDR ⚠️</span></label>
+          <label class="fld">Quem confere o orçamento<span class="in" style="border-color:var(--ambar-borda)">ZAQ SDR ⚠️</span></label>
+        </div>
+        <div class="dn">E, daqui pra frente, <b>membro IA não aparece mais</b> nessas três listas: só gente.</div>
+      </div></div>
+  </div></div>
+  <p class="nota"><i>d</i> <span>Eu <b>não</b> mudo a regra no banco. Você escolhe a pessoa na tela e salva. O que
+  entra no código é só o alerta e tirar a IA das três listas.</span></p>
+</section>
+
+<section class="sec">
+  <header><h2>Como seria construído</h2></header>
+  <div class="passos">
+    <div class="ps"><b>O teste guarda o chip dele</b>
+      <p>Ao abrir o "Testar comigo", o chip da conversa do lead (<code>conversas.chip_id</code>) fica gravado no
+      teste. As mensagens do teste saem por ele, e não mais pelo número principal.</p></div>
+    <div class="ps"><b>O desvio do supervisor olha o chip (a)</b>
+      <p>O webhook do QR só desvia a mensagem do supervisor se ela chegou <b>no chip do teste aberto</b> ou,
+      sem teste, <b>no chip principal</b>. Em outro chip, ela segue a rota normal, com a regra do chip, o
+      ZAQ SDR e o funil. O lead desse número ganha o selo 🧪, e a regra do chip atende o número do supervisor
+      também na conversa antiga, desde que o lead já seja do dono da regra (é o caso do #760).</p></div>
+    <div class="ps"><b>A resposta sai pelo mesmo chip, com 🧪 (b)</b>
+      <p>As respostas do teste e o lembrete saem pelo chip onde você escreveu e levam o 🧪 na frente. Os
+      avisos do Resgate (prévias, "a IA precisou de gente") continuam pelo principal, como hoje.</p></div>
+    <div class="ps"><b>A faixa do teste e o Encerrar (c)</b>
+      <p>O cartão do Resgate lê o teste aberto. <b>Encerrar teste</b> fecha o teste (vence na hora, nada é
+      apagado) e manda o aviso de fim.</p></div>
+    <div class="ps"><b>O alerta dos avisos pra IA (d, se aprovado)</b>
+      <p>A regra do chip avisa quando algum dos três avisos está com um membro IA, e as três listas passam a
+      mostrar só gente.</p></div>
+    <div class="ps"><b>Novidade (§5)</b>
+      <p><code>teste-resgate-no-chip-certo</code>, tipo <b>mudança</b>, pra <b>dono e gestor</b>, com link pra Comunicação.
+      O público é um portão novo, <b>resgate_ativo</b> (Resgate em Ensaio ou Ligado), porque o
+      <code>resgate_ligado</code> de hoje deixaria de fora a Prime, que está em Ensaio.</p></div>
+  </div>
+</section>
+
+<section class="sec">
+  <header><h2>Pra você decidir</h2></header>
+  <div class="q2"><span class="qn">1</span><h3>O lead de teste (o seu número no chip Thiago) conta no Desafio IA × equipe?</h3>
+    <p>Se contar, cada teste seu vira "lead da IA", e visita marcada no teste vira placar.</p>
+    <span class="rec">não contar. O selo 🧪 tira do Desafio e dos relatórios de origem os leads do número do supervisor (hoje, #760 e #673).</span></div>
+  <div class="q2"><span class="qn">2</span><h3>A recomendação d entra neste mesmo PR?</h3>
+    <p>É pequena e mexe na mesma tela de Comunicação.</p>
+    <span class="rec">entrar junto.</span></div>
+</section>
+
+</div>

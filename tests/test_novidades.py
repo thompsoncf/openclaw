@@ -169,6 +169,10 @@ def pool():
         # 404: os avisos das três trilhas e do espelho (portões da 389 e da 402)
         c.execute((BASE / "404_novidade_tres_trilhas.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "405_novidade_tres_trilhas_fila.sql").read_text(encoding="utf-8"))
+        # 410 amplia pela 12ª, com `resgate_ativo` (o resgate em Ensaio ou Ligado). O
+        # aviso dela sai logo: é conferido em `test_o_aviso_do_teste_no_chip_certo`
+        c.execute((BASE / "410_novidade_teste_resgate_chip.sql").read_text(encoding="utf-8"))
+        c.execute("delete from novidades where chave='teste-resgate-no-chip-certo'")
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1344,7 +1348,7 @@ def test_os_avisos_da_391(pool):
         # o `esteira_ligada` da 402: os avisos delas saem antes, senão o check recusa
         # a tabela
         c.execute("delete from novidades where publico in ('resgate_ligado','resgate_eventos',"
-                  "'esteira_ligada')")
+                  "'esteira_ligada','resgate_ativo')")
         c.execute((BASE / "391_novidade_ia_marca_visita.sql").read_text(encoding="utf-8"))
         rows = {r[0]: r[1:] for r in c.execute(
             """select chave, publico, pra_quem, resumo, link from novidades
@@ -1458,3 +1462,21 @@ def test_o_aviso_do_funil_sem_piscar(pool):
         c.commit()
     assert r[:3] == ("mudanca", "todos", ["dono", "gestor", "vendedor"])
     assert r[3] and r[4] == "/painel/prospeccao"
+
+
+def test_o_aviso_do_teste_no_chip_certo(pool):
+    """A 410: o teste do resgate no chip certo. Mira `resgate_ativo` — o resgate em
+    Ensaio OU Ligado, porque é no Ensaio que o dono testa (o `resgate_ligado` deixaria
+    a Prime de fora) — e só a gerência: o vendedor não testa nem configura nada disso."""
+    with pool.connection() as c:
+        c.execute((BASE / "410_novidade_teste_resgate_chip.sql").read_text(encoding="utf-8"))
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, corpo from novidades
+                          where chave='teste-resgate-no-chip-certo'""").fetchone()
+        c.execute("delete from novidades where chave='teste-resgate-no-chip-certo'")
+        c.commit()
+    assert r[:3] == ("mudanca", "resgate_ativo", ["dono", "gestor"])
+    assert r[3] and r[4] == "/painel/prospeccao/comunicacao"
+    assert "🧪" in r[5] and "Encerrar teste" in r[5]
+    assert "festa" not in (r[3] + r[5]).lower(), "o resgate não é só de quem vende festa"
+    # sem o resgate (a tabela nem existe aqui), o portão fecha
+    assert nv.alcanca("resgate_ativo", "eventos", pool, 1) is False

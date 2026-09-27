@@ -164,6 +164,49 @@ def vocabulario_pessoa(chave_perfil: str | None) -> dict:
     return {**VOC_PESSOA_PADRAO, **_VOC_PESSOA.get(chave_perfil or "", {})}
 
 
+# O NOME NA HORA, FORA DO TEMPLATE. O texto montado em Python (recado de erro, nome de
+# quem não tem nome, aviso pra equipe) pergunta `palavra("lead", conta_id)`. Com a
+# conta, lê o nicho dela (guardado 5 min); sem, vale o do acesso em andamento, que a
+# entrada liga (`ligar_voc`: `portal.conta_logada`, `painel_cockpit._sessao`).
+import contextvars as _cv
+import time as _time
+
+VOC_ATUAL = _cv.ContextVar("voc_pessoa", default=VOC_PESSOA_PADRAO)
+_VOC_CACHE: dict = {}
+
+
+def voc_da_conta(conta_id) -> dict:
+    if not conta_id:
+        return VOC_PESSOA_PADRAO
+    agora = _time.monotonic()
+    c = _VOC_CACHE.get(conta_id)
+    if not c or agora - c[1] > 300:
+        try:
+            from db.conexao import get_pool
+            pool = get_pool()
+        except Exception:  # noqa: BLE001 — sem banco, `perfil_da_conta` cai no padrão sozinho
+            pool = None
+        try:
+            voc = perfil_da_conta(pool, conta_id)["vocab"]
+        except Exception:  # noqa: BLE001 — o nome de quem compra não derruba nada
+            voc = VOC_PESSOA_PADRAO
+        c = (voc, agora)
+        _VOC_CACHE[conta_id] = c
+    return c[0]
+
+
+def ligar_voc(conta_id) -> None:
+    """Liga o vocabulário da conta no acesso em andamento."""
+    if conta_id:
+        VOC_ATUAL.set(voc_da_conta(conta_id))
+
+
+def palavra(chave: str, conta_id=None, *, maiuscula: bool = False) -> str:
+    v = voc_da_conta(conta_id) if conta_id else VOC_ATUAL.get()
+    w = v.get(chave, chave)
+    return w[:1].upper() + w[1:] if maiuscula else w
+
+
 _PERFIS = {
     "eventos": {
         "chave": "eventos", "rotulo": "eventos",

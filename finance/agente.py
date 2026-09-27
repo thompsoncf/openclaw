@@ -10,6 +10,7 @@ whatsapp_twilio. Só WhatsApp por enquanto (único canal ao vivo).
 """
 from __future__ import annotations
 
+from finance.raio_x_perfil import palavra as _palavra  # o nome de quem compra ("paciente" na clínica)
 import json
 import logging
 import re
@@ -493,7 +494,7 @@ def _atender(pool, conta_id, conversa_id):
             _ini = _iv.horario_da_letra(c, conta_id, conversa_id, _ult)
             if _ini:
                 _txt = _regra_visita(pool, c, conta_id, conversa_id, conv, regra, vcfg, _ini,
-                                     conv[3] or conv[2] or "O cliente", "")
+                                     conv[3] or conv[2] or "O " + _palavra("cliente", conta_id), "")
                 if _txt is None:        # outra volta pegou a conversa: ela responde
                     return False
                 _enviar(c, conta_id, conversa_id, _canal0, _dest0, _txt)
@@ -1045,7 +1046,7 @@ def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino
               "unitario": round(s["setup_centavos"] / 100),
               "setup": round(s["setup_centavos"] * s["qtd"] / 100),
               "mensal": round(s["mensal_centavos"] * s["qtd"] / 100)} for s in escolhidos]
-    empresa = conv[3] or conv[2] or "Cliente"
+    empresa = conv[3] or conv[2] or _palavra("cliente", conta_id, maiuscula=True)
     token = secrets.token_urlsafe(16)
     from finance import vendas as _vendas
     _n = c.execute("""select coalesce(n.slug,'') from contas ct

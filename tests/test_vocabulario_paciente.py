@@ -143,3 +143,41 @@ def test_a_janela_do_contato_le_o_voc_da_pagina():
     assert "function jVoc(k)" in jl.JS and "O que o '+jVoc('cliente')+' quer" in jl.JS
     base = portal._env.get_template("base").render(voc=rxp.perfil("clinica")["vocab"])
     assert '"Lead":"Paciente"' in base.replace(" ", "")
+
+
+# ------------------------------------------------------------------ 3ª leva: texto montado em finance/
+
+def test_palavra_pela_conta_ou_pelo_acesso_em_andamento(monkeypatch):
+    """`palavra` com a conta lê o nicho dela; sem a conta, o do acesso em andamento
+    (ligado por `portal.conta_logada` e `painel_cockpit._sessao`)."""
+    monkeypatch.setattr(rxp, "_VOC_CACHE", {})
+    monkeypatch.setattr(rxp, "perfil_da_conta", lambda pool, cid: rxp.perfil("clinica" if cid == 39 else None))
+    assert rxp.palavra("lead", 39) == "paciente" and rxp.palavra("lead", 3) == "lead"
+    assert rxp.palavra("cliente", 39, maiuscula=True) == "Paciente"
+    assert rxp.palavra("lead") == "lead"                      # nenhum acesso ligado: o padrão
+    tok = rxp.VOC_ATUAL.set(rxp.voc_da_conta(39))
+    try:
+        assert rxp.palavra("leads") == "pacientes"
+    finally:
+        rxp.VOC_ATUAL.reset(tok)
+
+
+def test_nao_era_cliente_vira_nao_era_paciente_na_clinica(monkeypatch):
+    from finance import motivo_lido as ml
+    monkeypatch.setattr(rxp, "_VOC_CACHE", {39: (rxp.perfil("clinica")["vocab"], 1e18),
+                                            34: (rxp.perfil(None)["vocab"], 1e18)})
+
+    class _C:
+        def transaction(self):
+            raise RuntimeError("sem banco")
+    assert ml.rotulos(_C(), 39, "clinica")["nao_era_cliente"] == "Não era paciente"
+    assert ml.rotulos(_C(), 34, "eventos")["nao_era_cliente"] == "Não era cliente"
+
+
+def test_os_recados_de_finance_nao_escrevem_lead_a_mao():
+    for arq, velho in (("finance/cockpit.py", '"Lead sem número de WhatsApp."'),
+                       ("finance/cockpit.py", '"Esse cliente não tem e-mail cadastrado."'),
+                       ("finance/distribuicao.py", '"💬 Cliente voltou a falar'),
+                       ("finance/resgate.py", '"🤖 Um lead seu vai pro resgate da IA"'),
+                       ("finance/funil_regua.py", "o lead só pode ir para")):
+        assert velho not in (RAIZ / arq).read_text(encoding="utf-8"), (arq, velho)

@@ -15,6 +15,7 @@ etapas do funil — o Cockpit é uma porta mobile pra esse mesmo dado, não um s
 """
 from __future__ import annotations
 
+from finance.raio_x_perfil import palavra as _palavra  # o nome de quem compra ("paciente" na clínica)
 import logging
 import re
 import secrets
@@ -485,7 +486,7 @@ def leads_do_vendedor(pool, conta_id: int, membro_id: int, *,
         else:
             snip = "Sem mensagens ainda"
         out.append({
-            "id": r[0], "empresa": r[1] or "Lead", "cnpj": r[2] or "",
+            "id": r[0], "empresa": r[1] or _palavra("lead", conta_id, maiuscula=True), "cnpj": r[2] or "",
             "cidade": r[3] or "", "uf": r[4] or "", "temperatura": r[5] or "frio",
             "temp_cor": TEMP_COR.get(r[5] or "frio", "#5b9bd5"),
             "status": r[6] or "novo",
@@ -1121,7 +1122,7 @@ def _recado_da_falha(c, conta_id: int, res: dict) -> str:
     from finance import whatsapp_out as _wo
     e = (res.get("erro") or "").strip()
     if e in _RECADO_ENVIO:
-        return _RECADO_ENVIO[e]
+        return _RECADO_ENVIO[e].replace("do lead", "do " + _palavra("lead", conta_id))
     try:
         prov = _wo.provedor_da_conta(c, conta_id)
     except Exception:  # noqa: BLE001 — o recado nunca derruba o retorno do envio
@@ -1192,7 +1193,7 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
                       (lead_id, conta_id)).fetchone()
         numero = (p[0] or p[1] or "") if p else ""
         if not numero:
-            return {"ok": False, "erro": "Lead sem número de WhatsApp."}
+            return {"ok": False, "erro": f"{_palavra('lead', conta_id, maiuscula=True)} sem número de WhatsApp."}
         # A TRAVA DA INSISTÊNCIA (migração 257). Fica ANTES do envio porque é o que
         # ela mede e, em 'ligado', o que ela barra: a tentativa, não o lead parado.
         #
@@ -1411,13 +1412,13 @@ def enviar_anexo(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
         c.commit()
     numero = (p[0] or p[1] or "") if p else ""
     if not numero:
-        return {"ok": False, "erro": "Lead sem número de WhatsApp."}
+        return {"ok": False, "erro": f"{_palavra('lead', conta_id, maiuscula=True)} sem número de WhatsApp."}
 
     res = _qr.enviar_midia(chip_id or conta_id, numero, dados, tipo,
                            mimetype, nome=nome, legenda=legenda)
     if not res.get("ok"):
         erros = {"desconectado": "WhatsApp desconectado. Reconecte na aba Canais.",
-                 "numero_invalido": "Número do lead inválido.",
+                 "numero_invalido": f"Número do {_palavra('lead', conta_id)} inválido.",
                  "qr_indisponivel": "O serviço de WhatsApp está fora do ar.",
                  "tipo_invalido": "Tipo de arquivo não suportado.",
                  "vazio_ou_grande": "Arquivo grande demais."}
@@ -1503,7 +1504,7 @@ def guardar_midia(pool, conta_id: int, membro_id: int, lead_id: int,
     except _wm.Expirou:
         # o recado exato importa: este é o caso em que guardar chegou TARDE, e o
         # vendedor precisa saber que a saída agora é pedir o arquivo de novo
-        return {"ok": False, "erro": "O WhatsApp já apagou este arquivo. Peça de novo ao cliente."}
+        return {"ok": False, "erro": f"O WhatsApp já apagou este arquivo. Peça de novo ao {_palavra('cliente', conta_id)}."}
     except ValueError as e:
         return {"ok": False, "erro": str(e)}
     except Exception as e:  # noqa: BLE001
@@ -1562,7 +1563,7 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
         c.commit()
     numero = (p[0] or p[1] or "") if p else ""
     if not numero:
-        return {"ok": False, "erro": "Lead sem número de WhatsApp."}
+        return {"ok": False, "erro": f"{_palavra('lead', conta_id, maiuscula=True)} sem número de WhatsApp."}
 
     pronto = av.preparar(dados, mimetype)
     if pronto.get("erro"):
@@ -1576,7 +1577,7 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
                            segundos, onda)
     if not res.get("ok"):
         erros = {"desconectado": "WhatsApp desconectado. Reconecte na aba Canais.",
-                 "numero_invalido": "Número do lead inválido.",
+                 "numero_invalido": f"Número do {_palavra('lead', conta_id)} inválido.",
                  "qr_indisponivel": "O serviço de WhatsApp está fora do ar.",
                  "audio_vazio_ou_grande": "Áudio grande demais."}
         return {"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar o áudio.")}
@@ -2108,7 +2109,7 @@ def avisar_mensagem(pool, conta_id: int, lead_id: int, conversa_id: int, texto: 
         _log.info("push mensagem: leitura falhou (ok): %s", e)
         return 0
 
-    titulo = (empresa or "Cliente").strip()[:60]
+    titulo = (empresa or _palavra("cliente", conta_id, maiuscula=True)).strip()[:60]
     corpo = texto[:80] + ("…" if len(texto) > 80 else "")
     enviados = 0
     for mid in alvos:
@@ -2923,7 +2924,7 @@ def enviar_contrato_email(pool, conta_id: int, orc_id: int,
         return {"ok": False, "erro": "Proposta não encontrada."}
     destino = (o.get("email") or "").strip()
     if "@" not in destino or "." not in destino.split("@")[-1]:
-        return {"ok": False, "erro": "Esse cliente não tem e-mail cadastrado."}
+        return {"ok": False, "erro": f"Esse {_palavra('cliente', conta_id)} não tem e-mail cadastrado."}
     ct = contrato_do_orcamento(pool, conta_id, orc_id)
     if not ct:
         return {"ok": False, "erro": "Essa proposta ainda não tem contrato."}
@@ -3005,7 +3006,7 @@ def enviar_proposta_email(pool, conta_id: int, orc_id: int, membro_id: int | Non
         return {"ok": False, "erro": "Proposta não encontrada."}
     destino = (o.get("email") or "").strip()
     if "@" not in destino or "." not in destino.split("@")[-1]:
-        return {"ok": False, "erro": "Esse cliente não tem e-mail cadastrado."}
+        return {"ok": False, "erro": f"Esse {_palavra('cliente', conta_id)} não tem e-mail cadastrado."}
     if not o.get("link"):
         return {"ok": False, "erro": "Essa proposta ainda não tem link público."}
 

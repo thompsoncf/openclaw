@@ -77,6 +77,9 @@ def conta_logada(request: Request):
     if not cid:
         request.state._conta_cache = None
         return None
+    # o nome de quem compra ("paciente" na clínica) pro texto montado em Python
+    from finance.raio_x_perfil import ligar_voc as _ligar_voc
+    _ligar_voc(cid)
     pool = get_pool()
     with pool.connection() as c:
         r = c.execute(

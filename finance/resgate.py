@@ -51,6 +51,7 @@ Tolerante: banco sem a 396 → o resgate não existe, e nada em volta quebra.
 """
 from __future__ import annotations
 
+from finance.raio_x_perfil import palavra as _palavra  # o nome de quem compra ("paciente" na clínica)
 import json
 import logging
 import re
@@ -230,7 +231,7 @@ def salvar(c, conta_id: int, f: dict) -> dict:
     if (f.get("supervisor_whatsapp") or "").strip() and not sup:
         return {"ok": False, "erro": "O número do supervisor não parece um WhatsApp (DDD + número)."}
     if modo != "off" and not mid:
-        return {"ok": False, "erro": "Escolha pra quem vão os leads do resgate."}
+        return {"ok": False, "erro": f"Escolha pra quem vão os {_palavra('leads', conta_id)} do resgate."}
     if modo != "off" and not sup:
         return {"ok": False, "erro": "Ponha o WhatsApp do supervisor: é pra ele que vão as prévias e os avisos."}
     if modo == "ligado":
@@ -877,7 +878,7 @@ def _avisos_vendedor(pool, conta_id: int, cfg: dict, todos: list[dict], agora: d
         nomes = ", ".join(_primeiro(x["quem"]) for x in xs[:8]) + (
             f" e mais {len(xs) - 8}" if len(xs) > 8 else "")
         um = len(xs) == 1
-        titulo = ("🤖 Um lead seu vai pro resgate da IA" if um
+        titulo = (f"🤖 Um {_palavra('lead', conta_id)} seu vai pro resgate da IA" if um
                   else f"🤖 {len(xs)} leads seus vão pro resgate da IA")
         corpo = (f"{nomes}: sem mensagem sua há dias. Em 2 dias {'ele passa' if um else 'eles passam'} "
                  "pra IA. Pra ficar, mande uma mensagem ou abra a ficha e escreva o motivo "
@@ -1367,7 +1368,7 @@ def testar(pool, conta_id: int) -> dict:
         if not cfg.get("supervisor_whatsapp"):
             return {"ok": False, "erro": "Ponha o WhatsApp do supervisor e salve antes de testar."}
         if not cfg.get("membro_id"):
-            return {"ok": False, "erro": "Escolha pra quem vão os leads do resgate e salve."}
+            return {"ok": False, "erro": f"Escolha pra quem vão os {_palavra('leads', conta_id)} do resgate e salve."}
         todos = leads(c, conta_id, cfg, agora)
         vencidos = fila_de([x for x in todos if x["vence_em"] <= agora])
         if not vencidos:

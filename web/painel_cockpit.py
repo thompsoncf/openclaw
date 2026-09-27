@@ -71,12 +71,9 @@ _PAPEIS_OK = ("vendedor", "gestor", "dono")
 # clínica (finance/raio_x_perfil.vocabulario_pessoa). O app monta HTML em Python, sem
 # o `_render` do portal; por isso a conta liga o vocabulário ao entrar (`_sessao`,
 # `_gerencia`) e o texto pergunta por `_p("lead")`. O JS da página lê `window.VOC`.
-import contextvars as _cv
-import time as _time
-from finance.raio_x_perfil import VOC_PESSOA_PADRAO as _VOC_PADRAO
+from finance import raio_x_perfil as _rxp_voc
 
-_VOC = _cv.ContextVar("cockpit_voc", default=_VOC_PADRAO)
-_VOC_CACHE: dict = {}          # conta -> (vocab, quando): o nicho não muda a cada clique
+_VOC = _rxp_voc.VOC_ATUAL      # o mesmo lugar que o texto de finance/ lê (`palavra`)
 
 
 def _p(chave: str) -> str:
@@ -89,19 +86,7 @@ def _P(chave: str) -> str:
 
 
 def _ligar_voc(conta_id) -> None:
-    if not conta_id:
-        return
-    agora = _time.monotonic()
-    c = _VOC_CACHE.get(conta_id)
-    if not c or agora - c[1] > 300:
-        try:
-            from finance import raio_x_perfil as _rxp
-            voc = _rxp.perfil_da_conta(get_pool(), conta_id)["vocab"]
-        except Exception:  # noqa: BLE001 — o nome de quem compra não derruba a tela
-            voc = _VOC_PADRAO
-        c = (voc, agora)
-        _VOC_CACHE[conta_id] = c
-    _VOC.set(c[0])
+    _rxp_voc.ligar_voc(conta_id)
 
 
 def _voc_js() -> str:

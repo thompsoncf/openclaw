@@ -30,6 +30,7 @@ tudo off é o registro do histórico — anotar o que humanos já fazem não é 
 """
 from __future__ import annotations
 
+from finance.raio_x_perfil import palavra as _palavra  # o nome de quem compra ("paciente" na clínica)
 import logging
 from datetime import datetime, time, timedelta, timezone
 
@@ -488,7 +489,7 @@ def recusa_de_saida(c, conta_id: int, de: str | None, para: str) -> str | None:
     rot = {e["chave"]: e["rotulo"] for e in etapas(c, conta_id)}
     destinos = [rot.get(k, k) for k in saidas.get(de, [])]
     lista = " ou ".join([", ".join(destinos[:-1]), destinos[-1]]) if len(destinos) > 1 else (destinos[0] if destinos else "")
-    return f"De {rot.get(de, de)} o lead só pode ir para {lista}."
+    return f"De {rot.get(de, de)} o {_palavra('lead', conta_id)} só pode ir para {lista}."
 
 
 def chaves_fechadas(etapas_: list[dict]) -> list[str]:

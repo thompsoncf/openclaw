@@ -9,6 +9,7 @@ orcamentos/eventos_agenda). Sem tabela nova.
 """
 from __future__ import annotations
 
+from finance.raio_x_perfil import palavra as _palavra  # o nome de quem compra ("paciente" na clínica)
 import logging
 from datetime import date, datetime, timedelta, timezone
 
@@ -931,7 +932,7 @@ def vendedor(pool, conta_id: int, membro_id: int) -> dict | None:
                   and """ + _ABERTO_P + """
                 order by p.atualizado_em desc limit 50""", (conta_id, membro_id)).fetchall()
     from web.painel_prospeccao import TEMP_COR
-    leads = [{"id": r[0], "empresa": r[1] or "Lead", "temp_cor": TEMP_COR.get(r[2] or "frio", "#5b9bd5"),
+    leads = [{"id": r[0], "empresa": r[1] or _palavra("lead", conta_id, maiuscula=True), "temp_cor": TEMP_COR.get(r[2] or "frio", "#5b9bd5"),
               "ia": bool(r[3])} for r in rows]
     return {"id": membro_id, "nome": m[0], "pausado": bool(m[1]), "papel": m[2],
             "fila": base.get("fila", len(leads)), "ganhos": base.get("ganhos", 0),
@@ -955,7 +956,7 @@ def atividade(pool, conta_id: int, limite: int = 25) -> list[dict]:
             # com fase, "ganhou" é tudo que encerrou e não foi perdido — inclusive
             # uma etapa de pós-venda, que é fechamento com o evento já entregue
             g = status != "perdido"
-            txt = f"{_primeiro(nome)} {'ganhou' if g else 'perdeu'} — {emp or 'lead'}"
+            txt = f"{_primeiro(nome)} {'ganhou' if g else 'perdeu'} — {emp or _palavra('lead', conta_id)}"
             if g and val:
                 txt += f" · {_reais(val)}"
             itens.append({"tipo": "ganho" if g else "perdido", "quando": quando, "txt": txt})
@@ -972,7 +973,7 @@ def atividade(pool, conta_id: int, limite: int = 25) -> list[dict]:
                     where conta_id=%s and coalesce(canal,'')='cockpit'
                     order by criado_em desc limit 10""", (conta_id,)).fetchall():
             nome = _nome_por_id(c, conta_id, criador)
-            itens.append({"tipo": "prop", "quando": quando, "txt": f"{_primeiro(nome)} enviou proposta — {emp or 'cliente'}"})
+            itens.append({"tipo": "prop", "quando": quando, "txt": f"{_primeiro(nome)} enviou proposta — {emp or _palavra('cliente', conta_id)}"})
     itens = [i for i in itens if i.get("quando")]
     itens.sort(key=lambda x: x["quando"], reverse=True)
     return itens[:limite]
@@ -1021,7 +1022,7 @@ def leads(pool, conta_id: int, vend: int | None = None, etapa: str = "", temp: s
            "where " + " and ".join(where) + " order by p.atualizado_em desc limit 200")
     with pool.connection() as c:
         rows = c.execute(sql, tuple(args)).fetchall()
-    return [{"id": r[0], "empresa": r[1] or "Lead", "status": r[2] or "novo",
+    return [{"id": r[0], "empresa": r[1] or _palavra("lead", conta_id, maiuscula=True), "status": r[2] or "novo",
              "temp_cor": TEMP_COR.get(r[3], "#5b9bd5"), "vendedor": r[4], "ia": bool(r[5])} for r in rows]
 
 

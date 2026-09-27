@@ -11,6 +11,7 @@ usa o e-mail do membro (sempre) e o WhatsApp dele (best-effort — fora da janel
 """
 from __future__ import annotations
 
+from finance.raio_x_perfil import palavra as _palavra  # o nome de quem compra ("paciente" na clínica)
 import logging
 
 _log = logging.getLogger(__name__)
@@ -168,7 +169,7 @@ def _texto_zap(modelo: str, *, lead: str, vendedor: str, empresa: str,
     Variável desconhecida fica como está, à vista — some no meio do texto seria pior:
     quem escreveu `{nome}` em vez de `{lead}` precisa ver que não funcionou."""
     valores = {
-        "{lead}": lead or "Um lead",
+        "{lead}": lead or "Um " + _palavra("lead"),
         "{vendedor}": (vendedor or "").split()[0] if vendedor else "você",
         "{empresa}": empresa or "sua empresa",
         "{link}": link or "",
@@ -249,8 +250,8 @@ def avisar_vendedor(pool, conta_id: int, membro_id: int, empresa: str,
         if not m:
             return
         nome, email, wa = m
-        emp = (empresa or "").strip() or "Um lead"
-        titulo = (f"💬 Cliente voltou a falar: {emp}" if retomada
+        emp = (empresa or "").strip() or "Um " + _palavra("lead", conta_id)
+        titulo = (f"💬 {_palavra('cliente', conta_id, maiuscula=True)} voltou a falar: {emp}" if retomada
                   else f"🔥 Novo lead pra você: {emp}")
         try:
             from finance.email_sender import _app_url

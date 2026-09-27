@@ -244,6 +244,46 @@ def test_faltou_volta_pra_qualificado_com_remarcar_e_o_gatilho_nao_devolve(pool)
         assert _status(c, lead) == "qualificado"
 
 
+def test_faltou_e_remarcou_a_mesma_visita_volta_pra_visita_marcada(pool):
+    """Revisão de 27/09/2026: remarcar move a MESMA visita (não cria outra), e o card
+    ficava preso em Qualificado — o gatilho não dispara pra visita que já existia."""
+    with pool.connection() as c:
+        _migrar(c)
+        lead = _lead(c, "qualificado")
+        ev = _visita(c, lead)
+        c.execute("update eventos_agenda set desfecho='nao_realizado' where id=%s", (ev,))
+        fr.card_pela_visita(c, PRIME, ev, "nao_realizado")
+        c.commit()
+        assert _status(c, lead) == "ficha_completa"
+        c.execute("update eventos_agenda set inicio=now() + interval '2 days', desfecho=null "
+                  "where id=%s", (ev,))
+        assert fr.card_pela_remarcacao(c, PRIME, ev) == "qualificado"
+        c.commit()
+        assert _status(c, lead) == "qualificado"
+        fr.aplicar_gatilhos(c, PRIME)
+        assert _status(c, lead) == "qualificado"
+        # e o card adiante não volta
+        b = _lead(c, "proposta")
+        ev_b = _visita(c, b, dias=2)
+        assert fr.card_pela_remarcacao(c, PRIME, ev_b) is None
+        assert _status(c, b) == "proposta"
+
+
+def test_a_venda_fechada_depois_da_festa_tambem_chega_no_pos_festa(pool):
+    """Revisão de 27/09/2026: o Ganho marcado à mão DEPOIS da festa é um movimento
+    manual mais novo que a meia-noite do dia seguinte — a TRAVA 3 descartava o
+    evento, e o card nunca chegava no Pós-festa."""
+    antes = (datetime.now(timezone(timedelta(hours=-3))) - timedelta(days=3)).date()
+    with pool.connection() as c:
+        _migrar(c)
+        lead = _lead(c, "proposta", evento_em=antes)
+        c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
+        fr.registrar_movimento(c, PRIME, lead, "proposta", "ganho", "manual")
+        c.commit()
+        fr.aplicar_gatilhos(c, PRIME)
+        assert _status(c, lead) == "pos_festa"
+
+
 def test_faltou_com_outra_visita_marcada_ou_card_ja_adiante_nao_mexe(pool):
     with pool.connection() as c:
         _migrar(c)

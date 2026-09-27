@@ -1124,6 +1124,9 @@ def test_o_espelho_desliga_e_confere_quem_recebe(pool, c, monkeypatch):
     assert es.salvar_espelho(c, CONTA, VEND, 99) == {
         "ok": False, "erro": "Quem recebe a cópia precisa ter WhatsApp no cadastro."}
     assert not es.salvar_espelho(c, CONTA, VEND, 12345)["ok"]              # de outra conta
+    # a cópia de alguém pra ele mesmo (revisão de 27/09/2026)
+    assert es.salvar_espelho(c, CONTA, VEND, VEND) == {
+        "ok": False, "erro": "Quem recebe a cópia tem que ser outra pessoa."}
     assert es.salvar_espelho(c, CONTA, "", "")["ok"]
     assert es.espelho(c, CONTA) == {"de": None, "para": None}
 

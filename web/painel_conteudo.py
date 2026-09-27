@@ -241,7 +241,7 @@ def publicar_facebook(page_id: str, page_token: str, mensagem: str,
 # gerada entram depois sem mexer neste fluxo (basta gravar outra URL em
 # conteudo_midias).
 
-_LOCK = 771146          # advisory lock próprio (não briga com e-mail/WhatsApp)
+_LOCK = 771185          # advisory lock próprio (era 771146, a mesma do reengajamento das campanhas)
 _MAX_PASS = 3           # posts publicados por passada do poller
 _MAX_TENTATIVAS = 3     # depois disso o post fica em 'erro' e espera o humano
 

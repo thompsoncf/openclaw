@@ -440,8 +440,17 @@ _SQL_EVENTO = {
     # ainda negociava uma data que passou não é pós-festa de ninguém. O instante é a
     # meia-noite do dia seguinte, em Brasília: fixo, e depois de qualquer movimento
     # de quando a venda fechou.
+    #
+    # A VENDA FECHADA DEPOIS DA FESTA (revisão de 27/09/2026): quem marca o Ganho
+    # depois que a festa passou faz um movimento manual MAIS NOVO que a meia-noite, e
+    # a TRAVA 3 descartava o evento — o card nunca chegava no Pós-festa. O instante
+    # passa a ser o mais tarde entre a meia-noite e a entrada na etapa de fechamento
+    # (+1 s): continua fixo, e continua depois de quando a venda fechou.
     "festa_passou": """
-        select p.id, ((p.evento_em + 1)::timestamp at time zone 'America/Sao_Paulo')
+        select p.id, greatest(
+                 ((p.evento_em + 1)::timestamp at time zone 'America/Sao_Paulo'),
+                 (select max(fm.criado_em) + interval '1 second' from funil_movimentos fm
+                   where fm.prospeccao_id = p.id and fm.para = p.status))
           from prospeccao p
          where p.conta_id=%(conta)s and p.evento_em is not null
            and p.evento_em < (now() at time zone 'America/Sao_Paulo')::date
@@ -519,6 +528,44 @@ def card_pela_visita(c, conta_id: int, evento_id: int, desfecho: str,
             return destino
     except Exception as ex:  # noqa: BLE001 — a agenda já gravou; o card é enfeite dela
         _log.warning("card_pela_visita conta=%s evento=%s: %s: %s", conta_id, evento_id,
+                     type(ex).__name__, ex)
+        return None
+
+
+def card_pela_remarcacao(c, conta_id: int, evento_id: int,
+                         membro_id: int | None = None) -> str | None:
+    """A VISITA FOI REMARCADA: o card que tinha voltado pra Qualificado porque o
+    cliente faltou (`card_pela_visita`) volta pra "Visita marcada" — há uma visita
+    marcada de novo. Antes ficava preso em Qualificado, e a TRAVA 3 (o movimento
+    'agenda' da falta) impedia o gatilho de devolvê-lo (revisão de 27/09/2026).
+
+    Só pra frente: o card que está ANTES da coluna da visita marcada anda até ela;
+    o que já está nela ou adiante (Proposta, Data segurada…) fica onde está. Só em
+    conta com a coluna (gatilho 'compromisso'). Tolerante: nunca levanta."""
+    try:
+        with c.transaction():
+            r = c.execute("""select e.prospeccao_id, p.status from eventos_agenda e
+                               join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                              where e.id=%s and e.conta_id=%s and e.tipo_evento is null
+                                and e.status='ativo' and p.estagio='lead'""",
+                          (evento_id, conta_id)).fetchone()
+            if not r:
+                return None
+            lead, atual = r
+            todas = etapas(c, conta_id)
+            marcada = next((e for e in todas if e["gatilho"] == "compromisso"), None)
+            if not marcada or atual == marcada["chave"] or atual in ("perdido", "ganho"):
+                return None
+            ordem = {e["chave"]: e["ordem"] for e in todas}
+            if atual not in ordem or ordem[atual] >= marcada["ordem"]:
+                return None
+            c.execute("""update prospeccao set status=%s, atualizado_em=now()
+                          where id=%s and conta_id=%s and status=%s""",
+                      (marcada["chave"], lead, conta_id, atual))
+            registrar_movimento(c, conta_id, lead, atual, marcada["chave"], "agenda", membro_id)
+            return marcada["chave"]
+    except Exception as ex:  # noqa: BLE001 — a agenda já gravou; o card é enfeite dela
+        _log.warning("card_pela_remarcacao conta=%s evento=%s: %s: %s", conta_id, evento_id,
                      type(ex).__name__, ex)
         return None
 
@@ -908,6 +955,19 @@ def avaliar_cobranca(c, conta_id: int, agora: datetime | None = None) -> dict:
     from finance import resgate as _rg
     da_ia = _rg.leads_da_ia(c, conta_id)
     ia = _cr.membros_ia(c, conta_id)       # e o lead da IA do número (27/09/2026)
+    # O LEAD QUE ESTÁ NA ESTEIRA JÁ É COBRADO POR ELA (finance/esteira.py, 3 cobranças
+    # em 7 dias): a régua cobrava o mesmo lead parado de novo, e o vendedor recebia
+    # dois avisos pelo mesmo card (revisão de 27/09/2026). A régua continua cobrando o
+    # cliente ESPERANDO resposta — isso a esteira não olha.
+    na_esteira: set[int] = set()
+    try:
+        with c.transaction():
+            na_esteira = {r[0] for r in c.execute(
+                """select prospeccao_id from follow_up_esteira
+                    where conta_id=%s and resolvido_em is null and fechado_em is null""",
+                (conta_id,)).fetchall()}
+    except Exception:  # noqa: BLE001 — base sem a esteira
+        na_esteira = set()
     for lead_id, status, vendedor_id, empresa in leads:
         if status in encerradas or lead_id in da_ia or vendedor_id in ia:
             continue
@@ -922,6 +982,8 @@ def avaliar_cobranca(c, conta_id: int, agora: datetime | None = None) -> dict:
             ref, etapa_chave = desde.get(lead_id), status
             if not (ref and prazo and minutos_uteis(ref, agora, cfg) > prazo):
                 continue
+        if lead_id in na_esteira and estado in ("etapa", "bola_cliente"):
+            continue
 
         atrasado = minutos_uteis(ref, agora, cfg) - prazo
         # ESCALA É SEQUENCIAL. O vendedor é cobrado primeiro, sempre — mesmo num lead

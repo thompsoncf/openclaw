@@ -163,3 +163,13 @@ def _esquema_runtime_limpo():
 # O relógio fixo às 23h de Brasília (ver tests/relogio_fixo.py). Registrado aqui
 # para qualquer arquivo poder pedir com `usefixtures("servidor_as_23h")`.
 from tests.relogio_fixo import servidor_as_23h  # noqa: E402,F401
+
+
+@pytest.fixture(autouse=True)
+def _avisos_da_equipe_o_dia_todo(monkeypatch):
+    """Os avisos à equipe esperam o dia (`finance.aviso_noite`, revisão de
+    27/09/2026). A suíte lê o relógio de verdade em muitos lugares e roda a qualquer
+    hora: aqui a janela fica aberta o dia todo, e a espera da noite tem os testes
+    dela (`tests/test_aviso_noite.py`), que fecham a janela de propósito."""
+    from finance import aviso_noite
+    monkeypatch.setattr(aviso_noite, "HORAS", (0, 24))

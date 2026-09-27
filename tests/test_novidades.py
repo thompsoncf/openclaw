@@ -1444,3 +1444,17 @@ def test_o_aviso_das_trilhas_fala_da_fila_e_da_visita_no_teste(pool):
         c.commit()
         corpo = c.execute("select corpo from novidades where chave='funil-tres-trilhas'").fetchone()[0]
     assert "os próximos da fila" in corpo and "TESTAR COMIGO" in corpo
+
+
+def test_o_aviso_do_funil_sem_piscar(pool):
+    """A 406: o funil é de todo mundo, e o vendedor é quem mais vê a troca. Fica fora
+    do fixture (um aviso `todos` mudaria as contagens dos outros testes): roda aqui e
+    sai."""
+    with pool.connection() as c:
+        c.execute((BASE / "406_novidade_funil_sem_piscar.sql").read_text(encoding="utf-8"))
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link from novidades
+                          where chave='funil-sem-piscar'""").fetchone()
+        c.execute("delete from novidades where chave='funil-sem-piscar'")
+        c.commit()
+    assert r[:3] == ("mudanca", "todos", ["dono", "gestor", "vendedor"])
+    assert r[3] and r[4] == "/painel/prospeccao"

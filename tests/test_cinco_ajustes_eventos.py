@@ -399,8 +399,13 @@ def test_o_reload_do_funil_tem_os_freios():
     """Recarregar por baixo de quem está no meio de uma ação perde trabalho — e
     esta é a diferença pro Radar, que é uma lista e não uma mesa."""
     tpl = pp._KANBAN_TPL
-    i = tpl.index("}, 60000);")
-    bloco = tpl[tpl.index("setInterval(function(){", tpl.index("// ATUALIZAR SOZINHO")):i]
+    # Desde o funil sem piscar, o laço só chama kbAtualiza; os freios moram em
+    # _kbFreado (e o da aba escondida, no próprio kbAtualiza).
+    assert "setInterval(function(){kbAtualiza(false);}, 60000);" in tpl
+    atualiza = tpl[tpl.index("function kbAtualiza("):tpl.index("function kbAtualiza(") + 400]
+    assert "_kbFreado()" in atualiza
+    freado = tpl[tpl.index("function _kbFreado(){"):tpl.index("function _kbFoto(")]
+    bloco = atualiza + freado
     for freio in ("document.hidden", ".chatpop", "_kbDragEl", "_kbMoved",
                   "getElementById('captar')", "activeElement", "isContentEditable"):
         assert freio in bloco, f"o reload perdeu o freio de {freio}"

@@ -12026,500 +12026,28 @@ function baseTirarCheck(){
 
 
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
-<div class="pw funil">
-""" + _navbar('funil') + """
-  {#- O TÍTULO NUMA LINHA SÓ (25/09/2026, docs/mockups/prospeccao_layout.html):
-     o nome, os números e as ações. Antes eram três faixas — o título, o "🎯 Captar
-     Lead" virado barra verde de 48 px e o "Editar etapas" entre os filtros e o
-     quadro —, e o primeiro card começava ~500 px abaixo do topo no computador.
-     Captar e Etapas abrem numa GAVETA à direita, por cima do quadro, sem empurrar
-     nada. No celular os botões viram ícones (🔍 ⚙ +). -#}
-  {#- O CABEÇALHO MAIS LEVE (25/09/2026, docs/mockups/funil_cabecalho.html, aprovado
-     pelo dono): o nome da EMPRESA e os números descem pra uma linha própria embaixo
-     do título — na linha do título eles cortavam em "490 lea…" —, e o aviso do
-     modelo do ramo deixa de ser uma faixa de duas linhas e vira um selo nela. O mês
-     não se repete aqui: a pílula de "Entraram em" já diz. -#}
-  <script>document.documentElement.classList.add('kbjs')</script>
-  <div class="kbtit{% if busca %} buscando{% endif %}" id="kbtit">
-    <div class="kbtt">
-      <h2 class="tt">Funil</h2>
-      {%- set _emp = empresa_nome or (conta[2] if conta else '') %}
-      <div class="kbnum">{% if _emp %}<span class="kbconta">{{ _emp|e }}</span><span class="kbsep">·</span>{% endif %}<span class="kbq"><b>{{ n_quadro }}</b> no quadro</span><span class="kbtot"><span class="kbsep">·</span><span id="kb-total-n">{{ total_alvos }}</span> no total</span>{% if total_valor %}<span class="kbtot"><span class="kbsep">·</span>pipeline {{ brl(total_valor) }}</span>{% endif %}
-        {#- A FAIXA DO MODELO DO RAMO (14/09/2026), desde 25/09 um selo nesta linha.
-            Continua só pra dono/gestor, e só quando a diferença NÃO é escolha do
-            dono — `funil_modelo.desencontro` não conta rótulo que ele mesmo
-            escreveu. Some sozinha quando o funil casa com o ramo.
-
-            POR QUE ELE MORA AQUI, no quadro, e não na Régua: o bloco que resolve isso
-            existe desde 11/09 e mora lá dentro. Em 14/09, de 8 contas com funil, UMA
-            tinha as colunas do próprio ramo — a Doce Mell, citada pelo nome no
-            docstring do `funil_modelo` como o caso que ele veio resolver, seguia nas
-            seis genéricas. A ferramenta funcionava; ninguém a encontrava. Continua à
-            vista em toda visita, só sem a faixa inteira todo dia. -#}
-        {% if ramo_fora %}<a class="kbramo" href="/painel/prospeccao/regua#modelo" title="{{ ramo_fora }} coluna{{ '' if ramo_fora == 1 else 's' }} diferente{{ '' if ramo_fora == 1 else 's' }} do modelo de {{ ramo_rotulo }} · nada muda sem você marcar"><span aria-hidden="true">⚠</span><span class="kbramo-l">{{ ramo_fora }} coluna{{ '' if ramo_fora == 1 else 's' }} fora do modelo de {{ ramo_rotulo }} · ver →</span><span class="kbramo-c">modelo</span></a>{% endif %}
-        {%- if n_contextos and n_contextos > 1 %}<span class="kbsep">·</span><a href="/trocar" class="kbtroca">trocar empresa ⇄</a>{% endif %}</div>
-    </div>
-    <div class="kbacoes">
-      {# A BUSCA: digitar filtra o que está na tela; Enter procura em todos os meses
-         (a rota recebe `q`). "/" em qualquer lugar da página põe o foco aqui. #}
-      <label class="kbbusca" title="Buscar por nome ou telefone — Enter procura em todos os meses">
-        <span aria-hidden="true">🔍</span><input id="kbbusca" type="search" autocomplete="off" enterkeyhint="search"
-          placeholder="Buscar nome ou telefone" aria-label="Buscar {{ voc.lead }} por nome ou telefone" value="{{ (busca or '')|e }}"
-          oninput="kbBuscaFiltra()" onkeydown="kbBuscaTecla(event)"><kbd>/</kbd></label>
-      <button type="button" class="kbbt kbico-busca" onclick="kbBuscaAbre()" aria-label="Buscar">🔍</button>
-      {% if modo_evento %}<div class="vseg" title="Colunas por etapa do funil, ou por mês da festa">
-        <a class="{% if not vista_mes %}on{% endif %}" href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">Por etapa</a><a class="{% if vista_mes %}on{% endif %}" href="/painel/prospeccao?vista=mes{% if filtro_vend %}&amp;vendedor={{ filtro_vend }}{% endif %}">Por mês do evento</a>
-      </div>{% endif %}
-      {% if gerencia %}<button type="button" class="kbbt" onclick="etAbre()" title="Editar as etapas do funil" aria-label="Etapas">⚙<span class="tx"> Etapas</span></button>{% endif %}
-      {# Captar Lead nunca navegou pra lugar nenhum: abre o painel de captação — desde
-         25/09/2026 numa gaveta à direita, sem empurrar o quadro pra baixo. #}
-      <button type="button" class="cap-btn" onclick="capToggle()" aria-label="Captar {{ voc.lead }}">+<span class="tx"> Captar {{ voc.lead }}</span></button>
-    </div>
-  </div>
-  {% if busca %}<div class="kbbusca-faixa">🔍 <span>Buscando <b>“{{ busca|e }}”</b> em todos os meses · {{ n_quadro }} encontrado{{ '' if n_quadro == 1 else 's' }}</span><a href="{{ busca_limpa|e }}">✕ limpar</a></div>{% endif %}
-  <div class="kbbusca-n" id="kbbusca-n" hidden></div>
-
-  {#- OS CRÍTICOS POR VENDEDOR (25/09/2026): o dono cobra a equipe sem contar card
-     na mão. Mesmo estado do selo "Crítico" do card e da tela de Follow-up — por
-     isso só existe em conta que tem aquela tela. Clicar no nome filtra o quadro. -#}
-  {#- Desde 25/09/2026 cada vendedor é um chip com o nome escrito normal
-     ("Jacqueline", não "JACQUELINE" — o cadastro guarda em maiúscula). -#}
-  {% if criticos %}<div class="kbcrit" id="kbcrit"><span class="rot"><span aria-hidden="true">🚨</span> Críticos</span>
-    {% for v in criticos %}<a href="{{ v.url|e }}" class="kbcc{% if v.on %} on{% endif %}" title="{% if v.on %}Ver todos os vendedores{% else %}Ver só os cards de {{ v.nome|e }}{% endif %}"><b>{{ v.n }}</b> {{ v.nome|e }}</a>{% endfor %}
-    <a class="lk" href="/painel/follow-up">ver fila →</a></div>{% endif %}
-
-  {#- AS TRÊS TRILHAS (docs/mockups/funil_tres_trilhas.html, aprovado em 27/09/2026):
-     vendedores, a IA do número e o resgate, cada uma com a sua regra. Só pra dono e
-     gestor (decisão 2), e só em conta com IA ou resgate — sem os dois, a barra não
-     existe. Tocar numa trilha filtra o quadro; tocar de novo solta. -#}
-  {% if tri_barra %}{% set tb = tri_barra %}
-  <nav class="kbtri-bar" aria-label="Trilhas do funil">
-    <a class="kbtr todas{% if not filtro_tri %} on{% endif %}" href="{{ tri_urls.todas|e }}"{% if not filtro_tri %} aria-current="true"{% endif %}>
-      <span class="t">Todas</span><span class="n">{{ tb.todas }}</span><span class="l">abertos no quadro</span></a>
-    <a class="kbtr vend{% if filtro_tri == 'vend' %} on{% endif %}" href="{{ tri_urls.vend|e }}">
-      <span class="t"><i class="d"></i>Vendedores</span><span class="n">{{ tb.abertos.vend }} <small>abertos</small></span>
-      {% if tb.vend.esteira is not none %}<span class="l">na esteira <b>{{ tb.vend.esteira }}</b> · tratados hoje <b>{{ tb.vend.tratados }}</b></span>{% endif %}
-      <span class="rg">A esteira cobra o vendedor{% if tb.rsg.modo != 'off' %}; 7 dias sem mensagem, vai pro Resgate{% endif %}.</span></a>
-    <a class="kbtr ia{% if filtro_tri == 'ia' %} on{% endif %}" href="{{ tri_urls.ia|e }}">
-      <span class="t"><i class="d"></i>IA do número</span><span class="n">{{ tb.abertos.ia }} <small>abertos{% if tb.ia.nome %} · {{ tb.ia.nome|e }}{% endif %}</small></span>
-      <span class="l">conversando <b>{{ tb.ia.conversando }}</b> · sumiu <b>{{ tb.ia.sumido }}</b>{% if tb.ia.gente %} · gente assumiu <b>{{ tb.ia.gente }}</b>{% endif %}</span>
-      <span class="rg">A IA responde{% if tb.ia.insiste %} e insiste no 3º e 7º dia; perdido no 10º{% else %} · a insistência está desligada{% endif %}.</span></a>
-    <a class="kbtr rsg{% if filtro_tri == 'rsg' %} on{% endif %}" href="{{ tri_urls.rsg|e }}">
-      <span class="t"><i class="d"></i>Resgate da IA{% if tb.rsg.modo != 'off' %} <span class="modo">{{ 'pausado' if tb.rsg.pausado else ('Ensaio' if tb.rsg.modo == 'ensaio' else 'Ligado') }}</span>{% endif %}</span>
-      <span class="n">{{ tb.abertos.rsg }} <small>com a IA{% if tb.rsg.fila is not none %} · {{ tb.rsg.fila }} na fila{% endif %}</small></span>
-      <span class="l">em andamento <b>{{ tb.rsg.andamento }}</b> · hoje <b>{{ tb.rsg.hoje }} de {{ tb.rsg.teto }}</b> · responderam <b>{{ tb.rsg.responderam }}</b></span>
-      <span class="rg">{% if tb.rsg.modo == 'off' %}Desligado · ligue em Comunicação › Agente{% else %}7 dias sem mensagem (14 com {{ 'visita' if modo_evento else 'reunião' }} ou orçamento){% endif %}.</span></a>
-  </nav>
-  {% if filtro_tri and tri_det and tri_det.linhas %}<div class="kbtri-det {{ filtro_tri }}"><span class="rot">{{ tri_det.rotulo }}</span>
-    {% set _mx = (tri_det.linhas | map(attribute='n') | max) or 1 %}
-    {% for l in tri_det.linhas %}<div class="er"><span>{{ l.nome|e }}</span><span class="bar"><i style="width:{{ (100 * l.n / _mx)|round|int }}%"></i></span><span class="q">{{ l.n }}</span></div>{% endfor %}
-  </div>{% endif %}
-  {% endif %}
-
-  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
-
-  <!-- painel de captação: gaveta à direita, por cima do quadro (desde 25/09/2026) -->
-  <div class="kbgav-fundo" id="kbgav-fundo" hidden onclick="kbGavFecha()"></div>
-  <div id="captar" class="fsec kbgav" style="display:none" role="dialog" aria-modal="true" aria-label="Captar {{ voc.lead }}">
-    <div class="kbgav-hd"><b>🎯 Captar {{ voc.lead }}</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
-    <div class="cabas">
-      <button type="button" class="caba on" data-tab="manual" onclick="capTab('manual')">✏️ Manual</button>
-      <button type="button" class="caba" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
-      <button type="button" class="caba" data-tab="google" onclick="capTab('google')">📍 Google Maps</button>
-    </div>
-
-    <div class="captab" data-tab="manual">
-      <form id="cap-manual" data-tipo-form action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
-        <input type="hidden" name="voltar" value="/painel/prospeccao">
-        <!-- cadastrou aqui dentro do funil = o lead ENTRA no funil (estagio=lead).
-             Sem isto ele nascia na Base e o card sumia no primeiro refresh. -->
-        <input type="hidden" name="destino" value="funil">
-        <input type="hidden" name="receita">
-        <input type="hidden" name="tipo" value="pj">
-        <div class="rcpills">
-          <button type="button" class="rcpill on" data-tipo-pill="pj" onclick="leadTipo('pj',this)">🏢 Pessoa Jurídica</button>
-          <button type="button" class="rcpill" data-tipo-pill="pf" onclick="leadTipo('pf',this)">🧑 Pessoa Física</button>
-        </div>
-        <div style="display:flex;gap:.5rem;align-items:end;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem;margin-bottom:.8rem;flex-wrap:wrap">
-          <div style="flex:1;min-width:200px"><label class="lbl" data-pj="🔎 CNPJ — puxa tudo da Receita" data-pf="🪪 CPF (opcional)">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="documento" inputmode="numeric" data-pj="digite o CNPJ (só números) e clique buscar" data-pf="000.000.000-00" placeholder="digite o CNPJ (só números) e clique buscar" oninput="leadDoc(this)"></div>
-          <button type="button" class="pbtn" data-so-pj onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
-        </div>
-        <div class="egrid">
-          <div class="full"><label class="lbl" data-pj="Empresa *" data-pf="Nome completo *">Empresa *</label><input class="fld" name="empresa" required data-pj="Nome da empresa" data-pf="Nome completo" placeholder="Nome da empresa"></div>
-          <div data-so-pj><label class="lbl">Contato</label><input class="fld" name="contato"></div>
-          <div data-so-pj><label class="lbl">Cargo</label><input class="fld" name="cargo" placeholder="Cargo do contato"></div>
-          <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
-          <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
-          <div><label class="lbl">E-mail</label><input class="fld" name="email" inputmode="email"></div>
-          <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
-          <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
-          <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
-          <div data-so-pj><label class="lbl">Sócio</label><input class="fld" name="socio"></div>
-          <div data-so-pj><label class="lbl">Regime</label><input class="fld" name="regime_tributario"></div>
-          <div data-so-pj><label class="lbl">Porte</label><input class="fld" name="porte"></div>
-          <div><label class="lbl">Instagram</label><input class="fld" name="instagram" placeholder="@perfil"></div>
-          <div><label class="lbl">Site (link)</label><input class="fld" name="site_url" inputmode="url" placeholder="https://…"></div>
-          <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
-          <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
-          {% if pode_atribuir %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
-          <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs"></div>
-          <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar ao funil</button>
-            <div class="mut" style="font-size:.78rem;margin-top:.4rem">Entra direto no funil, na primeira etapa. Pra alimentar a Base (campanhas em massa), use 📇 Base.</div></div>
-        </div>
-      </form>
-    </div>
-
-    <div class="captab" data-tab="csv" style="display:none">
-      <form id="cap-csv" action="/painel/prospeccao/captar/csv" method="post" enctype="multipart/form-data" onsubmit="return capCsv(event)">
-        <label class="lbl">Arquivo CSV</label>
-        <input class="fld" type="file" name="arquivo" accept=".csv,text/csv" required>
-        <div class="mut" style="font-size:.8rem;margin-top:.5rem">1ª linha = cabeçalho. Colunas: <b>empresa</b>, telefone, whatsapp, cidade, uf, segmento, contato, email, cnpj. Separador , ou ;.</div>
-        {% if pode_atribuir %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
-        <button class="pbtn" style="margin-top:.8rem">Importar CSV</button>
-      </form>
-    </div>
-
-    <div class="captab" data-tab="google" style="display:none">
-      {% if not tem_places %}
-      <div class="mut" style="font-size:.84rem;line-height:1.6">📍 Pra buscar no Google Maps falta a chave. No Render (openclaw-web → Environment) adicione <code style="background:var(--bg);padding:.1rem .35rem;border-radius:5px;border:1px solid var(--borda)">GOOGLE_PLACES_API_KEY</code> (Places API New, billing ativo).</div>
-      {% else %}
-      <form id="cap-google" action="/painel/prospeccao/captar/buscar" method="post" onsubmit="return capBuscar(event)">
-        <div class="egrid">
-          <div><label class="lbl">Segmento</label><input class="fld" name="segmento" required placeholder="Ex: pet shop"></div>
-          <div><label class="lbl">Cidade</label><input class="fld" name="cidade" id="cap-g-cidade" placeholder="Ex: Teresina - PI"></div>
-        </div>
-
-        <div class="mapacc" id="mapacc">
-          <div class="mapacc-hd" onclick="mapaToggle()">
-            <span class="mapacc-ic">🗺️</span>
-            <span class="mapacc-tt">Cercar uma área no mapa
-              <span class="mapacc-sub">Opcional — desenhe a região em vez de digitar bairro/rua</span>
-            </span>
-            <span class="mapacc-caret">▾</span>
-          </div>
-          <div class="mapacc-body">
-            <div class="mapacc-in">
-              {% if not tem_maps_js %}
-              <div class="mut" style="font-size:.8rem;line-height:1.6">🗺️ Pra desenhar a área falta uma chave (separada da de busca). No Render, adicione <code style="background:var(--bg);padding:.1rem .35rem;border-radius:5px;border:1px solid var(--borda)">GOOGLE_MAPS_JS_API_KEY</code> — Maps JavaScript API, com a chave <b>restrita por domínio</b> no Google Cloud (ela roda no navegador).</div>
-              {% else %}
-              <div class="mapcard">
-                <input type="text" class="mapcard-busca" id="cercaBusca" placeholder="🔍 Endereço ou bairro pra centralizar…">
-                <div id="cercaMap" style="position:absolute;inset:0"></div>
-              </div>
-              <div class="radiusbar">
-                <span>Raio</span>
-                <input type="range" id="cercaRaio" min="0.5" max="15" step="0.5" value="3">
-                <b id="cercaRaioLabel">3.0 km</b>
-              </div>
-              <input type="hidden" name="lat" id="cercaLat"><input type="hidden" name="lng" id="cercaLng">
-              <input type="hidden" name="raio_km" id="cercaRaioKm" value="3">
-              {% endif %}
-            </div>
-          </div>
-        </div>
-        <div class="mapa-usando" id="mapaUsando">🗺️ <span>Usando a área desenhada acima — bairro/rua ficam de lado enquanto isso</span></div>
-
-        <div class="lbl" style="margin-top:.4rem;color:var(--txt-mut)">📍 Refinar por região <span style="font-weight:400">— opcional, pra buscar numa área específica</span></div>
-        <div class="egrid" style="margin-top:.25rem">
-          <div><label class="lbl">Bairro</label><input class="fld" name="bairro" id="cap-g-bairro" placeholder="Ex: Jardim Renascença"></div>
-          <div><label class="lbl">Rua</label><input class="fld" name="rua" id="cap-g-rua" placeholder="Ex: Av. Nossa Sra. de Fátima"></div>
-        </div>
-        <div class="mut" style="font-size:.76rem;margin-top:.3rem">Bairro filtra a vizinhança toda. Rua afunila bastante (poucos resultados) — use pra mira fina.</div>
-        <label class="rrow" style="border:1px solid var(--borda);border-radius:10px;margin-top:.6rem;cursor:pointer">
-          <span class="toggle"><input type="checkbox" name="esconder_redes" value="1" checked><span class="tgl"></span></span>
-          <span style="font-size:.88rem">Esconder redes grandes (Petz, Drogasil…)</span>
-        </label>
-        {% if pode_atribuir %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" id="cap-g-vend" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
-        <button class="pbtn" style="margin-top:.8rem" id="cap-g-btn">Buscar</button>
-      </form>
-      <div id="cap-res" style="margin-top:.9rem"></div>
-      {% endif %}
-    </div>
-  </div>
-
-  {# A BARRA DE FOCO (mockup funil_mes_atual): numa linha só, o período ("Entraram
-     em", padrão mês corrente), o vendedor e as pílulas âmbar do que ficou de fora —
-     ligou, entram no quadro marcados; desligou, saem. A escolha fica na sessão. #}
-  <div class="foco" id="foco">
-    {# desde 25/09/2026 as pílulas do período formam UMA escolha (.kbseg), no mesmo
-       desenho do "Por etapa / Por mês": só uma vale por vez #}
-    {% if entrou_itens %}<span class="rot">Entraram em</span>
-    <span class="kbseg" role="group" aria-label="Entraram em">{% for m in entrou_itens %}<a class="pil{% if m.chave == entrou %} on{% endif %}" href="{{ m.url }}"{% if m.chave == entrou %} aria-current="true"{% endif %}>{{ m.rotulo }} <b>{{ m.n }}</b></a>{% endfor %}</span>{% endif %}
-    {# o seletor diz quantos cards cada um tem no quadro, com os filtros de agora
-       (25/09/2026) — "Todos · 227", "Jacqueline · 48" #}
-    {% if gerencia %}<span class="sep"></span>
-    <form method="get" action="/painel/prospeccao" class="vendf">
-      <span class="rot">Vendedor</span>
-      <select name="vendedor" onchange="this.form.submit()" aria-label="Filtrar por vendedor">
-        <option value="" {% if not filtro_vend %}selected{% endif %}>Todos · {{ vend_total or 0 }}</option>
-        <option value="nao" {% if filtro_vend=='nao' %}selected{% endif %}>Sem responsável · {{ (vend_cont or {}).get('nao', 0) }}</option>
-        {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }} · {{ (vend_cont or {}).get(v.id|string, 0) }}</option>{% endfor %}
-      </select>
-      {% if filtro_mes %}<input type="hidden" name="mes" value="{{ filtro_mes }}">{% endif %}
-      {% if vista_mes %}<input type="hidden" name="vista" value="mes">{% endif %}
-      {% if busca %}<input type="hidden" name="q" value="{{ busca|e }}">{% endif %}
-    </form>{% endif %}
-    {% if entrou_itens and entrou != 'tudo' and ((fora_cont or {}).get('esperando') or (fora_cont or {}).get('festa30')) %}<span class="sep"></span>
-    <span class="rot" title="{{ voc.leads|capitalize }} que entraram em outro mês e pedem atenção agora">+ de outros meses</span>
-    <a class="pil fora{% if 'esperando' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('esperando', '#') }}" title="O {{ voc.cliente }} falou por último e ninguém respondeu">🟢 esperando resposta <b>{{ (fora_cont or {}).get('esperando', 0) }}</b></a>
-    {% if modo_evento %}<a class="pil fora{% if 'festa30' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('festa30', '#') }}" title="Data do evento nos próximos 30 dias">🎉 festa em 30 dias <b>{{ (fora_cont or {}).get('festa30', 0) }}</b></a>{% endif %}
-    {% endif %}
-    {# a legenda da temperatura: a FORMA da bolinha, não só a cor (parte 1) #}
-    <span class="kbleg" aria-hidden="true"><span><i class="tdot t-quente"></i>quente</span><span><i class="tdot t-morno"></i>morno</span><span><i class="tdot t-frio"></i>frio</span><span><i class="tdot t-sem"></i>sem</span></span>
-  </div>
-
-  {# O TRILHO DE MESES: mês do EVENTO, não o mês em que o lead escreveu. Clicou em
-     Jan 27, o quadro inteiro vira o funil de janeiro (todas as etapas). "Sem data"
-     é a fila de trabalho — quem ainda não disse quando é a festa. #}
-  {# O ACERVO DO LEITOR (migração 198): quem já chegou e ainda não foi lido. Some
-     quando não sobra ninguém — daí em diante o leitor pega tudo na chegada. #}
-  {% if por_ler %}
-  <div class="lerconv" id="lerconv">🔎 <span><b>{{ por_ler }}</b> conversa{{ '' if por_ler == 1 else 's' }} de {{ voc.lead }}{{ '' if por_ler == 1 else 's' }} sem data ainda não {{ 'foi lida' if por_ler == 1 else 'foram lidas' }}</span>
-    <button type="button" class="pbtn" id="lerconv-btn" onclick="kbLerConversas(this)">Ler as conversas</button></div>
-  {% endif %}
-  {#- A RÉGUA "FESTA EM" (25/09/2026): uma barra por mês, com a contagem em cima e o
-     mês embaixo, e o ano como divisa. Eram 19 pílulas numa faixa que rolava de lado.
-     Só em conta que vende data (`modo_evento`, §6): quem vende mensalidade não tem
-     festa, e nem a palavra chega na página. -#}
-  {% if trilho_itens and not vista_mes %}
-  <div class="regua" id="trilho"><span class="rot">Festa em</span>
-    {% for t in trilho_itens %}{% if t.ano %}<span class="ano">{{ t.ano }}</span>{% endif %}<a class="mes{% if t.on %} on{% endif %}{% if t.sem %} semdata{% endif %}{% if t.todos %} todos{% endif %}{% if not t.n and not t.on %} vazio{% endif %}" href="/painel/prospeccao?{% if filtro_vend %}vendedor={{ filtro_vend }}&amp;{% endif %}{% if t.chave %}mes={{ t.chave }}{% endif %}" title="{{ t.titulo or t.rotulo }} · {{ t.n }}"><b>{{ t.n }}</b><i style="height:{{ t.h or 1 }}px"></i>{{ t.rotulo }}</a>{% endfor %}
-  </div>
-  {% if filtro_mes %}<div class="trilho-faixa">{% if filtro_mes == 'sem' %}📅 <b>Sem data do evento</b> · quem ainda não disse quando é a festa{% else %}🎉 <b>{{ filtro_mes_rotulo }}</b> · só as festas desse mês, em todas as etapas{% endif %}<a href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">✕ limpar</a></div>{% endif %}
-  {% endif %}
-
-  {% if gerencia %}
-  <style>
-  .etcfg{border:1px solid var(--borda);border-radius:12px;background:var(--card);margin:.2rem 0 1rem}
-  .etcfg>summary{cursor:pointer;padding:.7rem .9rem;font-weight:600;font-size:.9rem;list-style:none;
-    display:flex;align-items:center;gap:.5rem;user-select:none}
-  .etcfg>summary::-webkit-details-marker{display:none}
-  .etcfg>summary::after{content:'▾';margin-left:auto;color:var(--txt-mut);transition:transform .18s}
-  .etcfg[open]>summary::after{transform:rotate(180deg)}
-  .etbody{padding:0 .9rem .9rem;border-top:1px solid var(--borda)}
-  .ethint{color:var(--txt-mut);font-size:.8rem;margin:.7rem 0 .8rem}
-  .etlist{display:flex;flex-direction:column;gap:.4rem}
-  .etrow{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
-  .etrow .lock,.etrow .grip{width:1.1rem;text-align:center;color:var(--txt-mut);flex-shrink:0}
-  .etin{flex:1;min-width:130px;padding:.4rem .55rem;border-radius:8px;border:1px solid #333;
-    background:var(--bg);color:var(--txt);font-family:inherit;font-size:.86rem}
-  .etin:focus{outline:none;border-color:var(--verde)}
-  .etn{font-size:.72rem;color:var(--txt-mut);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:52px}
-  .etsel{padding:.34rem .4rem;border-radius:7px;border:1px solid var(--borda);background:var(--bg);
-    color:var(--txt-mut);font-family:inherit;font-size:.74rem;max-width:150px}
-  .etb{border:1px solid var(--borda);background:var(--card-2);color:var(--txt);border-radius:7px;
-    width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
-    font-size:.85rem;line-height:1;flex-shrink:0}
-  .etb:hover:not(:disabled){border-color:var(--verde)}
-  .etb.del:hover:not(:disabled){border-color:var(--coral);color:var(--coral)}
-  .etb:disabled{opacity:.32;cursor:not-allowed}
-  .etadd{display:flex;gap:.4rem;margin-top:.8rem;flex-wrap:wrap}
-  .etadd .etin{min-width:160px}
-  </style>
-  {# Desde 25/09/2026 o editor abre como GAVETA à direita, pelo "⚙ Etapas" do título
-     (etAbre). Continua um <details>: o `open` é o que o freio do reload de 60 s
-     confere, e sem JS o sumário volta a aparecer e abre no lugar, como antes. #}
-  <details class="etcfg" id="etcfg">
-    <summary>⚙️ Editar etapas do funil</summary>
-    <div class="etbody kbgav" role="dialog" aria-label="Etapas do funil">
-      <div class="kbgav-hd"><b>⚙ Etapas do funil</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
-      <p class="ethint">Renomeie no campo e clique ✓. Reordene com ◀ ▶. O ✕ remove — só quando a etapa
-        estiver <b>sem {{ voc.leads }}</b>. Pra esvaziar, escolha uma etapa em <b>fundir em…</b> e clique ⇥: os {{ voc.leads }}
-        vão pra lá com registro no histórico, e a etapa some do quadro sem ser apagada.
-        🔒 = etapa fixa (entrada/resultado): pode renomear, mas não remover.</p>
-      <div class="etlist">
-        {% for e in etapas %}
-        <form method="post" class="etrow">
-          {% if e.fixa %}<span class="lock" title="Etapa fixa (entrada/resultado)">🔒</span>{% else %}<span class="grip">⠿</span>{% endif %}
-          <input class="etin" name="rotulo" value="{{ e.rotulo }}" maxlength="40" aria-label="Nome da etapa">
-          <span class="etn">{{ e.n }} {{ voc.lead }}{{ '' if e.n == 1 else 's' }}</span>
-          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/renomear" title="Salvar nome">✓</button>
-          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/mover" name="dir" value="esq" {% if e.fixa %}disabled{% endif %} title="Mover pra esquerda">◀</button>
-          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/mover" name="dir" value="dir" {% if e.fixa %}disabled{% endif %} title="Mover pra direita">▶</button>
-          <button class="etb del" formaction="/painel/prospeccao/etapas/{{ e.id }}/remover"
-                  {% if e.fixa or e.n > 0 %}disabled{% endif %}
-                  title="{% if e.fixa %}Etapa fixa — não remove{% elif e.n > 0 %}Mova os {{ voc.leads }} primeiro{% else %}Remover etapa{% endif %}"
-                  onclick="return confirm('Remover a etapa “{{ e.rotulo }}”?')">✕</button>
-          {% if not e.fixa and etapas|length > 1 %}
-          <!-- FUNDIR (12/09/2026). Fica colado no ✕ de propósito: é o ✕ que diz
-               "mova os leads primeiro", e até hoje não existia o "mova". -->
-          <select class="etsel" name="para" aria-label="Fundir esta etapa em">
-            <option value="">fundir em…</option>
-            {% for d in etapas if d.chave != e.chave %}
-            <option value="{{ d.chave }}">{{ d.rotulo }}</option>
-            {% endfor %}
-          </select>
-          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/fundir"
-                  title="Levar os {{ voc.leads }} desta etapa para a escolhida"
-                  onclick="return etFundir(this,'{{ e.rotulo|e }}',{{ e.n }})">⇥</button>
-          {% endif %}
-        </form>
-        {% endfor %}
-      </div>
-      <form method="post" action="/painel/prospeccao/etapas/nova" class="etadd">
-        <input class="etin" name="rotulo" placeholder="Nova etapa (ex.: Reunião marcada)" maxlength="40">
-        <button class="pbtn">＋ Adicionar etapa</button>
-      </form>
-    </div>
-  </details>
-  {% endif %}
-
-  {#- AS ABAS DE ETAPA (só no celular): uma coluna por vez. Desde 25/09/2026 ficam
-     presas no topo ao rolar, e cada uma diz em verde quantos clientes esperam
-     resposta ali (●7) — o vendedor escolhe a etapa pelo que pede ação. -#}
-  <div class="kbtabs" id="kbtabs">
-    {% if rsg_col or rsg_mostra %}<button type="button" class="kbtab" data-tab="_resgate" onclick="kbTab('_resgate')"><span class="r">♻️ Resgate</span><span class="n"><span class="c">{{ rsg_col|length + (rsg_fila|length) }}</span></span></button>{% endif %}
-    {% for s, rot in (vista_cols or colunas_tpl) %}{% set _tgs = (grupos or {}).get(s, []) %}{% set _tesp = (_tgs | selectattr('tipo', 'equalto', 'esperando') | sum(attribute='n')) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')"><span class="r">{{ rot }}</span><span class="n"><span class="c">{{ _tgs | sum(attribute='n') if vista_mes else colunas[s]|length }}</span>{% if _tesp %}<i class="e" title="{{ _tesp }} esperando resposta">●{{ _tesp }}</i>{% endif %}</span></button>{% endfor %}
-  </div>
-
-  {# O CARD, uma vez só: a mesma marcação serve pros grupos por mês e pra dobra dos
-     parados. Macro do próprio template — enxerga o contexto (temp_cor, vendedores…). #}
-  {% macro kbcard(c) -%}
-        {#- O CARTÃO EM QUATRO LINHAS (24/09/2026, docs/mockups/prospeccao_layout.html).
-           Era uma pilha de até 13 blocos (250–430 px): cabiam 2 ou 3 por coluna, e a
-           Prime tinha 227 no quadro de setembro. Agora são quatro linhas fixas —
-           quem é · o que quer e quando · o que foi dito por último · o próximo passo
-           — e o resto mora no ⋯ (um menu só pra página inteira, montado pelo JS a
-           partir dos data-* deste botão).
-             * L1 (.kbl1): temperatura (a FORMA da bolinha, não só a cor), nome,
-               selo de outro mês, avatar do responsável e o ⋯;
-             * L2 (.kbl2): o evento e de onde veio (lido/✓/IA), ou segmento · cidade;
-             * L3 (.kbmsg): a última mensagem — a linha inteira abre a conversa;
-             * L4 (.kbl4): o próximo passo em texto, a campanha, os canais e o valor.
-           A ORDEM do que os testes recortam não mudou: o nome vem antes de .camp,
-           .kbch e .kbmsg, que vêm antes de <div class="ft">. Botão novo usa
-           data-lead, NUNCA data-id (é por data-id que os testes acham o card). -#}
-        <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if c.esperando %} data-esp="1"{% endif %}{% if c.tel_q %} data-tel="{{ c.tel_q }}"{% endif %}{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
-             tabindex="0" onkeydown="if(event.key==='Enter'&&event.target===this)kbAbrirLead(event,{{ c.id }},this)"
-             onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
-          <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav kbvn{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="Responsável: {{ (c.vendedor or 'ninguém')|e }} · clique pra trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor_curto or c.vendedor or ('livre' if not c.vendedor_id else 'sem nome'))|e }}</button>{% elif gerencia and c.vendedor %}<span class="kbav kbvn" title="Responsável: {{ c.vendedor|e }}">{{ (c.vendedor_curto or c.vendedor)|e }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
-          {#- A TRILHA NO CARD (mockup das três trilhas): de onde veio o lead do
-             resgate, a etapa em que ele está (a coluna Resgate é uma visão) e o
-             próximo passo; o selo da IA do número; e o "veio do Resgate" no card que
-             já saiu da coluna. -#}
-          {% set _t = c.tri or {} %}
-          {% if _t.andamento %}<div class="kbtri rsg"><span class="de">{{ _t.origem_txt }}{% if _t.era %} · era de {{ _t.era|e }}{% endif %}{% if _t.parado_dias %} · {{ _t.parado_dias }} dias parado{% endif %}</span><span class="etp">etapa: {{ c.etapa_rot }}</span>{% if _t.passo %}<span class="ps">{{ _t.passo }}</span>{% endif %}{% if _t.resumo %}<span class="rs">✨ {{ _t.resumo|e }}</span>{% endif %}</div>
-          {% elif _t.trilha == 'ia' %}<div class="kbtri ia">🤖 IA do número{% if _t.gente %} · <b>gente assumiu</b>{% endif %}</div>
-          {% elif _t.veio %}<div class="kbtri rsg veio">♻️ veio do Resgate{% if _t.era %} · era de {{ _t.era|e }}{% endif %}</div>{% endif %}
-          <div class="kbl2">
-          {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
-          {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
-             é o que diz qual pacote cabe (semana ou fim de semana) e em que mês a
-             venda cai. Sem data, numa conta que vende data, o card diz isso na cara
-             e oferece o "perguntar" (abre a conversa com a pergunta pronta). Data que
-             já passou com etapa aberta fica coral: festa que aconteceu e ninguém fechou. #}
-          {% if c.evento_em or c.evento_tipo or c.evento_convidados %}<div class="kbev{% if c.passou %} passou{% endif %}" title="{% if c.passou %}A data do evento já passou{% else %}Evento{% endif %}">{{ c.ev_ic }} {% if c.evento_tipo %}<b>{{ c.evento_tipo }}</b>{% endif %}{% if c.evento_em %}{% if c.evento_tipo %} · {% endif %}<span class="d">{{ c.ev_data }}</span>{% endif %}{% if c.evento_convidados %} · {{ c.evento_convidados }} conv.{% endif %}</div>
-          {% elif c.evento_pista %}<div class="kbev pista">📅 {{ c.evento_pista }}<button type="button" class="kbperg" title="Confirmar ou corrigir no balão" onclick="event.stopPropagation();kbAbrirLead(event,{{ c.id }},this.closest('.kbcard'))">confirmar</button></div>
-          {% elif modo_evento %}<div class="kbev sem">📅 sem data{% if c.conv_whatsapp %}<button type="button" class="kbperg" title="Perguntar a data do evento" onclick="kbPerguntarData(event,{{ c.conv_whatsapp }},this)">perguntar</button>{% elif c.zap_pergunta %}<a class="kbperg" href="{{ c.zap_pergunta }}" target="_blank" rel="noopener" title="Abre o WhatsApp com a pergunta pronta" onclick="event.stopPropagation()">perguntar</a>{% endif %}</div>{% endif %}
-          {# DE ONDE VEIO o que está no card (migração 198): lido da conversa, pelo
-             agente, ou confirmado pelo vendedor. Na tela sai curto ("lido", "✓",
-             "IA") por CSS; o texto inteiro fica aqui (e no title o trecho lido). #}
-          {% if c.evento_origem in ('conversa','agente','confirmado') and (c.evento_em or c.evento_tipo or c.evento_convidados) %}<div class="kbsrc">{% if c.evento_origem == 'conversa' %}<span class="tag lido" title="{{ c.evento_trecho or '' }}">💬 lido da conversa</span>{% elif c.evento_origem == 'agente' %}<span class="tag ia">🤖 lido pelo agente</span>{% else %}<span class="tag ok">✓ confirmado</span>{% endif %}</div>{% endif %}
-          {% if c.evento_pista and c.evento_em %}<div class="kbev pista">💬 {{ c.evento_pista }}</div>{% elif c.evento_pista and (c.evento_tipo or c.evento_convidados) %}<div class="kbev pista">📅 {{ c.evento_pista }}<button type="button" class="kbperg" title="Confirmar ou corrigir no balão" onclick="event.stopPropagation();kbAbrirLead(event,{{ c.id }},this.closest('.kbcard'))">confirmar</button></div>{% endif %}
-          </div>
-          {# na vista por mês a coluna já é a data: a ETAPA vem pro card como selo,
-             com o nº da proposta e a próxima visita quando existem #}
-          {% if vista_mes %}<div class="kbetapas"><span class="kbetapa{% if c.etapa_cls %} {{ c.etapa_cls }}{% endif %}">{% if c.proposta_num and c.status == 'proposta' %}Proposta nº {{ c.proposta_num }}{% else %}{{ c.etapa_rot }}{% endif %}</span>{% if c.visita_txt %}<span class="kbetapa vis">{{ c.visita_txt }}</span>{% endif %}</div>{% endif %}
-          {# A ÚLTIMA MENSAGEM (L3). A bolinha verde só acende no que ainda não foi
-             visto e veio do cliente — o que o próprio vendedor mandou nunca é
-             novidade pra ele. Com conversa, a LINHA INTEIRA abre o balão: é a ação
-             nº 1 de quem passa o dia no funil, no maior alvo do cartão. #}
-          {% if c.ult %}<div class="kbmsg{% if c.ult.nova %} nova{% endif %}{% if c.conv_ult %} abre{% endif %}"{% if c.conv_ult %} onclick="kbAbrirChat(event,{{ c.conv_ult }},'{{ c.canal_ult }}',this)" title="Abrir a conversa"{% endif %}>{% if c.ult.nova %}<span class="bolha" aria-hidden="true"></span>{% elif c.ult.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}<span class="txt">{{ c.ult.texto }}</span><span class="qdo">{{ c.ult.quando }}</span></div>{% endif %}
-          <div class="kbl4">
-          {# O PRÓXIMO PASSO (L4), EM TEXTO. Era uma pílula colorida em todo card
-             aberto — 118 de 208 em "🚨 Crítico" na Prime, e quando tudo grita nada
-             se destaca. Só aparece em conta que já tem a tela de Follow-up e com o
-             modo fora de 'off' (ver `fu_por_lead` no handler). "Follow-up hoje"
-             quer dizer "venceu há menos de 24h", e é isso que o card passa a dizer. #}
-          {% if c.fu %}<div class="kbfu {{ c.fu.estado }}" title="{{ c.fu.acao }}">{% if c.fu.estado == 'hoje' and c.fu.atraso %}Venceu há {{ c.fu.atraso }}{% else %}{{ c.fu.rotulo }}{% if c.fu.atraso %} · {{ c.fu.atraso }}{% endif %}{% endif %}</div>{% elif c.proximo and not vista_mes %}<div class="kbprox{% if c.proximo_venceu %} venceu{% endif %}" title="Próximo contato">Próx. contato {{ c.proximo.strftime('%d/%m') }}</div>{% endif %}
-          {% if c.campanha %}<div class="camp">📣 {{ c.campanha }}</div>{% endif %}
-          {# O CANAL ACENDE PELA CONVERSA (25/09/2026, parte 3): na ZAQ, 33 leads
-             têm conversa de WhatsApp e o campo "whatsapp" do cadastro vazio — o card
-             não tinha o 💬 e a conversa só se achava pela Comunicação. Tem conversa,
-             tem botão; só o campo, o selo apagado de sempre. #}
-          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido or c.conv_whatsapp or c.conv_email or c.conv_instagram %}<div class="kbch">{% if c.tem_whatsapp or c.conv_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb{% if c.chip_zap %} kbb-chip{% if c.chip_zap_outro %} outro{% endif %}{% endif %}" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="{% if c.chip_zap %}Abrir a conversa no {{ c.chip_zap_nome|e }}{% else %}Abrir a conversa de WhatsApp{% endif %}">💬{% if c.chip_zap %}<span class="kbchip">{{ c.chip_zap|e }}</span>{% endif %}</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email or c.conv_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram or c.conv_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram or c.conv_whatsapp or c.conv_email or c.conv_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
-          <div class="ft">{% if c.valor %}<span class="kbval">{{ brl(c.valor) }}</span>{% endif %}</div></div>
-          {# mesmo telefone, outro chip: são dois leads de propósito (cada chip responde
-             pelo seu número), mas quem olha o funil precisa saber — senão dois
-             vendedores negociam com a mesma pessoa, cada um com um preço. #}
-          {% if c.gemeo %}<div class="kbgem" onclick="event.stopPropagation()">⚠️ {{ c.gemeo }}{% if c.gemeo_lead %} <a href="/painel/prospeccao/{{ c.gemeo_lead }}">Abrir →</a>{% endif %}</div>{% endif %}
-        </div>
-  {%- endmacro %}
-
-  {# Na vista por mês a coluna é um MÊS: não se arrasta card entre meses (a data
-     da festa não muda de arrastar) — o drop fica desligado e a contagem é a soma
-     dos grupos. Mudar a etapa continua pelo balão do lead. #}
-  <div class="kbrow{% if vista_mes %} vmes{% endif %}" id="kbrow">
-    {#- A COLUNA RESGATE (seção 2 do mockup): quem está com o resgate em andamento,
-       de onde veio e em que etapa está. Não recebe card arrastado — é uma visão, a
-       etapa do lead não muda. -#}
-    {% if rsg_col or rsg_mostra %}{% set _rb = (tri_barra or {}).get('rsg') or {} %}
-    <div class="kbcol kbcol-rsg" data-status="_resgate">
-      <h4 title="Resgate da IA"><span>♻️ Resgate{% if _rb.modo == 'ensaio' %} <i class="kbrsg-modo">Ensaio</i>{% endif %}</span><span class="kbcnt">{% if rsg_col %}{{ rsg_col|length }}{% if _rb.fila %} <i>+{{ _rb.fila }} na fila</i>{% endif %}{% else %}{{ _rb.fila or 0 }} <i>na fila</i>{% endif %}</span></h4>
-      <div class="kbcolsub"><span class="v">{% if rsg_col %}em andamento · {% endif %}a etapa não muda</span></div>
-      <div class="kbdrop">
-        {% if rsg_col %}<div class="kbgrp">Em andamento <b>{{ rsg_col|length }}</b><span class="ln"></span></div>{% endif %}
-        {% for c in rsg_col %}{{ kbcard(c) }}{% endfor %}
-        {% if rsg_fila %}<div class="kbgrp">{% if _rb.modo == 'ensaio' %}Os próximos que a IA chamaria{% else %}Na fila · próximos{% endif %} <b>{{ rsg_fila|length }}</b><span class="ln"></span></div>
-        {% for f in rsg_fila %}<a class="kbrsg-fila" href="/painel/prospeccao/{{ f.id }}" title="Abrir a ficha">
-          <span class="nm">{{ f.quem|e }}</span>
-          <span class="de">{{ f.origem_txt }}{% if f.vendedor %} · de {{ f.vendedor|e }}{% endif %} · {{ f.parado_dias }} dias parado</span>
-          <span class="etp">etapa: {{ f.etapa_rot }}{% if f.evento_em %} · festa {{ f.evento_em.strftime('%d/%m') }}{% endif %}</span>
-          <span class="ps">{{ f.faixa_txt }}{% if f.uma_vez %} · uma mensagem só{% endif %} · {{ 'prévia no Ensaio' if _rb.modo == 'ensaio' else 'sai quando chegar a vez' }}</span>
-        </a>{% endfor %}
-        {% if _rb.fila and _rb.fila > rsg_fila|length %}<div class="kbempty">e mais {{ _rb.fila - rsg_fila|length }} na fila</div>{% endif %}
-        {% elif not rsg_col %}<div class="kbempty">ninguém na fila hoje</div>{% endif %}
-      </div>
-    </div>
-    {% endif %}
-    {% for s, rot in (vista_cols or colunas_tpl) %}
-    {#- A COLUNA (24/09/2026): largura de verdade (232–300 px, calculada pelo
-       kbLayout), altura presa à tela e rolagem própria — o cabeçalho fica parado.
-       Coluna VAZIA vira um trilho de 44 px (data-vazia; o clique abre, e arrastar
-       um card por cima também). A linha de baixo do cabeçalho diz quantos esperam
-       resposta e quantos estão parados, com atalho pra dobra. -#}
-    {%- set _gs = (grupos or {}).get(s, []) -%}
-    {%- set _ncol = (_gs | sum(attribute='n')) if vista_mes else colunas[s]|length -%}
-    {%- set _esp = (_gs | selectattr('tipo', 'equalto', 'esperando') | sum(attribute='n')) -%}
-    {%- set _par = (_gs | selectattr('tipo', 'equalto', 'parado') | sum(attribute='n')) %}
-    <div class="kbcol" data-status="{{ s }}"{% if not _ncol %} data-vazia="1"{% endif %}{% if not vista_mes %} ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')"{% endif %}>
-      <h4 title="{{ rot }}"><span>{{ rot }}</span><span class="kbcnt">{% if vista_mes %}{{ (grupos or {}).get(s, []) | sum(attribute='n') }}{% else %}{{ colunas[s]|length }}{% if filtrado %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}{% endif %}</span></h4>
-      <div class="kbcolsub">{% if _esp %}<span class="v">{{ _esp }} esperando</span>{% endif %}{% if _esp and _par %} · {% endif %}{% if _par %}<button type="button" class="kbpar" onclick="kbParados(this)">{{ _par }} parado{{ 's' if _par != 1 }} ▾</button>{% endif %}</div>
-      <div class="kbdrop">
-        {# A coluna separada em grupos (evento_lead.agrupar): mês do evento, depois
-           sem data por mês de entrada, e no pé a dobra dos parados há 15+ dias —
-           fechada, pra coluna encurtar sem apagar ninguém. Um card arrastado pra cá
-           entra no fim do .kbdrop e se acomoda no grupo certo no próximo carregar. #}
-        {% for g in (grupos or {}).get(s, []) %}
-        {% if g.tipo == 'parado' %}
-        <details class="kbdobra"><summary><span class="kbgrp alerta">{{ g.rotulo }} <b>{{ g.n }}</b></span></summary>
-          {% for c in g.cards %}{{ kbcard(c) }}{% endfor %}
-        </details>
-        {% else %}
-        {% if g.rotulo %}<div class="kbgrp{% if g.tipo == 'esperando' %} verde{% endif %}">{{ g.rotulo }} <b>{{ g.n }}</b><span class="ln"></span></div>{% endif %}
-        {% for c in g.cards %}{{ kbcard(c) }}{% endfor %}
-        {% endif %}
-        {% else %}<div class="kbempty">vazio</div>{% endfor %}
-      </div>
-    </div>
-    {% endfor %}
-    {# o mês quase vazio: o espaço livre diz o que houve e leva pro lote (25/09) #}
-    {% if mes_vazio %}<div class="kbnota" id="kbnota"><b>{{ mes_vazio.rotulo }} tem {{ mes_vazio.n }} {{ voc.lead }}{{ '' if mes_vazio.n == 1 else 's' }}.</b>
-      O último lote entrou em {{ mes_vazio.lote_rotulo|lower }} ({{ mes_vazio.lote_n }}).<br>
-      <a href="{{ mes_vazio.lote_url }}">Ver {{ mes_vazio.lote_rotulo|lower }}</a> · <a href="{{ mes_vazio.tudo_url }}">Ver tudo ({{ mes_vazio.tudo_n }})</a></div>{% endif %}
-  </div>
-  {#- OS POPOVERS DA PÁGINA, um de cada, fora do quadro: o menu ⋯ (montado pelo
-     JS com o que o card tem) e a lista de responsáveis (só pra quem atribui).
-     Antes era um <select> com a lista inteira DENTRO DE CADA CARD — ~1.100
-     <option> na página da Prime, e 48 px por card. -#}
-  <div id="kbmenu" class="kbpop" role="menu" hidden></div>
-  {% if pode_atribuir %}<div id="kbvpop" class="kbpop" role="menu" hidden>
-    <button type="button" class="kbpi" data-v="" onclick="kbVendEscolhe(this)">— sem responsável —</button>
-    {% for v in vendedores %}<button type="button" class="kbpi" data-v="{{ v.id }}" data-nome="{{ (v.nome or '')|e }}" data-curto="{{ (v.curto or v.nome or 'sem nome')|e }}" onclick="kbVendEscolhe(this)"><span class="kbav">{{ (v.nome or '?')[:2]|upper }}</span>{{ (v.nome or 'sem nome')|e }}</button>{% endfor %}
-  </div>{% endif %}
-</div>
-
+{#- O VISUAL DO QUADRO VEM ANTES DO QUADRO (27/09/2026, docs/mockups/funil_atualizacao.html).
+   Ele morava no FIM da página, depois dos cards: enquanto a página chegava (502
+   cards na Prime), o navegador desenhava tudo sem estilo — links roxos, botões da
+   largura da tela, a busca solta — e só no fim se encaixava, com a página pulando.
+   Era o print do dono, a cada minuto. -#}
 <style>
+/* ---- o funil sem piscar (27/09/2026, docs/mockups/funil_atualizacao.html) ---- */
+.kbtt-l{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.kbsync{display:inline-flex;align-items:center;gap:.35rem;font-size:.7rem;color:var(--txt-mut);border:1px solid var(--borda);border-radius:999px;padding:.12rem .55rem;background:none;cursor:pointer;white-space:nowrap;align-self:center}
+.kbsync i{width:7px;height:7px;border-radius:50%;background:var(--verde);flex:none}
+.kbsync.vai i{background:#e0a32e;animation:kbpulsa 1s infinite}
+.kbsync.pausa i{background:#5e6f66}
+.kbsync.erro i{background:#e0574f}
+.kbsync.erro span{color:#f0a9a2}
+@keyframes kbpulsa{50%{opacity:.25}}
+.kbfio{height:3px;border-radius:3px;background:#1e2a23;overflow:hidden;position:relative;margin-top:.5rem}
+.kbfio[hidden]{display:block;visibility:hidden}
+.kbfio i{position:absolute;top:0;bottom:0;left:-35%;width:35%;background:linear-gradient(90deg,transparent,var(--verde),transparent);animation:kbcorre 1.1s linear infinite}
+@keyframes kbcorre{from{left:-35%}to{left:100%}}
+.kbrow .kbcard.kbnovo{box-shadow:0 0 0 1px var(--verde),0 0 12px rgba(37,211,102,.25);transition:box-shadow .8s}
+@media (prefers-reduced-motion:reduce){.kbfio i,.kbsync.vai i{animation:none}}
+
 /* ---- as três trilhas (27/09/2026, docs/mockups/funil_tres_trilhas.html) ---- */
 .kbtri-bar{display:grid;grid-template-columns:minmax(110px,.6fr) repeat(3,minmax(0,1fr));gap:8px;margin-top:.7rem}
 .kbtr{border:1px solid var(--borda);border-radius:11px;background:var(--bg);padding:.5rem .65rem;display:flex;flex-direction:column;gap:.15rem;font-size:.72rem;color:var(--txt-mut);text-decoration:none;min-width:0}
@@ -12968,6 +12496,503 @@ button.kbav:hover{box-shadow:0 0 0 1.5px var(--verde)}
 }
 {{ janela_css }}
 </style>
+<div class="pw funil">
+""" + _navbar('funil') + """
+  {#- O TÍTULO NUMA LINHA SÓ (25/09/2026, docs/mockups/prospeccao_layout.html):
+     o nome, os números e as ações. Antes eram três faixas — o título, o "🎯 Captar
+     Lead" virado barra verde de 48 px e o "Editar etapas" entre os filtros e o
+     quadro —, e o primeiro card começava ~500 px abaixo do topo no computador.
+     Captar e Etapas abrem numa GAVETA à direita, por cima do quadro, sem empurrar
+     nada. No celular os botões viram ícones (🔍 ⚙ +). -#}
+  {#- O CABEÇALHO MAIS LEVE (25/09/2026, docs/mockups/funil_cabecalho.html, aprovado
+     pelo dono): o nome da EMPRESA e os números descem pra uma linha própria embaixo
+     do título — na linha do título eles cortavam em "490 lea…" —, e o aviso do
+     modelo do ramo deixa de ser uma faixa de duas linhas e vira um selo nela. O mês
+     não se repete aqui: a pílula de "Entraram em" já diz. -#}
+  <script>document.documentElement.classList.add('kbjs')</script>
+  <div class="kbtit{% if busca %} buscando{% endif %}" id="kbtit">
+    <div class="kbtt">
+      {#- O SELO DA ATUALIZAÇÃO (docs/mockups/funil_atualizacao.html), na linha do
+          título: em que pé está a troca automática; um toque atualiza na hora. O
+          texto nasce no JS. -#}
+      <div class="kbtt-l"><h2 class="tt">Funil</h2><button type="button" class="kbsync" id="kbsync" onclick="kbAtualiza(true)" title="Atualizar agora"><i aria-hidden="true"></i><span>atualizado</span></button></div>
+      {%- set _emp = empresa_nome or (conta[2] if conta else '') %}
+      <div class="kbnum">{% if _emp %}<span class="kbconta">{{ _emp|e }}</span><span class="kbsep">·</span>{% endif %}<span class="kbq"><b>{{ n_quadro }}</b> no quadro</span><span class="kbtot"><span class="kbsep">·</span><span id="kb-total-n">{{ total_alvos }}</span> no total</span>{% if total_valor %}<span class="kbtot"><span class="kbsep">·</span>pipeline {{ brl(total_valor) }}</span>{% endif %}
+        {#- A FAIXA DO MODELO DO RAMO (14/09/2026), desde 25/09 um selo nesta linha.
+            Continua só pra dono/gestor, e só quando a diferença NÃO é escolha do
+            dono — `funil_modelo.desencontro` não conta rótulo que ele mesmo
+            escreveu. Some sozinha quando o funil casa com o ramo.
+
+            POR QUE ELE MORA AQUI, no quadro, e não na Régua: o bloco que resolve isso
+            existe desde 11/09 e mora lá dentro. Em 14/09, de 8 contas com funil, UMA
+            tinha as colunas do próprio ramo — a Doce Mell, citada pelo nome no
+            docstring do `funil_modelo` como o caso que ele veio resolver, seguia nas
+            seis genéricas. A ferramenta funcionava; ninguém a encontrava. Continua à
+            vista em toda visita, só sem a faixa inteira todo dia. -#}
+        {% if ramo_fora %}<a class="kbramo" href="/painel/prospeccao/regua#modelo" title="{{ ramo_fora }} coluna{{ '' if ramo_fora == 1 else 's' }} diferente{{ '' if ramo_fora == 1 else 's' }} do modelo de {{ ramo_rotulo }} · nada muda sem você marcar"><span aria-hidden="true">⚠</span><span class="kbramo-l">{{ ramo_fora }} coluna{{ '' if ramo_fora == 1 else 's' }} fora do modelo de {{ ramo_rotulo }} · ver →</span><span class="kbramo-c">modelo</span></a>{% endif %}
+        {%- if n_contextos and n_contextos > 1 %}<span class="kbsep">·</span><a href="/trocar" class="kbtroca">trocar empresa ⇄</a>{% endif %}</div>
+    </div>
+    <div class="kbacoes">
+      {# A BUSCA: digitar filtra o que está na tela; Enter procura em todos os meses
+         (a rota recebe `q`). "/" em qualquer lugar da página põe o foco aqui. #}
+      <label class="kbbusca" title="Buscar por nome ou telefone — Enter procura em todos os meses">
+        <span aria-hidden="true">🔍</span><input id="kbbusca" type="search" autocomplete="off" enterkeyhint="search"
+          placeholder="Buscar nome ou telefone" aria-label="Buscar {{ voc.lead }} por nome ou telefone" value="{{ (busca or '')|e }}"
+          oninput="kbBuscaFiltra()" onkeydown="kbBuscaTecla(event)"><kbd>/</kbd></label>
+      <button type="button" class="kbbt kbico-busca" onclick="kbBuscaAbre()" aria-label="Buscar">🔍</button>
+      {% if modo_evento %}<div class="vseg" title="Colunas por etapa do funil, ou por mês da festa">
+        <a class="{% if not vista_mes %}on{% endif %}" href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">Por etapa</a><a class="{% if vista_mes %}on{% endif %}" href="/painel/prospeccao?vista=mes{% if filtro_vend %}&amp;vendedor={{ filtro_vend }}{% endif %}">Por mês do evento</a>
+      </div>{% endif %}
+      {% if gerencia %}<button type="button" class="kbbt" onclick="etAbre()" title="Editar as etapas do funil" aria-label="Etapas">⚙<span class="tx"> Etapas</span></button>{% endif %}
+      {# Captar Lead nunca navegou pra lugar nenhum: abre o painel de captação — desde
+         25/09/2026 numa gaveta à direita, sem empurrar o quadro pra baixo. #}
+      <button type="button" class="cap-btn" onclick="capToggle()" aria-label="Captar {{ voc.lead }}">+<span class="tx"> Captar {{ voc.lead }}</span></button>
+    </div>
+  </div>
+  {% if busca %}<div class="kbbusca-faixa">🔍 <span>Buscando <b>“{{ busca|e }}”</b> em todos os meses · {{ n_quadro }} encontrado{{ '' if n_quadro == 1 else 's' }}</span><a href="{{ busca_limpa|e }}">✕ limpar</a></div>{% endif %}
+  <div class="kbbusca-n" id="kbbusca-n" hidden></div>
+
+  {#- OS CRÍTICOS POR VENDEDOR (25/09/2026): o dono cobra a equipe sem contar card
+     na mão. Mesmo estado do selo "Crítico" do card e da tela de Follow-up — por
+     isso só existe em conta que tem aquela tela. Clicar no nome filtra o quadro. -#}
+  {#- Desde 25/09/2026 cada vendedor é um chip com o nome escrito normal
+     ("Jacqueline", não "JACQUELINE" — o cadastro guarda em maiúscula). -#}
+  <div id="kbcritw">{% if criticos %}<div class="kbcrit" id="kbcrit"><span class="rot"><span aria-hidden="true">🚨</span> Críticos</span>
+    {% for v in criticos %}<a href="{{ v.url|e }}" class="kbcc{% if v.on %} on{% endif %}" title="{% if v.on %}Ver todos os vendedores{% else %}Ver só os cards de {{ v.nome|e }}{% endif %}"><b>{{ v.n }}</b> {{ v.nome|e }}</a>{% endfor %}
+    <a class="lk" href="/painel/follow-up">ver fila →</a></div>{% endif %}</div>
+
+  {#- AS TRÊS TRILHAS (docs/mockups/funil_tres_trilhas.html, aprovado em 27/09/2026):
+     vendedores, a IA do número e o resgate, cada uma com a sua regra. Só pra dono e
+     gestor (decisão 2), e só em conta com IA ou resgate — sem os dois, a barra não
+     existe. Tocar numa trilha filtra o quadro; tocar de novo solta. -#}
+  <div id="kbtri">{% if tri_barra %}{% set tb = tri_barra %}
+  <nav class="kbtri-bar" aria-label="Trilhas do funil">
+    <a class="kbtr todas{% if not filtro_tri %} on{% endif %}" href="{{ tri_urls.todas|e }}"{% if not filtro_tri %} aria-current="true"{% endif %}>
+      <span class="t">Todas</span><span class="n">{{ tb.todas }}</span><span class="l">abertos no quadro</span></a>
+    <a class="kbtr vend{% if filtro_tri == 'vend' %} on{% endif %}" href="{{ tri_urls.vend|e }}">
+      <span class="t"><i class="d"></i>Vendedores</span><span class="n">{{ tb.abertos.vend }} <small>abertos</small></span>
+      {% if tb.vend.esteira is not none %}<span class="l">na esteira <b>{{ tb.vend.esteira }}</b> · tratados hoje <b>{{ tb.vend.tratados }}</b></span>{% endif %}
+      <span class="rg">A esteira cobra o vendedor{% if tb.rsg.modo != 'off' %}; 7 dias sem mensagem, vai pro Resgate{% endif %}.</span></a>
+    <a class="kbtr ia{% if filtro_tri == 'ia' %} on{% endif %}" href="{{ tri_urls.ia|e }}">
+      <span class="t"><i class="d"></i>IA do número</span><span class="n">{{ tb.abertos.ia }} <small>abertos{% if tb.ia.nome %} · {{ tb.ia.nome|e }}{% endif %}</small></span>
+      <span class="l">conversando <b>{{ tb.ia.conversando }}</b> · sumiu <b>{{ tb.ia.sumido }}</b>{% if tb.ia.gente %} · gente assumiu <b>{{ tb.ia.gente }}</b>{% endif %}</span>
+      <span class="rg">A IA responde{% if tb.ia.insiste %} e insiste no 3º e 7º dia; perdido no 10º{% else %} · a insistência está desligada{% endif %}.</span></a>
+    <a class="kbtr rsg{% if filtro_tri == 'rsg' %} on{% endif %}" href="{{ tri_urls.rsg|e }}">
+      <span class="t"><i class="d"></i>Resgate da IA{% if tb.rsg.modo != 'off' %} <span class="modo">{{ 'pausado' if tb.rsg.pausado else ('Ensaio' if tb.rsg.modo == 'ensaio' else 'Ligado') }}</span>{% endif %}</span>
+      <span class="n">{{ tb.abertos.rsg }} <small>com a IA{% if tb.rsg.fila is not none %} · {{ tb.rsg.fila }} na fila{% endif %}</small></span>
+      <span class="l">em andamento <b>{{ tb.rsg.andamento }}</b> · hoje <b>{{ tb.rsg.hoje }} de {{ tb.rsg.teto }}</b> · responderam <b>{{ tb.rsg.responderam }}</b></span>
+      <span class="rg">{% if tb.rsg.modo == 'off' %}Desligado · ligue em Comunicação › Agente{% else %}7 dias sem mensagem (14 com {{ 'visita' if modo_evento else 'reunião' }} ou orçamento){% endif %}.</span></a>
+  </nav>
+  {% if filtro_tri and tri_det and tri_det.linhas %}<div class="kbtri-det {{ filtro_tri }}"><span class="rot">{{ tri_det.rotulo }}</span>
+    {% set _mx = (tri_det.linhas | map(attribute='n') | max) or 1 %}
+    {% for l in tri_det.linhas %}<div class="er"><span>{{ l.nome|e }}</span><span class="bar"><i style="width:{{ (100 * l.n / _mx)|round|int }}%"></i></span><span class="q">{{ l.n }}</span></div>{% endfor %}
+  </div>{% endif %}
+  {% endif %}</div>
+
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <!-- painel de captação: gaveta à direita, por cima do quadro (desde 25/09/2026) -->
+  <div class="kbgav-fundo" id="kbgav-fundo" hidden onclick="kbGavFecha()"></div>
+  <div id="captar" class="fsec kbgav" style="display:none" role="dialog" aria-modal="true" aria-label="Captar {{ voc.lead }}">
+    <div class="kbgav-hd"><b>🎯 Captar {{ voc.lead }}</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
+    <div class="cabas">
+      <button type="button" class="caba on" data-tab="manual" onclick="capTab('manual')">✏️ Manual</button>
+      <button type="button" class="caba" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
+      <button type="button" class="caba" data-tab="google" onclick="capTab('google')">📍 Google Maps</button>
+    </div>
+
+    <div class="captab" data-tab="manual">
+      <form id="cap-manual" data-tipo-form action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
+        <input type="hidden" name="voltar" value="/painel/prospeccao">
+        <!-- cadastrou aqui dentro do funil = o lead ENTRA no funil (estagio=lead).
+             Sem isto ele nascia na Base e o card sumia no primeiro refresh. -->
+        <input type="hidden" name="destino" value="funil">
+        <input type="hidden" name="receita">
+        <input type="hidden" name="tipo" value="pj">
+        <div class="rcpills">
+          <button type="button" class="rcpill on" data-tipo-pill="pj" onclick="leadTipo('pj',this)">🏢 Pessoa Jurídica</button>
+          <button type="button" class="rcpill" data-tipo-pill="pf" onclick="leadTipo('pf',this)">🧑 Pessoa Física</button>
+        </div>
+        <div style="display:flex;gap:.5rem;align-items:end;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem;margin-bottom:.8rem;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px"><label class="lbl" data-pj="🔎 CNPJ — puxa tudo da Receita" data-pf="🪪 CPF (opcional)">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="documento" inputmode="numeric" data-pj="digite o CNPJ (só números) e clique buscar" data-pf="000.000.000-00" placeholder="digite o CNPJ (só números) e clique buscar" oninput="leadDoc(this)"></div>
+          <button type="button" class="pbtn" data-so-pj onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
+        </div>
+        <div class="egrid">
+          <div class="full"><label class="lbl" data-pj="Empresa *" data-pf="Nome completo *">Empresa *</label><input class="fld" name="empresa" required data-pj="Nome da empresa" data-pf="Nome completo" placeholder="Nome da empresa"></div>
+          <div data-so-pj><label class="lbl">Contato</label><input class="fld" name="contato"></div>
+          <div data-so-pj><label class="lbl">Cargo</label><input class="fld" name="cargo" placeholder="Cargo do contato"></div>
+          <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
+          <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
+          <div><label class="lbl">E-mail</label><input class="fld" name="email" inputmode="email"></div>
+          <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
+          <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
+          <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
+          <div data-so-pj><label class="lbl">Sócio</label><input class="fld" name="socio"></div>
+          <div data-so-pj><label class="lbl">Regime</label><input class="fld" name="regime_tributario"></div>
+          <div data-so-pj><label class="lbl">Porte</label><input class="fld" name="porte"></div>
+          <div><label class="lbl">Instagram</label><input class="fld" name="instagram" placeholder="@perfil"></div>
+          <div><label class="lbl">Site (link)</label><input class="fld" name="site_url" inputmode="url" placeholder="https://…"></div>
+          <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
+          <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+          {% if pode_atribuir %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+          <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs"></div>
+          <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar ao funil</button>
+            <div class="mut" style="font-size:.78rem;margin-top:.4rem">Entra direto no funil, na primeira etapa. Pra alimentar a Base (campanhas em massa), use 📇 Base.</div></div>
+        </div>
+      </form>
+    </div>
+
+    <div class="captab" data-tab="csv" style="display:none">
+      <form id="cap-csv" action="/painel/prospeccao/captar/csv" method="post" enctype="multipart/form-data" onsubmit="return capCsv(event)">
+        <label class="lbl">Arquivo CSV</label>
+        <input class="fld" type="file" name="arquivo" accept=".csv,text/csv" required>
+        <div class="mut" style="font-size:.8rem;margin-top:.5rem">1ª linha = cabeçalho. Colunas: <b>empresa</b>, telefone, whatsapp, cidade, uf, segmento, contato, email, cnpj. Separador , ou ;.</div>
+        {% if pode_atribuir %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+        <button class="pbtn" style="margin-top:.8rem">Importar CSV</button>
+      </form>
+    </div>
+
+    <div class="captab" data-tab="google" style="display:none">
+      {% if not tem_places %}
+      <div class="mut" style="font-size:.84rem;line-height:1.6">📍 Pra buscar no Google Maps falta a chave. No Render (openclaw-web → Environment) adicione <code style="background:var(--bg);padding:.1rem .35rem;border-radius:5px;border:1px solid var(--borda)">GOOGLE_PLACES_API_KEY</code> (Places API New, billing ativo).</div>
+      {% else %}
+      <form id="cap-google" action="/painel/prospeccao/captar/buscar" method="post" onsubmit="return capBuscar(event)">
+        <div class="egrid">
+          <div><label class="lbl">Segmento</label><input class="fld" name="segmento" required placeholder="Ex: pet shop"></div>
+          <div><label class="lbl">Cidade</label><input class="fld" name="cidade" id="cap-g-cidade" placeholder="Ex: Teresina - PI"></div>
+        </div>
+
+        <div class="mapacc" id="mapacc">
+          <div class="mapacc-hd" onclick="mapaToggle()">
+            <span class="mapacc-ic">🗺️</span>
+            <span class="mapacc-tt">Cercar uma área no mapa
+              <span class="mapacc-sub">Opcional — desenhe a região em vez de digitar bairro/rua</span>
+            </span>
+            <span class="mapacc-caret">▾</span>
+          </div>
+          <div class="mapacc-body">
+            <div class="mapacc-in">
+              {% if not tem_maps_js %}
+              <div class="mut" style="font-size:.8rem;line-height:1.6">🗺️ Pra desenhar a área falta uma chave (separada da de busca). No Render, adicione <code style="background:var(--bg);padding:.1rem .35rem;border-radius:5px;border:1px solid var(--borda)">GOOGLE_MAPS_JS_API_KEY</code> — Maps JavaScript API, com a chave <b>restrita por domínio</b> no Google Cloud (ela roda no navegador).</div>
+              {% else %}
+              <div class="mapcard">
+                <input type="text" class="mapcard-busca" id="cercaBusca" placeholder="🔍 Endereço ou bairro pra centralizar…">
+                <div id="cercaMap" style="position:absolute;inset:0"></div>
+              </div>
+              <div class="radiusbar">
+                <span>Raio</span>
+                <input type="range" id="cercaRaio" min="0.5" max="15" step="0.5" value="3">
+                <b id="cercaRaioLabel">3.0 km</b>
+              </div>
+              <input type="hidden" name="lat" id="cercaLat"><input type="hidden" name="lng" id="cercaLng">
+              <input type="hidden" name="raio_km" id="cercaRaioKm" value="3">
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="mapa-usando" id="mapaUsando">🗺️ <span>Usando a área desenhada acima — bairro/rua ficam de lado enquanto isso</span></div>
+
+        <div class="lbl" style="margin-top:.4rem;color:var(--txt-mut)">📍 Refinar por região <span style="font-weight:400">— opcional, pra buscar numa área específica</span></div>
+        <div class="egrid" style="margin-top:.25rem">
+          <div><label class="lbl">Bairro</label><input class="fld" name="bairro" id="cap-g-bairro" placeholder="Ex: Jardim Renascença"></div>
+          <div><label class="lbl">Rua</label><input class="fld" name="rua" id="cap-g-rua" placeholder="Ex: Av. Nossa Sra. de Fátima"></div>
+        </div>
+        <div class="mut" style="font-size:.76rem;margin-top:.3rem">Bairro filtra a vizinhança toda. Rua afunila bastante (poucos resultados) — use pra mira fina.</div>
+        <label class="rrow" style="border:1px solid var(--borda);border-radius:10px;margin-top:.6rem;cursor:pointer">
+          <span class="toggle"><input type="checkbox" name="esconder_redes" value="1" checked><span class="tgl"></span></span>
+          <span style="font-size:.88rem">Esconder redes grandes (Petz, Drogasil…)</span>
+        </label>
+        {% if pode_atribuir %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" id="cap-g-vend" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+        <button class="pbtn" style="margin-top:.8rem" id="cap-g-btn">Buscar</button>
+      </form>
+      <div id="cap-res" style="margin-top:.9rem"></div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# A BARRA DE FOCO (mockup funil_mes_atual): numa linha só, o período ("Entraram
+     em", padrão mês corrente), o vendedor e as pílulas âmbar do que ficou de fora —
+     ligou, entram no quadro marcados; desligou, saem. A escolha fica na sessão. #}
+  <div class="foco" id="foco">
+    {# desde 25/09/2026 as pílulas do período formam UMA escolha (.kbseg), no mesmo
+       desenho do "Por etapa / Por mês": só uma vale por vez #}
+    {% if entrou_itens %}<span class="rot">Entraram em</span>
+    <span class="kbseg" role="group" aria-label="Entraram em">{% for m in entrou_itens %}<a class="pil{% if m.chave == entrou %} on{% endif %}" href="{{ m.url }}"{% if m.chave == entrou %} aria-current="true"{% endif %}>{{ m.rotulo }} <b>{{ m.n }}</b></a>{% endfor %}</span>{% endif %}
+    {# o seletor diz quantos cards cada um tem no quadro, com os filtros de agora
+       (25/09/2026) — "Todos · 227", "Jacqueline · 48" #}
+    {% if gerencia %}<span class="sep"></span>
+    <form method="get" action="/painel/prospeccao" class="vendf">
+      <span class="rot">Vendedor</span>
+      <select name="vendedor" onchange="this.form.submit()" aria-label="Filtrar por vendedor">
+        <option value="" {% if not filtro_vend %}selected{% endif %}>Todos · {{ vend_total or 0 }}</option>
+        <option value="nao" {% if filtro_vend=='nao' %}selected{% endif %}>Sem responsável · {{ (vend_cont or {}).get('nao', 0) }}</option>
+        {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }} · {{ (vend_cont or {}).get(v.id|string, 0) }}</option>{% endfor %}
+      </select>
+      {% if filtro_mes %}<input type="hidden" name="mes" value="{{ filtro_mes }}">{% endif %}
+      {% if vista_mes %}<input type="hidden" name="vista" value="mes">{% endif %}
+      {% if busca %}<input type="hidden" name="q" value="{{ busca|e }}">{% endif %}
+    </form>{% endif %}
+    {% if entrou_itens and entrou != 'tudo' and ((fora_cont or {}).get('esperando') or (fora_cont or {}).get('festa30')) %}<span class="sep"></span>
+    <span class="rot" title="{{ voc.leads|capitalize }} que entraram em outro mês e pedem atenção agora">+ de outros meses</span>
+    <a class="pil fora{% if 'esperando' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('esperando', '#') }}" title="O {{ voc.cliente }} falou por último e ninguém respondeu">🟢 esperando resposta <b>{{ (fora_cont or {}).get('esperando', 0) }}</b></a>
+    {% if modo_evento %}<a class="pil fora{% if 'festa30' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('festa30', '#') }}" title="Data do evento nos próximos 30 dias">🎉 festa em 30 dias <b>{{ (fora_cont or {}).get('festa30', 0) }}</b></a>{% endif %}
+    {% endif %}
+    {# a legenda da temperatura: a FORMA da bolinha, não só a cor (parte 1) #}
+    <span class="kbleg" aria-hidden="true"><span><i class="tdot t-quente"></i>quente</span><span><i class="tdot t-morno"></i>morno</span><span><i class="tdot t-frio"></i>frio</span><span><i class="tdot t-sem"></i>sem</span></span>
+  </div>
+
+  {# O TRILHO DE MESES: mês do EVENTO, não o mês em que o lead escreveu. Clicou em
+     Jan 27, o quadro inteiro vira o funil de janeiro (todas as etapas). "Sem data"
+     é a fila de trabalho — quem ainda não disse quando é a festa. #}
+  {# O ACERVO DO LEITOR (migração 198): quem já chegou e ainda não foi lido. Some
+     quando não sobra ninguém — daí em diante o leitor pega tudo na chegada. #}
+  {% if por_ler %}
+  <div class="lerconv" id="lerconv">🔎 <span><b>{{ por_ler }}</b> conversa{{ '' if por_ler == 1 else 's' }} de {{ voc.lead }}{{ '' if por_ler == 1 else 's' }} sem data ainda não {{ 'foi lida' if por_ler == 1 else 'foram lidas' }}</span>
+    <button type="button" class="pbtn" id="lerconv-btn" onclick="kbLerConversas(this)">Ler as conversas</button></div>
+  {% endif %}
+  {#- A RÉGUA "FESTA EM" (25/09/2026): uma barra por mês, com a contagem em cima e o
+     mês embaixo, e o ano como divisa. Eram 19 pílulas numa faixa que rolava de lado.
+     Só em conta que vende data (`modo_evento`, §6): quem vende mensalidade não tem
+     festa, e nem a palavra chega na página. -#}
+  {% if trilho_itens and not vista_mes %}
+  <div class="regua" id="trilho"><span class="rot">Festa em</span>
+    {% for t in trilho_itens %}{% if t.ano %}<span class="ano">{{ t.ano }}</span>{% endif %}<a class="mes{% if t.on %} on{% endif %}{% if t.sem %} semdata{% endif %}{% if t.todos %} todos{% endif %}{% if not t.n and not t.on %} vazio{% endif %}" href="/painel/prospeccao?{% if filtro_vend %}vendedor={{ filtro_vend }}&amp;{% endif %}{% if t.chave %}mes={{ t.chave }}{% endif %}" title="{{ t.titulo or t.rotulo }} · {{ t.n }}"><b>{{ t.n }}</b><i style="height:{{ t.h or 1 }}px"></i>{{ t.rotulo }}</a>{% endfor %}
+  </div>
+  {% if filtro_mes %}<div class="trilho-faixa">{% if filtro_mes == 'sem' %}📅 <b>Sem data do evento</b> · quem ainda não disse quando é a festa{% else %}🎉 <b>{{ filtro_mes_rotulo }}</b> · só as festas desse mês, em todas as etapas{% endif %}<a href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">✕ limpar</a></div>{% endif %}
+  {% endif %}
+
+  {% if gerencia %}
+  <style>
+  .etcfg{border:1px solid var(--borda);border-radius:12px;background:var(--card);margin:.2rem 0 1rem}
+  .etcfg>summary{cursor:pointer;padding:.7rem .9rem;font-weight:600;font-size:.9rem;list-style:none;
+    display:flex;align-items:center;gap:.5rem;user-select:none}
+  .etcfg>summary::-webkit-details-marker{display:none}
+  .etcfg>summary::after{content:'▾';margin-left:auto;color:var(--txt-mut);transition:transform .18s}
+  .etcfg[open]>summary::after{transform:rotate(180deg)}
+  .etbody{padding:0 .9rem .9rem;border-top:1px solid var(--borda)}
+  .ethint{color:var(--txt-mut);font-size:.8rem;margin:.7rem 0 .8rem}
+  .etlist{display:flex;flex-direction:column;gap:.4rem}
+  .etrow{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
+  .etrow .lock,.etrow .grip{width:1.1rem;text-align:center;color:var(--txt-mut);flex-shrink:0}
+  .etin{flex:1;min-width:130px;padding:.4rem .55rem;border-radius:8px;border:1px solid #333;
+    background:var(--bg);color:var(--txt);font-family:inherit;font-size:.86rem}
+  .etin:focus{outline:none;border-color:var(--verde)}
+  .etn{font-size:.72rem;color:var(--txt-mut);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:52px}
+  .etsel{padding:.34rem .4rem;border-radius:7px;border:1px solid var(--borda);background:var(--bg);
+    color:var(--txt-mut);font-family:inherit;font-size:.74rem;max-width:150px}
+  .etb{border:1px solid var(--borda);background:var(--card-2);color:var(--txt);border-radius:7px;
+    width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+    font-size:.85rem;line-height:1;flex-shrink:0}
+  .etb:hover:not(:disabled){border-color:var(--verde)}
+  .etb.del:hover:not(:disabled){border-color:var(--coral);color:var(--coral)}
+  .etb:disabled{opacity:.32;cursor:not-allowed}
+  .etadd{display:flex;gap:.4rem;margin-top:.8rem;flex-wrap:wrap}
+  .etadd .etin{min-width:160px}
+  </style>
+  {# Desde 25/09/2026 o editor abre como GAVETA à direita, pelo "⚙ Etapas" do título
+     (etAbre). Continua um <details>: o `open` é o que o freio do reload de 60 s
+     confere, e sem JS o sumário volta a aparecer e abre no lugar, como antes. #}
+  <details class="etcfg" id="etcfg">
+    <summary>⚙️ Editar etapas do funil</summary>
+    <div class="etbody kbgav" role="dialog" aria-label="Etapas do funil">
+      <div class="kbgav-hd"><b>⚙ Etapas do funil</b><button type="button" class="kbgav-x" onclick="kbGavFecha()" aria-label="Fechar">✕</button></div>
+      <p class="ethint">Renomeie no campo e clique ✓. Reordene com ◀ ▶. O ✕ remove — só quando a etapa
+        estiver <b>sem {{ voc.leads }}</b>. Pra esvaziar, escolha uma etapa em <b>fundir em…</b> e clique ⇥: os {{ voc.leads }}
+        vão pra lá com registro no histórico, e a etapa some do quadro sem ser apagada.
+        🔒 = etapa fixa (entrada/resultado): pode renomear, mas não remover.</p>
+      <div class="etlist">
+        {% for e in etapas %}
+        <form method="post" class="etrow">
+          {% if e.fixa %}<span class="lock" title="Etapa fixa (entrada/resultado)">🔒</span>{% else %}<span class="grip">⠿</span>{% endif %}
+          <input class="etin" name="rotulo" value="{{ e.rotulo }}" maxlength="40" aria-label="Nome da etapa">
+          <span class="etn">{{ e.n }} {{ voc.lead }}{{ '' if e.n == 1 else 's' }}</span>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/renomear" title="Salvar nome">✓</button>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/mover" name="dir" value="esq" {% if e.fixa %}disabled{% endif %} title="Mover pra esquerda">◀</button>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/mover" name="dir" value="dir" {% if e.fixa %}disabled{% endif %} title="Mover pra direita">▶</button>
+          <button class="etb del" formaction="/painel/prospeccao/etapas/{{ e.id }}/remover"
+                  {% if e.fixa or e.n > 0 %}disabled{% endif %}
+                  title="{% if e.fixa %}Etapa fixa — não remove{% elif e.n > 0 %}Mova os {{ voc.leads }} primeiro{% else %}Remover etapa{% endif %}"
+                  onclick="return confirm('Remover a etapa “{{ e.rotulo }}”?')">✕</button>
+          {% if not e.fixa and etapas|length > 1 %}
+          <!-- FUNDIR (12/09/2026). Fica colado no ✕ de propósito: é o ✕ que diz
+               "mova os leads primeiro", e até hoje não existia o "mova". -->
+          <select class="etsel" name="para" aria-label="Fundir esta etapa em">
+            <option value="">fundir em…</option>
+            {% for d in etapas if d.chave != e.chave %}
+            <option value="{{ d.chave }}">{{ d.rotulo }}</option>
+            {% endfor %}
+          </select>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/fundir"
+                  title="Levar os {{ voc.leads }} desta etapa para a escolhida"
+                  onclick="return etFundir(this,'{{ e.rotulo|e }}',{{ e.n }})">⇥</button>
+          {% endif %}
+        </form>
+        {% endfor %}
+      </div>
+      <form method="post" action="/painel/prospeccao/etapas/nova" class="etadd">
+        <input class="etin" name="rotulo" placeholder="Nova etapa (ex.: Reunião marcada)" maxlength="40">
+        <button class="pbtn">＋ Adicionar etapa</button>
+      </form>
+    </div>
+  </details>
+  {% endif %}
+
+  {#- AS ABAS DE ETAPA (só no celular): uma coluna por vez. Desde 25/09/2026 ficam
+     presas no topo ao rolar, e cada uma diz em verde quantos clientes esperam
+     resposta ali (●7) — o vendedor escolhe a etapa pelo que pede ação. -#}
+  <div class="kbtabs" id="kbtabs">
+    {% if rsg_col or rsg_mostra %}<button type="button" class="kbtab" data-tab="_resgate" onclick="kbTab('_resgate')"><span class="r">♻️ Resgate</span><span class="n"><span class="c">{{ rsg_col|length + (rsg_fila|length) }}</span></span></button>{% endif %}
+    {% for s, rot in (vista_cols or colunas_tpl) %}{% set _tgs = (grupos or {}).get(s, []) %}{% set _tesp = (_tgs | selectattr('tipo', 'equalto', 'esperando') | sum(attribute='n')) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')"><span class="r">{{ rot }}</span><span class="n"><span class="c">{{ _tgs | sum(attribute='n') if vista_mes else colunas[s]|length }}</span>{% if _tesp %}<i class="e" title="{{ _tesp }} esperando resposta">●{{ _tesp }}</i>{% endif %}</span></button>{% endfor %}
+  </div>
+
+  {# O CARD, uma vez só: a mesma marcação serve pros grupos por mês e pra dobra dos
+     parados. Macro do próprio template — enxerga o contexto (temp_cor, vendedores…). #}
+  {% macro kbcard(c) -%}
+        {#- O CARTÃO EM QUATRO LINHAS (24/09/2026, docs/mockups/prospeccao_layout.html).
+           Era uma pilha de até 13 blocos (250–430 px): cabiam 2 ou 3 por coluna, e a
+           Prime tinha 227 no quadro de setembro. Agora são quatro linhas fixas —
+           quem é · o que quer e quando · o que foi dito por último · o próximo passo
+           — e o resto mora no ⋯ (um menu só pra página inteira, montado pelo JS a
+           partir dos data-* deste botão).
+             * L1 (.kbl1): temperatura (a FORMA da bolinha, não só a cor), nome,
+               selo de outro mês, avatar do responsável e o ⋯;
+             * L2 (.kbl2): o evento e de onde veio (lido/✓/IA), ou segmento · cidade;
+             * L3 (.kbmsg): a última mensagem — a linha inteira abre a conversa;
+             * L4 (.kbl4): o próximo passo em texto, a campanha, os canais e o valor.
+           A ORDEM do que os testes recortam não mudou: o nome vem antes de .camp,
+           .kbch e .kbmsg, que vêm antes de <div class="ft">. Botão novo usa
+           data-lead, NUNCA data-id (é por data-id que os testes acham o card). -#}
+        <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if c.esperando %} data-esp="1"{% endif %}{% if c.tel_q %} data-tel="{{ c.tel_q }}"{% endif %}{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
+             tabindex="0" onkeydown="if(event.key==='Enter'&&event.target===this)kbAbrirLead(event,{{ c.id }},this)"
+             onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
+          <div class="kbl1"><span class="tdot t-{{ c.temperatura or 'sem' }}" title="{{ c.temperatura or 'sem temperatura' }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}{% if pode_atribuir %}<button type="button" class="kbav kbvn{% if not c.vendedor_id %} livre{% endif %}" data-lead="{{ c.id }}" data-vend="{{ c.vendedor_id or '' }}" title="Responsável: {{ (c.vendedor or 'ninguém')|e }} · clique pra trocar" onclick="kbVendPop(event,this)">{{ (c.vendedor_curto or c.vendedor or ('livre' if not c.vendedor_id else 'sem nome'))|e }}</button>{% elif gerencia and c.vendedor %}<span class="kbav kbvn" title="Responsável: {{ c.vendedor|e }}">{{ (c.vendedor_curto or c.vendedor)|e }}</span>{% endif %}<button type="button" class="kbmais" data-lead="{{ c.id }}" data-conv="{{ c.conv_whatsapp or c.conv_instagram or '' }}" data-mail="{{ c.conv_email or '' }}" data-st="{{ c.status }}" aria-label="Mais ações" title="Mais ações" onclick="kbMenu(event,this)">⋯</button></div>
+          {#- A TRILHA NO CARD (mockup das três trilhas): de onde veio o lead do
+             resgate, a etapa em que ele está (a coluna Resgate é uma visão) e o
+             próximo passo; o selo da IA do número; e o "veio do Resgate" no card que
+             já saiu da coluna. -#}
+          {% set _t = c.tri or {} %}
+          {% if _t.andamento %}<div class="kbtri rsg"><span class="de">{{ _t.origem_txt }}{% if _t.era %} · era de {{ _t.era|e }}{% endif %}{% if _t.parado_dias %} · {{ _t.parado_dias }} dias parado{% endif %}</span><span class="etp">etapa: {{ c.etapa_rot }}</span>{% if _t.passo %}<span class="ps">{{ _t.passo }}</span>{% endif %}{% if _t.resumo %}<span class="rs">✨ {{ _t.resumo|e }}</span>{% endif %}</div>
+          {% elif _t.trilha == 'ia' %}<div class="kbtri ia">🤖 IA do número{% if _t.gente %} · <b>gente assumiu</b>{% endif %}</div>
+          {% elif _t.veio %}<div class="kbtri rsg veio">♻️ veio do Resgate{% if _t.era %} · era de {{ _t.era|e }}{% endif %}</div>{% endif %}
+          <div class="kbl2">
+          {% if c.segmento or c.cidade %}<div class="sub" title="{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
+          {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
+             é o que diz qual pacote cabe (semana ou fim de semana) e em que mês a
+             venda cai. Sem data, numa conta que vende data, o card diz isso na cara
+             e oferece o "perguntar" (abre a conversa com a pergunta pronta). Data que
+             já passou com etapa aberta fica coral: festa que aconteceu e ninguém fechou. #}
+          {% if c.evento_em or c.evento_tipo or c.evento_convidados %}<div class="kbev{% if c.passou %} passou{% endif %}" title="{% if c.passou %}A data do evento já passou{% else %}Evento{% endif %}">{{ c.ev_ic }} {% if c.evento_tipo %}<b>{{ c.evento_tipo }}</b>{% endif %}{% if c.evento_em %}{% if c.evento_tipo %} · {% endif %}<span class="d">{{ c.ev_data }}</span>{% endif %}{% if c.evento_convidados %} · {{ c.evento_convidados }} conv.{% endif %}</div>
+          {% elif c.evento_pista %}<div class="kbev pista">📅 {{ c.evento_pista }}<button type="button" class="kbperg" title="Confirmar ou corrigir no balão" onclick="event.stopPropagation();kbAbrirLead(event,{{ c.id }},this.closest('.kbcard'))">confirmar</button></div>
+          {% elif modo_evento %}<div class="kbev sem">📅 sem data{% if c.conv_whatsapp %}<button type="button" class="kbperg" title="Perguntar a data do evento" onclick="kbPerguntarData(event,{{ c.conv_whatsapp }},this)">perguntar</button>{% elif c.zap_pergunta %}<a class="kbperg" href="{{ c.zap_pergunta }}" target="_blank" rel="noopener" title="Abre o WhatsApp com a pergunta pronta" onclick="event.stopPropagation()">perguntar</a>{% endif %}</div>{% endif %}
+          {# DE ONDE VEIO o que está no card (migração 198): lido da conversa, pelo
+             agente, ou confirmado pelo vendedor. Na tela sai curto ("lido", "✓",
+             "IA") por CSS; o texto inteiro fica aqui (e no title o trecho lido). #}
+          {% if c.evento_origem in ('conversa','agente','confirmado') and (c.evento_em or c.evento_tipo or c.evento_convidados) %}<div class="kbsrc">{% if c.evento_origem == 'conversa' %}<span class="tag lido" title="{{ c.evento_trecho or '' }}">💬 lido da conversa</span>{% elif c.evento_origem == 'agente' %}<span class="tag ia">🤖 lido pelo agente</span>{% else %}<span class="tag ok">✓ confirmado</span>{% endif %}</div>{% endif %}
+          {% if c.evento_pista and c.evento_em %}<div class="kbev pista">💬 {{ c.evento_pista }}</div>{% elif c.evento_pista and (c.evento_tipo or c.evento_convidados) %}<div class="kbev pista">📅 {{ c.evento_pista }}<button type="button" class="kbperg" title="Confirmar ou corrigir no balão" onclick="event.stopPropagation();kbAbrirLead(event,{{ c.id }},this.closest('.kbcard'))">confirmar</button></div>{% endif %}
+          </div>
+          {# na vista por mês a coluna já é a data: a ETAPA vem pro card como selo,
+             com o nº da proposta e a próxima visita quando existem #}
+          {% if vista_mes %}<div class="kbetapas"><span class="kbetapa{% if c.etapa_cls %} {{ c.etapa_cls }}{% endif %}">{% if c.proposta_num and c.status == 'proposta' %}Proposta nº {{ c.proposta_num }}{% else %}{{ c.etapa_rot }}{% endif %}</span>{% if c.visita_txt %}<span class="kbetapa vis">{{ c.visita_txt }}</span>{% endif %}</div>{% endif %}
+          {# A ÚLTIMA MENSAGEM (L3). A bolinha verde só acende no que ainda não foi
+             visto e veio do cliente — o que o próprio vendedor mandou nunca é
+             novidade pra ele. Com conversa, a LINHA INTEIRA abre o balão: é a ação
+             nº 1 de quem passa o dia no funil, no maior alvo do cartão. #}
+          {% if c.ult %}<div class="kbmsg{% if c.ult.nova %} nova{% endif %}{% if c.conv_ult %} abre{% endif %}"{% if c.conv_ult %} onclick="kbAbrirChat(event,{{ c.conv_ult }},'{{ c.canal_ult }}',this)" title="Abrir a conversa"{% endif %}>{% if c.ult.nova %}<span class="bolha" aria-hidden="true"></span>{% elif c.ult.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}<span class="txt">{{ c.ult.texto }}</span><span class="qdo">{{ c.ult.quando }}</span></div>{% endif %}
+          <div class="kbl4">
+          {# O PRÓXIMO PASSO (L4), EM TEXTO. Era uma pílula colorida em todo card
+             aberto — 118 de 208 em "🚨 Crítico" na Prime, e quando tudo grita nada
+             se destaca. Só aparece em conta que já tem a tela de Follow-up e com o
+             modo fora de 'off' (ver `fu_por_lead` no handler). "Follow-up hoje"
+             quer dizer "venceu há menos de 24h", e é isso que o card passa a dizer. #}
+          {% if c.fu %}<div class="kbfu {{ c.fu.estado }}" title="{{ c.fu.acao }}">{% if c.fu.estado == 'hoje' and c.fu.atraso %}Venceu há {{ c.fu.atraso }}{% else %}{{ c.fu.rotulo }}{% if c.fu.atraso %} · {{ c.fu.atraso }}{% endif %}{% endif %}</div>{% elif c.proximo and not vista_mes %}<div class="kbprox{% if c.proximo_venceu %} venceu{% endif %}" title="Próximo contato">Próx. contato {{ c.proximo.strftime('%d/%m') }}</div>{% endif %}
+          {% if c.campanha %}<div class="camp">📣 {{ c.campanha }}</div>{% endif %}
+          {# O CANAL ACENDE PELA CONVERSA (25/09/2026, parte 3): na ZAQ, 33 leads
+             têm conversa de WhatsApp e o campo "whatsapp" do cadastro vazio — o card
+             não tinha o 💬 e a conversa só se achava pela Comunicação. Tem conversa,
+             tem botão; só o campo, o selo apagado de sempre. #}
+          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido or c.conv_whatsapp or c.conv_email or c.conv_instagram %}<div class="kbch">{% if c.tem_whatsapp or c.conv_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb{% if c.chip_zap %} kbb-chip{% if c.chip_zap_outro %} outro{% endif %}{% endif %}" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="{% if c.chip_zap %}Abrir a conversa no {{ c.chip_zap_nome|e }}{% else %}Abrir a conversa de WhatsApp{% endif %}">💬{% if c.chip_zap %}<span class="kbchip">{{ c.chip_zap|e }}</span>{% endif %}</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email or c.conv_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram or c.conv_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram or c.conv_whatsapp or c.conv_email or c.conv_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
+          <div class="ft">{% if c.valor %}<span class="kbval">{{ brl(c.valor) }}</span>{% endif %}</div></div>
+          {# mesmo telefone, outro chip: são dois leads de propósito (cada chip responde
+             pelo seu número), mas quem olha o funil precisa saber — senão dois
+             vendedores negociam com a mesma pessoa, cada um com um preço. #}
+          {% if c.gemeo %}<div class="kbgem" onclick="event.stopPropagation()">⚠️ {{ c.gemeo }}{% if c.gemeo_lead %} <a href="/painel/prospeccao/{{ c.gemeo_lead }}">Abrir →</a>{% endif %}</div>{% endif %}
+        </div>
+  {%- endmacro %}
+
+  {# Na vista por mês a coluna é um MÊS: não se arrasta card entre meses (a data
+     da festa não muda de arrastar) — o drop fica desligado e a contagem é a soma
+     dos grupos. Mudar a etapa continua pelo balão do lead. #}
+  <div class="kbfio" id="kbfio" hidden aria-hidden="true"><i></i></div>
+  <div class="kbrow{% if vista_mes %} vmes{% endif %}" id="kbrow">
+    {#- A COLUNA RESGATE (seção 2 do mockup): quem está com o resgate em andamento,
+       de onde veio e em que etapa está. Não recebe card arrastado — é uma visão, a
+       etapa do lead não muda. -#}
+    {% if rsg_col or rsg_mostra %}{% set _rb = (tri_barra or {}).get('rsg') or {} %}
+    <div class="kbcol kbcol-rsg" data-status="_resgate">
+      <h4 title="Resgate da IA"><span>♻️ Resgate{% if _rb.modo == 'ensaio' %} <i class="kbrsg-modo">Ensaio</i>{% endif %}</span><span class="kbcnt">{% if rsg_col %}{{ rsg_col|length }}{% if _rb.fila %} <i>+{{ _rb.fila }} na fila</i>{% endif %}{% else %}{{ _rb.fila or 0 }} <i>na fila</i>{% endif %}</span></h4>
+      <div class="kbcolsub"><span class="v">{% if rsg_col %}em andamento · {% endif %}a etapa não muda</span></div>
+      <div class="kbdrop">
+        {% if rsg_col %}<div class="kbgrp">Em andamento <b>{{ rsg_col|length }}</b><span class="ln"></span></div>{% endif %}
+        {% for c in rsg_col %}{{ kbcard(c) }}{% endfor %}
+        {% if rsg_fila %}<div class="kbgrp">{% if _rb.modo == 'ensaio' %}Os próximos que a IA chamaria{% else %}Na fila · próximos{% endif %} <b>{{ rsg_fila|length }}</b><span class="ln"></span></div>
+        {% for f in rsg_fila %}<a class="kbrsg-fila" href="/painel/prospeccao/{{ f.id }}" title="Abrir a ficha">
+          <span class="nm">{{ f.quem|e }}</span>
+          <span class="de">{{ f.origem_txt }}{% if f.vendedor %} · de {{ f.vendedor|e }}{% endif %} · {{ f.parado_dias }} dias parado</span>
+          <span class="etp">etapa: {{ f.etapa_rot }}{% if f.evento_em %} · festa {{ f.evento_em.strftime('%d/%m') }}{% endif %}</span>
+          <span class="ps">{{ f.faixa_txt }}{% if f.uma_vez %} · uma mensagem só{% endif %} · {{ 'prévia no Ensaio' if _rb.modo == 'ensaio' else 'sai quando chegar a vez' }}</span>
+        </a>{% endfor %}
+        {% if _rb.fila and _rb.fila > rsg_fila|length %}<div class="kbempty">e mais {{ _rb.fila - rsg_fila|length }} na fila</div>{% endif %}
+        {% elif not rsg_col %}<div class="kbempty">ninguém na fila hoje</div>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% for s, rot in (vista_cols or colunas_tpl) %}
+    {#- A COLUNA (24/09/2026): largura de verdade (232–300 px, calculada pelo
+       kbLayout), altura presa à tela e rolagem própria — o cabeçalho fica parado.
+       Coluna VAZIA vira um trilho de 44 px (data-vazia; o clique abre, e arrastar
+       um card por cima também). A linha de baixo do cabeçalho diz quantos esperam
+       resposta e quantos estão parados, com atalho pra dobra. -#}
+    {%- set _gs = (grupos or {}).get(s, []) -%}
+    {%- set _ncol = (_gs | sum(attribute='n')) if vista_mes else colunas[s]|length -%}
+    {%- set _esp = (_gs | selectattr('tipo', 'equalto', 'esperando') | sum(attribute='n')) -%}
+    {%- set _par = (_gs | selectattr('tipo', 'equalto', 'parado') | sum(attribute='n')) %}
+    <div class="kbcol" data-status="{{ s }}"{% if not _ncol %} data-vazia="1"{% endif %}{% if not vista_mes %} ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')"{% endif %}>
+      <h4 title="{{ rot }}"><span>{{ rot }}</span><span class="kbcnt">{% if vista_mes %}{{ (grupos or {}).get(s, []) | sum(attribute='n') }}{% else %}{{ colunas[s]|length }}{% if filtrado %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}{% endif %}</span></h4>
+      <div class="kbcolsub">{% if _esp %}<span class="v">{{ _esp }} esperando</span>{% endif %}{% if _esp and _par %} · {% endif %}{% if _par %}<button type="button" class="kbpar" onclick="kbParados(this)">{{ _par }} parado{{ 's' if _par != 1 }} ▾</button>{% endif %}</div>
+      <div class="kbdrop">
+        {# A coluna separada em grupos (evento_lead.agrupar): mês do evento, depois
+           sem data por mês de entrada, e no pé a dobra dos parados há 15+ dias —
+           fechada, pra coluna encurtar sem apagar ninguém. Um card arrastado pra cá
+           entra no fim do .kbdrop e se acomoda no grupo certo no próximo carregar. #}
+        {% for g in (grupos or {}).get(s, []) %}
+        {% if g.tipo == 'parado' %}
+        <details class="kbdobra"><summary><span class="kbgrp alerta">{{ g.rotulo }} <b>{{ g.n }}</b></span></summary>
+          {% for c in g.cards %}{{ kbcard(c) }}{% endfor %}
+        </details>
+        {% else %}
+        {% if g.rotulo %}<div class="kbgrp{% if g.tipo == 'esperando' %} verde{% endif %}">{{ g.rotulo }} <b>{{ g.n }}</b><span class="ln"></span></div>{% endif %}
+        {% for c in g.cards %}{{ kbcard(c) }}{% endfor %}
+        {% endif %}
+        {% else %}<div class="kbempty">vazio</div>{% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+    {# o mês quase vazio: o espaço livre diz o que houve e leva pro lote (25/09) #}
+    {% if mes_vazio %}<div class="kbnota" id="kbnota"><b>{{ mes_vazio.rotulo }} tem {{ mes_vazio.n }} {{ voc.lead }}{{ '' if mes_vazio.n == 1 else 's' }}.</b>
+      O último lote entrou em {{ mes_vazio.lote_rotulo|lower }} ({{ mes_vazio.lote_n }}).<br>
+      <a href="{{ mes_vazio.lote_url }}">Ver {{ mes_vazio.lote_rotulo|lower }}</a> · <a href="{{ mes_vazio.tudo_url }}">Ver tudo ({{ mes_vazio.tudo_n }})</a></div>{% endif %}
+  </div>
+  {#- OS POPOVERS DA PÁGINA, um de cada, fora do quadro: o menu ⋯ (montado pelo
+     JS com o que o card tem) e a lista de responsáveis (só pra quem atribui).
+     Antes era um <select> com a lista inteira DENTRO DE CADA CARD — ~1.100
+     <option> na página da Prime, e 48 px por card. -#}
+  <div id="kbmenu" class="kbpop" role="menu" hidden></div>
+  {% if pode_atribuir %}<div id="kbvpop" class="kbpop" role="menu" hidden>
+    <button type="button" class="kbpi" data-v="" onclick="kbVendEscolhe(this)">— sem responsável —</button>
+    {% for v in vendedores %}<button type="button" class="kbpi" data-v="{{ v.id }}" data-nome="{{ (v.nome or '')|e }}" data-curto="{{ (v.curto or v.nome or 'sem nome')|e }}" onclick="kbVendEscolhe(this)"><span class="kbav">{{ (v.nome or '?')[:2]|upper }}</span>{{ (v.nome or 'sem nome')|e }}</button>{% endfor %}
+  </div>{% endif %}
+</div>
+
 
 <script>
 var _KB_STATUS={{ status|tojson }};
@@ -13419,24 +13444,86 @@ function kbGuardaTela(){try{var el=document.getElementById('kbrow');if(!el)retur
     if(o.a)c.classList.add('aberta');c.querySelectorAll('.kbdobra').forEach(function(x,i){if(o.d&&o.d[i])x.open=true;});
     var dp=c.querySelector('.kbdrop');if(dp)dp.scrollTop=o.t||0;});
   kbLayout();el.scrollLeft=v.x||0;window.scrollTo(0,v.y||0);}catch(e){}})();
-setInterval(function(){
-  if(document.hidden) return;
-  if(document.querySelector('.chatpop')) return;
-  if(window._kbDragEl || window._kbMoved) return;
+// O FUNIL SEM PISCAR (27/09/2026, docs/mockups/funil_atualizacao.html, aprovado pelo
+// dono com as recomendações). Era um `location.reload()` a cada minuto: a página
+// inteira ia fora e voltava — e, com o visual no fim dela, voltava desmontada por um
+// instante. Agora a versão nova vem POR BAIXO (o mesmo endereço, com os mesmos
+// filtros) e só os dados trocam, no lugar: o quadro, as abas do celular, os números
+// do título, os críticos, a barra das trilhas e a linha de foco. A rolagem de cada
+// coluna, as dobras abertas, a coluna recolhida e a aba ficam como estavam; o card
+// que entrou ou mudou de coluna ganha um contorno verde por 8 segundos.
+//
+// OS FREIOS SÃO OS DE SEMPRE (ficha aberta, arrastando, gaveta de captar, campo com
+// foco, folha de perda, editor de etapas, menu aberto, busca digitada e não enviada),
+// conferidos antes de buscar E de novo antes de trocar — entre os dois a pessoa pode
+// ter começado a mexer. Algo errado na troca (a sessão caiu, o HTML veio sem o
+// quadro) cai no recarregamento de antes: nunca uma tela pela metade.
+var _kbAtualizando=false;
+function _kbHora(d){return d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}
+function _kbSelo(cls,txt){var s=document.getElementById('kbsync');if(!s)return;
+  s.className='kbsync'+(cls?' '+cls:'');var t=s.querySelector('span');if(t)t.textContent=txt;}
+function _kbFreado(){
+  if(document.querySelector('.chatpop'))return true;
+  if(window._kbDragEl || window._kbMoved)return true;
   var cap=document.getElementById('captar');
-  if(cap && cap.style.display !== 'none') return;
+  if(cap && cap.style.display !== 'none')return true;
   var a=document.activeElement;
-  if(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
-  if(a && a.isContentEditable) return;
-  if(document.querySelector('.leadpop') || document.getElementById('perdapop')) return;
-  if(document.querySelector('.etcfg[open]')) return;
-  if(document.querySelector('.kbpop:not([hidden])')) return;
-  // busca digitada e não enviada: o reload apagaria o filtro debaixo de quem procura
+  if(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return true;
+  if(a && a.isContentEditable)return true;
+  if(document.querySelector('.leadpop') || document.getElementById('perdapop'))return true;
+  if(document.querySelector('.etcfg[open]'))return true;
+  if(document.querySelector('.kbpop:not([hidden])'))return true;
+  // busca digitada e não enviada: a troca apagaria o filtro debaixo de quem procura
   var kbb=document.getElementById('kbbusca');
-  if(kbb && kbb.value.trim() && kbb.value.trim()!==KB_BUSCA) return;
-  kbGuardaTela();
-  location.reload();
-}, 60000);
+  if(kbb && kbb.value.trim() && kbb.value.trim()!==KB_BUSCA)return true;
+  return false;}
+function _kbFoto(){var el=document.getElementById('kbrow'),tb=document.querySelector('#kbtabs .kbtab.on');
+  var f={x:el?el.scrollLeft:0,y:window.scrollY,cols:{},ids:{},tab:tb?tb.getAttribute('data-tab'):null};
+  if(!el)return f;
+  el.querySelectorAll(':scope>.kbcol').forEach(function(c){var dp=c.querySelector('.kbdrop');
+    f.cols[c.getAttribute('data-status')]={t:dp?dp.scrollTop:0,d:[].map.call(c.querySelectorAll('.kbdobra'),function(x){return x.open?1:0;}),a:c.classList.contains('aberta')?1:0};});
+  el.querySelectorAll('.kbcard[data-id]').forEach(function(k){var c=k.closest('.kbcol');f.ids[k.getAttribute('data-id')]=c?c.getAttribute('data-status'):'';});
+  return f;}
+function _kbVolta(f){var el=document.getElementById('kbrow');if(!el)return;var ab=_kbAbertasLe();
+  el.querySelectorAll(':scope>.kbcol').forEach(function(c){var st=c.getAttribute('data-status'),o=f.cols[st];
+    if(c.getAttribute('data-vazia')&&ab.indexOf(st)>=0)c.classList.add('aberta');
+    if(!o)return;if(o.a)c.classList.add('aberta');
+    c.querySelectorAll('.kbdobra').forEach(function(x,i){if(o.d&&o.d[i])x.open=true;});
+    var dp=c.querySelector('.kbdrop');if(dp)dp.scrollTop=o.t||0;});
+  kbLayout();el.scrollLeft=f.x||0;window.scrollTo(0,f.y||0);
+  if(f.tab)kbTab(f.tab);
+  el.querySelectorAll('.kbcard .emp').forEach(function(e){if(e.scrollWidth>e.clientWidth)e.title=e.textContent;});
+  // o que entrou ou mudou de coluna: contorno verde por 8 segundos (decisão 3)
+  var marcados=[];el.querySelectorAll('.kbcard[data-id]').forEach(function(k){var id=k.getAttribute('data-id'),c=k.closest('.kbcol'),
+    st=c?c.getAttribute('data-status'):'';if(!(id in f.ids)||f.ids[id]!==st){k.classList.add('kbnovo');marcados.push(k);}});
+  if(marcados.length)setTimeout(function(){marcados.forEach(function(k){k.classList.remove('kbnovo');});},8000);}
+function kbAtualiza(forcar){
+  if(_kbAtualizando)return;
+  if(document.hidden&&!forcar)return;
+  if(!forcar&&_kbFreado()){_kbSelo('pausa','pausado · você está mexendo');return;}
+  _kbAtualizando=true;_kbSelo('vai','atualizando…');
+  var fio=document.getElementById('kbfio');if(fio)fio.hidden=false;
+  fetch(location.href,{credentials:'same-origin',cache:'no-store',headers:{'X-Requested-With':'kb-troca'}})
+  .then(function(r){if(r.redirected||!r.ok){throw new Error('recarrega');}return r.text();})
+  .then(function(html){
+    var doc=new DOMParser().parseFromString(html,'text/html');
+    var novo=doc.getElementById('kbrow'),el=document.getElementById('kbrow');
+    if(!novo||!el)throw new Error('recarrega');
+    if(!forcar&&_kbFreado()){_kbSelo('pausa','pausado · você está mexendo');return;}
+    var f=_kbFoto();
+    ['kbcritw','kbtri','kbtabs','foco'].forEach(function(id){var a=document.getElementById(id),b=doc.getElementById(id);
+      if(a&&b)a.replaceWith(document.importNode(b,true));});
+    var n1=document.querySelector('#kbtit .kbnum'),n2=doc.querySelector('#kbtit .kbnum');if(n1&&n2)n1.innerHTML=n2.innerHTML;
+    el.className=novo.className;el.innerHTML=novo.innerHTML;
+    _kbVolta(f);
+    _kbSelo('','atualizado '+_kbHora(new Date()));})
+  .catch(function(e){
+    // a sessão caiu ou a página veio sem o quadro: o recarregamento de antes
+    if(e&&e.message==='recarrega'){kbGuardaTela();location.reload();return;}
+    _kbSelo('erro','sem conexão · tocar pra tentar');})
+  .then(function(){_kbAtualizando=false;if(fio)fio.hidden=true;});}
+_kbSelo('','atualizado '+_kbHora(new Date()));
+setInterval(function(){kbAtualiza(false);}, 60000);
 </script>
 {% endblock %}"""
 

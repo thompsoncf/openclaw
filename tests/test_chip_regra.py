@@ -765,3 +765,14 @@ def test_a_ia_da_regra_nem_ve_a_opcao_de_orcamento(pool, equipe, agente):
     ag.atender(pool, EMPRESA, conv)
     pedir = agente["prompts"][0][1]
     assert "orcamento|visita" not in pedir and "acao=orcamento" not in pedir
+
+
+def test_a_ia_que_comeca_a_meia_noite_grava_0h_e_nao_8h(pool, equipe):
+    """O `or 8` lia o 0 como vazio: quem escolhia 0h ficava com a IA calada até as 8h."""
+    with pool.connection() as c:
+        _regra(c, equipe["ZAQ"], ia_horario="proprio", ia_dias=list(range(7)),
+               ia_hora_ini=0, ia_hora_fim=24)
+        r = cr.regra(c, EMPRESA, CHIP2)
+        assert (r["ia_hora_ini"], r["ia_hora_fim"]) == (0, 24)
+        meia_noite_e_meia = datetime(2026, 9, 27, 3, 30, tzinfo=timezone.utc)   # 00:30 em Brasília
+        assert cr.ia_pode_falar(r, meia_noite_e_meia)

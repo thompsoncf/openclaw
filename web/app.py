@@ -642,6 +642,17 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — orçamentos da IA falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # O resgate da IA (migração 396): o lead parado há 7 dias vai pro membro
+                # IA no 8º. Um envio por ciclo, no máximo — o teto e o espaçamento são
+                # o que protege o chip principal (QR) de banimento.
+                from finance import resgate as _rgs
+                _rg = _rgs.rodar(pool)
+                if any(_rg.values()):
+                    log.info("poller: ciclo #%d — resgate da IA: %s", ciclo, _rg)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — resgate da IA falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # Vaga liberada da clínica (migração 369): consulta cancelada vira
                 # convite pra quem cabe no horário; lê o 1/2/PARAR e manda a 2ª rodada.
                 from finance import clinica_vagas as _cvg

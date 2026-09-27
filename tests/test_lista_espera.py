@@ -29,11 +29,21 @@ create table membros (id bigserial primary key, conta_id bigint, nome text,
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, status text default 'novo', evento_em date, evento_tipo text,
-  perda_motivo text, orcamento_id bigint,
+  perda_motivo text, perda_descricao text, perda_em timestamptz, perda_etapa text,
+  orcamento_id bigint, estagio text default 'lead',
   criado_em timestamptz default now(), atualizado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   titulo text, inicio timestamptz, status text default 'ativo', desfecho text,
-  tipo text default 'empresa', tipo_evento text);
+  tipo text default 'empresa', tipo_evento text, pre_reserva_ate timestamptz);
+-- a coluna do funil (parte 2b) e o histórico que o card anda escreve
+create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
+  ordem int default 0, fase text default 'venda', unique (conta_id, chave));
+create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
+create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint,
+  membro_id bigint, tipo text, descricao text, criado_em timestamptz default now());
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  canal text default 'whatsapp', agente_ativo boolean default false);
 """
 
 
@@ -83,12 +93,13 @@ def _lead(pool, conta, vend, nome, dia, *, status="qualificado", tipo="Casamento
     return lid
 
 
-def _festa(pool, conta, dia, tipo="Locação", status="ativo"):
+def _festa(pool, conta, dia, tipo="Locação", status="ativo", lead=None, ate=None):
     with pool.connection() as c:
-        eid = c.execute("""insert into eventos_agenda (conta_id, titulo, inicio, tipo, tipo_evento, status)
-                           values (%s,'Festa',%s,'empresa',%s,%s) returning id""",
+        eid = c.execute("""insert into eventos_agenda (conta_id, titulo, inicio, tipo, tipo_evento, status,
+                                                      prospeccao_id, pre_reserva_ate)
+                           values (%s,'Festa',%s,'empresa',%s,%s,%s,%s) returning id""",
                         (conta, datetime.combine(dia, datetime.min.time(), tzinfo=BRT).replace(hour=18),
-                         tipo, status)).fetchone()[0]
+                         tipo, status, lead, ate)).fetchone()[0]
         c.commit()
     return eid
 
@@ -355,3 +366,175 @@ def test_migracao_216_e_idempotente(pool):
     with pool.connection() as c:
         c.execute((MIG / "216_lista_espera_data.sql").read_text(encoding="utf-8"))
         c.commit()
+
+
+
+# ------------------------------------------------------------------ a coluna do funil (parte 2b)
+
+def _coluna(pool, conta):
+    with pool.connection() as c:
+        c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem) values (%s,'lista_espera',"
+                  "'Lista de espera',908) on conflict do nothing", (conta,))
+        c.commit()
+
+
+def _status(pool, lid):
+    with pool.connection() as c:
+        return c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0]
+
+
+def test_a_propria_reserva_nao_e_data_tomada(pool):
+    """O lead que segurou a PRÓPRIA data (pré-reserva ligada ao card) não entra na
+    lista de espera dela, nem ganha o selo — era o que acontecia antes."""
+    conta = _conta(pool, "Própria")
+    v = _vend(pool, conta)
+    dia = date(2027, 2, 13)
+    lid = _lead(pool, conta, v, "Iara", dia, status="proposta")
+    _festa(pool, conta, dia, status="pre_reservado", lead=lid)
+    assert le.sincronizar(pool, conta, HOJE)["entraram"] == 0
+    assert le.tomada_para(pool, conta, lid, dia)["tomada"] is False
+    with pool.connection() as c:
+        assert le.selos(c, conta, [{"id": lid, "status": "proposta", "evento_em": dia}], HOJE) == {}
+
+
+def test_data_ocupada_ganha_o_selo_e_nao_muda_de_coluna_sozinho(pool):
+    conta = _conta(pool, "Selo")
+    _coluna(pool, conta)
+    v = _vend(pool, conta)
+    dia = date(2027, 2, 20)
+    _festa(pool, conta, dia)
+    lid = _lead(pool, conta, v, "Léo", dia, status="proposta")
+    le.rodar(pool, HOJE)
+    assert _status(pool, lid) == "proposta"               # ninguém anda sozinho
+    with pool.connection() as c:
+        assert le.selos(c, conta, [{"id": lid, "status": "proposta", "evento_em": dia}], HOJE) == \
+            {lid: ("📅 data ocupada · 20/02", "bad")}
+
+
+def test_aceitar_esperar_leva_pra_coluna_e_mostra_a_fila(pool):
+    conta = _conta(pool, "Aceita")
+    _coluna(pool, conta)
+    v = _vend(pool, conta)
+    dia = date(2027, 3, 6)
+    _festa(pool, conta, dia, status="pre_reservado", ate=datetime(2026, 10, 20, 18, tzinfo=BRT))
+    a = _lead(pool, conta, v, "Léo", dia, status="proposta")
+    b = _lead(pool, conta, v, "Bia", dia, status="contatado")
+    assert le.aceitar(pool, conta, a, v)["ok"]
+    assert le.aceitar(pool, conta, b, v)["ok"]
+    assert _status(pool, a) == "lista_espera" and _status(pool, b) == "lista_espera"
+    with pool.connection() as c:
+        mov = c.execute("select de, para, motivo from funil_movimentos where prospeccao_id=%s", (a,)).fetchall()
+        sel = le.selos(c, conta, [{"id": a, "status": "lista_espera", "evento_em": dia},
+                                  {"id": b, "status": "lista_espera", "evento_em": dia}], HOJE)
+    assert mov == [("proposta", "lista_espera", "manual")]
+    assert sel[a] == ("⏳ 1º da fila · 06/03 · a reserva do outro vence 20/10", "nt")
+    assert sel[b][0].startswith("⏳ 2º da fila")
+
+
+def test_aceitar_com_a_data_livre_nao_poe_na_lista(pool):
+    conta = _conta(pool, "Livre")
+    _coluna(pool, conta)
+    v = _vend(pool, conta)
+    lid = _lead(pool, conta, v, "Livre", date(2027, 3, 13), status="proposta")
+    r = le.aceitar(pool, conta, lid, v)
+    assert not r["ok"] and "está livre" in r["erro"]
+    assert _status(pool, lid) == "proposta"
+
+
+def test_a_data_abre_o_1o_da_fila_volta_pra_proposta_e_o_aviso_sai(pool, monkeypatch):
+    """O defeito de antes: a sincronização rodava ANTES do aviso e tirava da lista,
+    como "atendido", quem esperava a data que acabou de abrir — o aviso nunca saía."""
+    conta = _conta(pool, "Abre")
+    _coluna(pool, conta)
+    v1, v2 = _vend(pool, conta, "Jacqueline"), _vend(pool, conta, "Pedro")
+    dia = date(2027, 4, 17)
+    ev = _festa(pool, conta, dia)
+    a = _lead(pool, conta, v1, "Léo", dia, status="proposta")
+    b = _lead(pool, conta, v2, "Bia", dia, status="proposta")
+    c_ = _lead(pool, conta, v2, "Caio", dia, status="proposta")   # só interessado, não aceitou
+    le.aceitar(pool, conta, a, v1)
+    le.aceitar(pool, conta, b, v2)
+    le.sincronizar(pool, conta, HOJE)
+    _cancelar(pool, ev)
+    pushes = []
+    from finance import cockpit as ck, notificar as nt
+    monkeypatch.setattr(ck, "enviar_push", lambda pool_, conta_, m, t, corpo, *a_, **k: pushes.append((m, t)) or 1)
+    monkeypatch.setattr(nt, "enviar_para_dono", lambda *a_, **k: True)
+    le.rodar(pool, HOJE)
+    assert {m for m, _t in pushes} == {v1, v2}                 # os três avisados, cada um pro seu
+    assert len(pushes) == 3
+    assert _status(pool, a) == "proposta"                      # o 1º da fila volta
+    assert _status(pool, b) == "lista_espera"                  # o 2º continua esperando
+    assert _status(pool, c_) == "proposta"
+    with pool.connection() as c:
+        nota = c.execute("select descricao from prospeccao_atividades where prospeccao_id=%s "
+                         "order by id desc limit 1", (a,)).fetchone()[0]
+    assert "era o 1º da fila" in nota
+
+
+def test_o_2o_da_fila_continua_esperando_com_a_data_aberta(pool, monkeypatch):
+    conta = _conta(pool, "Fila")
+    _coluna(pool, conta)
+    v = _vend(pool, conta)
+    dia = date(2027, 5, 8)
+    ev = _festa(pool, conta, dia)
+    a = _lead(pool, conta, v, "Primeiro", dia, status="proposta")
+    b = _lead(pool, conta, v, "Segundo", dia, status="proposta")
+    le.aceitar(pool, conta, a, v)
+    le.aceitar(pool, conta, b, v)
+    _cancelar(pool, ev)
+    from finance import cockpit as ck, notificar as nt
+    monkeypatch.setattr(ck, "enviar_push", lambda *a_, **k: 1)
+    monkeypatch.setattr(nt, "enviar_para_dono", lambda *a_, **k: True)
+    le.rodar(pool, HOJE)
+    le.rodar(pool, HOJE)                                      # e o ciclo seguinte não o tira
+    assert _status(pool, a) == "proposta" and _status(pool, b) == "lista_espera"
+    assert le.esperando_por(pool, conta, b) == [dia]
+
+
+def test_mudou_a_data_sai_da_coluna(pool):
+    conta = _conta(pool, "Mudou")
+    _coluna(pool, conta)
+    v = _vend(pool, conta)
+    dia = date(2027, 5, 15)
+    _festa(pool, conta, dia)
+    lid = _lead(pool, conta, v, "Mudou", dia, status="proposta")
+    le.aceitar(pool, conta, lid, v)
+    with pool.connection() as c:
+        c.execute("update prospeccao set evento_em=%s where id=%s", (date(2027, 5, 22), lid))
+        c.commit()
+    r = le.rodar(pool, HOJE)
+    assert r["voltaram"] == 1 and _status(pool, lid) == "proposta"
+
+
+def test_a_data_passou_vira_perdido_por_data_indisponivel(pool):
+    conta = _conta(pool, "Passou")
+    _coluna(pool, conta)
+    v = _vend(pool, conta)
+    dia = date(2026, 9, 1)
+    lid = _lead(pool, conta, v, "Antigo", dia, status="lista_espera")
+    assert le.data_passou(pool, conta, HOJE) == 1
+    with pool.connection() as c:
+        st, motivo, etapa = c.execute("select status, perda_motivo, perda_etapa from prospeccao "
+                                      "where id=%s", (lid,)).fetchone()
+    assert (st, motivo, etapa) == ("perdido", "data_indisponivel", "lista_espera")
+
+
+def test_quem_espera_sai_do_follow_up_e_do_resgate():
+    import inspect
+    from finance import follow_up as fu, resgate as rg
+    assert "p.status <> 'lista_espera'" in inspect.getsource(fu)
+    assert "p.status <> 'lista_espera'" in rg._sql_leads(True)
+
+
+def test_o_selo_e_o_botao_no_quadro_e_no_app():
+    import inspect
+    from web import painel_cockpit as pc
+    from web import painel_prospeccao as pp
+    assert '{% if c.selo_data %}<div class="kbvis {{ c.selo_data[1] }}"' in pp._KANBAN_TPL
+    assert 'action="/painel/prospeccao/{{ c.id }}/lista-espera"' in pp._KANBAN_TPL
+    assert "_le.aceitar(pool, ctx[\"conta_id\"], lead_id" in inspect.getsource(pp.prospeccao_lista_espera)
+    app = inspect.getsource(pc._bloco_espera)
+    assert "_le.tomada_para(" in app and "/lista-espera" in app and "aceita esperar esta data" in app
+    assert "_le.aceitar(pool, conta_id, lead_id, membro_id)" in inspect.getsource(pc.cockpit_lista_espera)
+    pp._env.parse(pp._KANBAN_TPL)

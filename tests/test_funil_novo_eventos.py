@@ -100,6 +100,15 @@ def _migrar(c):
     c.commit()
 
 
+def _migrar_lista(c):
+    """A 419 (parte 2b): a coluna Lista de espera. Ela também liga `festas_por_dia`
+    em `contas`, que este esquema não tem — por isso a tabela nasce aqui."""
+    c.execute("create table if not exists contas (id bigint primary key, festas_por_dia int)")
+    c.execute("insert into contas (id) values (%s) on conflict do nothing", (PRIME,))
+    c.execute((BASE / "419_lista_espera_coluna.sql").read_text(encoding="utf-8"))
+    c.commit()
+
+
 def _etapas(c, conta):
     return {r[0]: r[1:] for r in c.execute(
         """select chave, rotulo, ordem, fase, gatilho, gatilho_ativo, sai_do_quadro
@@ -274,7 +283,8 @@ def test_conta_sem_as_colunas_novas_nao_mexe(pool):
 def test_o_modelo_de_eventos_tem_o_desenho_novo():
     chaves = [e[0] for e in rxp.etapas_padrao("eventos")]
     assert chaves == ["novo", "contatado", "ficha_completa", "qualificado", "visita_feita",
-                      "proposta", "evento_realizado", "ganho", "pos_festa", "perdido"]
+                      "proposta", "evento_realizado", "ganho", "pos_festa", "lista_espera",
+                      "perdido"]
     rot = {e[0]: e[1] for e in rxp.etapas_padrao("eventos")}
     assert rot["qualificado"] == "Visita marcada" and rot["evento_realizado"] == "Data segurada"
     # o recorrente não muda (§6)
@@ -291,6 +301,8 @@ def test_a_conta_nova_nasce_com_o_pos_festa_na_fase_pos_venda(pool):
 def test_a_prime_migrada_fica_dentro_do_modelo(pool):
     with pool.connection() as c:
         _migrar(c)
+        _migrar_lista(c)
+        assert c.execute("select festas_por_dia from contas where id=%s", (PRIME,)).fetchone()[0] == 1
         assert fm.desencontro(c, PRIME, "eventos") == 0
         # e o plano não propõe tirar nada que ela usa, nem criar de novo
         assert [i for i in fm.plano(c, PRIME, "eventos") if i["acao"] in ("criar", "rotulo")] == []

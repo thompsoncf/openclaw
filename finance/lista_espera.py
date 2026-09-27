@@ -40,8 +40,14 @@ _log = logging.getLogger("finance.lista_espera")
 SUGESTOES = 3
 #: até onde procurar data livre, pra frente e pra trás (dias)
 JANELA_SUGESTAO = 45
-#: status de lead que ainda estão em jogo (espelha finance.raio_x.ABERTOS)
-ABERTOS = ("novo", "contatado", "qualificado", "proposta")
+#: status de lead que ainda estão em jogo: as etapas de venda do funil de eventos
+#: (o funil novo de 27/09/2026 — Qualificado é `ficha_completa`, Visita feita é
+#: `visita_feita`) e a própria coluna da lista de espera
+ABERTOS = ("novo", "contatado", "ficha_completa", "qualificado", "visita_feita", "proposta",
+           "lista_espera")
+#: a coluna do funil (funil novo de eventos, parte 2b — docs/mockups/
+#: funil_novo_rotinas.html): o card vai pra ela quando o cliente ACEITA esperar
+COLUNA = "lista_espera"
 #: por que saiu da lista
 MOTIVOS_SAIDA = ("fechou", "mudou_data", "desistiu", "atendido")
 
@@ -107,6 +113,28 @@ def _ocupacao(c, conta_id: int, de: date, ate: date) -> dict[date, int]:
     return {r[0]: int(r[1]) for r in rows}
 
 
+def _festas_por_data(c, conta_id: int, de: date, ate: date) -> dict[date, list]:
+    """As festas de cada dia, com o lead de cada uma (None = festa sem card): é o
+    que separa "a data está tomada POR OUTRO" de "a festa é deste lead". Sem isso, o
+    cliente que acabou de segurar a própria data entraria na lista de espera dela."""
+    out: dict[date, list] = {}
+    for d, lead, status, ate_quando in c.execute("""
+        select (e.inicio at time zone 'America/Sao_Paulo')::date, e.prospeccao_id,
+               coalesce(e.status, 'ativo'), e.pre_reserva_ate
+          from eventos_agenda e
+         where e.conta_id = %s and e.tipo = 'empresa' and coalesce(e.tipo_evento, '') <> ''
+           and coalesce(e.status, 'ativo') in ('ativo', 'pre_reservado')
+           and (e.inicio at time zone 'America/Sao_Paulo')::date between %s and %s""",
+            (conta_id, de, ate)).fetchall():
+        out.setdefault(d, []).append({"lead": lead, "pre": status == "pre_reservado",
+                                      "ate": ate_quando})
+    return out
+
+
+def _de_outros(festas: list, lead_id: int) -> list:
+    return [f for f in festas if f["lead"] != lead_id]
+
+
 def data_tomada(pool, conta_id: int, dia: date | None) -> dict | None:
     """A data está tomada? Devolve {tomada, festas, limite, o_que} ou None quando
     a conta não usa lista (ou não há data)."""
@@ -132,6 +160,26 @@ def data_tomada(pool, conta_id: int, dia: date | None) -> dict | None:
         _log.info("lista_espera: data_tomada falhou: %s: %s", type(e).__name__, e)
         return None
     return {"tomada": n >= limite, "festas": n, "limite": limite, "o_que": o_que, "data": dia}
+
+
+def tomada_para(pool, conta_id: int, lead_id: int, dia: date | None) -> dict | None:
+    """`data_tomada` do ponto de vista DESTE lead: a festa ou a pré-reserva dele não
+    conta — quem segurou a própria data não está "com a data tomada"."""
+    if not dia:
+        return None
+    limite = festas_por_dia(pool, conta_id)
+    if limite is None:
+        return None
+    try:
+        with pool.connection() as c:
+            outros = _de_outros(_festas_por_data(c, conta_id, dia, dia).get(dia, []), lead_id)
+    except Exception as e:  # noqa: BLE001
+        _log.info("lista_espera: tomada_para falhou: %s: %s", type(e).__name__, e)
+        return None
+    pre = [f["ate"] for f in outros if f["pre"] and f["ate"]]
+    return {"tomada": len(outros) >= limite, "festas": len(outros), "limite": limite,
+            "o_que": "pré-reserva" if outros and len(pre) == len(outros) else "festa",
+            "reserva_vence": min(pre) if pre and len(pre) == len(outros) else None, "data": dia}
 
 
 def datas_livres_perto(pool, conta_id: int, dia: date | None, quantas: int = SUGESTOES,
@@ -172,14 +220,16 @@ def datas_livres_perto(pool, conta_id: int, dia: date | None, quantas: int = SUG
 
 def entrar(pool, conta_id: int, lead_id: int, dia: date) -> bool:
     """Põe o lead na lista daquela data. Idempotente: se já está (e não saiu),
-    não faz nada; se tinha saído, volta."""
+    não faz nada; se tinha saído, volta — e volta como espera NOVA (`avisado_em`
+    zera): a data que abriu e fechou de novo tem que avisar de novo quando reabrir."""
     try:
         with pool.connection() as c:
             c.execute("""
                 insert into lista_espera_data (conta_id, prospeccao_id, data)
                 values (%s, %s, %s)
                 on conflict (prospeccao_id, data) do update
-                   set saiu_em = null, saiu_motivo = null, entrou_em = coalesce(lista_espera_data.entrou_em, now())
+                   set saiu_em = null, saiu_motivo = null, avisado_em = null,
+                       entrou_em = coalesce(lista_espera_data.entrou_em, now())
                  where lista_espera_data.saiu_em is not null""", (conta_id, lead_id, dia))
             c.commit()
         return True
@@ -231,14 +281,21 @@ def sincronizar(pool, conta_id: int, hoje: date | None = None) -> dict:
             if leads:
                 de = min(l[1] for l in leads)
                 ate = max(l[1] for l in leads)
-                ocup = _ocupacao(c, conta_id, de, ate)
+                festas = _festas_por_data(c, conta_id, de, ate)
             else:
-                ocup = {}
-            na_lista = {(r[0], r[1]) for r in c.execute(
-                "select prospeccao_id, data from lista_espera_data where conta_id = %s and saiu_em is null",
-                (conta_id,)).fetchall()}
+                festas = {}
+            linhas = c.execute(
+                "select prospeccao_id, data, avisado_em from lista_espera_data "
+                "where conta_id = %s and saiu_em is null", (conta_id,)).fetchall()
+            na_lista = {(r[0], r[1]) for r in linhas}
+            # A DATA ABRIU E NINGUÉM FOI AVISADO AINDA: a linha fica até o aviso sair.
+            # Antes, a sincronização (que roda antes do aviso) tirava esse lead da
+            # lista como "atendido" no mesmo ciclo em que a data abria — e o aviso,
+            # que só olha quem ainda está na lista, nunca saía.
+            nao_avisados = {(r[0], r[1]) for r in linhas if r[2] is None}
         for lid, dia, status in leads:
-            tomada = ocup.get(dia, 0) >= limite
+            # tomada POR OUTRO: a festa (ou pré-reserva) do próprio lead não conta
+            tomada = len(_de_outros(festas.get(dia, []), lid)) >= limite
             em_jogo = status in ABERTOS
             # perdido por "data indisponível" continua esperando: o cliente ainda
             # quer aquele dia, e é justamente quem avisar quando abrir
@@ -248,6 +305,13 @@ def sincronizar(pool, conta_id: int, hoje: date | None = None) -> dict:
                 if entrar(pool, conta_id, lid, dia):
                     entraram += 1
             elif (lid, dia) in na_lista and not (tomada and em_jogo):
+                if em_jogo and not tomada and (lid, dia) in nao_avisados:
+                    continue            # abriu: o aviso sai primeiro (`avisar`)
+                if status == COLUNA and not tomada:
+                    # quem ACEITOU esperar continua na fila com a data aberta: o 1º
+                    # voltou pra Proposta (`avisar`), e o 2º é o próximo se ela fechar
+                    # de novo sem ele
+                    continue
                 motivo = ("fechou" if status == "ganho" else "atendido" if not tomada else "desistiu")
                 saíram += sair(pool, conta_id, lid, motivo, dia)
         # lead que MUDOU de data: a linha antiga não aparece mais no laço acima
@@ -359,21 +423,21 @@ def datas_que_abriram(pool, conta_id: int, hoje: date | None = None) -> list[dic
             rows = c.execute("""
                 select l.id, l.data, l.prospeccao_id, l.entrou_em, p.vendedor_id,
                        coalesce(nullif(p.contato, ''), nullif(p.empresa, ''), 'lead'),
-                       coalesce(nullif(p.evento_tipo, ''), '')
+                       coalesce(nullif(p.evento_tipo, ''), ''), p.status
                   from lista_espera_data l join prospeccao p on p.id = l.prospeccao_id
                  where l.conta_id = %s and l.saiu_em is null and l.avisado_em is null
                    and l.data >= %s
                  order by l.data, l.entrou_em""", (conta_id, hoje)).fetchall()
             if not rows:
                 return []
-            ocup = _ocupacao(c, conta_id, min(r[1] for r in rows), max(r[1] for r in rows))
+            festas = _festas_por_data(c, conta_id, min(r[1] for r in rows), max(r[1] for r in rows))
     except Exception as e:  # noqa: BLE001
         _log.info("lista_espera: datas_que_abriram falhou: %s: %s", type(e).__name__, e)
         return []
     return [{"id": r[0], "data": r[1], "lead_id": r[2], "entrou_em": r[3], "vendedor_id": r[4],
-             "nome": r[5], "tipo": r[6],
+             "nome": r[5], "tipo": r[6], "status": r[7],
              "dias_esperando": (datetime.now(r[3].tzinfo) - r[3]).days if r[3] else 0}
-            for r in rows if ocup.get(r[1], 0) < limite]
+            for r in rows if len(_de_outros(festas.get(r[1], []), r[2])) < limite]
 
 
 def _marcar_avisado(pool, ids: list[int]) -> int:
@@ -439,6 +503,18 @@ def avisar(pool, conta_id: int, hoje: date | None = None, push=None, telegram=No
             push(conta_id, x["vendedor_id"], titulo, corpo)
         except Exception as e:  # noqa: BLE001 — aviso que falha não desfaz a marca
             _log.info("lista_espera: push falhou (lead %s): %s: %s", x["lead_id"], type(e).__name__, e)
+    # O 1º DA FILA (quem ACEITOU esperar e está na coluna) volta pra Proposta: a data
+    # é dele até alguém dizer o contrário. Os outros da coluna continuam esperando.
+    primeiros: dict[date, dict] = {}
+    for x in sorted(meus, key=lambda y: (y["data"], y["entrou_em"] or datetime.max)):
+        if x.get("status") == COLUNA and x["data"] not in primeiros:
+            primeiros[x["data"]] = x
+    for x in primeiros.values():
+        try:
+            voltar_pra_proposta(pool, conta_id, x)
+        except Exception as e:  # noqa: BLE001
+            _log.info("lista_espera: 1º da fila falhou (lead %s): %s: %s",
+                      x["lead_id"], type(e).__name__, e)
     try:
         por_dia: dict[date, list[str]] = {}
         for x in meus:
@@ -467,11 +543,216 @@ def rodar(pool, hoje: date | None = None) -> dict:
         if not usa_lista(pool, conta_id):
             continue
         out["contas"] += 1
-        s = sincronizar(pool, conta_id, hoje)
-        out["entraram"] += s["entraram"]
-        out["sairam"] += s["sairam"]
+        # o aviso ANTES da sincronização: a data que abriu é avisada no mesmo ciclo
         try:
             out["avisados"] += avisar(pool, conta_id, hoje)
         except Exception as e:  # noqa: BLE001
             _log.info("lista_espera.rodar: avisar falhou (conta %s): %s: %s", conta_id, type(e).__name__, e)
+        s = sincronizar(pool, conta_id, hoje)
+        out["entraram"] += s["entraram"]
+        out["sairam"] += s["sairam"]
+        out["passaram"] = out.get("passaram", 0) + data_passou(pool, conta_id, hoje)
+        out["voltaram"] = out.get("voltaram", 0) + fora_da_espera(pool, conta_id, hoje)
+    return out
+
+
+def fora_da_espera(pool, conta_id: int, hoje: date | None = None) -> int:
+    """O card na coluna que NÃO espera mais nada: a data da festa mudou (ou foi
+    apagada) e não há fila dele pra data nova. Sem isto ele ficaria preso na coluna
+    pra sempre — nenhum gatilho anda pra trás. Volta pra Proposta, com a nota."""
+    from finance import funil_regua as fr
+    hoje = hoje or date.today()
+    n = 0
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                """select p.id, p.evento_em from prospeccao p
+                    where p.conta_id=%s and p.status=%s
+                      and (p.evento_em is null or p.evento_em >= %s)
+                      and not exists (select 1 from lista_espera_data l
+                                       where l.conta_id = p.conta_id and l.prospeccao_id = p.id
+                                         and l.data = p.evento_em and l.saiu_em is null)""",
+                (conta_id, COLUNA, hoje)).fetchall()
+            for lid, dia in rows:
+                if c.execute("""update prospeccao set status='proposta', atualizado_em=now()
+                                 where id=%s and conta_id=%s and status=%s""",
+                             (lid, conta_id, COLUNA)).rowcount:
+                    fr.registrar_movimento(c, conta_id, lid, COLUNA, "proposta", "lista_espera")
+                    _nota(c, lid, None, (f"A data mudou pra {dia:%d/%m}: saiu da lista de espera."
+                                         if dia else "A data da festa foi apagada: saiu da lista de espera."))
+                    n += 1
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.info("lista_espera: fora_da_espera falhou (conta %s): %s: %s", conta_id, type(e).__name__, e)
+    return n
+
+
+# ---------------------------------------------------------------- a coluna
+
+def tem_coluna(c, conta_id: int) -> bool:
+    return bool(c.execute("select 1 from funil_etapas where conta_id=%s and chave=%s",
+                          (conta_id, COLUNA)).fetchone())
+
+
+def _nota(c, lead_id: int, membro_id, texto: str) -> None:
+    try:
+        with c.transaction():
+            c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao)
+                         values (%s,%s,'nota',%s)""", (lead_id, membro_id, texto))
+    except Exception:  # noqa: BLE001 — a nota é o enfeite; o card anda sem ela
+        pass
+
+
+def aceitar(pool, conta_id: int, lead_id: int, membro_id: int | None = None) -> dict:
+    """O cliente ACEITOU esperar a data que pediu (mockup, seção "A proposta e a
+    data"): o card vai pra coluna Lista de espera e entra na fila daquela data. Só
+    com a data tomada POR OUTRO — esperar a própria reserva não é espera."""
+    from finance import funil_regua as fr
+    if not usa_lista(pool, conta_id):
+        return {"ok": False, "erro": "A conta não usa lista de espera (Empresa › festas por dia)."}
+    with pool.connection() as c:
+        r = c.execute("""select status, evento_em, estagio from prospeccao
+                          where id=%s and conta_id=%s""", (lead_id, conta_id)).fetchone()
+        if not r or r[2] != "lead" or r[0] not in ABERTOS:
+            return {"ok": False, "erro": "Esse card não está em jogo."}
+        status, dia = r[0], r[1]
+        if not dia:
+            return {"ok": False, "erro": "O card não tem a data da festa."}
+        limite = festas_por_dia(pool, conta_id)
+        if len(_de_outros(_festas_por_data(c, conta_id, dia, dia).get(dia, []), lead_id)) < limite:
+            return {"ok": False, "erro": f"A data {dia:%d/%m} está livre: dá pra seguir a venda."}
+        c.commit()
+    entrar(pool, conta_id, lead_id, dia)
+    with pool.connection() as c:
+        if status != COLUNA and tem_coluna(c, conta_id):
+            if c.execute("""update prospeccao set status=%s, atualizado_em=now()
+                             where id=%s and conta_id=%s and status=%s""",
+                         (COLUNA, lead_id, conta_id, status)).rowcount:
+                fr.registrar_movimento(c, conta_id, lead_id, status, COLUNA, "manual", membro_id)
+        _nota(c, lead_id, membro_id, f"Aceitou esperar a data {dia:%d/%m} (lista de espera).")
+        c.commit()
+    return {"ok": True, "data": dia}
+
+
+TEXTO_ABRIU = ("Oi{nome}! A data que você queria, {dia}, abriu 🎉 Ainda quer? "
+               "Se quiser, já seguro pra você.")
+_SEMANA = ("segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo")
+
+
+def voltar_pra_proposta(pool, conta_id: int, x: dict) -> bool:
+    """O 1º da fila, quando a data abre: volta pra Proposta, com a nota. Se o lead é
+    da IA do número (modelo 2), a IA chama o cliente — é a conversa dela; o do
+    vendedor recebe o push do `avisar`, e quem chama é ele."""
+    from finance import funil_regua as fr
+    lead = x["lead_id"]
+    with pool.connection() as c:
+        movido = c.execute("""update prospeccao set status='proposta', atualizado_em=now()
+                               where id=%s and conta_id=%s and status=%s""",
+                           (lead, conta_id, COLUNA)).rowcount
+        if not movido:
+            c.rollback()
+            return False
+        fr.registrar_movimento(c, conta_id, lead, COLUNA, "proposta", "lista_espera")
+        _nota(c, lead, None, f"A data {x['data']:%d/%m} abriu: era o 1º da fila de espera. "
+                             "Chame antes que feche em outro lugar.")
+        c.commit()
+    try:
+        from finance import chip_regra as _cr
+        with pool.connection() as c:
+            da_ia = x.get("vendedor_id") in _cr.membros_ia(c, conta_id)
+            cv = c.execute("""select id from conversas where conta_id=%s and prospeccao_id=%s
+                                and canal='whatsapp' and coalesce(agente_ativo,false)
+                              order by id desc limit 1""", (conta_id, lead)).fetchone()
+            c.commit()
+        if da_ia and cv:
+            from finance import agente
+            from finance import ia_visita as _iv
+            from finance.voltar_a_chamar import primeiro_nome
+            nome = primeiro_nome(x.get("nome"))
+            d = x["data"]
+            texto = TEXTO_ABRIU.format(nome=(", " + nome) if nome else "",
+                                       dia=f"{_SEMANA[d.weekday()]} {d:%d/%m}")
+            with pool.connection() as c:
+                res = _iv._mandar(c, conta_id, cv[0], texto)
+                if res.get("ok"):
+                    agente._add_bot_msg(c, cv[0], "whatsapp", texto, res.get("sid"))
+                c.commit()
+    except Exception as e:  # noqa: BLE001 — o card já voltou; a mensagem é o extra
+        _log.info("lista_espera: a IA chamar falhou (lead %s): %s: %s", lead, type(e).__name__, e)
+    return True
+
+
+def data_passou(pool, conta_id: int, hoje: date | None = None) -> int:
+    """Quem esperava uma data que PASSOU vai pra Perdido, "data indisponível" — a
+    mesma porta e o mesmo histórico do perdido de sempre."""
+    from finance import funil_perda as _perda
+    from finance import funil_regua as fr
+    hoje = hoje or date.today()
+    n = 0
+    try:
+        with pool.connection() as c:
+            ids = [r[0] for r in c.execute(
+                """select id from prospeccao where conta_id=%s and status=%s
+                     and evento_em is not null and evento_em < %s""",
+                (conta_id, COLUNA, hoje)).fetchall()]
+            for lid in ids:
+                if c.execute("""update prospeccao set status='perdido', atualizado_em=now()
+                                 where id=%s and conta_id=%s and status=%s""",
+                             (lid, conta_id, COLUNA)).rowcount:
+                    fr.registrar_movimento(c, conta_id, lid, COLUNA, "perdido", "lista_espera")
+                    _perda.registrar(c, conta_id, lid, motivo="data_indisponivel",
+                                     etapa_origem=COLUNA)
+                    n += 1
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.info("lista_espera: data_passou falhou (conta %s): %s: %s", conta_id, type(e).__name__, e)
+    return n
+
+
+def selos(c, conta_id: int, cards: list[dict], hoje: date | None = None) -> dict:
+    """O selo da data no card do funil, numa consulta pro quadro inteiro:
+
+        📅 data ocupada · 13/02            o card em jogo pede uma data tomada por outro
+        ⏳ 1º da fila · 13/02              na coluna, a posição na fila daquela data
+           · a reserva do outro vence 20/10  quando quem segura é uma pré-reserva
+
+    `cards` são os do quadro ({id, status, evento_em}). Sem a conta usar a lista, ou
+    sem as tabelas, nenhum selo."""
+    hoje = hoje or date.today()
+    try:
+        with c.transaction():
+            r = c.execute("select festas_por_dia from contas where id=%s", (conta_id,)).fetchone()
+            limite = int(r[0]) if (r and r[0]) else None
+            if not limite:
+                return {}
+            alvo = [x for x in cards if x.get("evento_em") and x["evento_em"] >= hoje
+                    and x.get("status") in ABERTOS]
+            if not alvo:
+                return {}
+            festas = _festas_por_data(c, conta_id, min(x["evento_em"] for x in alvo),
+                                      max(x["evento_em"] for x in alvo))
+            fila: dict[date, list[int]] = {}
+            for lid, d in c.execute(
+                    """select l.prospeccao_id, l.data from lista_espera_data l
+                         join prospeccao p on p.id = l.prospeccao_id and p.conta_id = l.conta_id
+                        where l.conta_id=%s and l.saiu_em is null and p.status=%s
+                        order by l.data, l.entrou_em""", (conta_id, COLUNA)).fetchall():
+                fila.setdefault(d, []).append(lid)
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for x in alvo:
+        d = x["evento_em"]
+        outros = _de_outros(festas.get(d, []), x["id"])
+        if x["status"] == COLUNA:
+            pos = fila.get(d, []).index(x["id"]) + 1 if x["id"] in fila.get(d, []) else None
+            txt = (f"⏳ {pos}º da fila · {d:%d/%m}" if pos else f"⏳ esperando {d:%d/%m}")
+            pre = [f for f in outros if f["pre"] and f["ate"]]
+            if pre and len(outros) == len(pre):
+                txt += f" · a reserva do outro vence {min(f['ate'] for f in pre):%d/%m}"
+            if len(outros) < limite:
+                txt = f"📅 a data {d:%d/%m} abriu"
+            out[x["id"]] = (txt, "nt")
+        elif len(outros) >= limite:
+            out[x["id"]] = (f"📅 data ocupada · {d:%d/%m}", "bad")
     return out

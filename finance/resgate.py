@@ -344,6 +344,8 @@ def _sql_leads(festa: bool) -> str:
                and not exists (select 1 from resgate_leads r2
                                 where r2.prospeccao_id = p.id and r2.origem = 'ia_numero')))
          and p.status not in {fr.sql_fechadas('p')}
+         -- A LISTA DE ESPERA (parte 2b): quem aceitou esperar a data não é parado.
+         and p.status <> 'lista_espera'
          -- A DATA SEGURADA (funil novo de eventos): aprovou e espera o sinal, não
          -- está parado — a reserva tem prazo próprio. O resgate não chama.
          and p.status not in (select fe.chave from funil_etapas fe

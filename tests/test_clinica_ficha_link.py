@@ -28,6 +28,7 @@ def banco(_banco_pacientes):  # noqa: F811
     with _banco_pacientes.connection() as c:
         c.execute((BASE / "411_clinica_ficha_link.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "417_clinica_termos_modelos.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "421_clinica_acesso_clinico.sql").read_text(encoding="utf-8"))
         c.commit()
     return _banco_pacientes
 
@@ -274,8 +275,9 @@ def test_so_o_profissional_le_a_pre_consulta(cli, banco, zap):  # noqa: F811
         eid = _marcar(c, lead)
         kid = _ficha_do_evento(c, eid)
         c.execute("insert into membros (id, conta_id, nome, papel) values (52,39,'Dr. Manoel','gestor')")
-        c.execute("update clinica_profissionais set membro_id=52, acesso='propria', conselho='CRM-MA 1234' "
-                  "where id=%s", (_manoel(c),))
+        # o dono liberou o prontuário pro Dr. Manoel (fase 1: só o dono libera)
+        c.execute("update clinica_profissionais set membro_id=52, acesso='propria', conselho='CRM-MA 1234', "
+                  "acesso_clinico=true, acesso_clinico_membro_id=52 where id=%s", (_manoel(c),))
         c.commit()
     _completar(banco, kid)
     cli.get("/_papel/vendedor/51")                                  # a recepção
@@ -302,7 +304,7 @@ def test_na_chegada_o_agendamento_avisa_que_falta_o_cpf(cli, banco, zap):  # noq
 def test_o_agente_nunca_le_a_pre_consulta():
     """Seção 01 do mockup: o agente do WhatsApp nunca lê conteúdo clínico. A tabela só é
     lida em finance/clinica_preconsulta.py, e as respostas só saem por `ultima`, chamada
-    só onde `pode_ler` foi conferido."""
+    só depois do portão do acesso clínico (finance/clinica_acesso_clinico.ler)."""
     for arq in ("finance/agente.py", "finance/clinica_agente.py"):
         assert "preconsulta" not in (RAIZ / arq).read_text(encoding="utf-8"), arq
     fora = [str(p.relative_to(RAIZ)) for pasta in ("finance", "web", "contas", "db")
@@ -312,7 +314,7 @@ def test_o_agente_nunca_le_a_pre_consulta():
     for p in (RAIZ / "web").rglob("*.py"):
         t = p.read_text(encoding="utf-8")
         if re.search(r"cpc\.ultima\(", t):
-            assert "pode_ler(" in t, p.name
+            assert ".ler(c" in t, p.name              # o portão do acesso clínico, que registra
 
 
 def test_cpf_de_outra_conta_nao_mostra_o_nome_de_ninguem(banco, zap):  # noqa: F811

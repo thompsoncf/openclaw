@@ -369,6 +369,8 @@ def salvar_profissional(c, conta_id: int, *, id: int | None = None, nome: str,
     campos = (nome[:80], (funcao or "").strip()[:80] or None, (especialidade or "").strip()[:80] or None,
               (conselho or "").strip()[:40] or None, cor, membro_id, acesso, bool(aviso_agenda))
     if id:
+        antes = c.execute("select membro_id, coalesce(conselho,''), acesso from clinica_profissionais "
+                          "where id=%s and conta_id=%s", (id, conta_id)).fetchone()
         r = c.execute(
             """update clinica_profissionais
                   set nome=%s, funcao=%s, especialidade=%s, conselho=%s, cor=%s,
@@ -376,6 +378,16 @@ def salvar_profissional(c, conta_id: int, *, id: int | None = None, nome: str,
                 where id=%s and conta_id=%s returning id""", campos + (id, conta_id)).fetchone()
         if not r:
             return "Profissional não encontrado."
+        if antes and (antes[0] != membro_id or antes[1] != (campos[3] or "") or antes[2] != acesso):
+            # o prontuário foi liberado pra ESTE login e ESTE conselho: mudou, desliga (só o
+            # dono liga de novo — o gestor não se dá acesso trocando o login do médico)
+            try:
+                with c.transaction():
+                    c.execute("""update clinica_profissionais set acesso_clinico=false, acesso_clinico_em=null
+                                  where id=%s and conta_id=%s""", (id, conta_id))
+            except Exception as e:  # noqa: BLE001 — só a base sem a 419 passa calada
+                if "does not exist" not in str(e):
+                    raise
     else:
         ordem = c.execute("select coalesce(max(ordem),0)+1 from clinica_profissionais where conta_id=%s",
                           (conta_id,)).fetchone()[0]

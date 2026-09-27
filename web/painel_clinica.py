@@ -97,6 +97,8 @@ def configurar(request: Request):
         membros = cc.membros_da_conta(c, conta_id)
         resumo = cc.resumo(c, conta_id)
         todos_profs = cc.listar_profissionais(c, conta_id, so_ativos=False)
+        from finance import clinica_acesso_clinico as acc
+        prontuario = acc.estado(c, conta_id)
         # a prova de que a grade funciona: os próximos horários livres de cada um,
         # no primeiro atendimento que ele faz
         amostra = {}
@@ -124,7 +126,8 @@ def configurar(request: Request):
                    resumo=resumo, amostra=amostra, nome_tipo=nome_tipo, nome_prof=nome_prof,
                    CAT=cc.CATEGORIAS, CAT_D=dict(cc.CATEGORIAS), FUNCOES=cc.FUNCOES,
                    CORES=cc.CORES, ACESSOS=cc.ACESSOS, ACESSO_D=dict(cc.ACESSOS),
-                   REPETE=cc.REPETE, DIAS=cc.DIAS, hoje=hoje.isoformat(),
+                   REPETE=cc.REPETE, DIAS=cc.DIAS, hoje=hoje.isoformat(), prontuario=prontuario,
+                   e_o_dono=_e_o_dono(request),
                    aviso=_AVISOS.get(q.get("aviso") or "", ""),
                    erro=request.session.pop("clinica_erro", ""))
 
@@ -152,6 +155,32 @@ def salvar_profissional(request: Request, id: str = Form(""), nome: str = Form("
                    funcao=funcao, especialidade=especialidade, conselho=conselho, cor=cor,
                    acesso=acesso, membro_id=_int(membro_id), aviso_agenda=bool(aviso_agenda),
                    tipos=[t for t in (_int(x) for x in tipos) if t])
+
+
+def _e_o_dono(request: Request) -> bool:
+    """O dono de verdade (o suporte "entrando como" dono não conta)."""
+    s = request.session
+    return (s.get("papel") or "dono") == "dono" and not s.get("suporte_acesso_id") and not s.get("suporte_de")
+
+
+@router.post("/painel/clinica/profissional/{profissional_id}/prontuario")
+def liberar_prontuario(request: Request, profissional_id: int, acesso: str = Form(""), e_dono: str = Form("")):
+    """Só o DONO libera o prontuário (a regra da seção 01 do desenho): o gestor não se dá
+    acesso ao conteúdo clínico, e o suporte do Zaq também não."""
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not _e_o_dono(request):
+        return _ir(request, "prof", erro="Só o dono da conta libera o prontuário.")
+    from finance import clinica_acesso_clinico as acc
+    with get_pool().connection() as c:
+        erro = acc.liberar(c, conta[0], profissional_id, acesso=bool(acesso), e_dono=bool(e_dono),
+                           por="Dono da conta")
+        if erro:
+            c.rollback()
+            return _ir(request, "prof", erro=erro)
+        c.commit()
+    return _ir(request, "prof", "salvo")
 
 
 @router.post("/painel/clinica/tipo")
@@ -287,16 +316,25 @@ details.cl-ed summary::-webkit-details-marker{display:none}
     <div class="cl-card" style="border-left-color:{{ p.cor }}">
       <div class="cab"><span class="nome">{{ p.nome }}</span>
         <span class="meta">{{ p.funcao or 'função a confirmar' }}{% if p.conselho %} · {{ p.conselho }}{% endif %}</span>
-        <span class="cl-chip">{{ ACESSO_D[p.acesso] }}</span></div>
+        <span class="cl-chip">{{ ACESSO_D[p.acesso] }}</span>
+        {% set pr = prontuario.get(p.id) %}{% if pr and pr.acesso_clinico %}<span class="cl-chip on">lê o prontuário{% if pr.e_dono %} · dono da conta{% endif %}</span>{% endif %}</div>
       <div class="cl-chips">{% for t in tipos %}{% if t.id in p.tipos %}<span class="cl-chip on">{{ t.nome }}</span>{% endif %}{% endfor %}
         {% if not p.tipos %}<span class="meta">nenhum atendimento marcado</span>{% endif %}</div>
       {% if grade_de.get(p.id) %}<div class="meta" style="margin-top:.3rem">{% for g in grade_de[p.id] %}{{ g.dias_txt }} {{ '%02d:%02d'|format(g.inicio.hour, g.inicio.minute) }}–{{ '%02d:%02d'|format(g.fim.hour, g.fim.minute) }} · {{ g.local }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+      {% if e_o_dono and p.funcao != 'Recepção, não atende' %}{% set pr = prontuario.get(p.id) or {} %}
+      <form class="cl-form" method="post" action="/painel/clinica/profissional/{{ p.id }}/prontuario" style="margin-top:.4rem">
+        <div class="meta inteira">Login ligado: {% if pr.login %}<b>{{ pr.login }}</b>{% if pr.email and pr.email != pr.login %} ({{ pr.email }}){% endif %}{% else %}nenhum{% endif %}. A liberação vale só para este login: se trocar, desliga.</div>
+        <label class="cx inteira"><input type="checkbox" name="acesso" value="1" {% if pr.acesso_clinico %}checked{% endif %}> Lê o prontuário (profissional de saúde, com conselho). Só o dono libera.</label>
+        <label class="cx inteira"><input type="checkbox" name="e_dono" value="1" {% if pr.e_dono %}checked{% endif %}> Este profissional sou eu, o dono da conta (entro com o login do dono)</label>
+        <div class="cl-acoes"><button class="sec">Salvar o acesso ao prontuário</button></div>
+      </form>{% endif %}
       <details class="cl-ed"><summary>Editar</summary>{% set f = p %}{% include "clinica_form_prof.html" %}
         <div class="cl-acoes" style="margin-top:.4rem"><form class="cl-rm" method="post" action="/painel/clinica/profissional/{{ p.id }}/remover" onsubmit="return confirm('Tirar da agenda? A grade deste profissional para de valer.')"><button>Tirar da agenda</button></form></div>
       </details>
     </div>
   {% else %}<div class="meta">Ninguém cadastrado ainda.</div>{% endfor %}
   </div>
+  <div class="meta" style="margin:.6rem 0">Prontuário: só lê quem o dono liberou aqui. <a href="/painel/clinica/registro">Registro de acesso ao prontuário</a></div>
   <div class="cl-novo"><details class="cl-ed" {% if not profs %}open{% endif %}><summary>+ Novo profissional</summary>{% set f = None %}{% include "clinica_form_prof.html" %}</details></div>
   {% endif %}
 

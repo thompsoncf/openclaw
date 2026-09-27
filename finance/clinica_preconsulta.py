@@ -4,7 +4,8 @@ Desenho aprovado: docs/mockups/clinica_prontuario.html, seções 01 (quem vê o 
 (a ficha que nasce no agendamento). Migração 411.
 
 É CONTEÚDO CLÍNICO. Por isso mora aqui, separado da ficha:
-  - só o PROFISSIONAL DE SAÚDE da clínica lê as respostas (`pode_ler` + `ultima`);
+  - só o PROFISSIONAL DE SAÚDE da clínica lê as respostas (`clinica_acesso_clinico.ler`,
+    que também registra a leitura, e depois `ultima`);
   - a recepção, o dono e o gestor sem registro veem só que foi respondida e se há
     alergia, sem o texto (`resumo`);
   - o agente do WhatsApp nunca importa este módulo nem lê a tabela
@@ -87,24 +88,9 @@ def salvar(c, conta_id: int, cliente_id: int, respostas: dict, *, curta: bool, e
 
 # ------------------------------------------------------------------ quem lê
 
-def pode_ler(c, conta_id: int, membro_id: int | None) -> bool:
-    """Profissional de saúde da clínica, com login e registro no conselho (seção 01).
-    Não vem do papel no sistema: o dono que não é profissional de saúde não lê."""
-    if not membro_id:
-        return False
-    try:
-        with c.transaction():
-            r = c.execute(
-                """select 1 from clinica_profissionais
-                    where conta_id=%s and membro_id=%s and ativo and acesso <> 'sem_login'
-                      and coalesce(conselho, '') <> '' limit 1""", (conta_id, membro_id)).fetchone()
-    except Exception:  # noqa: BLE001
-        return False
-    return bool(r)
-
-
 def ultima(c, conta_id: int, cliente_id: int) -> dict | None:
-    """As respostas da última pré-consulta. SÓ para quem `pode_ler`."""
+    """As respostas da última pré-consulta. SÓ depois do portão do acesso clínico
+    (finance/clinica_acesso_clinico.ler), que confere o profissional e registra a leitura."""
     try:
         with c.transaction():
             r = c.execute(

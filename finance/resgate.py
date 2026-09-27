@@ -1051,9 +1051,28 @@ def redigir_toque(pool, conta_id: int, lead: dict, n: int, agora: datetime | Non
     return msg[:800] or None
 
 
-def _toques_devidos(c, conta_id: int, agora: datetime) -> list[dict]:
-    """Quem já foi chamado, não respondeu, e está no dia do próximo toque. Só com a
-    conversa ainda da IA (ninguém da equipe assumiu) e o lead ainda do membro IA."""
+def _sql_toque_ok() -> str:
+    """As travas de um toque, as MESMAS da fila: o lead ainda do membro IA, a conversa
+    ainda da IA, sem resposta do cliente desde a retomada, card não fechado, festa que
+    não passou nem é já, e sem visita marcada pra frente ("se ele marcou a visita a IA
+    não se entromete"). Vale na escolha E de novo logo antes de mandar — entre as duas
+    a IA pensou uns segundos, e o cliente pode ter respondido nesse meio."""
+    from finance import funil_regua as fr
+    from finance import visita as vis
+    return f"""
+              and p.vendedor_id = r.membro_id and cv.agente_ativo and cv.status <> 'pendente'
+              and p.status not in {fr.sql_fechadas('p')}
+              and (p.evento_em is null or p.evento_em >= current_date + {int(FESTA_MIN_DIAS)})
+              and not exists (select 1 from mensagens mi where mi.conversa_id = r.conversa_id
+                                 and mi.direcao = 'in' and mi.criado_em > r.entrou_em)
+              and not exists (select 1 from eventos_agenda e
+                               where e.conta_id = r.conta_id and e.prospeccao_id = r.prospeccao_id
+                                 and e.inicio >= now() and {vis.sql_conta('e', festa=False)})"""
+
+
+def _toques_devidos(c, conta_id: int, agora: datetime, membro_id=None) -> list[dict]:
+    """Quem já foi chamado, não respondeu, e está no dia do próximo toque (só os do
+    membro IA da config: é a regra dele que responde se o cliente voltar)."""
     rows = c.execute(
         """select r.prospeccao_id, r.conversa_id, r.toques, r.entrou_em, r.ultimo_envio_em,
                   cv.chip_id,
@@ -1063,8 +1082,8 @@ def _toques_devidos(c, conta_id: int, agora: datetime) -> list[dict]:
              join prospeccao p on p.id = r.prospeccao_id and p.conta_id = r.conta_id
              join conversas cv on cv.id = r.conversa_id and cv.conta_id = r.conta_id
             where r.conta_id=%s and r.ativo and r.estado='chamado' and not r.opt_out
-              and p.vendedor_id = r.membro_id and cv.agente_ativo and cv.status <> 'pendente'
-              and r.ultimo_envio_em is not null
+              and r.membro_id = %s
+              and r.ultimo_envio_em is not null""" + _sql_toque_ok() + """
               and ((r.toques = 1 and r.entrou_em <= %s and r.ultimo_envio_em <= %s)
                 or (r.toques = 2 and r.entrou_em <= %s and r.ultimo_envio_em <= %s))
               and not exists (select 1 from resgate_envios e
@@ -1072,7 +1091,7 @@ def _toques_devidos(c, conta_id: int, agora: datetime) -> list[dict]:
                                  and ((e.tipo = 'toque' and e.criado_em > %s)
                                    or (e.tipo = 'erro_texto' and e.criado_em > %s)))
             order by r.ultimo_envio_em""",
-        (conta_id, agora - timedelta(days=TOQUE_2_DIAS), agora - timedelta(days=TOQUE_2_DIAS),
+        (conta_id, membro_id, agora - timedelta(days=TOQUE_2_DIAS), agora - timedelta(days=TOQUE_2_DIAS),
          agora - timedelta(days=TOQUE_3_DIAS), agora - timedelta(days=TOQUE_INTERVALO_DIAS),
          agora - timedelta(days=1), agora - timedelta(hours=6))).fetchall()
     return [{"id": r[0], "conversa_id": r[1], "toques": r[2], "entrou_em": r[3],
@@ -1087,7 +1106,7 @@ def _um_toque(pool, conta_id: int, cfg: dict, regra, agora: datetime, out: dict)
     from finance import agente as ag
     from finance import whatsapp_out as wo
     with pool.connection() as c:
-        devidos = [x for x in _toques_devidos(c, conta_id, agora)
+        devidos = [x for x in _toques_devidos(c, conta_id, agora, cfg.get("membro_id"))
                    if _chip_de_pe(c, conta_id, x["chip_id"])]
         if not devidos:
             c.commit()
@@ -1106,19 +1125,37 @@ def _um_toque(pool, conta_id: int, cfg: dict, regra, agora: datetime, out: dict)
             c.commit()
         return True
     with pool.connection() as c:
+        # RECONFERE E REIVINDICA, numa transação, antes de mandar: o cliente pode ter
+        # respondido enquanto a IA escrevia (aí a IA já está conversando com ele), e o
+        # toque não pode sair duas vezes se a gravação depois do envio cair — por isso
+        # o `toques` sobe AGORA, e só volta se o envio falhar
+        ok = c.execute(
+            """update resgate_leads r set toques=%s, ultimo_envio_em=now()
+                 from prospeccao p, conversas cv
+                where r.prospeccao_id=%s and r.conta_id=%s and r.ativo and r.estado='chamado'
+                  and not r.opt_out and r.toques=%s
+                  and p.id = r.prospeccao_id and p.conta_id = r.conta_id
+                  and cv.id = r.conversa_id and cv.conta_id = r.conta_id""" + _sql_toque_ok(),
+            (n, lead["id"], conta_id, lead["toques"])).rowcount
+        if not ok:
+            c.rollback()
+            return True
+        _registrar(c, conta_id, "toque", lead=lead["id"], texto=texto)
+        envio_id = c.execute("select max(id) from resgate_envios where prospeccao_id=%s "
+                             "and tipo='toque'", (lead["id"],)).fetchone()[0]
         destino = wo.preparar(c, conta_id)
         c.commit()
     res = wo.enviar_pronto(destino, lead["numero"], texto, chip_id=lead["chip_id"])
     with pool.connection() as c:
         if res.get("ok"):
             ag._add_bot_msg(c, lead["conversa_id"], "whatsapp", texto, res.get("sid"))
-            c.execute("""update resgate_leads set toques=%s, ultimo_envio_em=now()
-                          where prospeccao_id=%s and conta_id=%s""", (n, lead["id"], conta_id))
-            _registrar(c, conta_id, "toque", lead=lead["id"], texto=texto)
             out["toques"] = out.get("toques", 0) + 1
         else:
-            _registrar(c, conta_id, "toque", lead=lead["id"], texto=texto, ok=False,
-                       erro=str(res.get("erro") or "falhou")[:200])
+            c.execute("""update resgate_leads set toques=%s, ultimo_envio_em=%s
+                          where prospeccao_id=%s and conta_id=%s""",
+                      (lead["toques"], lead["ultimo_envio_em"], lead["id"], conta_id))
+            c.execute("update resgate_envios set ok=false, erro=%s where id=%s",
+                      (str(res.get("erro") or "falhou")[:200], envio_id))
         c.commit()
     return True
 
@@ -1142,10 +1179,13 @@ def _perder_sem_resposta(pool, conta_id: int, agora: datetime) -> int:
                    and r.ultimo_envio_em <= %s""",
             (conta_id, agora - timedelta(days=PERDIDO_DEPOIS_DIAS))).fetchall()
         for lead, status, fechado in rows:
-            if not fechado and status != "perdido":
+            if fechado:
+                continue            # alguém fechou a venda: isso não é "não respondeu"
+            if status != "perdido":
                 try:
                     with c.transaction():
-                        _fp.fechar(c, conta_id, {"id": lead, "etapa": status}, agora)
+                        if not _fp.fechar(c, conta_id, {"id": lead, "etapa": status}, agora):
+                            continue        # o card mudou entre a leitura e agora
                 except Exception as e:  # noqa: BLE001
                     _log.warning("resgate: não fechei o lead %s como perdido: %s", lead, e)
                     continue

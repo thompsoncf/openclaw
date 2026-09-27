@@ -38,7 +38,7 @@ OS TOQUES
 A ABA RESGATE NO DESAFIO
 
 - Por faixa da fila: quantos foram chamados, quantos responderam (e em até 7 dias), visitas, orçamentos, contratos, quantos pediram pra parar, quantos viraram perdido e o custo da IA.
-- A régua: o que acontecia quando alguém da equipe voltava a chamar um lead parado 7 dias. Na Prime, em setembro: 31% respondiam em até 7 dias.
+- A régua: o que acontecia quando alguém da sua equipe voltava a chamar um lead parado 7 dias — quantos respondiam em até 7 dias e quantos fechavam.
 
 Fica em Comunicação › Agente › Regras por número › Desafio IA × equipe. Visão de dono e gestor.$txt$,
  timestamptz '2026-09-27 16:00:00+00')

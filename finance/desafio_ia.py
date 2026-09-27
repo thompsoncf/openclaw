@@ -209,9 +209,14 @@ def resgate(pool, conta_id: int, ini: date, fim: date) -> dict | None:
     except Exception:  # noqa: BLE001 — banco sem a 396
         return None
     sql = f"""
+        with r as (
+          select r.*, (select min(m.criado_em) from mensagens m
+                        where m.conversa_id = r.conversa_id and m.direcao = 'in'
+                          and m.criado_em > r.entrou_em) resp_em
+            from resgate_leads r where r.conta_id = %s)
         select r.faixa,
-               r.respondeu_em is not null,
-               r.respondeu_em is not null and r.respondeu_em <= r.entrou_em + interval '7 days',
+               r.resp_em is not null,
+               r.resp_em is not null and r.resp_em <= r.entrou_em + interval '7 days',
                exists (select 1 from eventos_agenda e
                         where e.conta_id = r.conta_id and e.prospeccao_id = r.prospeccao_id
                           and e.inicio >= r.entrou_em and {vis.sql_conta('e', festa=festa)}),
@@ -223,12 +228,12 @@ def resgate(pool, conta_id: int, ini: date, fim: date) -> dict | None:
                           and c.assinado_em >= r.entrou_em and {SQL_CT_VIVO}),
                r.opt_out, r.estado = 'perdido',
                r.prospeccao_id, r.entrou_em
-          from resgate_leads r join prospeccao p on p.id = r.prospeccao_id and p.conta_id = r.conta_id
+          from r join prospeccao p on p.id = r.prospeccao_id and p.conta_id = r.conta_id
          where r.conta_id=%s and (r.entrou_em at time zone '{_TZ}')::date >= %s
            and (r.entrou_em at time zone '{_TZ}')::date < %s"""
     try:
         with pool.connection() as c:
-            rows = c.execute(sql, (conta_id, ini, fim)).fetchall()
+            rows = c.execute(sql, (conta_id, conta_id, ini, fim)).fetchall()
             custo = {}
             if rows:
                 try:
@@ -236,7 +241,9 @@ def resgate(pool, conta_id: int, ini: date, fim: date) -> dict | None:
                         custo = {int(x[0]): int(x[1]) for x in c.execute(
                             """select u.prospeccao_id, coalesce(sum(u.custo_centavos), 0)
                                  from ia_uso u join resgate_leads r on r.prospeccao_id = u.prospeccao_id
-                                where u.conta_id=%s and r.conta_id=%s and u.criado_em >= r.entrou_em
+                                where u.conta_id=%s and r.conta_id=%s
+                                  -- a retomada é escrita segundos ANTES da passagem (entrou_em)
+                                  and u.criado_em >= r.entrou_em - interval '10 minutes'
                                   and u.prospeccao_id = any(%s)
                                 group by u.prospeccao_id""",
                             (conta_id, conta_id, [x[8] for x in rows])).fetchall()}

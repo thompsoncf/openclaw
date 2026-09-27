@@ -908,3 +908,61 @@ def test_a_regua_do_vendedor(pool, equipe):
         c.commit()
     r = dia.regua_do_vendedor(pool, EMPRESA)
     assert r == {"retomadas": 1, "responderam": 1, "resp_pct": 100, "fecharam": 0}
+
+
+# ══════════════════════════════════════════════ o que a revisão da etapa 2 pegou
+
+def test_o_toque_nao_sai_se_o_cliente_respondeu_enquanto_a_ia_escrevia(pool, equipe, duble, monkeypatch):
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        _atrasar(c, 3)
+
+    def _escreve_e_o_cliente_responde(pool_, conta, lead, n, agora=None):
+        with pool_.connection() as c2:
+            c2.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                       "values (%s,'whatsapp','in','lead','oi! tô aqui')", (cv,))
+            c2.commit()
+        return "Toque que não pode sair"
+    monkeypatch.setattr(rg, "redigir_toque", _escreve_e_o_cliente_responde)
+    rg.rodar(pool)
+    assert "Toque que não pode sair" not in [s["texto"] for s in duble["saiu"]]
+    with pool.connection() as c:
+        assert c.execute("select toques from resgate_leads").fetchone()[0] == 1
+
+
+def test_card_fechado_nao_recebe_toque_nem_vira_perdido(pool, equipe, duble):
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("update prospeccao set status='fechado' where id=%s", (lid,))
+        _atrasar(c, 3)
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1
+    with pool.connection() as c:
+        c.execute("update resgate_leads set toques=3")
+        _atrasar(c, 4)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select estado from resgate_leads").fetchone()[0] == "chamado"
+        assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "fechado"
+
+
+def test_visita_marcada_depois_da_retomada_para_os_toques(pool, equipe, duble):
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("insert into eventos_agenda (conta_id, titulo, inicio, prospeccao_id) "
+                  "values (%s,'Visita — Carla', now() + interval '2 days', %s)", (EMPRESA, lid))
+        c.commit()
+        _atrasar(c, 3)
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1
+
+
+def test_o_toque_que_falha_volta_a_contagem(pool, equipe, duble):
+    _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        _atrasar(c, 3)
+    duble["estado"]["ok"] = False
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select toques from resgate_leads").fetchone()[0] == 1
+        assert c.execute("select ok from resgate_envios where tipo='toque'").fetchone()[0] is False

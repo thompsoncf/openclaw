@@ -1,7 +1,7 @@
 """A pré-consulta: o que o paciente conta antes da consulta, pelo link da ficha.
 
 Desenho aprovado: docs/mockups/clinica_prontuario.html, seções 01 (quem vê o quê) e 12
-(a ficha que nasce no agendamento). Migração 409.
+(a ficha que nasce no agendamento). Migração 411.
 
 É CONTEÚDO CLÍNICO. Por isso mora aqui, separado da ficha:
   - só o PROFISSIONAL DE SAÚDE da clínica lê as respostas (`pode_ler` + `ultima`);
@@ -111,7 +111,7 @@ def ultima(c, conta_id: int, cliente_id: int) -> dict | None:
                 """select curta, respostas, criado_em, respondida_por from clinica_preconsultas
                     where conta_id=%s and cliente_id=%s order by criado_em desc limit 1""",
                 (conta_id, cliente_id)).fetchone()
-    except Exception:  # noqa: BLE001 — migração 409 ainda não rodou
+    except Exception:  # noqa: BLE001 — migração 411 ainda não rodou
         return None
     if not r:
         return None
@@ -143,7 +143,7 @@ def resumo(c, conta_id: int, cliente_ids: list[int]) -> dict[int, dict]:
                                    and x.cliente_id = q.cliente_id and not x.curta)
                      from clinica_preconsultas q where conta_id=%s and cliente_id = any(%s)
                     order by cliente_id, criado_em desc""", (conta_id, list(cliente_ids))).fetchall()
-    except Exception:  # noqa: BLE001 — migração 409 ainda não rodou
+    except Exception:  # noqa: BLE001 — migração 411 ainda não rodou
         return {}
     return {r[0]: {"quando": r[1], "alergia": bool(r[2]), "tem_completa": bool(r[3])} for r in rows}
 

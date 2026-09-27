@@ -1,4 +1,4 @@
--- 410_novidade_ficha_link.sql
+-- 412_novidade_ficha_link.sql
 -- O aviso do link "complete sua ficha" (finance/clinica_ficha_link.py, /ficha/{token}),
 -- seguindo a seção 5 do CLAUDE.md.
 --

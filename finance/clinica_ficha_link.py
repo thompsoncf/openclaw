@@ -1,7 +1,7 @@
 """O link "complete sua ficha": a ficha que nasce no agendamento e o paciente termina no celular.
 
 Desenho aprovado: docs/mockups/clinica_prontuario.html, seções 12 e 13 (ideias 2, 3, 6
-e 8). Migração 409. Página pública: /ficha/{token} (web/ficha_publica.py).
+e 8). Migração 411. Página pública: /ficha/{token} (web/ficha_publica.py).
 
   1. Marcou a consulta: a ficha nasce (finance/clinica_pacientes.ligar_evento).
   2. A confirmação do horário leva o link (`linha_da_mensagem`); a véspera lembra dele
@@ -51,7 +51,7 @@ def ligado(c, conta_id: int) -> bool:
     try:
         with c.transaction():
             r = c.execute("select ficha_link from clinica_agenda_config where conta_id=%s", (conta_id,)).fetchone()
-    except Exception:  # noqa: BLE001 — migração 409 ainda não rodou
+    except Exception:  # noqa: BLE001 — migração 411 ainda não rodou
         return False
     return bool(r and r[0] == "ligado")
 
@@ -60,7 +60,7 @@ def salvar_ligado(c, conta_id: int, valor: str) -> str | None:
     if valor not in ("off", "ligado"):
         return "Opção inválida."
     if (valor == "ligado") == ligado(c, conta_id):
-        return None                  # nada mudou (e a base sem a 409 não quebra a tela)
+        return None                  # nada mudou (e a base sem a 411 não quebra a tela)
     try:
         with c.transaction():
             c.execute("""insert into clinica_agenda_config (conta_id, ficha_link) values (%s,%s)

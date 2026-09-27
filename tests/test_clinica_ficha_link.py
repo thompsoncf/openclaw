@@ -1,7 +1,7 @@
 """O link "complete sua ficha" (finance/clinica_ficha_link.py, finance/clinica_preconsulta.py,
 /ficha/{token}) — passo 0c do prontuário, seções 12 e 13 do mockup.
 
-Reaproveita o banco dos pacientes (tests/test_clinica_pacientes.py) e põe a 409 por cima.
+Reaproveita o banco dos pacientes (tests/test_clinica_pacientes.py) e põe a 411 por cima.
 """
 import re
 from datetime import date, time
@@ -26,7 +26,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 @pytest.fixture()
 def banco(_banco_pacientes):  # noqa: F811
     with _banco_pacientes.connection() as c:
-        c.execute((BASE / "409_clinica_ficha_link.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "411_clinica_ficha_link.sql").read_text(encoding="utf-8"))
         c.commit()
     return _banco_pacientes
 
@@ -373,8 +373,8 @@ def test_no_retorno_a_alergia_e_perguntada_e_vira_aviso(banco, zap):  # noqa: F8
         assert cfl.situacao(c, CLINICA, kid, AGORA)["alergia"]
 
 
-def test_antes_da_409_as_telas_nao_quebram(pool, zap, monkeypatch):  # noqa: F811
-    """Sem a migração 409: nada de 500 na agenda, no agendamento nem na confirmação."""
+def test_antes_da_411_as_telas_nao_quebram(pool, zap, monkeypatch):  # noqa: F811
+    """Sem a migração 411: nada de 500 na agenda, no agendamento nem na confirmação."""
     from finance import clinica_preconsulta as cpc
     with pool.connection() as c:
         assert cfl.ligado(c, CLINICA) is False

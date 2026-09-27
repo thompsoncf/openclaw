@@ -188,6 +188,8 @@ def disputas(pool, conta_id: int, cfg: dict, agora: datetime) -> int:
                   and coalesce(e.tipo_evento, '') <> '' and p.status = %s
                   and not exists (select 1 from data_disputas d where d.evento_id = e.id)""",
             (list(ABERTOS), conta_id, agora, chave)).fetchall()
+        from finance import chip_regra as _cr
+        ia = _cr.membros_ia(c, conta_id)
         c.commit()
     for ev, lead, ate, dia, vend, nome, da_ia, outro in rows:
         if not outro:
@@ -215,6 +217,8 @@ def disputas(pool, conta_id: int, cfg: dict, agora: datetime) -> int:
                  f"{vence:%d/%m} às {vence.hour}h"
                  + (f" (passou pra {int(horas)}h por causa da disputa)" if novo != ate else "")
                  + ". Vale lembrar do sinal.")
+        if vend in ia:
+            continue          # o membro da IA: o WhatsApp dele é o do dono da conta
         _avisar(pool, conta_id, vend, f"⚠️ Outro cliente pediu {quando}", corpo,
                 f"/cockpit/lead/{lead}")
     return n
@@ -304,15 +308,26 @@ def pos_festa(pool, conta_id: int, cfg: dict, agora: datetime) -> int:
                  from prospeccao p
                 where p.conta_id=%s and p.status='pos_festa' and p.estagio='lead'
                   and p.evento_em is not null and p.evento_em >= %s and p.evento_em < %s
-                  and not exists (select 1 from pos_festa_envios x where x.prospeccao_id = p.id)""",
-            (conta_id, desde, hoje)).fetchall()
+                  and not exists (select 1 from pos_festa_envios x
+                                   where x.prospeccao_id = p.id
+                                     and (x.quem = 'vendedor' or x.enviado_em is not null
+                                          or x.envio_falhas >= %s
+                                          or x.envio_falhou_em > %s))""",
+            (conta_id, desde, hoje, MAX_FALHAS, agora - INTERVALO_FALHA)).fetchall()
         c.commit()
     for lead, vend, quem, dia, conv in rows:
         nome = primeiro_nome(quem)
         if vend in ia and conv:
             if not (HORAS_CLIENTE[0] <= loc.hour < HORAS_CLIENTE[1]):
                 continue
-            if not _reivindicar(pool, conta_id, lead, "ia"):
+            if not _reivindicar_ia(pool, conta_id, lead, agora):
+                continue
+            from finance import teto_chip as _tc
+            with pool.connection() as c:
+                pode = _tc.pode(c, conta_id, conv, agora)
+                c.commit()
+            if not pode:
+                _desfazer(pool, lead)          # o teto do chip: tenta no próximo ciclo
                 continue
             texto = texto_pos_festa(nome, dia, hoje, link, com_indicacao=True)
             try:
@@ -320,18 +335,18 @@ def pos_festa(pool, conta_id: int, cfg: dict, agora: datetime) -> int:
                 from finance import ia_visita as _iv
                 with pool.connection() as c:
                     res = _iv._mandar(c, conta_id, conv, texto)
-                    if res.get("ok"):
-                        agente._add_bot_msg(c, conv, "whatsapp", texto, res.get("sid"))
-                    else:
-                        c.execute("delete from pos_festa_envios where prospeccao_id=%s", (lead,))
                     c.commit()
-                n += bool(res.get("ok"))
             except Exception as e:  # noqa: BLE001
                 _log.warning("pos_festa: envio falhou (lead %s): %s", lead, e)
+                res = {"ok": False, "erro": str(e)}
+            _fechar_envio(pool, conta_id, lead, conv, texto, res, agora)
+            n += bool(res.get("ok"))
             continue
         if not (HORAS_EQUIPE[0] + 1 <= loc.hour < HORAS_EQUIPE[1]):
             continue
-        if not vend or not _reivindicar(pool, conta_id, lead, "vendedor"):
+        # o vendedor que É A IA sem conversa de pé: o aviso iria pro WhatsApp do dono da
+        # conta (o número do "ZAQ SDR") — não sai (revisão de 27/09/2026)
+        if not vend or vend in ia or not _reivindicar(pool, conta_id, lead, "vendedor"):
             continue
         sugestao = texto_pos_festa(nome, dia, hoje, link, com_indicacao=True)
         _avisar(pool, conta_id, vend, f"🎉 A festa {('de ' + nome) if nome else ''} foi "
@@ -340,6 +355,68 @@ def pos_festa(pool, conta_id: int, cfg: dict, agora: datetime) -> int:
                 f"/cockpit/lead/{lead}")
         n += 1
     return n
+
+
+#: o pós-festa da IA: poucas tentativas, bem espaçadas — é um agradecimento, e
+#: repetir é pior que faltar (revisão de 27/09/2026: antes a falha apagava a
+#: reivindicação e o relógio mandava de novo a cada ~2 min, sem limite)
+MAX_FALHAS = 3
+INTERVALO_FALHA = timedelta(minutes=30)
+
+
+def talvez_saiu(res: dict) -> bool:
+    """O envio "falhou" por PRAZO ESTOURADO: a mensagem pode ter saído (o provedor
+    recebeu e demorou a responder). Não se tenta de novo — mandar duas vezes o mesmo
+    agradecimento é pior que não mandar."""
+    erro = str(res.get("erro") or "").lower()
+    return "timed out" in erro or "timeout" in erro
+
+
+def _reivindicar_ia(pool, conta_id: int, lead: int, agora: datetime) -> bool:
+    """Reivindica o envio da IA: a linha nasce (ou, depois de uma falha, é retomada)
+    com `envio_falhou_em = agora` — é a marca de "em andamento" que impede outro
+    worker de mandar junto, e que libera de novo em 30 min se o processo cair."""
+    with pool.connection() as c:
+        r = c.execute("""insert into pos_festa_envios (prospeccao_id, conta_id, quem, envio_falhou_em)
+                         values (%(l)s, %(c)s, 'ia', %(a)s)
+                         on conflict (prospeccao_id) do update set envio_falhou_em = %(a)s
+                          where pos_festa_envios.quem = 'ia' and pos_festa_envios.enviado_em is null
+                            and pos_festa_envios.envio_falhas < %(m)s
+                            and (pos_festa_envios.envio_falhou_em is null
+                                 or pos_festa_envios.envio_falhou_em <= %(lim)s)
+                         returning prospeccao_id""",
+                      {"l": lead, "c": conta_id, "a": agora, "m": MAX_FALHAS,
+                       "lim": agora - INTERVALO_FALHA}).fetchone()
+        c.commit()
+    return bool(r)
+
+
+def _desfazer(pool, lead: int) -> None:
+    with pool.connection() as c:
+        c.execute("""update pos_festa_envios set envio_falhou_em = null
+                      where prospeccao_id=%s and enviado_em is null""", (lead,))
+        c.commit()
+
+
+def _fechar_envio(pool, conta_id: int, lead: int, conv: int, texto: str, res: dict,
+                  agora: datetime) -> None:
+    from finance import agente
+    from finance import teto_chip as _tc
+    with pool.connection() as c:
+        if res.get("ok") or talvez_saiu(res):
+            c.execute("""update pos_festa_envios set enviado_em = %s, envio_falhou_em = null
+                          where prospeccao_id=%s""", (agora, lead))
+            _tc.registrar(c, conta_id, conv, "pos_festa", agora)
+            if res.get("ok"):
+                try:
+                    with c.transaction():
+                        agente._add_bot_msg(c, conv, "whatsapp", texto, res.get("sid"))
+                except Exception:  # noqa: BLE001 — saiu; só não ficou gravado
+                    _log.warning("pos_festa: saiu mas não gravou (lead %s)", lead, exc_info=True)
+        else:
+            c.execute("""update pos_festa_envios set envio_falhas = envio_falhas + 1,
+                                envio_falhou_em = %s where prospeccao_id=%s""", (agora, lead))
+        c.commit()
 
 
 def _reivindicar(pool, conta_id: int, lead: int, quem: str) -> bool:

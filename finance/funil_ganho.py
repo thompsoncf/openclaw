@@ -75,7 +75,18 @@ def marcar_por_assinatura(pool, conta_id: int, orcamento_id: int) -> dict:
                 # quando a assinatura passou a amarrar o card do cliente que volta
                 # (`proposta_lead.garantir_pelo_orcamento`): o contrato ficaria preso
                 # num card em Perdido. O motivo e a data da perda ficam gravados.
-                if de != "perdido" and alturas.get(de) is not None and alturas[de] >= piso:
+                # a FASE DE VENDA acima do ganho (a Lista de espera, ordem 908) é venda
+                # em andamento, não "depois da venda" (revisão de 27/09/2026)
+                de_venda = False
+                try:
+                    with c.transaction():
+                        f = c.execute("select fase from funil_etapas where conta_id=%s and chave=%s",
+                                      (conta_id, de)).fetchone()
+                    de_venda = bool(f and f[0] == "venda")
+                except Exception:  # noqa: BLE001 — base sem `fase`: vale a ordem
+                    de_venda = False
+                if (de != "perdido" and not de_venda and alturas.get(de) is not None
+                        and alturas[de] >= piso):
                     return {"ok": False, "lead_id": lead_id, "de": de,
                             "motivo": "ja_passou_da_venda"}
                 c.execute(

@@ -105,6 +105,20 @@ def _alturas(c, conta_id: int) -> dict:
         return {}
 
 
+def _de_venda(c, conta_id: int, status: str) -> bool:
+    """A etapa é da FASE DE VENDA? A Lista de espera (funil novo, parte 2b) mora na
+    ordem 908, ACIMA do `ganho` (900), e é venda em andamento — medir "já vendeu"
+    pela ordem a tratava como venda fechada (revisão de 27/09/2026). Tolerante: base
+    sem a coluna `fase` responde False e vale a ordem, como antes."""
+    try:
+        with c.transaction():
+            r = c.execute("select fase from funil_etapas where conta_id=%s and chave=%s",
+                          (conta_id, status)).fetchone()
+        return bool(r and r[0] == "venda")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _nao_volta(c, conta_id: int, status: str | None) -> bool:
     """O card já está na altura da "Proposta" ou depois? Aí a proposta se amarra,
     mas o card fica onde está — é a mesma trava do `funil_ganho` ("nunca anda pra
@@ -117,7 +131,8 @@ def _nao_volta(c, conta_id: int, status: str | None) -> bool:
     alt = _alturas(c, conta_id)
     if status not in alt:
         return False
-    return alt[status] >= alt.get(ETAPA_PROPOSTA, alt[status] + 1) or alt[status] >= alt.get("ganho", 900)
+    return alt[status] >= alt.get(ETAPA_PROPOSTA, alt[status] + 1) or (
+        alt[status] >= alt.get("ganho", 900) and not _de_venda(c, conta_id, status))
 
 
 def _fechado(c, conta_id: int, lead_id: int) -> bool:
@@ -138,7 +153,7 @@ def _fechado(c, conta_id: int, lead_id: int) -> bool:
     if st == "perdido" or not st:
         return False
     alt = _alturas(c, conta_id)
-    return st in alt and alt[st] >= alt.get("ganho", 900)
+    return st in alt and alt[st] >= alt.get("ganho", 900) and not _de_venda(c, conta_id, st)
 
 
 def _candidatos(c, conta_id: int, telefone: str, email: str) -> list[int]:

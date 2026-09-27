@@ -3195,9 +3195,22 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
         # (migração 233) nasceriam todas atrasadas.
         antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
                           (lead_id, conta_id)).fetchone()
+        # SÓ PRA FRENTE (revisão de 27/09/2026): marcar uma visita num card que já
+        # está depois de "visita marcada" — Proposta, Visita feita, Data segurada,
+        # Lista de espera — puxava o card pra trás, com motivo 'manual', e a TRAVA 3
+        # não deixava os gatilhos devolverem. Agora o card só anda se estiver ANTES
+        # da coluna da visita marcada (ordem da própria conta).
         movido = c.execute(
             "update prospeccao set status='qualificado', ultimo_contato_em=now(), atualizado_em=now() "
-            "where id=%s and conta_id=%s and " + _ABERTO_T, (lead_id, conta_id)).rowcount
+            "where id=%s and conta_id=%s and " + _ABERTO_T +
+            " and coalesce((select fe.ordem from funil_etapas fe where fe.conta_id = prospeccao.conta_id"
+            "                and fe.chave = prospeccao.status), 0)"
+            "   < coalesce((select fe.ordem from funil_etapas fe where fe.conta_id = prospeccao.conta_id"
+            "                and fe.chave = 'qualificado'), 30)", (lead_id, conta_id)).rowcount
+        if not movido:
+            # o card não andou (já está adiante): o contato continua registrado
+            c.execute("update prospeccao set ultimo_contato_em=now(), atualizado_em=now() "
+                      "where id=%s and conta_id=%s", (lead_id, conta_id))
         # só registra o que de fato mudou: o `_ABERTO_T` acima recusa lead fechado, e
         # anotar um movimento que não aconteceu seria a mesma mentira ao contrário
         if movido and (not antes or antes[0] != "qualificado"):

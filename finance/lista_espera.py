@@ -32,7 +32,9 @@ data pra disputar — a regra 6 do CLAUDE.md em ação.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+from finance.agenda import BRT
 
 _log = logging.getLogger("finance.lista_espera")
 
@@ -314,6 +316,21 @@ def sincronizar(pool, conta_id: int, hoje: date | None = None) -> dict:
                     continue
                 motivo = ("fechou" if status == "ganho" else "atendido" if not tomada else "desistiu")
                 saíram += sair(pool, conta_id, lid, motivo, dia)
+        # A DATA FOI TOMADA DE NOVO (o 1º da fila segurou e a reserva venceu, ou outro
+        # fechou): quem continua na fila volta a esperar um aviso. Sem isto o 2º da
+        # fila, já marcado como avisado da primeira abertura, nunca mais era chamado e
+        # virava perdido "data indisponível" com a data livre (revisão de 27/09/2026).
+        avisados = {(r[0], r[1]) for r in linhas if r[2] is not None}
+        rearmar = [(lid, dia) for lid, dia, _st in leads
+                   if (lid, dia) in avisados
+                   and len(_de_outros(festas.get(dia, []), lid)) >= limite]
+        if rearmar:
+            with pool.connection() as c:
+                for lid, dia in rearmar:
+                    c.execute("""update lista_espera_data set avisado_em = null
+                                  where conta_id=%s and prospeccao_id=%s and data=%s
+                                    and saiu_em is null""", (conta_id, lid, dia))
+                c.commit()
         # lead que MUDOU de data: a linha antiga não aparece mais no laço acima
         atuais = {(l[0], l[1]) for l in leads}
         for lid, dia in na_lista - atuais:
@@ -495,8 +512,18 @@ def avisar(pool, conta_id: int, hoje: date | None = None, push=None, telegram=No
         from finance import notificar as _nt
         def telegram(conta, texto):  # noqa: E306
             return _nt.enviar_para_dono(pool, conta, texto)
+    # o vendedor que É A IA não recebe push: o aparelho dele é o do dono da conta, e
+    # o lead da IA é chamado pela própria IA (`voltar_pra_proposta`) — revisão de
+    # 27/09/2026
+    try:
+        from finance import chip_regra as _cr
+        with pool.connection() as c:
+            ia = _cr.membros_ia(c, conta_id)
+            c.commit()
+    except Exception:  # noqa: BLE001
+        ia = set()
     for x in meus:
-        if not x["vendedor_id"]:
+        if not x["vendedor_id"] or x["vendedor_id"] in ia:
             continue
         try:
             titulo, corpo = _texto_push(x)
@@ -528,10 +555,19 @@ def avisar(pool, conta_id: int, hoje: date | None = None, push=None, telegram=No
     return len(meus)
 
 
-def rodar(pool, hoje: date | None = None) -> dict:
+#: a janela do aviso de "a data abriu" (hora de Brasília): ele move o card, chama o
+#: cliente (lead da IA) e manda push/Telegram — nada disso de madrugada. Fora dela, a
+#: linha continua na lista sem aviso (`sincronizar` não tira quem não foi avisado) e o
+#: aviso sai no primeiro ciclo das 8h (revisão de 27/09/2026)
+HORAS_AVISO = (8, 21)
+
+
+def rodar(pool, hoje: date | None = None, agora: datetime | None = None) -> dict:
     """Chamado pelo ticker do web: sincroniza e avisa, em toda conta que usa a
     lista. Best-effort por conta — uma que falhe não segura as outras."""
     out = {"contas": 0, "entraram": 0, "sairam": 0, "avisados": 0}
+    agora = agora or datetime.now(timezone.utc)
+    hora_de_avisar = HORAS_AVISO[0] <= agora.astimezone(BRT).hour < HORAS_AVISO[1]
     try:
         with pool.connection() as c:
             contas = [r[0] for r in c.execute(
@@ -545,7 +581,8 @@ def rodar(pool, hoje: date | None = None) -> dict:
         out["contas"] += 1
         # o aviso ANTES da sincronização: a data que abriu é avisada no mesmo ciclo
         try:
-            out["avisados"] += avisar(pool, conta_id, hoje)
+            if hora_de_avisar:
+                out["avisados"] += avisar(pool, conta_id, hoje)
         except Exception as e:  # noqa: BLE001
             _log.info("lista_espera.rodar: avisar falhou (conta %s): %s: %s", conta_id, type(e).__name__, e)
         s = sincronizar(pool, conta_id, hoje)
@@ -666,14 +703,26 @@ def voltar_pra_proposta(pool, conta_id: int, x: dict) -> bool:
             c.commit()
         if da_ia and cv:
             from finance import agente
+            from finance import festa_rotinas as _frt
             from finance import ia_visita as _iv
+            from finance import teto_chip as _tc
             from finance.voltar_a_chamar import primeiro_nome
+            agora = datetime.now(timezone.utc)
+            with pool.connection() as c:
+                pode = _tc.pode(c, conta_id, cv[0], agora)
+                c.commit()
+            if not pode:
+                # o card já voltou pra Proposta, com a nota: o teto do chip segura só a
+                # mensagem — o dono fica sabendo pelo Telegram do `avisar`
+                return True
             nome = primeiro_nome(x.get("nome"))
             d = x["data"]
             texto = TEXTO_ABRIU.format(nome=(", " + nome) if nome else "",
                                        dia=f"{_SEMANA[d.weekday()]} {d:%d/%m}")
             with pool.connection() as c:
                 res = _iv._mandar(c, conta_id, cv[0], texto)
+                if res.get("ok") or _frt.talvez_saiu(res):
+                    _tc.registrar(c, conta_id, cv[0], "lista_espera", agora)
                 if res.get("ok"):
                     agente._add_bot_msg(c, cv[0], "whatsapp", texto, res.get("sid"))
                 c.commit()

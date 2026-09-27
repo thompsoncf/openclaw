@@ -375,11 +375,17 @@ def leads(c, conta_id: int, perfil: dict | None = None,
     toques_por_etapa = {k: v for k, v in toques_por_etapa.items() if v}
     hoje = agora.date()
     out = []
+    # O LEAD DO RESGATE É DA IA (migração 396): quem chama o cliente são os toques do
+    # resgate, e o dono do card é o membro IA, que não tem celular pra receber cobrança
+    from finance import resgate as _rg
+    da_ia = _rg.leads_da_ia(c, conta_id)
     for r in c.execute(_SQL_LEADS, {"conta": conta_id}).fetchall():
         (lid, status, vend, quem, temperatura, evento_em, ev_tipo, ev_conv, criado,
          na_etapa, saiu_na_etapa,
          ult_in, ult_out, tent, m_prazo, m_acao, m_em, adiados, vend_nome, m_por,
          msg_txt, msg_em, msg_dir, msg_id, visto, conversa_id, canal) = r
+        if lid in da_ia:
+            continue
         ult = max([x for x in (ult_in, ult_out) if x], default=None)
         # festa que já passou e o lead segue aberto: não há o que propor
         sem_acao = bool(tem_data and evento_em and evento_em < hoje)

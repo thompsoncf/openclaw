@@ -2798,7 +2798,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                                        escopo=escopo)
         ag_cfg, ag_conhec = None, None
         dist_cfg, dist_membros, dist_chips, dist_qr = None, [], [], False
-        regras_chip, regra_cat = [], None
+        regras_chip, regra_cat, resgate = [], None, None
         perfil = {"instagram": "", "cargo": "", "material": "", "material_tipo": "link"}
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
@@ -2816,6 +2816,12 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                 regras_chip = _cr.listar(c, ctx["conta_id"], dist_chips)
                 regra_cat = _cr.catalogo_liberado(c, ctx["conta_id"])
                 c.commit()
+                # O RESGATE DA IA (migração 396): mora no mesmo cartão, porque quem
+                # recebe o lead resgatado é o dono de uma regra por número
+                if any(ch.get("regra") for ch in regras_chip):
+                    from finance import resgate as _rgt
+                    resgate = _rgt.tela(c, ctx["conta_id"])
+                    c.commit()
             # QR x Twilio/Meta decide QUAL tela mostrar: no QR o aviso é texto livre e
             # há chip pra escolher; em Twilio/Meta a janela de 24h obriga template e não
             # existe chip nenhum. Pedir template pra quem está no QR — como esta tela
@@ -2863,6 +2869,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    resumo=_resumo_cfg(pool, ctx["conta_id"]), resumo_max=_rs_max(),
                    dist_cfg=dist_cfg, dist_membros=dist_membros, dist_chips=dist_chips,
                    dist_qr=dist_qr, regras_chip=regras_chip, regra_cat=regra_cat,
+                   resgate=resgate,
                    regra_eventos=modo_evento, **_ctx_grade_visita(),
                    regra_tem_pix=(_ia_tem_pix(ctx["conta_id"]) if regras_chip else True),
                    abrir=abrir, embed=request.query_params.get("embed") == "1",
@@ -4417,7 +4424,7 @@ def prospeccao_desafio_ia(request: Request, mes: str = ""):
     d = _dia.dados(pool, ctx["conta_id"], mes)
     return _render("prospeccao_desafio_ia", request, titulo="Desafio: IA × equipe",
                    secao_ativa="prospeccao", nav_ativo="comunicacao", gerencia=True,
-                   d=d, brl=brl, dur=_dur)
+                   d=d, brl=brl, dur=_dur, modo_evento=True)
 
 
 @router.post("/painel/prospeccao/comunicacao/regra-chip")
@@ -4466,6 +4473,62 @@ async def comunicacao_regra_chip(request: Request):
                            if f.get("tem_visita") else None)})
     request.session["prosp_aviso"] = ("Regra do número salva ✓" if r.get("ok")
                                       else r.get("erro") or "Não consegui salvar a regra.")
+    return RedirectResponse(_AG_DESTINO, status_code=303)
+
+
+def _salvar_resgate(conta_id: int, dados: dict) -> dict:
+    from finance import resgate as _rg
+    with get_pool().connection() as c:
+        r = _rg.salvar(c, conta_id, dados)
+        if r.get("ok"):
+            c.commit()
+        else:
+            c.rollback()
+    return r
+
+
+@router.post("/painel/prospeccao/comunicacao/resgate")
+async def comunicacao_resgate(request: Request):
+    """Salva o RESGATE DA IA (finance/resgate.py). Só dono/gestor. Não toca na
+    conexão de chip nenhum (CLAUDE.md §1): é uma linha de config à parte."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor configura o resgate."
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    f = await request.form()
+    sim = lambda k: str(f.get(k) or "").lower() in ("1", "on", "true", "sim")  # noqa: E731
+    dados = {"modo": f.get("modo"), "membro_id": f.get("membro_id"), "dias": f.get("dias"),
+             "aquecido_dias": ("nunca" if f.get("aquecido_nunca") else f.get("aquecido_dias")),
+             "teto_dia": f.get("teto_dia"), "hora_ini": f.get("hora_ini"),
+             "hora_fim": f.get("hora_fim"), "dias_semana": f.getlist("dias_semana"),
+             "supervisor_whatsapp": f.get("supervisor_whatsapp"),
+             "incluir_perdidos": sim("incluir_perdidos"), "aviso_vendedor": sim("aviso_vendedor"),
+             "retomar": sim("retomar")}
+    r = await run_in_threadpool(_salvar_resgate, ctx["conta_id"], dados)
+    request.session["prosp_aviso"] = ("Resgate salvo ✓" if r.get("ok")
+                                      else r.get("erro") or "Não consegui salvar o resgate.")
+    return RedirectResponse(_AG_DESTINO, status_code=303)
+
+
+def _testar_resgate(conta_id: int) -> dict:
+    from finance import resgate as _rg
+    return _rg.testar(get_pool(), conta_id)
+
+
+@router.post("/painel/prospeccao/comunicacao/resgate/testar")
+async def comunicacao_resgate_testar(request: Request):
+    """"Testar comigo": a IA manda a retomada do primeiro da fila pro WhatsApp do
+    supervisor, e ele responde como se fosse o cliente. Nada vira lead."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    r = await run_in_threadpool(_testar_resgate, ctx["conta_id"])
+    request.session["prosp_aviso"] = ("Mandei o teste pro seu WhatsApp ✓ Responda lá como se fosse o cliente."
+                                      if r.get("ok") else r.get("erro") or "Não consegui testar agora.")
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
@@ -6262,6 +6325,16 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
                         conta_id)
             return Response("ok", media_type="text/plain")
         empresa_id, chip_id = alvo
+        # O SUPERVISOR DO RESGATE (finance/resgate.py) não é cliente: a mensagem dele é
+        # o "Testar comigo" (ele faz o papel do cliente) ou a resposta a um aviso. Não
+        # vira lead nem conversa — senão o rodízio daria o dono a um vendedor.
+        from finance import resgate as _rg
+        if _rg.e_do_supervisor(c, empresa_id, sender):
+            c.commit()
+            log.info("webhook_wa_qr: empresa=%s mensagem do supervisor do resgate", empresa_id)
+            background_tasks.add_task(_rg.responder_supervisor, get_pool(), empresa_id, texto,
+                                      payload.get("id") or None)
+            return Response("ok", media_type="text/plain")
         m = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                       (empresa_id,)).fetchone()
         agente_on = bool(m and m[0])
@@ -6558,6 +6631,12 @@ def _webhook_wa_qr_saida_sync(corpo: bytes):
         if not alvo:
             return Response("ok", media_type="text/plain")
         empresa_id, chip_id = alvo
+        # o que o resgate manda pro SUPERVISOR (prévias, avisos, o "Testar comigo") não
+        # é conversa com cliente: não vai pra caixa da equipe (finance/resgate.py)
+        from finance import resgate as _rg
+        if _rg.e_do_supervisor(c, empresa_id, destinatario):
+            c.commit()
+            return Response("ok", media_type="text/plain")
         conv_id = _wa_saida_conversa(c, empresa_id, destinatario, texto,
                                      payload.get("id") or None, chip_id=chip_id,
                                      recebido_em=payload.get("recebido_em"))
@@ -14615,6 +14694,56 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </form>
     </details>
     {% endfor %}
+    {% if resgate %}{% set rg = resgate.cfg %}
+    <details class="rgchip" {% if rg.modo != 'off' %}open{% endif %}>
+      <summary>
+        <span class="nm">🤖 Resgate da IA <span class="tag-new">novo</span></span>
+        <span class="zappill {{ 'ok' if rg.modo == 'ligado' else 'off' }}">{{ {'off':'desligado','ensaio':'ensaio','ligado':'ligado'}[rg.modo] }}</span>
+        <span class="res">{{ resgate.fila }} {{ voc.lead }}{{ 's' if resgate.fila != 1 }} parado{{ 's' if resgate.fila != 1 }} na fila{% if resgate.segurados %} · {{ resgate.segurados }} segurado{{ 's' if resgate.segurados != 1 }} com justificativa{% endif %}</span>
+      </summary>
+      <form class="rgcorpo" method="post" action="/painel/prospeccao/comunicacao/resgate">
+        {% if rg.pausado_em %}<div class="distalerta">🛑 <b>Pausado pelo freio:</b> {{ rg.pausado_motivo }}. Nada sai até você retomar.
+          <label style="display:inline-flex;gap:.3rem;align-items:center;margin-left:.4rem"><input type="checkbox" name="retomar" value="1"> retomar ao salvar</label></div>{% endif %}
+        <div class="distnote">No {{ '%d' % (rg.dias + 1) }}º dia sem mensagem nossa, o {{ voc.lead }} passa para a IA, que volta a chamar o {{ voc.cliente }} com as regras dela. O vendedor só fica com ele mandando mensagem ou escrevendo o motivo no histórico da ficha ("Segurar este {{ voc.lead }}", no app).</div>
+        <div class="agrow"><div class="lab"><b>Situação</b><div><b>Ensaio</b>: nada vai pro {{ voc.cliente }} e nenhum {{ voc.lead }} muda de dono — a IA manda a prévia pro seu WhatsApp. <b>Ligado</b>: o {{ voc.lead }} passa pra IA e a mensagem sai.</div></div>
+          <select class="fld" name="modo" style="max-width:10rem">
+            {% for k, rot in [('off','Desligado'),('ensaio','Ensaio'),('ligado','Ligado')] %}<option value="{{ k }}" {% if rg.modo == k %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+          </select></div>
+        <div class="aggrid">
+          <div class="agfield"><label>Vai para</label>
+            <select class="fld" name="membro_id">{% for m in resgate.membros %}<option value="{{ m.id }}" {% if rg.membro_id == m.id %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}</select></div>
+          <div class="agfield"><label>Dias sem mensagem (passa no dia seguinte)</label>
+            <input class="fld" name="dias" type="number" min="3" max="60" value="{{ rg.dias }}"></div>
+          <div class="agfield"><label>{{ voc.lead | capitalize }} esquentado ({{ 'visita feita' if regra_eventos else 'reunião feita' }} ou orçamento): dias</label>
+            <div class="rghoras"><input class="fld" name="aquecido_dias" type="number" min="3" max="90" value="{{ rg.aquecido_dias or 14 }}" style="max-width:5rem">
+              <label style="display:inline-flex;gap:.3rem;align-items:center"><input type="checkbox" name="aquecido_nunca" value="1" {% if rg.aquecido_dias is none %}checked{% endif %}> nunca vai</label></div></div>
+          <div class="agfield"><label>Mensagens por dia (teto)</label>
+            <input class="fld" name="teto_dia" type="number" min="1" max="60" value="{{ rg.teto_dia }}"></div>
+          <div class="agfield"><label>Horário do resgate</label>
+            <div class="rghoras"><input class="fld" name="hora_ini" type="number" min="0" max="23" value="{{ rg.hora_ini }}" style="max-width:4.5rem">h às <input class="fld" name="hora_fim" type="number" min="1" max="24" value="{{ rg.hora_fim }}" style="max-width:4.5rem">h</div></div>
+          <div class="agfield"><label>Dias do resgate</label>
+            <div class="rghoras">{% for d, rot in [(0,'seg'),(1,'ter'),(2,'qua'),(3,'qui'),(4,'sex'),(5,'sáb'),(6,'dom')] %}<label style="display:inline-flex;gap:.2rem;align-items:center"><input type="checkbox" name="dias_semana" value="{{ d }}" {% if d in rg.dias_semana %}checked{% endif %}>{{ rot }}</label>{% endfor %}</div></div>
+          <div class="agfield"><label>Supervisor (WhatsApp, com DDD)</label>
+            <input class="fld" name="supervisor_whatsapp" inputmode="tel" value="{{ rg.supervisor_whatsapp }}" placeholder="(11) 99999-9999"></div>
+        </div>
+        <div class="agrow"><div class="lab"><b>Incluir os já marcados como perdido</b><div>Se o {{ voc.cliente }} responder, a conversa segue com a IA.</div></div>
+          <label class="sw"><input type="checkbox" name="incluir_perdidos" {% if rg.incluir_perdidos %}checked{% endif %}><span></span></label></div>
+        <div class="agrow"><div class="lab"><b>Avisar o vendedor 2 dias antes</b><div>Um aviso por dia, com a lista dos {{ voc.lead }}s dele. O {{ voc.lead }} só passa 48h depois do aviso.</div></div>
+          <label class="sw"><input type="checkbox" name="aviso_vendedor" {% if rg.aviso_vendedor %}checked{% endif %}><span></span></label></div>
+        {% if resgate.fila %}
+        <div class="distnote"><b>A fila hoje ({{ resgate.fila }}):</b>
+          {% for k, rot in resgate.faixas.items() %}{% if resgate.por_faixa[k] %}{{ loop.index }}º {{ rot | lower }}: <b>{{ resgate.por_faixa[k] }}</b>{% if not loop.last %} · {% endif %}{% endif %}{% endfor %}
+          {% if resgate.a_caminho %}<br>Chegando ao prazo nos próximos 2 dias: <b>{{ resgate.a_caminho }}</b>.{% endif %}</div>
+        {% endif %}
+        {% if rg.modo != 'off' %}<div class="distnote">Hoje: <b>{{ resgate.hoje.envios }}</b> de {{ rg.teto_dia }} {{ 'prévias' if rg.modo == 'ensaio' else 'mensagens' }}.{% if resgate.com_ia.total %} Com a IA pelo resgate: <b>{{ resgate.com_ia.total }}</b> (com resposta: {{ resgate.com_ia.responderam }} · pediram pra parar: {{ resgate.com_ia.pararam }} · com alguém da equipe: {{ resgate.com_ia.pausados }}).{% endif %}</div>{% endif %}
+        {% if not resgate.regra_ok %}<div class="distalerta">⚠️ A regra por número de quem recebe o resgate não está ligada com a IA atendendo. Dá pra usar o <b>Ensaio</b>; pra <b>Ligar</b>, ligue a regra e a IA no cartão do número acima — é ela que responde o {{ voc.cliente }}.</div>{% endif %}
+        <div class="distalerta">📵 <b>O número principal é por QR:</b> por isso o teto, uma mensagem a cada 20 a 30 minutos, só no horário acima, e sempre pelo número onde a conversa já está. <b>Freio:</b> se 3 {{ voc.cliente }}s pedirem pra parar ou 3 envios falharem no mesmo dia, o resgate pausa sozinho e avisa você.</div>
+        <div style="display:flex;justify-content:flex-end;gap:.5rem">
+          {% if rg.supervisor_whatsapp and rg.modo != 'off' %}<button class="pbtn ghost" formaction="/painel/prospeccao/comunicacao/resgate/testar">🧪 Testar comigo</button>{% endif %}
+          <button class="pbtn">Salvar resgate</button></div>
+      </form>
+    </details>
+    {% endif %}
   </div>
   <script>
   (function(){
@@ -18082,6 +18211,24 @@ _DESAFIO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.84rem;margin-top:.4rem;line-height:1.55">O tráfego da campanha do número da IA não é o mesmo do chip principal. A comparação indica; pra uma comparação limpa, metade da campanha teria de ir pra equipe.</div>
     </div>
   </div>
+  {% if d.resgate %}{% set rs = d.resgate %}
+  <h3 class="tt" style="margin-top:1.6rem;font-size:1.1rem">🤖 Resgate · {{ d.mes_rotulo }}</h3>
+  <div class="mut" style="font-size:.84rem;margin-top:.25rem;line-height:1.55;max-width:78ch">
+    Os {{ voc.leads }} que ficaram 7 dias sem mensagem e passaram pra IA no mês. Aqui a IA compete com o próprio
+    vendedor: a régua é o que acontecia quando alguém da equipe voltava a chamar um {{ voc.lead }} parado.</div>
+  <div class="ds-kpis">
+    <div class="ds-k"><div class="v">{{ rs.total.chamados }}</div><div class="l">{{ voc.leads|capitalize }} resgatados</div><div class="m">no mês</div></div>
+    <div class="ds-k"><div class="v">{{ (rs.total.resp_7d_pct ~ '%') if rs.total.resp_7d_pct is not none else '—' }}</div><div class="l">Responderam em até 7 dias</div><div class="m">{% if rs.regua %}régua do vendedor: {{ rs.regua.resp_pct }}% ({{ rs.regua.responderam }} de {{ rs.regua.retomadas }}){% else %}régua do vendedor: sem dado{% endif %}</div></div>
+    <div class="ds-k"><div class="v">{{ rs.total.contratos }}</div><div class="l">Contratos assinados</div><div class="m">{% if rs.regua %}régua: {{ rs.regua.fecharam }} de {{ rs.regua.retomadas }} fecharam{% endif %}</div></div>
+    <div class="ds-k"><div class="v">{{ brl(rs.total.custo_centavos) }}</div><div class="l">Gasto da IA com eles</div><div class="m">{{ ('por contrato ' ~ brl((rs.total.custo_centavos / rs.total.contratos)|round|int)) if rs.total.contratos else 'por contrato —' }}</div></div>
+  </div>
+  <div class="ds-wrap" style="margin-top:1rem"><table class="ds-tab">
+    <thead><tr><th>Faixa da fila</th><th class="ia">Chamados</th><th class="ia">Responderam</th><th class="ia">em 7 dias</th><th class="ia">{{ 'Visitas' if modo_evento else 'Reuniões' }}</th><th class="ia">Orçamentos</th><th class="ia">Contratos</th><th class="ia">Pararam</th><th class="ia">Perdidos</th><th class="ia">Custo da IA</th></tr></thead>
+    <tbody>
+      {% for f in rs.faixas + [rs.total] %}<tr><td>{% if f.nome == 'Festa com data por vir' and not modo_evento %}Com data por vir{% else %}{{ f.nome }}{% endif %}</td><td class="ia">{{ f.chamados }}</td><td class="ia">{{ f.responderam }}</td><td class="ia">{{ (f.resp_7d_pct ~ '%') if f.resp_7d_pct is not none else '—' }}</td><td class="ia">{{ f.visitas }}</td><td class="ia">{{ f.orcamentos }}</td><td class="ia">{{ f.contratos }}</td><td class="ia">{{ f.pararam }}</td><td class="ia">{{ f.perdidos }}</td><td class="ia">{{ brl(f.custo_centavos) }}</td></tr>{% endfor %}
+      {% if rs.regua %}<tr><td class="meta">Régua: vendedor retomando (últimos 6 meses)</td><td class="meta">{{ rs.regua.retomadas }}</td><td class="meta">{{ rs.regua.responderam }}</td><td class="meta">{{ rs.regua.resp_pct }}%</td><td class="meta">—</td><td class="meta">—</td><td class="meta">{{ rs.regua.fecharam }}</td><td class="meta">—</td><td class="meta">—</td><td class="meta">—</td></tr>{% endif %}
+    </tbody></table></div>
+  {% endif %}
 </div>
 {% endblock %}"""
 

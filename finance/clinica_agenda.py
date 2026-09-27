@@ -399,7 +399,7 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
          marcado_por if marcado_por in ("recepcao", "ia", "vaga") else "recepcao",
          (observacao or "").strip()[:500] or None)).fetchone()[0]
     # o agendamento aponta pro PACIENTE (a ficha), não só pro card: a mãe que marca
-    # pro filho gera a ficha do filho (finance/clinica_pacientes, migração 403)
+    # pro filho gera a ficha do filho (finance/clinica_pacientes, migração 405)
     from finance import clinica_pacientes as _cpa
     _cpa.ligar_evento(c, conta_id, eid, lid, nome_pac, fone_pac, origem=origem, cliente_id=cliente_id)
     return eid, None

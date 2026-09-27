@@ -201,6 +201,20 @@ def _visita_da_ia(pool, conta_id: int) -> bool:
         return False
 
 
+def _resgate_ligado(pool, conta_id: int) -> bool:
+    """O RESGATE DA IA está ligado nesta empresa (migração 396)? É só aí que a rotina
+    muda: no Ensaio nenhum lead muda de dono. Mesmo portão do cartão
+    (`resgate.config`). Falha fechada: sem a tabela, a config é 'off'."""
+    try:
+        from finance import resgate as _rg
+        with pool.connection() as c:
+            return _rg.config(c, conta_id).get("modo") == "ligado"
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ver o resgate da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
 # O REGISTRO. Cada chave aponta pro portão que já decide quem vê a funcionalidade.
 # Acrescentar um público aqui EXIGE mexer no check da migração — e um teste
 # compara as duas listas, pra deriva virar falha em vez de surpresa.
@@ -229,6 +243,7 @@ PUBLICOS_CONTA = {
     "empresa": _empresa,
     "mais_de_um_chip": _mais_de_um_chip,
     "visita_da_ia": _visita_da_ia,
+    "resgate_ligado": _resgate_ligado,
 }
 
 # A lista completa — é ela que o check da migração espelha.

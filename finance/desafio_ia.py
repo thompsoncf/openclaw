@@ -113,12 +113,25 @@ def _por_lead(pool, conta_id: int, ini: date, fim: date) -> list[dict]:
         tem_regra = False
     ia_sql = ("(select r.membro_id from chip_regra_leads r where r.prospeccao_id = p.id "
               "and r.conta_id = p.conta_id)" if tem_regra else "null::bigint")
+    # O LEAD DO RESGATE (migração 396) chegou na IA parado, não novo: no desafio ele
+    # continua na coluna de quem ERA o dono no mês em que entrou (a aba do resgate é
+    # outra conta). Sem dono antes, fica fora — não vira coluna do membro IA.
+    try:
+        with pool.connection() as c:
+            with c.transaction():
+                c.execute("select 1 from resgate_leads limit 1")
+        vend_sql = ("(case when exists (select 1 from resgate_leads rg where rg.prospeccao_id = p.id"
+                    " and rg.conta_id = p.conta_id) then (select rg.vendedor_antes from resgate_leads rg"
+                    " where rg.prospeccao_id = p.id and rg.conta_id = p.conta_id)"
+                    " else p.vendedor_id end)")
+    except Exception:  # noqa: BLE001 — banco sem a 396
+        vend_sql = "p.vendedor_id"
     sql = f"""
         with l as (
-          select p.id, p.vendedor_id, {ia_sql} ia_membro, p.evento_em, p.evento_convidados,
-                 p.orcamento_id
+          select p.id, {vend_sql} vendedor_id, {ia_sql} ia_membro, p.evento_em,
+                 p.evento_convidados, p.orcamento_id
             from prospeccao p
-           where p.conta_id=%s and p.vendedor_id is not null
+           where p.conta_id=%s and {vend_sql} is not null
              and (p.criado_em at time zone '{_TZ}')::date >= %s
              and (p.criado_em at time zone '{_TZ}')::date < %s),
         cv as (

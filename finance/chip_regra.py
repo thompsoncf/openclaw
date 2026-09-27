@@ -90,16 +90,24 @@ def regra_da_conversa(c, conta_id: int, conversa_id: int) -> dict | None:
         with c.transaction():
             cv = c.execute("""select cv.chip_id, p.vendedor_id,
                                      exists (select 1 from chip_regra_leads l
-                                              where l.prospeccao_id = p.id and l.conta_id = cv.conta_id)
+                                              where l.prospeccao_id = p.id and l.conta_id = cv.conta_id),
+                                     p.id
                                 from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                                where cv.id=%s and cv.conta_id=%s""",
                            (conversa_id, conta_id)).fetchone()
     except Exception:  # noqa: BLE001
         return None
-    # só o lead que a REGRA deu (chip_regra_leads): o lead antigo do mesmo dono, ou um
-    # que o gestor moveu pra ele, segue o atendimento de sempre
-    if not cv or not cv[2]:
+    if not cv:
         return None
+    # só o lead que a REGRA deu (chip_regra_leads): o lead antigo do mesmo dono, ou um
+    # que o gestor moveu pra ele, segue o atendimento de sempre — MENOS o que o
+    # RESGATE deu (migração 396, finance/resgate.py): esse chegou pela conversa antiga,
+    # no chip onde ela estava, e quem responde é a regra do membro IA
+    if not cv[2]:
+        if not cv[3]:
+            return None
+        from finance import resgate as _rg
+        return _rg.regra_do_lead(c, conta_id, cv[3])
     r = regra(c, conta_id, cv[0])
     if not r or not r["membro_id"] or cv[1] != r["membro_id"]:
         return None
@@ -470,11 +478,15 @@ def avisar(pool, conta_id: int, r: dict, motivo: str, *, prospeccao_id=None,
         _log.warning("chip_regra.avisar: não registrou o aviso (conta=%s, motivo=%s): %s",
                      conta_id, motivo, e)
         return None
-    if not m:
-        return None
     quem = (lead or "").strip() or "Um cliente"
     titulo = f"🤖 A IA precisa de você · {rotulo}"
     corpo = f"{quem}: {(resumo or '').strip() or rotulo}"
+    if (r or {}).get("resgate") and prospeccao_id:
+        # o lead veio do RESGATE: o supervisor fica sabendo também (finance/resgate.py)
+        from finance import resgate as _rg
+        _rg.avisar_supervisor(pool, conta_id, prospeccao_id, titulo, corpo)
+    if not m:
+        return None
     url = f"/cockpit/lead/{prospeccao_id}" if prospeccao_id else "/cockpit"
     _enviar_aviso(pool, conta_id, mid, m, titulo, corpo, url)
     return mid

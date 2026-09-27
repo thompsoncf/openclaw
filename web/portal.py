@@ -410,7 +410,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   <div class="side-logo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span></div>
   {% set _dono = (papel == 'dono') %}
   {% if _dono and (vende_produto or _tem_app) %}<div class="side-grp">Principal</div>{% endif %}
-  {% if _dono and vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
+  {% if _dono and vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if _dono and _tem_app %}{{ navi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
   {% if caps.vendas or (tem_pj and caps.financeiro) or caps.gerir or (_dono and (vende_produto or _forn)) %}<div class="side-grp">{{ 'Loja' if _dono else 'Minha área' }}</div>{% endif %}
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
@@ -438,6 +438,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('hoje','/painel/hoje','agenda','Hoje') }}{% endif %}
+  {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('pacientes','/painel/clinica/pacientes','clientes','Pacientes') }}{% endif %}
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
@@ -446,7 +447,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
-  {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
+  {% if _dono and tem_pj and not vende_produto %}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{{ navi('respostas','/painel/respostas','caixa','Respostas rápidas') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -498,6 +499,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('hoje','/painel/hoje','agenda','Hoje') }}{% endif %}
+  {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('pacientes','/painel/clinica/pacientes','clientes','Pacientes') }}{% endif %}
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
@@ -506,7 +508,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
-  {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
+  {% if _dono and tem_pj and not vende_produto %}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{{ navi('respostas','/painel/respostas','caixa','Respostas rápidas') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}

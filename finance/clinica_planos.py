@@ -521,12 +521,14 @@ def _titulos(pool, p: dict, forma: str, agora: datetime) -> list[int]:
     from finance import empresa as _emp
     # a ficha do cliente pelo TELEFONE (nome parecido não é a mesma pessoa: "Maria
     # Silva" não é "Maria Silva Santos"); sem telefone único, cria uma ficha nova
-    cliente_id = None
+    from finance import clinica_pacientes as _cpa
+    cliente_id = _cpa.ficha_do_paciente(pool, p["conta_id"], p.get("lead"), p["paciente"], p["fone"])
     try:
         from finance import clientes as _cli
-        achado = _cli.buscar_unico_por_telefone(pool, p["conta_id"], p["fone"]) if p["fone"] else None
-        cliente_id = achado["id"] if achado else _cli.criar_cliente(pool, p["conta_id"], p["paciente"],
-                                                                     telefone=p["fone"] or None)
+        achado = None if cliente_id else (
+            _cli.buscar_unico_por_telefone(pool, p["conta_id"], p["fone"]) if p["fone"] else None)
+        cliente_id = cliente_id or (achado["id"] if achado else _cli.criar_cliente(
+            pool, p["conta_id"], p["paciente"], telefone=p["fone"] or None))
     except Exception:  # noqa: BLE001 — sem a base de clientes, o título vai sem a ficha
         cliente_id = None
     ids = []

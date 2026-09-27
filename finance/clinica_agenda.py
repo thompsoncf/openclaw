@@ -328,7 +328,7 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
             lead_id: int | None = None, nome: str = "", fone: str = "", origem: str = "",
             observacao: str = "", encaixe: bool = False, membro_id: int | None = None,
             agora: datetime | None = None, paciente: str = "",
-            marcado_por: str = "recepcao") -> tuple[int | None, str | None]:
+            marcado_por: str = "recepcao", cliente_id: int | None = None) -> tuple[int | None, str | None]:
     """Marca. Devolve (evento_id, None) ou (None, erro pra tela). Não faz commit.
 
     `paciente` é quem vai ser atendido quando não é o dono do card (a mãe marca pro
@@ -398,6 +398,10 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
          origem if origem in ORIGENS else None, nome_pac[:120], fone_pac, bool(encaixe and not livre),
          marcado_por if marcado_por in ("recepcao", "ia", "vaga") else "recepcao",
          (observacao or "").strip()[:500] or None)).fetchone()[0]
+    # o agendamento aponta pro PACIENTE (a ficha), não só pro card: a mãe que marca
+    # pro filho gera a ficha do filho (finance/clinica_pacientes, migração 403)
+    from finance import clinica_pacientes as _cpa
+    _cpa.ligar_evento(c, conta_id, eid, lid, nome_pac, fone_pac, origem=origem, cliente_id=cliente_id)
     return eid, None
 
 

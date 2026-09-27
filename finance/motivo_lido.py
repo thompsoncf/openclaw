@@ -138,7 +138,9 @@ def rotulos(c, conta_id: int, perfil: str) -> dict:
                 out[ch] = rot
     except Exception:  # noqa: BLE001
         pass
-    out.update(ESPECIAIS)
+    # "Não era cliente" → "Não era paciente" na clínica (o nome vem do nicho)
+    from finance.raio_x_perfil import palavra as _palavra
+    out.update({k: v.replace("cliente", _palavra("cliente", conta_id)) for k, v in ESPECIAIS.items()})
     return out
 
 

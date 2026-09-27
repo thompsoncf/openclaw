@@ -21,6 +21,7 @@ sempre foi. Nada daqui pode derrubar a entrada de uma mensagem.
 """
 from __future__ import annotations
 
+from finance.raio_x_perfil import palavra as _palavra  # o nome de quem compra ("paciente" na clínica)
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -493,7 +494,7 @@ def avisar(pool, conta_id: int, r: dict, motivo: str, *, prospeccao_id=None,
         _log.warning("chip_regra.avisar: não registrou o aviso (conta=%s, motivo=%s): %s",
                      conta_id, motivo, e)
         return None
-    quem = (lead or "").strip() or "Um cliente"
+    quem = (lead or "").strip() or "Um " + _palavra("cliente", conta_id)
     titulo = f"🤖 A IA precisa de você · {rotulo}"
     corpo = f"{quem}: {(resumo or '').strip() or rotulo}"
     if (r or {}).get("resgate") and prospeccao_id:

@@ -40,6 +40,7 @@ mostra em lilás. Misturar os dois faria o vendedor desconfiar do que é certo.
 """
 from __future__ import annotations
 
+from finance.raio_x_perfil import palavra as _palavra  # o nome de quem compra ("paciente" na clínica)
 import json
 import logging
 import os
@@ -194,7 +195,7 @@ def bola(ultima: dict | None, agora=None) -> dict:
         if eh_fecho(ultima.get("texto")):
             return {"quem": None, "txt": f"Última mensagem do cliente {quando}"}
         return {"quem": "voce", "txt": f"A bola está com você {quando}"}
-    return {"quem": "cliente", "txt": f"Esperando o cliente {quando}"}
+    return {"quem": "cliente", "txt": f"Esperando o {_palavra('cliente')} {quando}"}
 
 
 def conversa_do_lead(c, conta_id: int, lead_id: int) -> dict | None:

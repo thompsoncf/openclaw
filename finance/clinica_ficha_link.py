@@ -31,6 +31,10 @@ _log = logging.getLogger("clinica.ficha_link")
 
 TENTATIVAS = 5
 TRAVA_MIN = 30
+BALCAO_MIN = 15                 # o código do check-in no balcão vale 15 minutos, uma vez
+#: o que o paciente preenche no link além do básico (migração 413)
+CAMPOS_LINK = ("nome_social", "sexo", "profissao", "numero", "complemento", "bairro",
+               "contato_emergencia", "fone_emergencia")
 MAIORIDADE = 18
 COMO_CONHECEU = ("Instagram", "Indicação de alguém", "Google", "Anúncio", "Passei na frente", "Outro")
 IMAGEM = (("clinico", "Autorizo as fotos só para o meu tratamento: ficam no prontuário, e só os profissionais "
@@ -93,6 +97,48 @@ def novo_token(c, conta_id: int, cliente_id: int) -> str | None:
     c.execute("""update clientes set ficha_token=%s, ficha_tentativas=0, ficha_travada_ate=null
                   where id=%s and dono_id=%s""", (secrets.token_urlsafe(18), cliente_id, conta_id))
     return token(c, conta_id, cliente_id)
+
+
+def gerar_balcao(c, conta_id: int, cliente_id: int, agora: datetime) -> tuple[str, str] | None:
+    """Check-in no balcão (ideia 7): um código de uso único, que vale 15 minutos, pra o
+    paciente abrir a ficha dele no tablet da clínica sem a data de nascimento — quem
+    confere que é ele é a recepção, na frente dele. (token, código) ou None."""
+    tok = token(c, conta_id, cliente_id)
+    if not tok:
+        return None
+    # o código ainda valendo (mais de 2 minutos) é reaproveitado: o F5 ou o clique duplo
+    # na tela do QR não matam o QR que o paciente está lendo. Num UPDATE só.
+    r = c.execute(
+        """update clientes
+              set ficha_balcao_codigo = case when ficha_balcao_codigo is not null
+                                              and ficha_balcao_ate > %s + interval '2 minutes'
+                                             then ficha_balcao_codigo else %s end,
+                  ficha_balcao_ate = case when ficha_balcao_codigo is not null
+                                           and ficha_balcao_ate > %s + interval '2 minutes'
+                                          then ficha_balcao_ate else %s end
+            where id=%s and dono_id=%s returning ficha_balcao_codigo""",
+        (agora, secrets.token_urlsafe(9), agora, agora + timedelta(minutes=BALCAO_MIN),
+         cliente_id, conta_id)).fetchone()
+    return (tok, r[0]) if r else None
+
+
+def usar_balcao(c, f: dict, codigo: str, agora: datetime) -> bool:
+    """Gasta o código do balcão (uma vez só, dentro do prazo)."""
+    if not codigo or len(codigo) > 40:
+        return False
+    try:
+        with c.transaction():
+            r = c.execute(
+                """update clientes set ficha_balcao_codigo=null, ficha_balcao_ate=null
+                    where id=%s and dono_id=%s and ficha_balcao_codigo=%s and ficha_balcao_ate > %s
+                    returning id""", (f["id"], f["conta_id"], codigo, agora)).fetchone()
+    except Exception:  # noqa: BLE001 — migração 413 ainda não rodou
+        return False
+    return bool(r)
+
+
+def link_balcao(tok: str, cod: str) -> str:
+    return f"{link(tok)}?b={cod}"
 
 
 def link(tok: str) -> str:
@@ -361,6 +407,8 @@ def salvar_cadastro(pool, f: dict, form: dict, agora: datetime,
     cidade = _limpo(form.get("cidade"), 80)
     if not cidade:
         return "Informe a cidade.", None
+    if str(form.get("sexo") or "").strip() and form["sexo"].strip() not in dict(cpa.SEXO):
+        return "Sexo inválido.", None
     menor = (_idade(nasc, hoje) or 0) < MAIORIDADE
     cpf = validadoc.so_digitos(form.get("cpf")) or None
     if cpf and not validadoc.valida_cpf(cpf):
@@ -447,11 +495,18 @@ def salvar_cadastro(pool, f: dict, form: dict, agora: datetime,
             return None, "Não deu pra guardar o CPF: ele já está em outra ficha. A clínica confere com você na chegada."
         raise
     como = _limpo(form.get("como_conheceu"), 80)
-    if como:
-        with pool.connection() as c:
+    with pool.connection() as c:
+        if como:
             c.execute("update clientes set como_conheceu=%s where id=%s and dono_id=%s and como_conheceu is null",
                       (como, kid, conta_id))
-            c.commit()
+        # os campos da 413 (nome social, sexo, profissão, endereço separado, emergência):
+        # campo em branco não apaga; sem a data conferida, só o que estava vazio
+        extras = {k: form[k] for k in CAMPOS_LINK if str(form.get(k) or "").strip()}
+        erro = cpa.salvar_extras(c, conta_id, kid, extras, so_vazios=not verificado)
+        if erro:
+            c.rollback()
+            return erro, aviso
+        c.commit()
     return None, aviso
 
 

@@ -32,6 +32,11 @@ FILTROS = (("todos", "Todos"), ("novos", "Novos contatos"), ("com_horario", "Com
            ("assinantes", "Assinantes"), ("inativos", "Sem vir há 6 meses"),
            ("ficha_incompleta", "Ficha incompleta"))
 INATIVO_DIAS = 180
+SEXO = (("f", "Feminino"), ("m", "Masculino"), ("outro", "Outro"))
+#: os campos da ficha que a clínica usava no Amigo (migração 413), com o tamanho máximo
+EXTRAS = (("nome_social", 80), ("sexo", 5), ("profissao", 80), ("rg", 20), ("nome_mae", 120),
+          ("numero", 10), ("complemento", 60), ("bairro", 80), ("contato_emergencia", 120),
+          ("fone_emergencia", 30))
 
 
 def _falta_migracao(e: Exception) -> bool:
@@ -44,6 +49,66 @@ def _falta_migracao(e: Exception) -> bool:
 def _primeiro(nome: str | None) -> str:
     from finance.clinica_pacotes import _primeiro as p
     return p(nome)
+
+
+def etiquetas_de(txt) -> list[str]:
+    """'VIP, pós-operatório ,vip' → ['VIP', 'pós-operatório']: sem repetir, até 10, curtas."""
+    out = []
+    for e in str(txt or "").split(","):
+        e = " ".join(e.split())[:30]
+        if e and e.lower() not in {x.lower() for x in out}:
+            out.append(e)
+    return out[:10]
+
+
+def _extras(c, conta_id: int, ids: list[int]) -> dict[int, dict]:
+    """Os campos da 413 de cada ficha. Base sem a 413: vazio (a ficha abre igual)."""
+    if not ids:
+        return {}
+    try:
+        with c.transaction():
+            rows = c.execute(
+                """select id, nome_social, sexo, profissao, rg, nome_mae, numero, complemento, bairro,
+                          contato_emergencia, fone_emergencia, etiquetas
+                     from clientes where dono_id=%s and id = any(%s)""", (conta_id, list(ids))).fetchall()
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for r in rows:
+        d = {k: (r[i + 1] or "") for i, (k, _n) in enumerate(EXTRAS)}
+        d["etiquetas"] = list(r[11] or [])
+        out[r[0]] = d
+    return out
+
+
+def salvar_extras(c, conta_id: int, cliente_id: int, form: dict, *, so_vazios: bool = False) -> str | None:
+    """Grava os campos da 413 que vieram no formulário. `so_vazios`: o link sem a data
+    conferida só preenche o que está em branco. Campo que não veio não muda."""
+    sexo = str(form.get("sexo") or "").strip()
+    if sexo and sexo not in dict(SEXO):
+        return "Sexo inválido."
+    vals = {}
+    for k, n in EXTRAS:
+        if k in form:
+            v = " ".join(str(form.get(k) or "").split())[:n]
+            vals[k] = v or None
+    if "etiquetas" in form and not so_vazios:
+        vals["etiquetas"] = etiquetas_de(form.get("etiquetas"))
+    if not vals:
+        return None
+    if so_vazios:
+        sets = ", ".join(f"{k} = coalesce(nullif({k}, ''), %s)" for k in vals)
+    else:
+        sets = ", ".join(f"{k} = %s" for k in vals)
+    try:
+        with c.transaction():
+            c.execute(f"update clientes set {sets}, atualizado_em=now() where id=%s and dono_id=%s",
+                      list(vals.values()) + [cliente_id, conta_id])
+    except Exception as e:  # noqa: BLE001
+        if "does not exist" in str(e):       # base sem a 413: o resto do cadastro vale
+            return None
+        raise
+    return None
 
 
 def _sem_acento(t: str | None) -> str:
@@ -184,7 +249,7 @@ def _conjuntos(c, conta_id: int, hoje: date) -> dict:
 
 
 def listar(c, conta_id: int, agora: datetime, *, filtro: str = "todos", busca: str = "",
-           cidade: str = "", limite: int = 300) -> dict:
+           cidade: str = "", etiqueta: str = "", limite: int = 300) -> dict:
     """{'pacientes': [...], 'contagem': {filtro: n}, 'cidades': [...]}. Os pacientes com
     ficha, e os NOVOS CONTATOS: quem escreveu no WhatsApp e ainda não tem ficha nem
     atendimento (o antigo "lead")."""
@@ -257,6 +322,11 @@ def listar(c, conta_id: int, agora: datetime, *, filtro: str = "todos", busca: s
                           "ultima_msg": ca.local(ult_msg) if ult_msg else None,
                           "_msg_ts": ult_msg.timestamp() if ult_msg else 0.0})
 
+    ext = _extras(c, conta_id, [p["id"] for p in pacientes if p["id"]])
+    for p in pacientes:
+        e = ext.get(p["id"]) or {}
+        p["etiquetas"] = e.get("etiquetas", [])
+        p["nome_social"] = e.get("nome_social", "")
     # a ficha de quem tem horário: a recepção sabe quem cobrar antes da consulta (ideia 8)
     from finance import clinica_ficha_link as cfl
     sit = cfl.situacoes(c, conta_id, [p["id"] for p in pacientes if p["id"] and p["proximo"]], agora)
@@ -271,20 +341,24 @@ def listar(c, conta_id: int, agora: datetime, *, filtro: str = "todos", busca: s
                 "ficha_incompleta": bool(p.get("ficha") and not p["ficha"]["completa"])}[f]
     contagem = {k: sum(1 for p in pacientes if passa(p, k)) for k, _r in FILTROS}
     cidades = sorted({p["cidade"].strip() for p in pacientes if p["cidade"].strip()}, key=str.lower)
+    todas_etiquetas = sorted({e for p in pacientes for e in p["etiquetas"]}, key=str.lower)
     f = filtro if filtro in dict(FILTROS) else "todos"
     sel = [p for p in pacientes if passa(p, f)]
     b = _sem_acento(" ".join((busca or "").split()))
     if b:
         dig = ca._digitos(b)
-        sel = [p for p in sel if b in _sem_acento(p["nome"])
+        sel = [p for p in sel if b in _sem_acento(p["nome"]) or b in _sem_acento(p["nome_social"])
                or (len(dig) >= 4 and dig in ca._digitos(p["fone"]))]
+    if etiqueta:
+        sel = [p for p in sel if etiqueta.lower() in {e.lower() for e in p["etiquetas"]}]
     if cidade:
         sel = [p for p in sel if (p["cidade"] or "").strip().lower() == cidade.strip().lower()]
     # quem tem horário primeiro, depois quem veio por último; novos contatos pela última mensagem
     sel.sort(key=lambda p: (p["proximo"] is None, p["proximo"] or datetime.max.replace(tzinfo=timezone.utc),
                             -(p["ultimo"] or date.min).toordinal(),
                             -p.get("_msg_ts", 0.0), (p["nome"] or "").lower()))
-    return {"pacientes": sel[:limite], "total": len(sel), "contagem": contagem, "cidades": cidades}
+    return {"pacientes": sel[:limite], "total": len(sel), "contagem": contagem, "cidades": cidades,
+            "etiquetas": todas_etiquetas}
 
 
 # ------------------------------------------------------------------ a ficha
@@ -307,6 +381,8 @@ def ficha(c, conta_id: int, cliente_id: int, agora: datetime) -> dict | None:
          "idade": _idade(nasc, hoje), "cidade": cid or "", "uf": uf or "", "endereco": end or "", "cep": cep or "",
          "cpf": cpf or "", "lead": lead, "responsavel_id": resp_id, "como_conheceu": como or "",
          "desde": ca.local(criado).date() if criado else None, "obs": obs or ""}
+    d.update(_extras(c, conta_id, [kid]).get(kid) or {**{k: "" for k, _n in EXTRAS}, "etiquetas": []})
+    d["sexo_txt"] = dict(SEXO).get(d["sexo"], "")
     d["responsavel"] = None
     if resp_id:
         rr = c.execute("""select k.id, coalesce(p.nome, k.nome), p.cpf is not null
@@ -405,6 +481,8 @@ def salvar_cadastro(pool, conta_id: int, cliente_id: int, form: dict) -> str | N
             return "Data de nascimento inválida."
         if nasc > date.today() or nasc.year < 1900:
             return "Data de nascimento inválida."
+    if str(form.get("sexo") or "").strip() and form["sexo"].strip() not in dict(SEXO):
+        return "Sexo inválido."
     resp = form.get("responsavel_id")
     resp = int(resp) if str(resp or "").isdigit() and int(resp) != cliente_id else None
     from finance import validadoc
@@ -438,6 +516,10 @@ def salvar_cadastro(pool, conta_id: int, cliente_id: int, form: dict) -> str | N
         c.execute("""update clientes set responsavel_id=%s, como_conheceu=%s, atualizado_em=now()
                       where id=%s and dono_id=%s""",
                   (resp, (form.get("como_conheceu") or "").strip()[:80] or None, cliente_id, conta_id))
+        erro = salvar_extras(c, conta_id, cliente_id, form)
+        if erro:
+            c.rollback()
+            return erro
         c.commit()
     return None
 

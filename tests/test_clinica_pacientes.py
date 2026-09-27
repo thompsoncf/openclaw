@@ -1,7 +1,7 @@
 """Os pacientes da clínica (finance/clinica_pacientes.py e /painel/clinica/pacientes).
 
 Reaproveita o banco do test_clinica_pacotes (a semente da Espaço Pelle, o Dr. Manoel)
-e põe por cima a ficha de clientes do Zaq (064, 066, 149, 182) e a 405.
+e põe por cima a ficha de clientes do Zaq (064, 066, 149, 182) e a 407.
 """
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -35,7 +35,7 @@ def banco(pool):  # noqa: F811
                      alter table titulos add column if not exists descricao text;
                      alter table titulos add column if not exists tipo text default 'receber';
                      alter table titulos add column if not exists cliente_id bigint""")
-        c.execute((BASE / "405_clinica_pacientes.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "407_clinica_pacientes.sql").read_text(encoding="utf-8"))
         c.commit()
     return pool
 

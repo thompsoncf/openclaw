@@ -2,7 +2,7 @@
 
 Desenho aprovado: docs/mockups/clinica_prontuario.html, seções 11.1 (a lista), 11.2 (a
 ficha) e 13 (o paciente separado do card, o menor com responsável, a cidade). Migração
-405. Tela: /painel/clinica/pacientes (web/painel_clinica_pacientes.py).
+407. Tela: /painel/clinica/pacientes (web/painel_clinica_pacientes.py).
 
 O PACIENTE mora na ficha de clientes do Zaq (`clientes`, com a identidade — nome,
 celular, CPF — em `pessoas`). O card do WhatsApp (`prospeccao`) é por onde ele chegou,
@@ -131,7 +131,7 @@ def ficha_do_paciente(pool, conta_id: int, lead: int | None, nome: str, fone: st
 def ligar_evento(c, conta_id: int, evento_id: int, lead: int | None, nome: str, fone: str,
                  origem: str | None = None, cliente_id: int | None = None) -> int | None:
     """Liga o agendamento ao paciente. `cliente_id` (a recepção marcou pela ficha) manda;
-    senão, acha ou cria. Tolerante: sem a 405, o agendamento segue."""
+    senão, acha ou cria. Tolerante: sem a 407, o agendamento segue."""
     try:
         with c.transaction():
             kid = None

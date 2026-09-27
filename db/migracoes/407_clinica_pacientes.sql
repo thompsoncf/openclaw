@@ -1,4 +1,4 @@
--- 405_clinica_pacientes.sql
+-- 407_clinica_pacientes.sql
 -- Clínica: o PACIENTE separado do card do WhatsApp, a lista e a ficha de pacientes
 -- (docs/mockups/clinica_prontuario.html, seções 11.1, 11.2 e 13 — aprovado pelo dono
 -- em 26/09/2026). finance/clinica_pacientes.py, tela /painel/clinica/pacientes.

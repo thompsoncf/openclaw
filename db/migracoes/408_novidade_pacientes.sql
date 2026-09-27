@@ -1,4 +1,4 @@
--- 406_novidade_pacientes.sql
+-- 408_novidade_pacientes.sql
 -- O aviso da lista e da ficha de pacientes (finance/clinica_pacientes.py,
 -- /painel/clinica/pacientes), seguindo a seção 5 do CLAUDE.md.
 --

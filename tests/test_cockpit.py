@@ -2151,6 +2151,19 @@ def test_a_tela_do_lead_preenche_a_caixa_e_avisa_a_pista(pool, monkeypatch):
     assert "O cliente <b>falou de março</b> na conversa. Confirmar a data?" in html
     assert f"href='/cockpit/lead/{lid}/ficha'>Abrir a ficha</a>" in html
     assert f"href='/cockpit/lead/{lid}?texto=Pra%20qual%20data" in html
+    # O ✕ (achado em produção, 28/09/2026): o vendedor da Martha ficou com o aviso
+    # da pista preso na tela, empilhado com "Data tomada", e achou que travava o
+    # envio de mensagem. Fecha só nesta tela — não marca nada no banco.
+    assert "this.closest('.aviso.pista').remove()" in html
+
+
+def test_o_aviso_de_outra_conversa_tem_o_x_de_fechar():
+    """Mesmo achado (28/09/2026): o aviso "mesmo número, outra ficha" (.dupla)
+    é montado ao lado da pista, dentro de _lead_vendedor — também precisa do ✕."""
+    import inspect
+    from web import painel_cockpit as pc
+    src = inspect.getsource(pc._lead_vendedor)
+    assert "this.closest('.dupla').remove()" in src
 
 
 # ═══════════════════════════════════════ as Novidades no app (migração 199)

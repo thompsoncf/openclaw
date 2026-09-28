@@ -355,10 +355,20 @@ b,strong{font-weight:600}
 .lead .ev .src{font-style:normal;font-size:.56rem;color:#7bb8e6;border:1px solid #1f3a4d;background:#122029;border-radius:999px;padding:0 .32rem}
 .lead .ev.sem{color:#F0DCA6}
 .lead .ev .perg{margin-left:auto;font-size:.68rem;font-weight:600;color:#F0DCA6;border:1px solid #5a4520;background:#241c0f;border-radius:999px;padding:.06rem .5rem}
-.aviso.pista{text-align:left;margin:.6rem 1.1rem 0;border:1px solid #5a4520;background:#241c0f;color:#F0DCA6;border-radius:12px;padding:.55rem .7rem;font-size:.8rem;display:flex;flex-direction:column;gap:.35rem}
+.aviso.pista{text-align:left;margin:.6rem 1.1rem 0;border:1px solid #5a4520;background:#241c0f;color:#F0DCA6;border-radius:12px;padding:.55rem 2.3rem .55rem .7rem;font-size:.8rem;display:flex;flex-direction:column;gap:.35rem;position:relative}
 .aviso.pista .bts{display:flex;gap:.4rem}
 .aviso.pista .bt{font-size:.72rem;font-weight:600;padding:.3rem .6rem;border-radius:8px;border:1px solid #5a4520;color:#F0DCA6;text-decoration:none}
 .aviso.pista .bt.ok{background:var(--ambar);color:#1c1408;border-color:var(--ambar)}
+/* O ✕ que faltava nos avisos acima do chat (espera, pista, dupla): eles ficavam
+   presos na tela, empilhando até esconder o campo de escrever — o vendedor da
+   Martha achou que a IA tinha travado. Fecha só NESTA tela (não marca nada no
+   banco): a régua por trás continua a mesma, então se o motivo ainda for
+   verdade o aviso volta no próximo carregamento — fechar não é "resolvido",
+   é "não preciso ver agora". Alvo de 44px, a mesma régua do ✕ da faixa. */
+.le .fx,.dupla .fx,.aviso.pista .fx{position:absolute;top:0;right:0;width:44px;height:44px;
+  display:flex;align-items:center;justify-content:center;background:none;border:0;
+  color:inherit;opacity:.65;font-size:.9rem;padding:0}
+.le .fx:active,.dupla .fx:active,.aviso.pista .fx:active{opacity:1}
 
 /* ---------- deslizar o card pra revelar ação ----------
    As ações ficam ATRÁS: o card da frente é opaco e escorrega pra esquerda por
@@ -904,8 +914,8 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 /* LISTA DE ESPERA POR DATA (finance/lista_espera): a data pedida já tem festa.
    A pílula diz o problema; as datas livres são a resposta pronta pro cliente. */
 .le{margin:.35rem .8rem 0;border:1px solid var(--coral-borda);background:var(--coral-fundo);
-  border-radius:11px;padding:.5rem .65rem;font-size:.76rem;color:#F2BDB9;display:flex;
-  flex-direction:column;gap:.35rem}
+  border-radius:11px;padding:.5rem 2.3rem .5rem .65rem;font-size:.76rem;color:#F2BDB9;display:flex;
+  flex-direction:column;gap:.35rem;position:relative}
 .le.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
 .le b{font-weight:600}
 .le .liv{display:flex;gap:.3rem;flex-wrap:wrap}
@@ -1007,8 +1017,8 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 /* "este número tem outra conversa". Fica FORA do .chat de propósito: a conversa
    nasce rolada no fim (ver o script do rodapé), então um aviso no topo do
    histórico nunca seria lido por ninguém. */
-.dupla{margin:.35rem 1.1rem 0;padding:.5rem .7rem;border-radius:11px;font-size:.76rem;
-  background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6}
+.dupla{margin:.35rem 1.1rem 0;padding:.5rem 2.3rem .5rem .7rem;border-radius:11px;font-size:.76rem;
+  background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6;position:relative}
 .dupla b{color:var(--text)}
 .dupla a{color:var(--ambar);text-decoration:underline}
 /* a campanha rodando nos dois chips não é defeito: mesma faixa, tom neutro */
@@ -6532,7 +6542,9 @@ def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
         if not st["tomada"]:
             if dia in esperando:
                 return (f"<div class='le ok'><span>🟢 <b>A data {dia:%d/%m} abriu.</b> "
-                        "Avise o " + _p('cliente') + " antes que ele feche em outro lugar.</span></div>")
+                        "Avise o " + _p('cliente') + " antes que ele feche em outro lugar.</span>"
+                        "<button type=button class=fx onclick=\"this.closest('.le').remove()\" "
+                        "aria-label=Fechar>✕</button></div>")
             return ""
         livres = _le.datas_livres_perto(get_pool(), conta_id, dia)
         chips = "".join(
@@ -6551,7 +6563,9 @@ def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
         return ("<div class=le>"
                 f"<span>📅 <b>Data tomada</b> — {dia:%d/%m} já tem {o_que}.</span>"
                 + (f"<span>Datas livres perto:</span><div class=liv>{chips}</div>" if chips else "")
-                + na_lista + "</div>")
+                + na_lista
+                + "<button type=button class=fx onclick=\"this.closest('.le').remove()\" "
+                  "aria-label=Fechar>✕</button></div>")
     except Exception as e:  # noqa: BLE001
         _log.info("lista de espera na tela do lead: %s: %s", type(e).__name__, e)
         return ""
@@ -7130,7 +7144,9 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                      f"<button class='btn amb' type=submit>Passar este {_p('lead')} pra "
                      f"{esc(_nome.split()[0].title())}</button></form>")
         dupla = (f"<div class='{cls}'>{rot}{esc(av['texto'])}"
-                 f" O histórico dela não aparece aqui.{link}{passa}</div>")
+                 f" O histórico dela não aparece aqui.{link}{passa}"
+                 "<button type=button class=fx onclick=\"this.closest('.dupla').remove()\" "
+                 "aria-label=Fechar>✕</button></div>")
 
     chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")
     # o resumo da IA (finance/resumo_ia.py): o ✨ no cabeçalho, a folha no fim da
@@ -7147,7 +7163,8 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                    "<div class=iacorpo id=iacorpo></div><div class=iape id=iape></div></div>"
                    + _IA_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id)))
     # A PISTA (198): o leitor ouviu o mês (ou uma data diferente) e não gravou. O
-    # aviso fica em cima do chat até o vendedor confirmar na ficha ou perguntar o dia.
+    # aviso fica em cima do chat até o vendedor confirmar na ficha, perguntar o dia
+    # ou fechar no ✕ (só nesta tela — sem confirmar, ele volta no próximo carregamento).
     pista = ""
     if d.get("evento_pista"):
         from finance import evento_lead as _evl
@@ -7156,7 +7173,8 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                  "Confirmar a data?<span class=bts>"
                  f"<a class='bt ok' href='{_BASE}/lead/{lead_id}/ficha'>Abrir a ficha</a>"
                  f"<a class=bt href='{_BASE}/lead/{lead_id}?texto={_quote(_evl.PERGUNTA_DATA)}'>Perguntar o dia</a>"
-                 "</span></div>")
+                 "</span><button type=button class=fx onclick=\"this.closest('.aviso.pista').remove()\" "
+                 "aria-label=Fechar>✕</button></div>")
     corpo = (
                _hdr(d["empresa"], sub, voltar=_BASE, direita=chip)
              + _flash(request)

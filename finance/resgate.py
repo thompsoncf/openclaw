@@ -753,23 +753,51 @@ def supervisor(pool, conta_id: int, texto: str, *, tipo: str = "supervisor", lea
     Sai pelo número principal da empresa, MENOS quando `chip_id` diz outro: o teste
     ("Testar comigo") fala pelo chip da conversa do lead do teste, e a resposta a
     uma mensagem do supervisor sai pelo chip onde ele escreveu. Sem isso, em
-    27/09/2026 o dono escreveu pro chip Thiago e o CP Zarb respondeu."""
+    27/09/2026 o dono escreveu pro chip Thiago e o CP Zarb respondeu.
+
+    A PRÉVIA (tipo='previa') RECLAMA A VAGA ANTES DE MANDAR (revisão de 28/09/2026,
+    achado em produção: a Rozalia, lead #1167 da Prime, recebeu a mesma prévia duas
+    vezes, 0,7s de diferença). O serviço roda com 2 processos (uvicorn --workers 2),
+    cada um com o próprio relógio do resgate, e a trava que devia impedir os dois de
+    mandar junto (`pg_try_advisory_lock`, uma trava de SESSÃO) não segura sob o
+    pooler de transação do Supabase — a mesma razão de `db/conexao.py` desligar
+    prepared statements. Um INSERT com `on conflict` (migração 445) não depende de
+    sessão: só um dos dois consegue a linha, e é ele que manda. O outro devolve
+    False, calado, sem gastar chip nem confundir o supervisor. Os outros tipos
+    (aviso ao vendedor, retomada, toque) já têm a própria reivindicação atômica
+    (`_passar`, o UPDATE de `_um_toque`) — só a prévia lia "já mandei?" achado uma
+    corrida real."""
     try:
         with pool.connection() as c:
             cfg = cfg or config(c, conta_id)
             num = cfg.get("supervisor_whatsapp") or ""
             if not num:
                 return False
+            if tipo == "previa":
+                pegou = c.execute(
+                    """insert into resgate_envios (conta_id, prospeccao_id, tipo, ref_em, ok, erro)
+                         values (%s,%s,'previa',%s,false,'em andamento')
+                         on conflict (conta_id, prospeccao_id, ref_em) where tipo='previa'
+                         do nothing returning id""",
+                    (conta_id, lead, ref_em)).fetchone()
+                if not pegou:
+                    c.commit()
+                    return False
             from finance import whatsapp_out as wo
             destino = wo.preparar(c, conta_id)
             c.commit()
         chip = int(chip_id) if chip_id and int(chip_id) != int(conta_id) else None
         res = wo.enviar_pronto(destino, num, texto, chip_id=chip)
+        ok, erro = bool(res.get("ok")), (None if res.get("ok") else str(res.get("erro"))[:200])
         with pool.connection() as c:
-            _registrar(c, conta_id, tipo, lead=lead, ref_em=ref_em, texto=texto,
-                       ok=bool(res.get("ok")), erro=None if res.get("ok") else str(res.get("erro"))[:200])
+            if tipo == "previa":
+                c.execute("""update resgate_envios set texto=%s, ok=%s, erro=%s
+                              where conta_id=%s and prospeccao_id=%s and ref_em=%s and tipo='previa'""",
+                          ((texto or "")[:4000], ok, erro, conta_id, lead, ref_em))
+            else:
+                _registrar(c, conta_id, tipo, lead=lead, ref_em=ref_em, texto=texto, ok=ok, erro=erro)
             c.commit()
-        return bool(res.get("ok"))
+        return ok
     except Exception as e:  # noqa: BLE001
         _log.info("resgate.supervisor: não saiu (conta=%s): %s", conta_id, e)
         return False

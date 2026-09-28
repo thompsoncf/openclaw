@@ -5,7 +5,9 @@ responsável dele, e a mensagem cumprimenta quem recebe ("Lúcia, a consulta de 
 Tudo por SINAL EXPLÍCITO de que a consulta é de outra pessoa (o "para" do agente, a caixa
 da recepção, o "era pro meu filho"), nunca comparando nomes.
 """
-from datetime import date, time
+from datetime import date, datetime, time
+
+import pytest
 
 from finance import clinica_agenda as ca
 from finance import clinica_agente as cla
@@ -16,6 +18,41 @@ from tests.test_clinica_ficha_link import banco  # noqa: F401
 from tests.test_clinica_pacientes import _ficha_do_evento
 from tests.test_clinica_pacientes import banco as _banco_pacientes  # noqa: F401
 from tests.test_clinica_pacotes import FONE, _manoel, _paciente, _tipo, pool, zap  # noqa: F401
+
+
+# RELÓGIO FIXO SÓ PRA QUEM PASSA PELA ROTA HTTP. `_marcar` (acima) chama
+# `cla.marcar` direto, que aceita `agora=` e recebe AGORA explícito — os testes
+# que usam esse caminho nunca dependem do relógio de verdade.
+#
+# `test_card_sem_nome_nao_vira_responsavel` e
+# `test_a_recepcao_marca_o_filho_com_a_caixa_e_sem_ela_o_nome_nao_manda` marcam
+# pela ROTA (`cli.post`), que chama `web.painel_clinica_agenda.novo_salvar` →
+# `ca.agendar` SEM passar `agora=` — de propósito: é o caminho de produção, e lá
+# "agora" tem que ser o relógio de verdade. `ca.agendar` então usa
+# `datetime.now(timezone.utc)`, o instante REAL em que o teste roda.
+#
+# Só que a data escolhida do slot livre destes dois testes vem de
+# `ca.livres(..., agora=AGORA)`, com o AGORA FIXO desta suíte (25/09/2026,
+# sexta). Enquanto o relógio de verdade não passava de 28/09, o horário
+# escolhido (na tarde de segunda) continuava no futuro dos dois lados. A partir
+# do momento em que o relógio real passa desse horário, `ca.agendar` recusa com
+# "Esse horário já passou" — o POST redireciona de volta pro formulário sem
+# criar o evento, e a leitura seguinte (`_ficha_do_evento`) quebra com
+# `TypeError: 'NoneType' object is not subscriptable`: não é o dado que falta,
+# é o evento que nunca chegou a nascer.
+#
+# O ajuste é só nestes dois testes: fixa `datetime.now()` de
+# `finance.clinica_agenda` no mesmo AGORA que escolheu o slot, pro caminho HTTP
+# enxergar o mesmo "agora" que o resto do arquivo já usa.
+class _AgoraDaSuite(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return AGORA.astimezone(tz) if tz else AGORA.replace(tzinfo=None)
+
+
+@pytest.fixture
+def relogio_da_rota(monkeypatch):
+    monkeypatch.setattr(ca, "datetime", _AgoraDaSuite)
 
 
 def _marcar(pool_, c, lead, conv, nome, nascimento="", para="", h=9, dia=date(2026, 9, 28)):
@@ -107,7 +144,7 @@ def test_mae_e_filha_com_o_mesmo_primeiro_nome(banco, zap):  # noqa: F811
     assert saiu[0].startswith("Prontinho!! ✅ Maria, a consulta de Maria Eduarda")
 
 
-def test_card_sem_nome_nao_vira_responsavel(cli, banco, zap):  # noqa: F811
+def test_card_sem_nome_nao_vira_responsavel(cli, banco, zap, relogio_da_rota):  # noqa: F811
     with banco.connection() as c:
         lead, _conv = _paciente(c, nome="Contato WhatsApp")
         prof, tipo = _manoel(c), _tipo(c, "Consulta")["id"]
@@ -127,7 +164,7 @@ def test_card_sem_nome_nao_vira_responsavel(cli, banco, zap):  # noqa: F811
     assert txt.startswith("Prontinho!! ✅ A consulta de Pedro com")
 
 
-def test_a_recepcao_marca_o_filho_com_a_caixa_e_sem_ela_o_nome_nao_manda(cli, banco, zap):  # noqa: F811
+def test_a_recepcao_marca_o_filho_com_a_caixa_e_sem_ela_o_nome_nao_manda(cli, banco, zap, relogio_da_rota):  # noqa: F811
     with banco.connection() as c:
         lead, _conv = _paciente(c, nome="Lúcia Ferreira")
         prof, tipo = _manoel(c), _tipo(c, "Consulta")["id"]

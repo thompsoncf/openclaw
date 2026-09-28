@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Forma de pagamento com seletor</title>
+<style>
+:root{
+  --bg:#0e0e0f; --card:#161617; --card-2:#1a1a1c; --borda:#2a2a2b;
+  --txt:#ececec; --txt-mut:#a8a8a3;
+  --verde:#1d9e75; --verde-claro:#5dcaa5;
+  --vermelho:#f0917f;
+  --ambar:#e0a32e; --ambar-borda:#5a4520; --ambar-fundo:#241c0f;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  max-width:1180px;margin:0 auto;padding:30px 18px 90px;line-height:1.45}
+h1{font-size:1.2rem;margin-bottom:6px}
+.lead{color:var(--txt-mut);font-size:.88rem;margin-bottom:8px;line-height:1.6;max-width:900px}
+.lead b{color:var(--txt)}
+.fonte{font-size:.78rem;color:var(--txt-mut);margin-bottom:32px}
+.fonte a{color:var(--verde-claro);text-decoration:none}
+
+.secao{margin-bottom:44px}
+.secao-h{font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--verde-claro);margin-bottom:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.secao-h .tag{font-size:.62rem;background:rgba(93,202,165,.14);border:1px solid rgba(93,202,165,.35);
+  padding:2px 8px;border-radius:20px;letter-spacing:0;text-transform:none;font-weight:600}
+.secao-h .tag.bad{background:rgba(240,145,127,.14);border-color:rgba(240,145,127,.4);color:var(--vermelho)}
+
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media(max-width:900px){.compare{grid-template-columns:1fr}}
+.col-h{font-size:.78rem;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.col-h .sel{font-size:.64rem;font-weight:700;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.04em}
+.sel.antes{background:rgba(240,145,127,.14);color:var(--vermelho);border:1px solid rgba(240,145,127,.4)}
+.sel.depois{background:rgba(29,158,117,.16);color:#8be6c4;border:1px solid rgba(29,158,117,.45)}
+
+/* ---- réplica das classes reais de web/painel_servicos.py ---- */
+.card{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:1.1rem 1.2rem;margin-bottom:0}
+.oc-pill{padding:.4rem .8rem;border-radius:99px;border:1px solid var(--borda);background:var(--bg);color:var(--txt);cursor:pointer;font-size:.85rem}
+.mut{color:var(--txt-mut)}
+.oc-field{display:flex;flex-direction:column;gap:.35rem;margin-bottom:.6rem}
+.oc-field label{font-size:.82rem;color:var(--txt-mut)}
+.oc-inp{padding:.55rem .7rem;border-radius:8px;background:var(--bg);color:var(--txt);border:1px solid var(--borda);font-size:.95rem;width:100%;box-sizing:border-box}
+.oc-inp:focus{border-color:var(--verde);outline:none}
+select.oc-inp{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%23a8a8a3'/></svg>");background-repeat:no-repeat;background-position:right .7rem center;padding-right:1.8rem}
+
+.pg-row{display:grid;grid-template-columns:120px 90px minmax(0,1fr) minmax(0,1fr) auto;gap:.5rem;align-items:start;padding:.5rem 0;border-bottom:1px solid var(--borda)}
+.pg-row:last-child{border-bottom:0}
+.pg-row input,.pg-row select{padding:.4rem .5rem;font-size:.86rem}
+.pg-row .oc-valor{text-align:right}
+.pg-forma-cel{display:flex;flex-direction:column;gap:.32rem}
+.pg-forma-cel .outro-inp{display:none}
+.pg-forma-cel.tem-outro .outro-inp{display:block}
+@media(max-width:640px){.pg-row{grid-template-columns:1fr 1fr;gap:.4rem}.pg-row .pg-obs-cel{grid-column:1/-1}}
+.oc-ic{background:var(--bg);border:1px solid var(--borda);color:var(--txt-mut);cursor:pointer;font-size:.85rem;width:30px;height:30px;padding:0;border-radius:8px;display:inline-flex;align-items:center;justify-content:center}
+.oc-empty{border:1px dashed var(--borda);border-radius:12px;padding:1.4rem;text-align:center;margin-top:.6rem}
+
+.rotulo{font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:.35rem}
+
+/* nota de rodapé de cada coluna */
+.nota{margin-top:14px;font-size:.8rem;color:var(--txt-mut);line-height:1.55;padding:.7rem .85rem;
+  border-radius:9px;background:var(--card-2);border:1px solid var(--borda)}
+.nota b{color:var(--txt)}
+.nota.problema{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:#f0d9a8}
+.nota.problema b{color:var(--ambar)}
+
+.opcoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.opcoes .chip{font-size:.78rem;padding:.35rem .7rem;border-radius:99px;background:var(--card-2);
+  border:1px solid var(--borda);color:var(--txt-mut)}
+.opcoes .chip.destaque{color:var(--verde-claro);border-color:rgba(93,202,165,.4)}
+
+.pergunta{margin-top:52px;padding:1rem 1.2rem;border-radius:12px;background:var(--card-2);
+  border:1px solid var(--verde-claro);font-size:.92rem;line-height:1.6}
+.pergunta b{color:var(--verde-claro)}
+</style>
+</head>
+<body>
+
+<h1>Mockup — seletor de forma de pagamento no Plano de pagamento</h1>
+<p class="lead">Hoje o campo <b>Forma</b> do Plano de pagamento (tela de Serviços,
+  <code>/painel/servicos</code>) é texto livre — cada vendedor escreve do jeito
+  que lembra ("cartao", "Cartão", "cartão 3x"). Isso trava qualquer relatório
+  futuro que precise somar por forma de pagamento. A proposta é trocar por um
+  seletor com as formas comuns, mantendo espaço pra um caso que não está na
+  lista.</p>
+<p class="fonte">Tela real de referência: <i>Plano de pagamento</i> em
+  <code>web/painel_servicos.py</code> (campo <code>pg-forma</code>, linhas 3457 e 5818).</p>
+
+<div class="secao">
+  <div class="secao-h">Comparação <span class="tag bad">campo aberto hoje</span> <span class="tag">seletor proposto</span></div>
+  <div class="compare">
+
+    <div>
+      <div class="col-h"><span class="sel antes">ANTES</span> texto livre</div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
+          <h2 style="margin:0;font-size:1.05rem">Plano de pagamento</h2>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+            <button class="oc-pill" type="button">Sinal + parcelas…</button>
+            <button class="oc-pill" type="button">+ Parcela</button>
+          </div>
+        </div>
+        <p class="mut" style="margin:.5rem 0 .6rem;font-size:.85rem">Cada linha vira um título a receber, no vencimento, quando você fechar o contrato.</p>
+
+        <div class="rotulo" style="margin-top:.4rem">Sinal</div>
+        <div class="pg-row">
+          <input class="oc-inp" type="date" value="2026-10-05">
+          <input class="oc-inp oc-valor" value="800,00">
+          <input class="oc-inp" value="Pix">
+          <input class="oc-inp" placeholder="Observação (ex.: sinal)" value="Sinal — confirma a reserva da data">
+          <button class="oc-ic" type="button">🗑</button>
+        </div>
+        <div class="rotulo" style="margin-top:.7rem">Parcelas</div>
+        <div class="pg-row">
+          <input class="oc-inp" type="date" value="2026-11-05">
+          <input class="oc-inp oc-valor" value="612,50">
+          <input class="oc-inp" value="cartao">
+          <input class="oc-inp" placeholder="Observação (ex.: sinal)" value="Parcela 1/12">
+          <button class="oc-ic" type="button">🗑</button>
+        </div>
+        <div class="pg-row">
+          <input class="oc-inp" type="date" value="2026-12-05">
+          <input class="oc-inp oc-valor" value="612,50">
+          <input class="oc-inp" value="Cartão de Crédito">
+          <input class="oc-inp" placeholder="Observação (ex.: sinal)" value="Parcela 2/12">
+          <button class="oc-ic" type="button">🗑</button>
+        </div>
+        <div class="pg-row">
+          <input class="oc-inp" type="date" value="2027-01-05">
+          <input class="oc-inp oc-valor" value="612,50">
+          <input class="oc-inp" value="cartão 3x s/ juros">
+          <input class="oc-inp" placeholder="Observação (ex.: sinal)" value="Parcela 3/12">
+          <button class="oc-ic" type="button">🗑</button>
+        </div>
+        <div class="mut" style="font-size:.82rem;margin-top:.6rem">As parcelas somam R$ 2.637,50 — bate com o total do orçamento.</div>
+      </div>
+      <div class="nota problema">
+        <b>O problema que dá pra ver aqui:</b> três parcelas do MESMO jeito de pagar
+        (cartão) estão escritas de três formas diferentes — "cartao", "Cartão de
+        Crédito", "cartão 3x s/ juros". Nenhum relatório consegue somar isso como
+        uma coisa só sem normalizar texto na mão.
+      </div>
+    </div>
+
+    <div>
+      <div class="col-h"><span class="sel depois">DEPOIS</span> seletor + "Outro"</div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
+          <h2 style="margin:0;font-size:1.05rem">Plano de pagamento</h2>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+            <button class="oc-pill" type="button">Sinal + parcelas…</button>
+            <button class="oc-pill" type="button">+ Parcela</button>
+          </div>
+        </div>
+        <p class="mut" style="margin:.5rem 0 .6rem;font-size:.85rem">Cada linha vira um título a receber, no vencimento, quando você fechar o contrato.</p>
+
+        <div class="rotulo" style="margin-top:.4rem">Sinal</div>
+        <div class="pg-row">
+          <input class="oc-inp" type="date" value="2026-10-05">
+          <input class="oc-inp oc-valor" value="800,00">
+          <div class="pg-forma-cel">
+            <select class="oc-inp forma-sel">
+              <option>Pix</option>
+              <option>Cartão de crédito</option>
+              <option>Cartão de débito</option>
+              <option>Boleto</option>
+              <option>Dinheiro</option>
+              <option>Transferência</option>
+              <option value="Outro">Outro…</option>
+            </select>
+            <input class="oc-inp outro-inp" placeholder="Especifique">
+          </div>
+          <div class="pg-obs-cel"><input class="oc-inp" placeholder="Observação (ex.: sinal)" value="Sinal — confirma a reserva da data"></div>
+          <button class="oc-ic" type="button">🗑</button>
+        </div>
+        <div class="rotulo" style="margin-top:.7rem">Parcelas</div>
+        <div class="pg-row">
+          <input class="oc-inp" type="date" value="2026-11-05">
+          <input class="oc-inp oc-valor" value="612,50">
+          <div class="pg-forma-cel">
+            <select class="oc-inp forma-sel">
+              <option>Pix</option>
+              <option selected>Cartão de crédito</option>
+              <option>Cartão de débito</option>
+              <option>Boleto</option>
+              <option>Dinheiro</option>
+              <option>Transferência</option>
+              <option value="Outro">Outro…</option>
+            </select>
+            <input class="oc-inp outro-inp" placeholder="Especifique">
+          </div>
+          <div class="pg-obs-cel"><input class="oc-inp" placeholder="Observação (ex.: sinal)" value="Parcela 1/12"></div>
+          <button class="oc-ic" type="button">🗑</button>
+        </div>
+        <div class="rotulo" style="margin-top:.7rem">Parcela migrada de texto livre</div>
+        <div class="pg-row">
+          <input class="oc-inp" type="date" value="2027-01-05">
+          <input class="oc-inp oc-valor" value="612,50">
+          <div class="pg-forma-cel tem-outro">
+            <select class="oc-inp forma-sel">
+              <option>Pix</option>
+              <option>Cartão de crédito</option>
+              <option>Cartão de débito</option>
+              <option>Boleto</option>
+              <option>Dinheiro</option>
+              <option>Transferência</option>
+              <option value="Outro" selected>Outro…</option>
+            </select>
+            <input class="oc-inp outro-inp" value="cartão 3x s/ juros">
+          </div>
+          <div class="pg-obs-cel"><input class="oc-inp" placeholder="Observação (ex.: sinal)" value="Parcela 3/12"></div>
+          <button class="oc-ic" type="button">🗑</button>
+        </div>
+        <div class="mut" style="font-size:.82rem;margin-top:.6rem">As parcelas somam R$ 2.025,00 — bate com o total do orçamento.</div>
+      </div>
+      <div class="nota">
+        <b>Como cada caso vira dado limpo:</b> as duas primeiras batem com uma
+        opção da lista e já nascem normalizadas. A terceira ("cartão 3x s/
+        juros") não bate com nenhuma — cai em <b>Outro</b> com o texto original
+        preservado, em vez de forçar num valor errado. Nenhuma parcela salva
+        antes desta mudança perde informação ao carregar a tela.
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="secao">
+  <div class="secao-h">Opções do seletor</div>
+  <div class="opcoes">
+    <span class="chip destaque">Pix</span>
+    <span class="chip destaque">Cartão de crédito</span>
+    <span class="chip destaque">Cartão de débito</span>
+    <span class="chip destaque">Boleto</span>
+    <span class="chip destaque">Dinheiro</span>
+    <span class="chip destaque">Transferência</span>
+    <span class="chip">Outro… (abre o campo de texto ao lado)</span>
+  </div>
+  <div class="nota" style="margin-top:14px">
+    O gerador de parcelas ("Sinal + parcelas…") ganha o mesmo seletor no lugar
+    do campo <code>Forma</code> que hoje tem placeholder "Cartão de crédito" —
+    e continua preenchendo "Pix" automaticamente na linha do sinal, como já faz
+    hoje.
+  </div>
+</div>
+
+<div class="pergunta">
+  <b>Pra aprovar:</b> as seis opções da lista cobrem o que a sua empresa recebe hoje?
+  Se tiver mais alguma forma que apareça com frequência (ex.: cheque, vale), ela
+  entra na lista fixa em vez de cair sempre em "Outro".
+</div>
+
+<script>
+document.querySelectorAll('.forma-sel').forEach(function(sel){
+  var cel=sel.closest('.pg-forma-cel');
+  function pinta(){cel.classList.toggle('tem-outro',sel.value==='Outro');}
+  sel.addEventListener('change',pinta);
+  pinta();
+});
+</script>
+</body>
+</html>

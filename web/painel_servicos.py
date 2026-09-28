@@ -2319,11 +2319,21 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 .oc-sub{display:flex;flex-direction:column;gap:.15rem;text-align:right}
 .oc-sub span{font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut)}
 .oc-sub b{font-size:.9rem;color:var(--verde-claro);white-space:nowrap}
-.pg-row{display:grid; grid-template-columns:140px 110px minmax(0,1fr) minmax(0,1fr) auto; gap:.5rem; align-items:center; padding:.45rem 0; border-bottom:1px solid var(--borda)}
+.pg-row{display:grid; grid-template-columns:140px 110px minmax(0,1fr) minmax(0,1fr) auto; gap:.5rem; align-items:start; padding:.45rem 0; border-bottom:1px solid var(--borda)}
 .pg-row:last-child{border-bottom:0}
-.pg-row input{padding:.4rem .5rem; font-size:.88rem}
+.pg-row input,.pg-row select{padding:.4rem .5rem; font-size:.88rem}
 .pg-row .oc-valor{text-align:right}
 @media(max-width:640px){.pg-row{grid-template-columns:1fr 1fr; gap:.4rem}.pg-row .pg-obs{grid-column:1/-1}}
+/* FORMA DE PAGAMENTO: seletor com as formas comuns + "Outro" pra não perder
+   o que já foi digitado antes disso existir (mockup docs/mockups/
+   plano_pagamento_forma_selecionavel.html). O campo de texto só aparece
+   quando "Outro" está escolhido. */
+select.oc-inp{appearance:none; -webkit-appearance:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%23a8a8a3'/></svg>");
+  background-repeat:no-repeat; background-position:right .7rem center; padding-right:1.8rem}
+.pg-forma-cel{display:flex; flex-direction:column; gap:.32rem}
+.pg-forma-cel .pg-forma-outro{display:none}
+.pg-forma-cel.tem-outro .pg-forma-outro{display:block}
 .pg-aviso{color:#e6b877}
 /* paleta de ícones do serviço (no lugar da foto): a biblioteca inteira à vista,
    com o escolhido aceso. Um clique troca — sem upload, sem espera, sem rede. */
@@ -3448,13 +3458,43 @@ _JS_CRU = r"""(function(){
     i.value=(val==null?'':val);
     return i;
   }
+  // FORMAS FIXAS DO SELETOR. Parcela salva antes disso existir pode ter
+  // QUALQUER texto em `forma` ("cartao", "cartão 3x s/ juros"…) — o valor que
+  // não bate com nenhuma destas cai em "Outro" com o texto original intacto,
+  // nunca é descartado (mockup docs/mockups/plano_pagamento_forma_selecionavel.html).
+  var FORMAS_PAGAMENTO=['Pix','Cartão de crédito','Cartão de débito','Boleto','Dinheiro','Transferência'];
+  function pgFormaSelect(valorSalvo){
+    var sel=document.createElement('select'); sel.className='oc-inp pg-forma';
+    var vazia=document.createElement('option'); vazia.value=''; vazia.textContent='Selecione…';
+    sel.appendChild(vazia);
+    FORMAS_PAGAMENTO.forEach(function(f){
+      var o=document.createElement('option'); o.value=f; o.textContent=f; sel.appendChild(o);
+    });
+    var outro=document.createElement('option'); outro.value='Outro'; outro.textContent='Outro…';
+    sel.appendChild(outro);
+    var v=valorSalvo||'';
+    if(!v) sel.value='';
+    else if(FORMAS_PAGAMENTO.indexOf(v)>=0) sel.value=v;
+    else sel.value='Outro';
+    return sel;
+  }
+  function pgFormaCel(valorSalvo){
+    var cel=document.createElement('div'); cel.className='pg-forma-cel';
+    var sel=pgFormaSelect(valorSalvo);
+    var outroInp=document.createElement('input');
+    outroInp.className='oc-inp pg-forma-outro'; outroInp.placeholder='Especifique';
+    if(sel.value==='Outro') outroInp.value=valorSalvo||'';
+    cel.classList.toggle('tem-outro',sel.value==='Outro');
+    cel.appendChild(sel); cel.appendChild(outroInp);
+    return cel;
+  }
   function addParcela(p){
     var box=document.getElementById('pg-linhas'); if(!box)return;
     p=p||{};
     var d=document.createElement('div'); d.className='pg-row';
     d.appendChild(pgInp('pg-venc','',p.venc||'','date'));
     d.appendChild(pgInp('pg-valor oc-valor','0,00',p.valor_centavos?fmtc(p.valor_centavos):''));
-    d.appendChild(pgInp('pg-forma','Pix, cartão…',p.forma||''));
+    d.appendChild(pgFormaCel(p.forma||''));
     d.appendChild(pgInp('pg-obs','Observação (ex.: sinal)',p.obs||''));
     var b=document.createElement('button');
     b.className='oc-ic pg-rm'; b.type='button'; b.title='Remover parcela'; b.textContent='🗑';
@@ -3464,9 +3504,11 @@ _JS_CRU = r"""(function(){
   }
   function coletarParcelas(){
     return pgRows().map(function(r){
+      var sel=r.querySelector('.pg-forma');
+      var forma=sel.value==='Outro'?(r.querySelector('.pg-forma-outro').value||'').trim():sel.value;
       return {venc:r.querySelector('.pg-venc').value||'',
               valor_centavos:centavos(r.querySelector('.pg-valor').value),
-              forma:r.querySelector('.pg-forma').value||'',
+              forma:forma||'',
               obs:r.querySelector('.pg-obs').value||''};
     }).filter(function(p){return p.valor_centavos>0;});
   }
@@ -3528,7 +3570,8 @@ _JS_CRU = r"""(function(){
     var entrada=centavos(document.getElementById('pg-entrada').value);
     var n=Math.max(1,Math.min(60,num(document.getElementById('pg-n'))));
     var venc=document.getElementById('pg-venc').value;
-    var forma=document.getElementById('pg-forma').value||'';
+    var formaSel=document.getElementById('pg-forma').value||'';
+    var forma=formaSel==='Outro'?(document.getElementById('pg-forma-outro').value||'').trim():formaSel;
     if(!venc){alert('Escolha o 1º vencimento.');return;}
     if(entrada>total){alert('O sinal é maior que o total do orçamento.');return;}
     document.getElementById('pg-linhas').innerHTML='';
@@ -3550,6 +3593,10 @@ _JS_CRU = r"""(function(){
   var pgBox=document.getElementById('pg-linhas');
   if(pgBox){
     pgBox.addEventListener('input',pintaParcelas);
+    pgBox.addEventListener('change',function(e){
+      var sel=e.target.closest('.pg-forma'); if(!sel)return;
+      sel.closest('.pg-forma-cel').classList.toggle('tem-outro',sel.value==='Outro');
+    });
     pgBox.addEventListener('click',function(e){
       var rm=e.target.closest('.pg-rm'); if(!rm)return;
       var row=rm.closest('.pg-row'); if(row)row.remove();
@@ -3557,6 +3604,10 @@ _JS_CRU = r"""(function(){
     });
     document.getElementById('pg-add').addEventListener('click',function(){addParcela();});
     var pgGer=document.getElementById('pg-gerador');
+    var pgGerForma=document.getElementById('pg-forma');
+    if(pgGerForma) pgGerForma.addEventListener('change',function(){
+      pgGerForma.closest('.pg-forma-cel').classList.toggle('tem-outro',pgGerForma.value==='Outro');
+    });
     document.getElementById('pg-gerar').addEventListener('click',function(){
       pgGer.style.display=(pgGer.style.display==='none'?'block':'none');
     });
@@ -5815,7 +5866,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           <div class="oc-field" style="margin-bottom:0"><label>Sinal (R$)</label><input id="pg-entrada" class="oc-inp" placeholder="0,00"></div>
           <div class="oc-field" style="margin-bottom:0"><label>Nº de parcelas</label><input id="pg-n" class="oc-inp" inputmode="numeric" value="12"></div>
           <div class="oc-field" style="margin-bottom:0"><label>1º vencimento</label><input id="pg-venc" class="oc-inp" type="date"></div>
-          <div class="oc-field" style="margin-bottom:0"><label>Forma</label><input id="pg-forma" class="oc-inp" placeholder="Cartão de crédito"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Forma</label>
+            <div class="pg-forma-cel">
+              <select id="pg-forma" class="oc-inp">
+                <option value="">Selecione…</option>
+                <option>Pix</option>
+                <option>Cartão de crédito</option>
+                <option>Cartão de débito</option>
+                <option>Boleto</option>
+                <option>Dinheiro</option>
+                <option>Transferência</option>
+                <option value="Outro">Outro…</option>
+              </select>
+              <input id="pg-forma-outro" class="oc-inp pg-forma-outro" placeholder="Especifique">
+            </div>
+          </div>
         </div>
         <div style="display:flex; gap:.5rem; margin-top:.6rem">
           <button id="pg-gerar-ok" class="oc-btn-g" type="button" style="border:0;border-radius:8px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Gerar</button>

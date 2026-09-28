@@ -60,6 +60,33 @@ def migracao_ja_rodou(pool, nome: str) -> bool:
         "Abortando: reexecutar migração já aplicada pode destruir dado."
     ) from ultimo
 
+def _erro_e_so_ja_existia(e: Exception) -> bool:
+    """A migração falhou porque o objeto JÁ EXISTE (rodou antes, sem
+    rastreamento) — seguro marcar como concluída e seguir? Ou é um erro de
+    verdade que precisa parar o deploy?
+
+    NUNCA testar só "duplicate" na mensagem. "could not create unique index
+    ... is duplicated" — DADO duplicado bloqueando a criação do índice, o
+    OPOSTO de já ter rodado — contém "duplicate" como substring de
+    "duplicated". Esse bug marcou a migração 445 (resgate) como concluída em
+    produção em 28/09/2026 sem o índice existir: o `CREATE UNIQUE INDEX`
+    falhou por causa de duas linhas duplicadas que já estavam na tabela, e o
+    runner leu "duplicate" na mensagem e seguiu como se nada tivesse
+    acontecido — a proteção que a migração devia trazer nunca chegou a
+    existir. `schema_migrations` dizia uma coisa; o banco, outra.
+
+    "already exists" (relação/índice/coluna já existe pelo nome) e
+    "duplicate key value violates unique constraint" (INSERT batendo numa
+    constraint já satisfeita, ex.: semente que já foi inserida numa rodada
+    anterior) são os dois casos genuinamente seguros. Qualquer mensagem que
+    comece com "could not create" é uma falha de criação — nunca "já
+    existia" — e nunca passa aqui, mesmo se também contiver "duplicate"."""
+    msg = str(e).lower()
+    if "could not create" in msg:
+        return False
+    return "already exists" in msg or "duplicate key value violates unique constraint" in msg
+
+
 def registrar_migracao(pool, nome: str):
     """Registra que uma migração foi executada."""
     try:
@@ -103,7 +130,7 @@ def _obter_lock(lock_conn, tentativas: int = 12, espera: float = 1.5) -> bool:
     return False
 
 
-def aplicar_migracoes(pool, forcar: bool = False):
+def aplicar_migracoes(pool, forcar: bool = False, diretorio: Path | None = None):
     """Lê e executa todos os .sql da pasta migracoes/ em ordem numérica.
 
     Serializado (best-effort) por um advisory lock não-bloqueante: se dois
@@ -111,6 +138,9 @@ def aplicar_migracoes(pool, forcar: bool = False):
     espera o outro. Se o lock não vier a tempo, segue mesmo assim — as migrações
     são idempotentes (if not exists / registro em schema_migrations) e o Postgres
     serializa o DDL, então não há corrida perigosa.
+
+    `diretorio`: só pra teste (aponta pra uma pasta descartável em vez de
+    db/migracoes/). Em produção nunca é passado.
     """
     criar_tabela_rastreamento(pool)
 
@@ -120,7 +150,7 @@ def aplicar_migracoes(pool, forcar: bool = False):
             print("⚠ advisory lock ocupado (outra instância migrando?) — "
                   "seguindo mesmo assim; migrações são idempotentes.")
         try:
-            return _aplicar(pool, forcar)
+            return _aplicar(pool, forcar, diretorio)
         finally:
             if pegou:
                 try:
@@ -131,8 +161,8 @@ def aplicar_migracoes(pool, forcar: bool = False):
                     pass
 
 
-def _aplicar(pool, forcar: bool = False):
-    migracoes_dir = Path(__file__).parent / "migracoes"
+def _aplicar(pool, forcar: bool = False, diretorio: Path | None = None):
+    migracoes_dir = diretorio or (Path(__file__).parent / "migracoes")
     if not migracoes_dir.exists():
         print("Diretório de migrações não encontrado.")
         return 0
@@ -165,7 +195,7 @@ def _aplicar(pool, forcar: bool = False):
         except Exception as e:
             # Se a tabela/índice já existe (migração já rodou no passado, sem rastreamento),
             # registra como concluída e continua (idempotência)
-            if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+            if _erro_e_so_ja_existia(e):
                 registrar_migracao(pool, nome)
                 print(f"⊘ {nome} (já existia, registrada como concluída)")
             else:

@@ -293,3 +293,73 @@ def test_127_permite_engajamento():
            / "127_prospeccao_atividade_bounce.sql").read_text("utf-8")
     assert "'engajamento'" in sql, "reexecutar a 127 vai quebrar em banco com engajamento"
     assert "'bounce'" in sql
+
+
+# ------------------------------------- "duplicate" não é "já existia" (445, 28/09)
+
+@pytest.mark.parametrize("mensagem,esperado", [
+    ('relation "resgate_envios_previa_unica" already exists', True),
+    ('duplicate key value violates unique constraint "schema_migrations_nome_key"', True),
+    # o bug real: "is duplicated" contém "duplicate" como substring, mas é o
+    # OPOSTO de "já existia" — é dado bloqueando a criação do índice
+    ('could not create unique index "resgate_envios_previa_unica"\n'
+     'DETAIL:  Key (conta_id, prospeccao_id, ref_em)=(34, 1167, 2026-09-16 20:52:00+00) '
+     'is duplicated.', False),
+    ('syntax error at or near "CRAETE"', False),
+])
+def test_classificacao_de_erro_ja_existia(mensagem, esperado):
+    from db.aplicar_migracoes import _erro_e_so_ja_existia
+    assert _erro_e_so_ja_existia(Exception(mensagem)) is esperado
+
+
+def test_indice_unico_ja_existente_e_pulado(pool, tmp_path):
+    """Contraprova do caso seguro: se o índice já existe pelo nome, o deploy
+    segue e marca a migração como concluída — comportamento de sempre,
+    preservado depois do conserto do 445."""
+    from db.aplicar_migracoes import aplicar_migracoes
+    with pool.connection() as c:
+        c.execute("create table alvo_indice (id serial primary key, chave text)")
+        c.execute("create unique index alvo_indice_chave_unica on alvo_indice (chave)")
+        c.commit()
+    migracoes = tmp_path / "migracoes"
+    migracoes.mkdir()
+    (migracoes / "900_indice_ja_existe.sql").write_text(
+        "create unique index alvo_indice_chave_unica on alvo_indice (chave);",
+        encoding="utf-8")
+    n = aplicar_migracoes(pool, diretorio=migracoes)
+    assert n == 0                          # "já existia" não conta como execução nova
+    with pool.connection() as c:
+        assert c.execute("select 1 from schema_migrations where nome=%s",
+                         ("900_indice_ja_existe.sql",)).fetchone()
+
+
+def test_indice_unico_com_dado_duplicado_para_o_deploy_em_vez_de_mentir(pool, tmp_path):
+    """O CASO QUE ESTE TESTE FIXA (28/09/2026, produção): a migração 445 do
+    resgate criava um índice único, mas duas linhas duplicadas já tinham sido
+    gravadas antes do deploy — o `CREATE UNIQUE INDEX` falhou com "could not
+    create unique index ... is duplicated", e o runner, lendo só "duplicate"
+    na mensagem, tratou como "já existia" e marcou a migração como concluída
+    em `schema_migrations` SEM o índice existir de verdade. A proteção que a
+    migração prometia nunca chegou a existir, e nada acusou — até a próxima
+    corrida duplicar de novo.
+
+    Reproduz o cenário exato: uma tabela com duas linhas iguais na coluna que
+    a migração tenta indexar como única. O deploy tem que LEVANTAR e NUNCA
+    marcar como concluída."""
+    from db.aplicar_migracoes import aplicar_migracoes
+    with pool.connection() as c:
+        c.execute("create table alvo_indice (id serial primary key, chave text)")
+        c.execute("insert into alvo_indice (chave) values ('x'), ('x')")   # duplicado
+        c.commit()
+    migracoes = tmp_path / "migracoes"
+    migracoes.mkdir()
+    (migracoes / "900_indice_unico_com_duplicata.sql").write_text(
+        "create unique index if not exists alvo_indice_chave_unica on alvo_indice (chave);",
+        encoding="utf-8")
+    with pytest.raises(Exception, match="(?i)could not create"):
+        aplicar_migracoes(pool, diretorio=migracoes)
+    with pool.connection() as c:
+        assert not c.execute("select 1 from schema_migrations where nome=%s",
+                             ("900_indice_unico_com_duplicata.sql",)).fetchone()
+        assert not c.execute("select indexname from pg_indexes where "
+                             "indexname='alvo_indice_chave_unica'").fetchone()

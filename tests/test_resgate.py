@@ -98,6 +98,7 @@ def pool():
         c.execute((BASE / "403_resgate_origem_e_espelho.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "409_resgate_teste_chip.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "445_resgate_previa_sem_dobro.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "446_resgate_previa_sem_dobro_de_verdade.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos')")
         c.execute("insert into contas (id, nome, chip_de, nicho_id) values "
                   "(%s,'Prime',null,1),(%s,'CP Thiago',%s,null),(%s,'Outra',null,1)",
@@ -1366,6 +1367,33 @@ def test_a_previa_nao_dobra_quando_dois_workers_competem(pool, equipe, duble):
         rows = c.execute("select texto from resgate_envios where tipo='previa' and prospeccao_id=%s",
                          (candidato["id"],)).fetchall()
     assert rows == [("primeira prévia",)]
+
+
+def test_a_446_apaga_a_duplicata_e_recria_o_indice(pool, equipe):
+    """O CASO QUE ESTE TESTE FIXA (28/09/2026, produção): o índice da 445 nunca
+    existiu de verdade — um bug em `db/aplicar_migracoes.py` confundiu "dado
+    duplicado bloqueando a criação" com "índice já existe" e marcou a 445 como
+    concluída em `schema_migrations` mesmo com o `CREATE UNIQUE INDEX`
+    falhando. As duas linhas duplicadas da Rozalia (lead #1167) continuavam
+    lá. Simula esse exato estado — derruba o índice, insere a duplicata de
+    novo — e reaplica o SQL da 446: só a linha mais antiga sobra, e o índice
+    volta a existir."""
+    with pool.connection() as c:
+        c.execute("drop index if exists resgate_envios_previa_unica")
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+        ref = datetime.now(timezone.utc) - timedelta(days=10)
+        c.execute("""insert into resgate_envios (conta_id, prospeccao_id, tipo, ref_em, texto, ok)
+                     values (%s,%s,'previa',%s,'primeira',true)""", (EMPRESA, lid, ref))
+        c.execute("""insert into resgate_envios (conta_id, prospeccao_id, tipo, ref_em, texto, ok)
+                     values (%s,%s,'previa',%s,'segunda',true)""", (EMPRESA, lid, ref))
+        c.commit()
+        c.execute((BASE / "446_resgate_previa_sem_dobro_de_verdade.sql").read_text(encoding="utf-8"))
+        c.commit()
+        rows = c.execute("select texto from resgate_envios where tipo='previa' and prospeccao_id=%s",
+                         (lid,)).fetchall()
+        assert rows == [("primeira",)]                      # a mais antiga (menor id) fica
+        assert c.execute("select indexname from pg_indexes where "
+                         "indexname='resgate_envios_previa_unica'").fetchone()
 
 
 def _perdido_da_ia(c, equipe, dias_perdido, numero="5586988880009"):

@@ -538,6 +538,11 @@ def test_o_selo_e_o_botao_no_quadro_e_no_app():
     assert "_le.aceitar(pool, ctx[\"conta_id\"], lead_id" in inspect.getsource(pp.prospeccao_lista_espera)
     app = inspect.getsource(pc._bloco_espera)
     assert "_le.tomada_para(" in app and "/lista-espera" in app and "aceita esperar esta data" in app
+    # O ✕ (achado em produção, 28/09/2026): "Data tomada" empilhava com outros
+    # avisos e não tinha como fechar — o vendedor achou que travava o envio de
+    # mensagem. Fecha só nesta tela, não marca nada no banco (a régua por trás
+    # é a mesma; se ainda for verdade, volta no próximo carregamento).
+    assert "this.closest('.le').remove()" in app
     assert "_le.aceitar(pool, conta_id, lead_id, membro_id)" in inspect.getsource(pc.cockpit_lista_espera)
     pp._env.parse(pp._KANBAN_TPL)
 

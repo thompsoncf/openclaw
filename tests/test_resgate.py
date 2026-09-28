@@ -97,6 +97,7 @@ def pool():
         c.execute((BASE / "401_ia_fora_da_esteira.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "403_resgate_origem_e_espelho.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "409_resgate_teste_chip.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "445_resgate_previa_sem_dobro.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos')")
         c.execute("insert into contas (id, nome, chip_de, nicho_id) values "
                   "(%s,'Prime',null,1),(%s,'CP Thiago',%s,null),(%s,'Outra',null,1)",
@@ -1342,6 +1343,29 @@ def test_a_previa_diz_de_onde_veio_e_o_resumo(pool, equipe, duble, monkeypatch):
     with pool.connection() as c:
         txt = c.execute("select texto from resgate_envios where tipo='previa'").fetchone()[0]
     assert "veio dos perdidos" in txt and "✨ 15 anos · parou: pediu o valor" in txt
+
+
+def test_a_previa_nao_dobra_quando_dois_workers_competem(pool, equipe, duble):
+    """Migração 445 (achado em produção, 28/09/2026): o lead #1167 da Prime recebeu a
+    mesma prévia duas vezes, 0,7s de diferença — dois processos do serviço
+    (render.yaml, `--workers 2`) competindo pela mesma prévia. A segunda tentativa
+    tem que voltar False sem mandar nada, e só uma linha pode sobrar."""
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10)
+        candidato = rg.fila(c, EMPRESA)[0]
+        cfg = rg.config(c, EMPRESA)
+    ok1 = rg.supervisor(pool, EMPRESA, "primeira prévia", tipo="previa",
+                        lead=candidato["id"], ref_em=candidato["desde"], cfg=cfg)
+    ok2 = rg.supervisor(pool, EMPRESA, "segunda prévia (não devia sair)", tipo="previa",
+                        lead=candidato["id"], ref_em=candidato["desde"], cfg=cfg)
+    assert ok1 is True and ok2 is False
+    assert len(duble["saiu"]) == 1                       # só a primeira saiu de fato
+    assert duble["saiu"][0]["texto"] == "primeira prévia"
+    with pool.connection() as c:
+        rows = c.execute("select texto from resgate_envios where tipo='previa' and prospeccao_id=%s",
+                         (candidato["id"],)).fetchall()
+    assert rows == [("primeira prévia",)]
 
 
 def _perdido_da_ia(c, equipe, dias_perdido, numero="5586988880009"):

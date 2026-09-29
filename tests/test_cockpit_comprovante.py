@@ -242,3 +242,41 @@ def test_proposta_de_outra_conta_nao_e_alcancada(pool, cena, cofre):
                               _PNG, "image/png", "pix.png")
     assert r["ok"] is False
     assert _anexos(pool, cena["da_ana"]) == []
+
+
+# ═════════════════════ a tela, pela rota real (28/09/2026, conta 34 na Prime) ═════════════════════
+
+@pytest.fixture()
+def tela(pool, monkeypatch):
+    """A rota de verdade, com sessão de dono — é aqui, não em `ck.pagamentos`, que a
+    tela renderiza `pago_em` em HTML."""
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+    from starlette.middleware.sessions import SessionMiddleware
+    from web import painel_cockpit as pc
+
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="teste")
+    app.include_router(pc.router)
+
+    @app.post("/_entrar")
+    async def _entrar(request: Request, dados: dict):
+        request.session["conta_id"] = dados["conta"]
+        request.session["papel"] = "dono"
+        return {"ok": True}
+
+    return TestClient(app)
+
+
+def test_a_tela_do_sinal_pago_sem_titulo_ainda_nao_quebra(tela, cena, cofre):
+    """Reproduz o 500 relatado por um vendedor da Prime: o sinal confirmado ANTES de
+    existir título (`finance.vendas.pagamentos_do_orcamento`, quando `titulos` está
+    vazio ou nem existe pra conta) devolve `pago_em` como `date`, não `datetime` — e
+    `web.painel_cockpit._data()` chamava `.astimezone()` sem tratar isso, derrubando
+    `/cockpit/orcamentos/{id}/pagamentos` com AttributeError. A `cena` deste arquivo
+    já nasce exatamente assim: sinal pago, sem tabela `titulos`."""
+    tela.post("/_entrar", json={"conta": cena["conta"]})
+    r = tela.get(f"/cockpit/orcamentos/{cena['da_ana']}/pagamentos")
+    assert r.status_code == 200, r.text
+    assert "Internal Server Error" not in r.text

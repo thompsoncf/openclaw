@@ -2745,7 +2745,10 @@ def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
         linhas.append(
             f"{t['vencimento']};{t['tipo']};{desc};{t['contraparte']};"
             f"{brl(t['valor_centavos'])};{'sim' if t['atrasado'] else 'nao'}")
-    return "\n".join(linhas) + "\n"
+    # BOM: sem ele, o Excel abre o UTF-8 como se fosse ANSI/Latin-1 e todo
+    # acento vira "ServiÃ§os" — relatado em produção em 29/09/2026. O BOM é o
+    # sinal que faz o Excel (inclusive versões PT-BR) detectar UTF-8 sozinho.
+    return "﻿" + "\n".join(linhas) + "\n"
 
 
 # ---------------------------------------------------------------------------

@@ -48,8 +48,9 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from db.conexao import get_pool
 from finance import comprovantes as comprov
@@ -229,6 +230,7 @@ def painel_eventos_stands(request: Request):
         cor_tam=_COR_TAM, tam_label=_TAM_LABEL, data_curta=_data_curta,
         mapa_json=mapa_json, pode_gerir=pode_gerir, stands=stands,
         vinculos=vinculos, precos_tam=precos_tam,
+        sem_storage=not comprov.configurado(),
         erro=(request.query_params.get("erro") or "").strip(),
         ok=(request.query_params.get("ok") or "").strip())
 
@@ -299,6 +301,46 @@ def liberar(request: Request, codigo: str):
         return cfg_ou_redir
     ok = es.liberar(get_pool(), conta[0], codigo)
     msg = f"Estande {codigo} liberado." if ok else f"Estande {codigo} já estava livre."
+    return RedirectResponse(f"/painel/eventos/estandes?ok={msg}", status_code=303)
+
+
+@router.post("/painel/eventos/estandes/{codigo}/comprovante")
+async def anexar_comprovante(request: Request, codigo: str, nome: str = Form(""),
+                             whatsapp: str = Form(""), arquivo: UploadFile = File(...)):
+    """O gestor ANEXA o comprovante pelo painel — a venda fechada por fora
+    (WhatsApp, presencial) entra pelo MESMO cano da página pública
+    (subir_e_registrar_comprovante): trava o stand, nasce prospecção, proposta
+    e contrato iguais. Sub-aba "Anexar comprovante" da maquete, agora real
+    (achado do dono, 29/09/2026: em produção tudo é livre e as sub-abas não
+    apareciam — faltava o caminho manual).
+
+    Só o READ do arquivo fica no event loop; o resto roda na threadpool —
+    mesma regra de web/loja_stands (tests/test_event_loop_nao_trava.py)."""
+    conteudo = await arquivo.read()
+    return await run_in_threadpool(_anexar_comprovante_sync, request, codigo,
+                                   nome, whatsapp, conteudo,
+                                   arquivo.content_type or "")
+
+
+def _anexar_comprovante_sync(request: Request, codigo: str, nome: str,
+                             whatsapp: str, conteudo: bytes, content_type: str):
+    conta, cfg_ou_redir = _acesso(request)
+    if conta is None:
+        return cfg_ou_redir
+    pool = get_pool()
+    pid = None
+    if (nome or "").strip():
+        from web.loja_stands import _criar_prospeccao_simples
+        pid = _criar_prospeccao_simples(pool, conta[0], nome, whatsapp)
+    r = es.subir_e_registrar_comprovante(pool, conta[0], codigo, conteudo,
+                                         content_type, prospeccao_id=pid)
+    if not r.get("ok"):
+        return RedirectResponse(
+            f"/painel/eventos/estandes?erro={r.get('erro') or 'Não deu pra anexar.'}",
+            status_code=303)
+    msg = f"Comprovante anexado — estande {codigo} reservado."
+    if r.get("contrato_token"):
+        msg += " Proposta e contrato criados."
     return RedirectResponse(f"/painel/eventos/estandes?ok={msg}", status_code=303)
 
 
@@ -525,6 +567,12 @@ _CSS = r"""<style>
 .es-pag .oc-ghost-btn.prim{background:var(--mint);border-color:var(--mint);color:var(--mint-fg)}
 .es-pag .oc-ghost-btn.prim:hover{background:var(--mint-strong);color:var(--mint-fg)}
 .es-pag .oc-acoes-detail{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.es-pag .oc-upload{margin-top:10px;border:1.5px dashed var(--line);border-radius:10px;padding:12px;background:var(--surface-2)}
+.es-pag .oc-upload b{display:block;font-size:12.5px;margin-bottom:2px}
+.es-pag .oc-upload .sub{display:block;font-size:10.5px;color:var(--fg-dim);margin-bottom:8px}
+.es-pag .oc-upload .campos{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-bottom:8px}
+.es-pag .oc-upload input[type=text]{background:var(--surface);border:1px solid var(--line);border-radius:8px;color:var(--fg);font-family:inherit;font-size:12px;padding:8px 10px;width:100%;min-height:0;margin:0;box-sizing:border-box}
+.es-pag .oc-upload input[type=file]{color:var(--fg-dim);font-size:11.5px;width:100%;min-height:0;margin:0 0 8px;padding:0}
 .es-pag .oc-vazio{color:var(--fg-dim);font-size:13px;margin:.4rem 0}
 </style>"""
 
@@ -571,17 +619,6 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       </button>
     </div>
   </div>
-  {% if d.status == 'livre' %}
-  {#- livre expande igual (o botão de opções da maquete) — as opções são as
-      de venda: mandar o link certo pro interessado -#}
-  <div class="oc-detail" hidden>
-    <div class="oc-acoes-detail">
-      <button class="oc-ghost-btn prim" type="button" onclick="mapaCopiarLink(this, '{{ d.codigo }}')">Copiar link pro cliente</button>
-      <a class="oc-ghost-btn" href="/e/{{ cfg.slug }}?stand={{ d.codigo }}" target="_blank" rel="noopener">Ver na página →</a>
-    </div>
-    <p class="oc-vazio" style="margin:8px 0 0">O link abre a página pública já com o {{ d.codigo }} selecionado — manda direto pro interessado.</p>
-  </div>
-  {% else %}
   <div class="oc-detail" hidden>
     <div class="oc-subtabs">
       <button class="oc-subtab on" onclick="ocTab(this,'comprovante')">Anexar comprovante</button>
@@ -590,11 +627,15 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     </div>
     <div class="oc-detail-body" data-tab="comprovante">
       {% if d.comprovante_url %}
-      <div class="oc-comprovante-item"><div class="ic">✓</div><div class="txt"><b>Comprovante do sinal</b><span>enviado pela página{% if d.comprovante_em %} em {{ data_curta(d.comprovante_em) }}{% endif %}{% if d.preco_centavos %} · {{ brl(d.preco_centavos) }}{% endif %}</span></div></div>
-      {% else %}
+      <div class="oc-comprovante-item"><div class="ic">✓</div><div class="txt"><b>Comprovante do sinal</b><span>enviado{% if d.comprovante_em %} em {{ data_curta(d.comprovante_em) }}{% endif %}{% if d.preco_centavos %} · {{ brl(d.preco_centavos) }}{% endif %}</span></div></div>
+      {% elif d.status != 'livre' %}
       <p class="oc-vazio">Nenhum arquivo anexado a este stand.</p>
       {% endif %}
       <div class="oc-acoes-detail">
+        {% if d.status == 'livre' %}
+        <button class="oc-ghost-btn prim" type="button" onclick="mapaCopiarLink(this, '{{ d.codigo }}')">Copiar link pro cliente</button>
+        <a class="oc-ghost-btn" href="/e/{{ cfg.slug }}?stand={{ d.codigo }}" target="_blank" rel="noopener">Ver na página →</a>
+        {% endif %}
         {% if pode_gerir and d.comprovante_url %}<a class="oc-ghost-btn" href="/painel/eventos/estandes/{{ d.codigo }}/comprovante" target="_blank">Ver comprovante →</a>{% endif %}
         {% if pode_gerir and d.status == 'pre_reservado' %}
         <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/confirmar" style="display:inline">
@@ -606,6 +647,24 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         </form>
         {% endif %}
       </div>
+      {% if pode_gerir and d.status != 'vendido' and not sem_storage %}
+      {#- a caixa de anexar da maquete, real: venda fechada por fora entra por
+          aqui e trava o stand pelo MESMO cano da página pública -#}
+      <form class="oc-upload" method="post" action="/painel/eventos/estandes/{{ d.codigo }}/comprovante" enctype="multipart/form-data">
+        <b>{% if d.status == 'livre' %}Anexar comprovante{% else %}Anexar novo comprovante{% endif %}</b>
+        <span class="sub">{% if d.status == 'livre' %}Venda fechada por fora (WhatsApp/presencial)? Anexa o comprovante e o stand fica reservado igual ao da página — com proposta e contrato.{% else %}Substitui o arquivo atual (comprovante melhor, ou parcela seguinte) — o prazo da reserva não muda.{% endif %}</span>
+        {% if d.status == 'livre' %}
+        <div class="campos">
+          <input type="text" name="nome" placeholder="Nome do lojista (pra nascer o contrato)" maxlength="200">
+          <input type="text" name="whatsapp" placeholder="WhatsApp (opcional)" maxlength="40">
+        </div>
+        {% endif %}
+        <input type="file" name="arquivo" accept="image/*,application/pdf" required>
+        <button class="oc-ghost-btn prim" type="submit">{% if d.status == 'livre' %}Anexar e reservar{% else %}Anexar comprovante{% endif %}</button>
+      </form>
+      {% elif pode_gerir and d.status != 'vendido' and sem_storage %}
+      <p class="oc-vazio" style="margin-top:10px">⚠ Upload temporariamente indisponível (storage fora do ar).</p>
+      {% endif %}
       {% if d.status == 'pre_reservado' and d.pre_reserva_ate %}
       <p class="oc-vazio" style="margin-top:10px">Reserva vence em {{ d.pre_reserva_ate.strftime('%d/%m às %H:%M') }} — depois disso o stand volta pro mapa sozinho.</p>
       {% endif %}
@@ -627,8 +686,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       <p style="margin:0 0 10px">A proposta existe mas o contrato ainda não nasceu — confere o modelo de contrato em Serviços.</p>
       {% if pode_gerir %}<a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta →</a>{% endif %}
       {% else %}
-      <span class="oc-contract-status pendente">⏳ Sem proposta vinculada</span>
-      <p style="margin:0">O contrato nasce sozinho quando o comprovante chega com o cadastro do lojista preenchido. Este envio veio sem nome — cria a proposta em Serviços e vincula o stand, se quiser contrato.</p>
+      <span class="oc-contract-status pendente">⏳ {% if d.status == 'livre' %}Nasce com o comprovante{% else %}Sem proposta vinculada{% endif %}</span>
+      <p style="margin:0">O contrato nasce sozinho quando o comprovante chega com o nome do lojista — pela página pública ou pela aba "Anexar comprovante" aqui do lado.{% if d.status != 'livre' %} Este envio veio sem nome — cria a proposta em Serviços e vincula o stand, se quiser contrato.{% endif %}</p>
       {% endif %}
     </div>
     <div class="oc-detail-body" data-tab="cliente" hidden>
@@ -639,10 +698,10 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         <div class="oc-field"><span>Stand</span><b>{{ d.codigo }} · {{ tam_label.get(d.tamanho, d.tamanho) }}</b></div>
       </div>
       {% if d.prospeccao_id %}<a class="oc-ghost-btn" href="/painel/prospeccao">Abrir no Funil →</a>
+      {% elif d.status == 'livre' %}<p class="oc-vazio" style="margin:0">Sem interessado ainda — o cadastro nasce quando o comprovante chegar.</p>
       {% else %}<p class="oc-vazio" style="margin:0">Este envio veio sem nome — o interessado não preencheu o cadastro.</p>{% endif %}
     </div>
   </div>
-  {% endif %}
 </div>
 {% endmacro %}
 """ + _CSS + r"""

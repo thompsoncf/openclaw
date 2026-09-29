@@ -19,6 +19,7 @@ import logging
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from db.conexao import get_pool
 from finance import comprovantes as comprov
@@ -110,7 +111,22 @@ async def loja_stands_comprovante(request: Request, slug: str,
     """Recebe o comprovante do sinal — é ESTE POST que, no modo 'pagamento',
     trava o estande (livre -> pre_reservado). Sem login: qualquer visitante da
     página pode mandar, pro modo mais rápido possível de reservar (é o pedido
-    do dono: concorrência real entre interessados até o Pix cair)."""
+    do dono: concorrência real entre interessados até o Pix cair).
+
+    Só o READ do arquivo fica no event loop (é I/O assíncrono de verdade); o
+    resto — resolver slug, criar prospecção, subir e registrar — é psycopg
+    SÍNCRONO, e por isso roda na THREADPOOL. Mesmo motivo dos webhooks do
+    wa-qr (web/painel_prospeccao.py): handler async fazendo banco síncrono
+    trava o worker inteiro a cada requisição, painel incluso — pego pelo
+    tests/test_event_loop_nao_trava.py antes de chegar em produção."""
+    conteudo = await arquivo.read()
+    return await run_in_threadpool(
+        _loja_stands_comprovante_sync, slug, codigo, nome, whatsapp,
+        conteudo, arquivo.content_type or "")
+
+
+def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: str,
+                                  conteudo: bytes, content_type: str):
     pool = get_pool()
     cfg = es.buscar_config_por_slug(pool, slug)
     if cfg is None:
@@ -120,10 +136,8 @@ async def loja_stands_comprovante(request: Request, slug: str,
     if not codigo:
         return RedirectResponse(f"/e/{slug}?msg=erro_generico", status_code=303)
 
-    conteudo = await arquivo.read()
     prospeccao_id = _criar_prospeccao_simples(pool, conta_id, nome, whatsapp)
-    r = es.subir_e_registrar_comprovante(pool, conta_id, codigo, conteudo,
-                                         arquivo.content_type or "",
+    r = es.subir_e_registrar_comprovante(pool, conta_id, codigo, conteudo, content_type,
                                          prospeccao_id=prospeccao_id)
     if not r["ok"]:
         _log.info("loja_stands: comprovante recusado (%s/%s): %s", conta_id, codigo,

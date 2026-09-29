@@ -101,15 +101,15 @@ def _orc(pool, sinal_pago=None):
 
 
 def _t(pool, descricao, valor, *, orc=None, idx=None, venc=VENC, contraparte="Maria",
-       cliente_id=None, status="aberto", recorrente=False):
+       cliente_id=None, status="aberto", recorrente=False, tipo="receber"):
     with pool.connection() as c:
         tid = c.execute(
             """insert into titulos (conta_id, tipo, descricao, contraparte, valor_centavos,
                                     vencimento, status, orcamento_id, parcela_idx,
                                     cliente_id, recorrente, periodicidade, aprovacao)
-               values (%s,'receber',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'autorizado')
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'autorizado')
                returning id""",
-            (CONTA, descricao, contraparte, valor, venc, status, orc, idx, cliente_id,
+            (CONTA, tipo, descricao, contraparte, valor, venc, status, orc, idx, cliente_id,
              recorrente, "mensal" if recorrente else None)).fetchone()[0]
         if status == "pago":
             c.execute("update titulos set pago_em=%s where id=%s", (PAGO, tid))
@@ -284,6 +284,120 @@ def test_a_mais_por_juros_usa_o_acrescimo_de_sempre(pool):
     assert _linha(pool, ps[0])["valor"] == 114200
 
 
+# ═══════════════════════════════════════════ contas a PAGAR (29/09/2026)
+#
+# O pedido do dono: "verifica como tá hoje e se é possível fazer; se não, vamos
+# ajustar pra que isso aconteça — e o próximo valor que gerar a diferença, o
+# gestor coloca a data da sobra." Mockup aprovado em
+# docs/mockups/contas_pagar_baixa_parcial.html — "data em branco mesmo, e não
+# cria abater no fornecedor".
+
+def _p(pool, descricao, valor, *, venc=VENC, contraparte="Buffet Doces"):
+    return _t(pool, descricao, valor, venc=venc, contraparte=contraparte, tipo="pagar")
+
+
+def test_pagar_valor_igual_e_a_baixa_de_sempre(pool):
+    t = _p(pool, "Boleto", 320000)
+    r = rd.baixar(pool, CONTA, t, 320000, data_pagto=PAGO)
+    assert r["ok"] and r["tipo"] == "pagar"
+    assert _linha(pool, t)["status"] == "pago"
+    assert _ajustes(pool, t) == []
+
+
+def test_pagar_sem_escolha_nada_muda(pool):
+    t = _p(pool, "Boleto", 320000)
+    r = rd.baixar(pool, CONTA, t, 200000, data_pagto=PAGO)
+    assert r["ok"] is False and "escolha o que fazer" in r["erro"]
+    assert _linha(pool, t)["status"] == "aberto" and _linha(pool, t)["valor"] == 320000
+
+
+def test_pagar_a_menos_exige_a_data_da_sobra(pool):
+    """Diferente de receber, pagar não tem como adivinhar quando o resto sai —
+    é combinado com o fornecedor. Sem a data, nada muda (nem a baixa)."""
+    t = _p(pool, "Boleto", 320000)
+    r = rd.baixar(pool, CONTA, t, 200000, destino="restante", data_pagto=PAGO)
+    assert r["ok"] is False and "data" in r["erro"].lower()
+    assert _linha(pool, t)["status"] == "aberto"
+
+
+def test_pagar_a_menos_nasce_com_a_data_que_o_gestor_deu(pool):
+    t = _p(pool, "Boleto", 320000)
+    sobra_venc = date(2026, 10, 15)
+    r = rd.baixar(pool, CONTA, t, 200000, destino="restante", data_pagto=PAGO,
+                  vencimento_sobra=sobra_venc)
+    assert r["ok"] and r["restante_id"] and r["tipo"] == "pagar"
+    l = _linha(pool, t)
+    assert (l["status"], l["valor"]) == ("pago", 200000)
+    assert _lanc(pool, l["lanc"]) == 200000          # o caixa só lança o que de fato saiu
+    rest = _linha(pool, r["restante_id"])
+    assert (rest["status"], rest["valor"]) == ("aberto", 120000)
+    assert rest["desc"].endswith(" — restante")
+    with pool.connection() as c:
+        venc, tipo = c.execute("select vencimento, tipo from titulos where id=%s",
+                               (r["restante_id"],)).fetchone()
+    # a data é a que o GESTOR escolheu — nunca a do título original (VENC)
+    assert (venc, tipo) == (sobra_venc, "pagar")
+    assert venc != VENC
+    assert _ajustes(pool, t) == [(t, "recebido", 320000, 200000),
+                                 (r["restante_id"], "restante", 0, 120000)]
+
+
+def test_pagar_a_menos_por_desconto_usa_o_acrescimo_negativo_de_sempre(pool):
+    t = _p(pool, "Boleto", 320000)
+    r = rd.baixar(pool, CONTA, t, 300000, destino="desconto", data_pagto=PAGO)
+    assert r["ok"] and not r.get("restante_id")
+    l = _linha(pool, t)
+    assert (l["valor"], l["acrescimo"]) == (320000, -20000)
+
+
+def test_pagar_a_mais_por_juros_usa_o_acrescimo_de_sempre(pool):
+    t = _p(pool, "Boleto", 320000)
+    r = rd.baixar(pool, CONTA, t, 335000, destino="juros", data_pagto=PAGO)
+    assert r["ok"]
+    l = _linha(pool, t)
+    assert (l["valor"], l["acrescimo"]) == (320000, 15000)
+
+
+def test_pagar_a_mais_nao_oferece_abater(pool):
+    """Abater crédito na PRÓXIMA conta do mesmo fornecedor não foi pedido —
+    fica de fora até ter pedido de verdade (ver finance/recebido_diferente.py).
+    """
+    t = _p(pool, "Boleto", 320000)
+    r = rd.baixar(pool, CONTA, t, 335000, destino="abater", data_pagto=PAGO)
+    assert r["ok"] is False and "escolha o que fazer" in r["erro"]
+    assert _linha(pool, t)["status"] == "aberto"
+
+
+# ─────────────────────────── o caminho INTEIRO, pela rota HTTP
+
+class _ReqBaixa:
+    def __init__(self):
+        # sem membro_id: este arquivo não semeia `membros` (as outras chamadas a
+        # `rd.baixar` também passam membro_id=None, implícito) — um id inventado
+        # aqui violaria a FK de `titulo_ajustes.criado_por`.
+        self.session = {}
+
+
+def test_a_rota_leva_a_data_da_sobra_ate_o_titulo_novo(pool, monkeypatch):
+    """Não só `rd.baixar` direto: o formulário manda `vencimento_sobra` — é o
+    campo que a rota podia perder no caminho sem nenhum teste notar."""
+    import web.portal as pt
+    monkeypatch.setattr(pt, "_guard_pj", lambda req: ((CONTA,), pool))
+    t = _p(pool, "Boleto", 320000)
+    req = _ReqBaixa()
+    r = pt.empresa_titulo_baixa(req, t, pago_em=PAGO.isoformat(), acrescimo="",
+                                recebido="2.000,00", destino="restante", alvo_id="",
+                                vencimento_sobra="2026-10-15")
+    assert r.headers["location"].endswith("#titulos")
+    assert "com o vencimento que você escolheu" in req.session["emp_aviso"]
+    l = _linha(pool, t)
+    assert (l["status"], l["valor"]) == ("pago", 200000)
+    with pool.connection() as c:
+        venc = c.execute("select vencimento from titulos where conta_id=%s "
+                         "and descricao='Boleto — restante'", (CONTA,)).fetchone()[0]
+    assert venc == date(2026, 10, 15)
+
+
 # ═══════════════════════════════════════════ uma transação só
 
 def test_se_a_baixa_falha_nenhuma_parcela_muda(pool, monkeypatch):
@@ -418,8 +532,14 @@ def test_a_baixa_de_receber_pergunta_quanto_entrou_sem_escolha_marcada():
     import re
     assert not re.search(r"<input[^>]*\schecked", f)
     assert "Parcela &lt;1/5&gt;" in f
+    # PAGAR (29/09/2026): ganhou o mesmo "quanto de fato" que o receber, mas sem
+    # "acrescimo" solto (virou o valor pago em si) e sem "abater" (não pedido —
+    # ver finance/recebido_diferente.py). A data da sobra é campo próprio.
     p = _form_da_baixa(html, 2)
-    assert 'name="acrescimo"' in p and 'name="recebido"' not in p
+    assert 'name="recebido"' in p and 'name="acrescimo"' not in p
+    assert 'value="restante"' in p and 'value="desconto"' in p and 'value="juros"' in p
+    assert 'value="abater"' not in p
+    assert 'name="vencimento_sobra"' in p
     # e a linha diz por que vale o que vale
     assert "− R$ 775,00 de crédito abatido" in html
 

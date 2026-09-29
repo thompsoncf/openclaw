@@ -338,8 +338,16 @@ def test_conciliar_guarda_o_acrescimo_sem_quebrar_a_linha_do_extrato(pool, conta
 
 # ═══════════════ a tela ═══════════════
 def test_o_painel_da_baixa_tem_a_data_e_o_acrescimo():
+    """29/09/2026: pagar deixou de ter um campo `acrescimo` solto — virou "Valor
+    pago" + o painel de diferença (igual ao receber, ver
+    finance/recebido_diferente.py), com "foi multa e juros do atraso" como uma
+    das escolhas (`value="juros"`). O mecanismo de acréscimo continua existindo
+    por baixo (`acrescimo_centavos`, migração 197); só o campo livre na tela é
+    que não existe mais."""
     assert 'name="pago_em"' in pt._EMPRESA
-    assert 'name="acrescimo"' in pt._EMPRESA
+    assert 'name="acrescimo"' not in pt._EMPRESA
+    assert 'name="recebido"' in pt._EMPRESA
+    assert 'value="juros"' in pt._EMPRESA
     assert 'class="tit-baixa"' in pt._EMPRESA
 
 

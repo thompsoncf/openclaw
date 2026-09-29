@@ -122,9 +122,21 @@ def _prospeccoes(pool, conta_id: int, ids: list[int]) -> dict[int, dict]:
         return {}
     with pool.connection() as c:
         rows = c.execute(
-            """select id, empresa, whatsapp, criado_em from prospeccao
+            """select id, empresa, whatsapp, criado_em, vendedor_id from prospeccao
                where conta_id=%s and id = any(%s)""", (conta_id, ids)).fetchall()
-    return {r[0]: {"empresa": r[1], "whatsapp": r[2], "criado_em": r[3]} for r in rows}
+    return {r[0]: {"empresa": r[1], "whatsapp": r[2], "criado_em": r[3],
+                   "vendedor_id": r[4]} for r in rows}
+
+
+def _vendedores(pool, conta_id: int) -> list[dict]:
+    """Os membros que podem receber uma venda — vendedor/gestor ativos. Popula
+    o seletor de atribuição no painel e valida a troca."""
+    with pool.connection() as c:
+        rows = c.execute(
+            "select id, coalesce(nullif(nome,''), email, 'Membro '||id) "
+            "from membros where conta_id=%s and ativo and papel in ('vendedor','gestor') "
+            "order by 2", (conta_id,)).fetchall()
+    return [{"id": r[0], "nome": r[1]} for r in rows]
 
 
 @router.get("/painel/eventos/estandes", response_class=HTMLResponse)
@@ -207,6 +219,11 @@ def painel_eventos_stands(request: Request):
     # não repetir as consultas do funil
     vinculos = {d["codigo"]: d for grupo in funil.values() for d in grupo}
 
+    # vendedores da conta (pro seletor de atribuição) + nome por id (pra mostrar
+    # o vendedor atual de cada venda)
+    vendedores = _vendedores(pool, conta[0])
+    vend_nomes = {v["id"]: v["nome"] for v in vendedores}
+
     # VALORES POR TAMANHO (achado do dono, 29/09/2026: "onde eu cadastro o
     # valor?? por tamanho, alterável"): o valor mais comum de cada tamanho
     # pré-preenche o formulário; misturado = aviso, salvar iguala os livres.
@@ -230,6 +247,9 @@ def painel_eventos_stands(request: Request):
         cor_tam=_COR_TAM, tam_label=_TAM_LABEL, data_curta=_data_curta,
         mapa_json=mapa_json, pode_gerir=pode_gerir, stands=stands,
         vinculos=vinculos, precos_tam=precos_tam,
+        vendedores=vendedores, vend_nomes=vend_nomes,
+        es_link=request.session.pop("es_link", None),
+        es_link_quem=request.session.pop("es_link_quem", None),
         sem_storage=not comprov.configurado(),
         erro=(request.query_params.get("erro") or "").strip(),
         ok=(request.query_params.get("ok") or "").strip())
@@ -289,6 +309,70 @@ def confirmar(request: Request, codigo: str):
         return RedirectResponse(f"/painel/eventos/estandes?erro={r['erro']}", status_code=303)
     return RedirectResponse(f"/painel/eventos/estandes?ok=Estande {codigo} confirmado.",
                             status_code=303)
+
+
+@router.post("/painel/eventos/estandes/{codigo}/vendedor")
+def trocar_vendedor(request: Request, codigo: str, vendedor_id: str = Form("")):
+    """Atribui/corrige o vendedor da venda — grava vendedor_id na prospecção do
+    stand. `vendedor_id` vazio ou '0' = tira o vendedor (venda sem dono). Só
+    aceita membro válido da conta; o resto vira None (mesma trava do link)."""
+    conta, cfg_ou_redir = _acesso(request)
+    if conta is None:
+        return cfg_ou_redir
+    pool = get_pool()
+    s = es.buscar(pool, conta[0], codigo)
+    if not s or not s.get("prospeccao_id"):
+        return RedirectResponse(
+            "/painel/eventos/estandes?erro=Sem cadastro de interessado pra atribuir "
+            "vendedor — anexe um comprovante com o nome do lojista primeiro.",
+            status_code=303)
+    with pool.connection() as c:
+        vid = None
+        if (vendedor_id or "").strip() not in ("", "0"):
+            r = c.execute(
+                "select id, coalesce(nullif(nome,''), email) from membros "
+                "where id=%s and conta_id=%s and ativo and papel in ('vendedor','gestor')",
+                (vendedor_id.strip(), conta[0])).fetchone()
+            if not r:
+                return RedirectResponse(
+                    "/painel/eventos/estandes?erro=Vendedor inválido.", status_code=303)
+            vid = r[0]
+        c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() "
+                  "where id=%s and conta_id=%s",
+                  (vid, s["prospeccao_id"], conta[0]))
+        c.commit()
+    msg = f"Venda do {codigo} sem vendedor." if vid is None else f"Venda do {codigo} atribuída."
+    return RedirectResponse(f"/painel/eventos/estandes?ok={msg}", status_code=303)
+
+
+@router.post("/painel/eventos/estandes/link-vendedor")
+def link_vendedor(request: Request, membro_id: str = Form("")):
+    """Gera o link do app (Cockpit) pra um vendedor, DIRETO do painel de
+    estandes — pra o dono/gestor liberar o acesso sem passar pela tela de
+    Equipe (pedido do dono, 29/09/2026). O link vale 15 min e já leva a marca
+    do vendedor: o que ele vender fica na conta dele.
+
+    Rota própria (não a de Equipe) de propósito: o gestor já alcança estandes,
+    mas não a gestão de pessoas — abrir /painel/equipe pra ele seria demais."""
+    conta, cfg_ou_redir = _acesso(request)
+    if conta is None:
+        return cfg_ou_redir
+    from finance import cockpit as _ck
+    pool = get_pool()
+    with pool.connection() as c:
+        m = c.execute(
+            "select coalesce(nullif(nome,''), email) from membros "
+            "where id=%s and conta_id=%s and ativo and papel in ('vendedor','gestor')",
+            ((membro_id or "").strip() or "0", conta[0])).fetchone()
+    if not m:
+        return RedirectResponse(
+            "/painel/eventos/estandes?erro=Escolha um vendedor ativo.", status_code=303)
+    token = _ck.gerar_token(pool, conta[0], int(membro_id))
+    request.session["es_link"] = _ck.link_acesso(token)
+    request.session["es_link_quem"] = m[0]
+    return RedirectResponse(
+        f"/painel/eventos/estandes?ok=Link do app gerado pra {m[0]} (vale 15 min) — "
+        "copia abaixo e manda pra pessoa.", status_code=303)
 
 
 @router.post("/painel/eventos/estandes/{codigo}/liberar")
@@ -699,7 +783,22 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         <div class="oc-field"><span>Origem</span><b>Página de stands</b></div>
         <div class="oc-field"><span>Stand</span><b>{{ d.codigo }} · {{ tam_label.get(d.tamanho, d.tamanho) }}</b></div>
       </div>
-      {% if d.prospeccao_id %}<a class="oc-ghost-btn" href="/painel/prospeccao">Abrir no Funil →</a>
+      {% if d.prospeccao_id %}
+      {#- vendedor da venda: mostra o atual e (pra gestão) deixa trocar/corrigir.
+          O automático vem do link do vendedor; isto é a correção manual. -#}
+      <div class="oc-field" style="margin-bottom:12px">
+        <span>Vendedor</span>
+        {% if pode_gerir %}
+        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/vendedor" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px">
+          <select name="vendedor_id" style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--fg);font-family:inherit;font-size:12.5px;padding:7px 10px">
+            <option value="0"{% if not cli.get('vendedor_id') %} selected{% endif %}>— Sem vendedor —</option>
+            {% for v in vendedores %}<option value="{{ v.id }}"{% if cli.get('vendedor_id') == v.id %} selected{% endif %}>{{ v.nome }}</option>{% endfor %}
+          </select>
+          <button class="oc-ghost-btn" type="submit">Salvar vendedor</button>
+        </form>
+        {% else %}<b>{{ vend_nomes.get(cli.get('vendedor_id')) or 'Sem vendedor' }}</b>{% endif %}
+      </div>
+      <a class="oc-ghost-btn" href="/painel/prospeccao">Abrir no Funil →</a>
       {% elif d.status == 'livre' %}<p class="oc-vazio" style="margin:0">Sem interessado ainda — o cadastro nasce quando o comprovante chegar.</p>
       {% else %}<p class="oc-vazio" style="margin:0">Este envio veio sem nome — o interessado não preencheu o cadastro.</p>{% endif %}
     </div>
@@ -755,6 +854,30 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     {% if pode_gerir %}<button class="oc-ghost-btn prim" type="submit">Salvar valores</button>{% endif %}
   </form>
 </div>
+
+{% if pode_gerir %}
+<div class="preco-card">
+  <h3>App do vendedor</h3>
+  <p class="preco-obs">O vendedor entra pelo link, vê o mapa e o que está livre — e o que ele vender pelo link dele fica na conta dele. O link vale 15 minutos.</p>
+  {% if es_link %}
+  <div class="oc-comprovante-item" style="margin-bottom:12px">
+    <div class="ic">🔗</div>
+    <div class="txt"><b>Link pra {{ es_link_quem }}</b><span id="es-link-txt" style="word-break:break-all">{{ es_link }}</span></div>
+    <button class="oc-ghost-btn prim" type="button" onclick="esCopiarLink(this)">Copiar</button>
+  </div>
+  {% endif %}
+  {% if vendedores %}
+  <form method="post" action="/painel/eventos/estandes/link-vendedor" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <select name="membro_id" style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--fg);font-family:inherit;font-size:12.5px;padding:8px 10px">
+      {% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}
+    </select>
+    <button class="oc-ghost-btn prim" type="submit">📱 Gerar link do app</button>
+  </form>
+  {% else %}
+  <p class="oc-vazio" style="margin:0">Nenhum vendedor cadastrado ainda — adicione a equipe em <a href="/painel/equipe" style="color:var(--mint)">Pessoas</a>.</p>
+  {% endif %}
+</div>
+{% endif %}
 
 <h3 class="es-sec">Todos os stands</h3>
 <p class="es-sec-sub">O cadastro completo, na MESMA planta da página pública — toca num stand pra ver a situação{% if pode_gerir %} e agir{% endif %}. Livre? Copia o link e manda pro interessado.</p>
@@ -1000,6 +1123,14 @@ function ocTab(btn, tab){
   var detail = btn.closest('.oc-detail');
   detail.querySelectorAll('.oc-subtab').forEach(function(b){ b.classList.toggle('on', b === btn); });
   detail.querySelectorAll('.oc-detail-body').forEach(function(el){ el.hidden = el.dataset.tab !== tab; });
+}
+function esCopiarLink(btn){
+  var el = document.getElementById('es-link-txt');
+  if (!el) return;
+  var txt = el.textContent.trim();
+  var done = function(){ var t = btn.textContent; btn.textContent = 'Copiado ✓'; setTimeout(function(){ btn.textContent = t; }, 1600); };
+  if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done); }
+  else { window.prompt('Copia o link:', txt); }
 }
 var lstF = '';
 function lstStatus(btn){

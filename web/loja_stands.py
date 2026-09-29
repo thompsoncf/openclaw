@@ -63,12 +63,31 @@ def _dias_restantes(ate) -> int | None:
         return None
 
 
-def _criar_prospeccao_simples(pool, conta_id: int, nome: str, whatsapp: str):
+def _vendedor_valido(c, conta_id: int, vendedor_raw: str):
+    """O `v` do link (`?stand=G58&v=5`) só vira dono da venda se for um MEMBRO
+    ATIVO desta conta e vendedor/gestor — nunca um id qualquer da URL, que
+    permitiria plantar comissão em nome de outra pessoa. Devolve o id ou None."""
+    try:
+        vid = int((vendedor_raw or "").strip())
+    except (TypeError, ValueError):
+        return None
+    r = c.execute(
+        "select 1 from membros where id=%s and conta_id=%s and ativo "
+        "and papel in ('vendedor','gestor')", (vid, conta_id)).fetchone()
+    return vid if r else None
+
+
+def _criar_prospeccao_simples(pool, conta_id: int, nome: str, whatsapp: str,
+                              vendedor: str = ""):
     """Registro MÍNIMO do interessado (nome/whatsapp) na tabela de CRM
     (prospeccao, migração 075) — pra que `evento_stands.prospeccao_id` aponte
     pra algo navegável no Funil, em vez de ficar solto. Não é o fluxo de
     inbound completo (aquele trata mensagem dentro de uma conversa que já
     existe); aqui o visitante da página ainda não conversou com ninguém.
+
+    `vendedor` (o `v` do link do app) vincula a venda a quem mandou o link —
+    validado contra os membros da conta antes de gravar (ver _vendedor_valido),
+    pra o `vendedor_id` da URL não virar porta de fraude de comissão.
 
     Best-effort e SILENCIOSO: o upload do comprovante — a parte que importa —
     não pode falhar por causa de um cadastro de lead que é só um bônus."""
@@ -77,10 +96,13 @@ def _criar_prospeccao_simples(pool, conta_id: int, nome: str, whatsapp: str):
         return None
     try:
         with pool.connection() as c:
+            vid = _vendedor_valido(c, conta_id, vendedor)
             pid = c.execute(
-                """insert into prospeccao (conta_id, empresa, whatsapp, status, origem)
-                   values (%s,%s,%s,'novo','pagina_stands') returning id""",
-                (conta_id, nome[:200], (whatsapp or "").strip()[:40] or None)).fetchone()[0]
+                """insert into prospeccao (conta_id, empresa, whatsapp, status,
+                                           origem, vendedor_id)
+                   values (%s,%s,%s,'novo','pagina_stands',%s) returning id""",
+                (conta_id, nome[:200], (whatsapp or "").strip()[:40] or None, vid)
+            ).fetchone()[0]
             c.commit()
         return pid
     except Exception as e:  # noqa: BLE001
@@ -121,11 +143,14 @@ def loja_stands(request: Request, slug: str):
     msg_codigo = (request.query_params.get("codigo") or "")[:20]
     ct = (request.query_params.get("ct") or "")[:64] if msg == "ok" else ""
     # ?stand=G58 abre a página já com o stand selecionado — é o link que o
-    # vendedor manda pro interessado a partir do mapa do painel.
+    # vendedor manda pro interessado a partir do mapa do painel/cockpit.
+    # ?v=5 é o VENDEDOR do link: a venda que sair por aqui fica na conta dele
+    # (validado no POST — a URL não é confiável). Só dígitos entram no form.
     stand_link = (request.query_params.get("stand") or "")[:20]
+    vendedor_link = "".join(ch for ch in (request.query_params.get("v") or "")[:12] if ch.isdigit())
     html = _env.get_template(_TPL_NOME).render(
         cfg=cfg, marca=marca, n_total=len(stands), stands_json=stands_json,
-        data_br=_data_br, msg=msg, msg_codigo=msg_codigo, ct=ct,
+        data_br=_data_br, msg=msg, msg_codigo=msg_codigo, ct=ct, vendedor_link=vendedor_link,
         ct_json=json.dumps(ct or None), stand_link_json=json.dumps(stand_link or None),
         # injeção segura no JS: sempre via json.dumps, nunca string crua
         pix_json=json.dumps({"chave": cfg["pix_chave"], "titular": cfg["pix_titular"]}),
@@ -139,7 +164,7 @@ def loja_stands(request: Request, slug: str):
 @router.post("/e/{slug}/comprovante")
 async def loja_stands_comprovante(request: Request, slug: str,
                                   codigo: str = Form(...), nome: str = Form(""),
-                                  whatsapp: str = Form(""),
+                                  whatsapp: str = Form(""), vendedor: str = Form(""),
                                   arquivo: UploadFile = File(...)):
     """Recebe o comprovante do sinal — é ESTE POST que, no modo 'pagamento',
     trava o estande (livre -> pre_reservado). Sem login: qualquer visitante da
@@ -154,12 +179,12 @@ async def loja_stands_comprovante(request: Request, slug: str,
     tests/test_event_loop_nao_trava.py antes de chegar em produção."""
     conteudo = await arquivo.read()
     return await run_in_threadpool(
-        _loja_stands_comprovante_sync, slug, codigo, nome, whatsapp,
+        _loja_stands_comprovante_sync, slug, codigo, nome, whatsapp, vendedor,
         conteudo, arquivo.content_type or "")
 
 
 def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: str,
-                                  conteudo: bytes, content_type: str):
+                                  vendedor: str, conteudo: bytes, content_type: str):
     pool = get_pool()
     cfg = es.buscar_config_por_slug(pool, slug)
     if cfg is None:
@@ -169,7 +194,7 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
     if not codigo:
         return RedirectResponse(f"/e/{slug}?msg=erro_generico", status_code=303)
 
-    prospeccao_id = _criar_prospeccao_simples(pool, conta_id, nome, whatsapp)
+    prospeccao_id = _criar_prospeccao_simples(pool, conta_id, nome, whatsapp, vendedor)
     r = es.subir_e_registrar_comprovante(pool, conta_id, codigo, conteudo, content_type,
                                          prospeccao_id=prospeccao_id)
     if not r["ok"]:
@@ -618,6 +643,7 @@ var JUST_SENT = {{ just_sent_json|safe }};
 var ERRO_CODIGO = {{ erro_codigo_json|safe }};
 var CT = {{ ct_json|safe }};
 var STAND_LINK = {{ stand_link_json|safe }};
+var VENDEDOR_LINK = "{{ vendedor_link }}";  // o `v` do link — vai no form do comprovante
 var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
 </script>
 {% raw %}<script>
@@ -953,6 +979,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
       if (!SEM_STORAGE){
         html += '<form method="post" action="' + ACTION + '" enctype="multipart/form-data" onsubmit="return validarEnvio(this)">';
         html += '  <input type="hidden" name="codigo" value="' + esc(s.code) + '">';
+        if (VENDEDOR_LINK) html += '  <input type="hidden" name="vendedor" value="' + esc(VENDEDOR_LINK) + '">';
         html += '  <input class="up-input" type="text" name="nome" placeholder="Seu nome" required maxlength="200">';
         html += '  <input class="up-input" type="text" name="whatsapp" placeholder="WhatsApp (opcional)" maxlength="40">';
         html += '  <label class="upload-box">';

@@ -9382,7 +9382,9 @@ def painel_equipe_cockpit_link(request: Request, membro_id: int = Form(...)):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
-    if request.session.get("papel", "dono") != "dono":
+    # dono E gestor geram o link do app (pedido do dono, 29/09/2026: liberar
+    # pro gestor também) — quem administra a venda administra o acesso.
+    if request.session.get("papel", "dono") not in ("dono", "gestor"):
         return RedirectResponse("/painel", status_code=303)
     pool = get_pool()
     with pool.connection() as c:
@@ -9571,6 +9573,9 @@ _STANDS_JS = r"""
 
   window.stCopiar=function(btn,code){
     var url=location.origin+PUB+'?stand='+encodeURIComponent(code);
+    // o link já leva a marca do vendedor logado: quem comprar por ele fica na
+    // conta dele (validado no servidor). Sem MEU_ID (dono), vai o link neutro.
+    if(typeof MEU_ID!=='undefined'&&MEU_ID)url+='&v='+encodeURIComponent(MEU_ID);
     var ok=function(){var t=btn.textContent;btn.textContent='Copiado ✓';setTimeout(function(){btn.textContent=t;},1600);};
     if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(ok);}
     else{window.prompt('Copia o link:',url);}
@@ -9585,6 +9590,7 @@ def cockpit_stands(request: Request):
     sess = _sessao(request)
     g = _gerencia(request)
     conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
     if conta_id is None:
         return RedirectResponse("/cockpit/login", status_code=303)
     pool = get_pool()
@@ -9632,7 +9638,7 @@ def cockpit_stands(request: Request):
         + "<div class=stdet id=stdet hidden></div>"
         + "</div>"
         + f"<script>var STANDS={_json_mod.dumps(dados)};"
-        + f"var PUB='/e/{cfg['slug']}';</script>"
+        + f"var PUB='/e/{cfg['slug']}';var MEU_ID={_json_mod.dumps(meu_id)};</script>"
         + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS + "})();</script>"
     )
     return _page("Mapa de stands", corpo)

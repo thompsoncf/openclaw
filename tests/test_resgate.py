@@ -1369,6 +1369,63 @@ def test_a_previa_nao_dobra_quando_dois_workers_competem(pool, equipe, duble):
     assert rows == [("primeira prévia",)]
 
 
+def test_erro_de_verdade_na_previa_nao_e_perder_a_corrida(pool, equipe, duble):
+    """O CASO QUE ESTE TESTE FIXA (29/09/2026, produção): entre o deploy da 445 e o da
+    446, o índice único não existia de verdade (bug à parte, já corrigido) e toda
+    tentativa de prévia caía num erro de BANCO, não em "perdi a corrida pro outro
+    processo" — são coisas diferentes, e o `supervisor()` tratava as duas iguais,
+    calado. ~90 tentativas falharam em 3h sem pausar nem avisar ninguém. Reproduz o
+    estado exato (dropa o índice) e confirma: cai no erro, registra 'erro_previa'
+    (não 'previa' — não pode ocupar a vaga do índice único e travar uma tentativa boa
+    depois), e devolve False sem mandar nada."""
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+        c.execute("drop index resgate_envios_previa_unica")
+        c.commit()
+        candidato = rg.fila(c, EMPRESA)[0]
+        cfg = rg.config(c, EMPRESA)
+    ok = rg.supervisor(pool, EMPRESA, "prévia", tipo="previa", lead=candidato["id"],
+                       ref_em=candidato["desde"], cfg=cfg)
+    assert ok is False
+    assert duble["saiu"] == []                            # nada saiu de verdade
+    with pool.connection() as c:
+        assert not c.execute("select 1 from resgate_envios where tipo='previa' and "
+                             "prospeccao_id=%s", (lid,)).fetchone()
+        erro = c.execute("select ok, erro from resgate_envios where tipo='erro_previa' "
+                         "and prospeccao_id=%s", (lid,)).fetchone()
+    assert erro is not None and erro[0] is False
+    assert "unique or exclusion" in (erro[1] or "")
+
+
+def test_3_erros_de_previa_pausam_o_ensaio_e_avisam(pool, equipe, duble, monkeypatch):
+    """O freio (`_freio`) só rodava no modo Ligado — o Ensaio não tinha proteção
+    nenhuma contra um erro técnico se repetindo sem parar (o achado de 29/09/2026
+    acima). Agora conta os `erro_previa` do dia e pausa igual ao Ligado, avisando o
+    supervisor — em vez de ficar mudo por horas."""
+    monkeypatch.setattr(rg, "ESPACO_MIN", -60)      # uma tentativa por passada, sem esperar
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10)
+        c.execute("drop index resgate_envios_previa_unica")
+        c.commit()
+    for _ in range(3):
+        rg.rodar(pool)                                    # acumula as 3 falhas
+    rg.rodar(pool)                                        # o freio lê as 3 e pausa (mesma
+                                                            # régua do Ligado: só na PRÓXIMA
+                                                            # passada, depois de contar)
+    with pool.connection() as c:
+        cfg = rg.config(c, EMPRESA)
+    assert cfg["pausado_em"] and "erro técnico" in cfg["pausado_motivo"]
+    assert "pausado" in duble["saiu"][-1]["texto"]        # o freio avisou o supervisor
+    with pool.connection() as c:
+        antes = c.execute("select count(*) from resgate_envios where tipo='erro_previa'").fetchone()[0]
+    rg.rodar(pool)                                        # pausado: não tenta de novo
+    with pool.connection() as c:
+        depois = c.execute("select count(*) from resgate_envios where tipo='erro_previa'").fetchone()[0]
+    assert depois == antes
+
+
 def test_a_446_apaga_a_duplicata_e_recria_o_indice(pool, equipe):
     """O CASO QUE ESTE TESTE FIXA (28/09/2026, produção): o índice da 445 nunca
     existiu de verdade — um bug em `db/aplicar_migracoes.py` confundiu "dado

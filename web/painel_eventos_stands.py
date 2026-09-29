@@ -12,6 +12,14 @@ prazo de reserva, muito mais perto do que painel_obras já faz pra casa/reforma
 se a Outlet Chic também vender por proposta consultiva, a proposta dela
 aparece no painel_servicos normal — as duas coisas não competem.
 
+USA O MESMO CASCO DE TODA TELA DO PAINEL (base.html via _render — o mesmo
+`extends "base"` de painel_obras.py), e não uma página HTML solta: a versão
+anterior desta tela desenhava `<html>` própria, sem menu nem cabeçalho — não
+aparecia em lugar nenhum de dentro do produto e não tinha como chegar nela sem
+colar a URL (achado do dono, 29/09/2026, revisando o PR #919 já mergeado). O
+item de menu correspondente mora em web/portal.py (`tem_estandes` em
+`_render()`, os dois `navi('estandes', ...)` perto de Obras).
+
 GATE (opt-in, igual ao resto do módulo): nicho 'eventos' E a conta ter
 `evento_stands_config` — nem toda conta de eventos vende estande numerado
 (Prime Eventos, conta 34, não vende).
@@ -25,19 +33,18 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from db.conexao import get_pool
 from finance import comprovantes as comprov
 from finance import evento_stands as es
-from web.portal import _env, brl, conta_logada, nicho_da_conta
+from web.portal import _env, _render, brl, conta_logada, nicho_da_conta
 
 router = APIRouter()
 _log = logging.getLogger("openclaw.painel_eventos_stands")
 
 _PAPEIS_OK = ("dono", "gestor")
-_TPL_NOME = "painel_eventos_stands.html"
 
 
 def _acesso(request: Request):
@@ -85,11 +92,11 @@ def painel_eventos_stands(request: Request):
             pendentes.append(s)
     pendentes.sort(key=lambda s: s["pre_reserva_ate"] or "")
 
-    html = _env.get_template(_TPL_NOME).render(
+    return _render(
+        "estandes", request, titulo="Estandes", secao_ativa="estandes", brl=brl,
         cfg=cfg, kpis=kpis, por_pavilhao=por_pavilhao, pendentes=pendentes,
-        brl=brl, erro=(request.query_params.get("erro") or "").strip(),
+        erro=(request.query_params.get("erro") or "").strip(),
         ok=(request.query_params.get("ok") or "").strip())
-    return HTMLResponse(html)
 
 
 @router.post("/painel/eventos/estandes/{codigo}/confirmar")
@@ -141,88 +148,107 @@ def ver_comprovante(request: Request, codigo: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────
-_TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Estandes — {{ cfg.slug }}</title>
-{% raw %}<style>
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0E0E0E;color:#EDEDEA;margin:0;padding:20px 14px 60px}
-h1{font-size:22px;margin:0 0 4px}
-.sub{color:#8A8A86;font-size:13px;margin-bottom:18px}
-.msg{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px}
-.msg.ok{background:rgba(22,227,174,.12);border:1px solid #16E3AE;color:#16E3AE}
-.msg.erro{background:rgba(255,222,46,.1);border:1px solid #FFDE2E;color:#FFDE2E}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:22px}
-.kpi{background:#181818;border:1px solid #2A2A2A;border-radius:10px;padding:12px 14px}
-.kpi .n{font-size:24px;font-weight:700}
-.kpi .l{font-size:11px;color:#8A8A86;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
-.kpi.livre .n{color:#16E3AE}
-.kpi.pre .n{color:#FFDE2E}
-.kpi.vendido .n{color:#9A9A96}
-.kpi.fat .n{color:#16E3AE;font-size:19px}
-h2{font-size:15px;margin:26px 0 10px;color:#EDEDEA}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;color:#8A8A86;font-weight:600;font-size:11px;text-transform:uppercase;padding:6px 8px;border-bottom:1px solid #2A2A2A}
-td{padding:8px;border-bottom:1px solid #202020}
-.pav-nome{text-transform:capitalize}
-.pendente{background:#161616;border:1px solid #2A2A2A;border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.pendente .cod{font-family:monospace;font-weight:700;font-size:15px}
-.pendente .det{color:#8A8A86;font-size:12px;margin-top:2px}
-.btns{display:flex;gap:8px;flex-wrap:wrap}
-.btn{border:none;border-radius:7px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer}
-.btn.ok{background:#16E3AE;color:#04231B}
-.btn.ghost{background:transparent;border:1px solid #3A3A3A;color:#EDEDEA;text-decoration:none;display:inline-block}
-.btn.liberar{background:transparent;border:1px solid #FFDE2E;color:#FFDE2E}
-.vazio{color:#8A8A86;font-size:13px;padding:16px 0}
-form{display:inline}
-</style>{% endraw %}
-</head><body>
-<h1>Estandes — {{ cfg.edicao_label or cfg.slug }}</h1>
-<div class="sub">Página pública: <a href="/e/{{ cfg.slug }}" target="_blank" style="color:#16E3AE">/e/{{ cfg.slug }}</a></div>
+# Mesmo casco de toda tela do painel (`{% extends "base" %}` + o `_render` de
+# web/portal.py) — não uma página solta. Convenção de nome de classe (`es-`) e
+# tokens de cor (--card, --borda, --txt-mut, --verde, --ambar-*) copiados de
+# painel_obras.py de propósito: é a MESMA gramática visual do resto do
+# painel, pra esta aba não parecer de outro produto.
+# ─────────────────────────────────────────────────────────────────────────
+_CSS = r"""<style>
+.es-pag{width:100%;max-width:var(--pag,1180px);margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
+.es-topo{display:flex;align-items:flex-end;justify-content:space-between;gap:.8rem;flex-wrap:wrap}
+.es-topo h2{margin:0;font-size:1.5rem;line-height:1.15}
+.es-sub{color:var(--txt-mut);font-size:.88rem;margin-top:.25rem}
+.es-sub a{color:var(--verde-claro)}
+.es-msg{border-radius:9px;padding:.55rem .75rem;margin:.8rem 0;font-size:.86rem}
+.es-msg.ok{background:var(--verde-fundo,rgba(70,166,121,.12));border:1px solid var(--verde)}
+.es-msg.erro{background:var(--neon-fundo);border:1px solid var(--neon-borda)}
+.es-faixas{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem;margin:1rem 0}
+.es-cx{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.55rem .75rem}
+.es-cx .r{font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut);display:block}
+.es-cx .v{font-size:1.3rem;font-weight:700;line-height:1.2;display:block}
+.es-cx.livre .v{color:var(--verde-claro)}
+.es-cx.pre .v{color:#F0DCA6}
+.es-sec{margin:1.6rem 0 .6rem;font-size:1.05rem}
+.es-pavs{display:flex;flex-direction:column;gap:.5rem}
+.es-pav{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.6rem .85rem}
+.es-pav .l{display:flex;justify-content:space-between;font-size:.82rem;font-weight:600;margin-bottom:.35rem;text-transform:capitalize}
+.es-pav .n{font-weight:400;color:var(--txt-mut);text-transform:none}
+.es-bar{height:8px;background:var(--borda);border-radius:5px;overflow:hidden;display:flex}
+.es-bar i{display:block;height:100%}
+.es-bar i.vendido{background:var(--txt-mut)}
+.es-bar i.pre{background:#D9932B}
+.es-bar i.livre{background:var(--verde)}
+.es-lista{display:flex;flex-direction:column;gap:.45rem}
+.es-card{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:.8rem;align-items:center;background:var(--card);
+  border:1px solid var(--borda);border-radius:11px;padding:.65rem .85rem}
+.es-card .cod{font-family:var(--mono,monospace);font-weight:700;font-size:.95rem}
+.es-mut{color:var(--txt-mut);font-size:.78rem}
+.es-acoes{display:flex;gap:.35rem;flex-wrap:wrap;justify-content:flex-end}
+.es-bt{padding:.35rem .7rem;border-radius:7px;border:1px solid var(--borda);background:transparent;color:inherit;
+  cursor:pointer;font-size:.8rem;text-decoration:none;display:inline-block}
+.es-bt.prim{background:var(--verde);border-color:var(--verde);color:#fff}
+.es-bt.ambar{border-color:var(--ambar-borda);color:#F0DCA6}
+.es-vazio{color:var(--txt-mut);font-size:.86rem;padding:.6rem 0}
+@media (max-width:760px){.es-card{grid-template-columns:1fr 1fr}.es-acoes{grid-column:1/-1;justify-content:flex-start}}
+</style>"""
 
-{% if ok %}<div class="msg ok">{{ ok }}</div>{% endif %}
-{% if erro %}<div class="msg erro">{{ erro }}</div>{% endif %}
+_TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
+<div class="es-pag">
+<div class="es-topo"><div><h2>Estandes</h2>
+  <div class="es-sub">{{ cfg.edicao_label or cfg.slug }} · página pública:
+    <a href="/e/{{ cfg.slug }}" target="_blank">/e/{{ cfg.slug }}</a></div></div></div>
 
-<div class="kpis">
-  <div class="kpi"><div class="n">{{ kpis.total }}</div><div class="l">Total</div></div>
-  <div class="kpi livre"><div class="n">{{ kpis.get('livre',0) }}</div><div class="l">Livres</div></div>
-  <div class="kpi pre"><div class="n">{{ kpis.get('pre_reservado',0) }}</div><div class="l">Pré-reservados</div></div>
-  <div class="kpi vendido"><div class="n">{{ kpis.get('vendido',0) }}</div><div class="l">Vendidos</div></div>
-  <div class="kpi fat"><div class="n">{{ brl(kpis.faturamento_centavos) }}</div><div class="l">Faturamento</div></div>
+{% if ok %}<div class="es-msg ok">{{ ok|e }}</div>{% endif %}
+{% if erro %}<div class="es-msg erro">{{ erro|e }}</div>{% endif %}
+
+<div class="es-faixas">
+  <div class="es-cx"><span class="r">Total</span><span class="v">{{ kpis.total }}</span></div>
+  <div class="es-cx livre"><span class="r">Livres</span><span class="v">{{ kpis.get('livre',0) }}</span></div>
+  <div class="es-cx pre"><span class="r">Pré-reservados</span><span class="v">{{ kpis.get('pre_reservado',0) }}</span></div>
+  <div class="es-cx"><span class="r">Vendidos</span><span class="v">{{ kpis.get('vendido',0) }}</span></div>
+  <div class="es-cx"><span class="r">Faturamento</span><span class="v">{{ brl(kpis.faturamento_centavos) }}</span></div>
 </div>
 
-<h2>Ocupação por pavilhão</h2>
-<table>
-<tr><th>Pavilhão</th><th>Total</th><th>Livres</th><th>Pré-reservados</th><th>Vendidos</th></tr>
+<h3 class="es-sec">Ocupação por pavilhão</h3>
+<div class="es-pavs">
 {% for pav, n in por_pavilhao.items() %}
-<tr><td class="pav-nome">{{ pav|replace('_',' ') }}</td><td>{{ n.total }}</td>
-    <td>{{ n.get('livre',0) }}</td><td>{{ n.get('pre_reservado',0) }}</td><td>{{ n.get('vendido',0) }}</td></tr>
-{% endfor %}
-</table>
-
-<h2>Comprovante pendente de confirmação ({{ pendentes|length }})</h2>
-{% if not pendentes %}<div class="vazio">Nada esperando confirmação agora.</div>{% endif %}
-{% for s in pendentes %}
-<div class="pendente">
-  <div>
-    <span class="cod">{{ s.codigo }}</span>
-    <div class="det">{{ s.pavilhao|replace('_',' ') }}{% if s.zona %} · {{ s.zona }}{% endif %} · {{ s.tamanho }}
-      {% if s.preco_centavos %} · {{ brl(s.preco_centavos) }}{% endif %}
-      {% if s.pre_reserva_ate %} · reserva vence {{ s.pre_reserva_ate.strftime('%d/%m %H:%M') }}{% endif %}</div>
+<div class="es-pav">
+  <div class="l">{{ pav|replace('_',' ') }}
+    <span class="n">{{ n.get('vendido',0) }} vendidos · {{ n.get('pre_reservado',0) }} pré-reservados · {{ n.get('livre',0) }} livres de {{ n.total }}</span></div>
+  <div class="es-bar">
+    <i class="vendido" style="width:{{ (n.get('vendido',0)/n.total*100) if n.total else 0 }}%"></i>
+    <i class="pre" style="width:{{ (n.get('pre_reservado',0)/n.total*100) if n.total else 0 }}%"></i>
+    <i class="livre" style="width:{{ (n.get('livre',0)/n.total*100) if n.total else 0 }}%"></i>
   </div>
-  <div class="btns">
-    <a class="btn ghost" href="/painel/eventos/estandes/{{ s.codigo }}/comprovante" target="_blank">Ver comprovante</a>
-    {% if s.orcamento_id %}<a class="btn ghost" href="/painel/servicos?ab={{ s.orcamento_id }}">Ver proposta</a>{% endif %}
-    <form method="post" action="/painel/eventos/estandes/{{ s.codigo }}/confirmar">
-      <button class="btn ok" type="submit">Confirmar pagamento</button>
+</div>
+{% endfor %}
+</div>
+
+<h3 class="es-sec">Comprovante pendente de confirmação{% if pendentes %} · {{ pendentes|length }}{% endif %}</h3>
+{% if not pendentes %}<p class="es-vazio">Nada esperando confirmação agora.</p>{% endif %}
+<div class="es-lista">
+{% for s in pendentes %}
+<div class="es-card">
+  <div><span class="cod">{{ s.codigo }}</span>
+    <div class="es-mut">{{ s.pavilhao|replace('_',' ') }}{% if s.zona %} · {{ s.zona }}{% endif %} · {{ s.tamanho }}</div></div>
+  <div>{% if s.preco_centavos %}<b>{{ brl(s.preco_centavos) }}</b>{% endif %}</div>
+  <div class="es-mut">{% if s.pre_reserva_ate %}reserva vence {{ s.pre_reserva_ate.strftime('%d/%m %H:%M') }}{% endif %}</div>
+  <div class="es-acoes">
+    <a class="es-bt" href="/painel/eventos/estandes/{{ s.codigo }}/comprovante" target="_blank">Ver comprovante</a>
+    {% if s.orcamento_id %}<a class="es-bt" href="/painel/servicos?ab={{ s.orcamento_id }}">Ver proposta</a>{% endif %}
+    <form method="post" action="/painel/eventos/estandes/{{ s.codigo }}/confirmar" style="display:inline">
+      <button class="es-bt prim" type="submit">Confirmar pagamento</button>
     </form>
-    <form method="post" action="/painel/eventos/estandes/{{ s.codigo }}/liberar"
+    <form method="post" action="/painel/eventos/estandes/{{ s.codigo }}/liberar" style="display:inline"
           onsubmit="return confirm('Liberar o estande {{ s.codigo }} de volta pra livre?')">
-      <button class="btn liberar" type="submit">Liberar</button>
+      <button class="es-bt ambar" type="submit">Liberar</button>
     </form>
   </div>
 </div>
 {% endfor %}
-</body></html>
-"""
+</div>
+</div>
+{% endblock %}"""
 
-_env.loader.mapping[_TPL_NOME] = _TPL
+_env.loader.mapping["estandes"] = _TPL

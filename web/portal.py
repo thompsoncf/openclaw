@@ -443,6 +443,10 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
   {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
+     público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
+     _render(), não é todo mundo do nicho que vende espaço numerado. #}
+  {% if tem_pj and caps.financeiro and tem_estandes %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -504,6 +508,10 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
   {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
+     público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
+     _render(), não é todo mundo do nicho que vende espaço numerado. #}
+  {% if tem_pj and caps.financeiro and tem_estandes %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -8537,6 +8545,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("hoje", "/painel/hoje"),
                  ("clinica", "/painel/clinica"),
                  ("obras", "/painel/obras"),
+                 ("estandes", "/painel/eventos/estandes"),
                  ("follow_up", "/painel/follow-up"),
                  ("novidades", "/painel/novidades"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
@@ -8604,6 +8613,21 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             from finance import follow_up as _fu
             ctx["tem_follow_up"] = bool(
                 ctx.get("raio_x_perfil") and ctx["raio_x_perfil"]["chave"] in _fu.PERFIS_COM_TELA)
+        # Estandes de feira (finance/evento_stands, migração 448) é opt-in DENTRO
+        # do nicho 'eventos' — Prime Eventos (conta 34) não vende estande, só a
+        # Outlet Chic (conta 40) por enquanto. Por isso o gate não é
+        # `raio_x_perfil.chave == 'eventos'` (apareceria pra quem não usa a
+        # feature, como Obras faria pra quem não é construção) — é a config
+        # existir de verdade. Sem este item o painel existia mas não tinha como
+        # chegar nele sem colar a URL (achado do dono, 29/09/2026).
+        if "tem_estandes" not in ctx:
+            ctx["tem_estandes"] = False
+            if ctx.get("raio_x_perfil") and ctx["raio_x_perfil"]["chave"] == "eventos":
+                try:
+                    from finance import evento_stands as _es
+                    ctx["tem_estandes"] = bool(_es.obter_config(get_pool(), _c[0]))
+                except Exception:
+                    pass
     if "beta_gratis" not in ctx:
         try:
             from finance import config_app as _cfg

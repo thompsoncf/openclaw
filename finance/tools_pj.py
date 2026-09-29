@@ -537,6 +537,19 @@ def construir_ferramentas_pj(pool, conta_id: int,
     if _nicho_da_conta(pool, conta_id) == "construcao":
         ferramentas += construir_ferramentas_obras(pool, conta_id, livro=livro,
                                                    membro_id=membro_id)
+    # As ferramentas de ESTANDE são só de 'eventos' E com a feature LIGADA
+    # (evento_stands_config, migração 448) — nem toda conta de eventos vende
+    # espaço numerado (Prime Eventos, conta 34, não vende), e sem essa segunda
+    # checagem o agente ofereceria "confirmar comprovante de estande" pra quem
+    # nunca ouviu falar de estande.
+    if _nicho_da_conta(pool, conta_id) == "eventos":
+        try:
+            from . import evento_stands as _es
+            if _es.obter_config(pool, conta_id):
+                ferramentas += construir_ferramentas_evento_stands(
+                    pool, conta_id, livro=livro, membro_id=membro_id)
+        except Exception:
+            pass  # feature nova: nunca derruba o agente de quem não usa
     return ferramentas
 
 
@@ -934,5 +947,76 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                        "dividir_entre_obras."),
             parametros={"type": "object", "properties": {}},
             executar=gastos_sem_obra,
+        ),
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Estandes de feira/evento (migração 448, finance/evento_stands.py)
+# ─────────────────────────────────────────────────────────────────────────
+def construir_ferramentas_evento_stands(pool, conta_id: int, livro=None,
+                                        membro_id: int | None = None) -> list[Ferramenta]:
+    """Ferramenta do agente pro comprovante do estande chegando PELO WHATSAPP —
+    o mesmo evento que a página pública trata em web/loja_stands.py, só que o
+    cliente manda a foto direto na conversa em vez de usar o formulário.
+
+    O MECANISMO é IDÊNTICO ao de `guardar_foto_da_obra` (acima, linha ~930): o
+    webhook (web/app.py) deixa a mídia da mensagem atual em `livro.midia_atual`
+    — (bytes, content_type) — antes de chamar o agente; a ferramenta lê de lá
+    porque não existe outro jeito de saber qual foto veio em QUAL mensagem (o
+    modelo não recebe o arquivo bruto, só uma descrição em texto).
+
+    # TODO(zaq-tool): `livro.midia_atual` só é preenchido pro WhatsApp quando
+    # `media_type` começa com 'image/' (web/app.py, bloco do webhook que lê
+    # `media_url`/`media_ctype` — ver a condição logo antes de `agente.responder`).
+    # Comprovante em FOTO (o caso comum: print do Pix) funciona; comprovante em
+    # PDF mandado pelo WhatsApp NÃO populará `midia_atual` hoje, e esta
+    # ferramenta vai responder "não chegou nenhuma foto/PDF" mesmo com o PDF
+    # tendo chegado. Não ampliei a condição do webhook pra incluir PDF aqui
+    # porque ela também decide o fluxo de LEITURA DE APÓLICE (outro PDF, outro
+    # destino — ver o comentário "TERCEIRA PORTA DO LEITOR DE APÓLICE" em
+    # web/app.py) e um PDF pode servir aos dois; misturar os dois sem entender
+    # a prioridade entre eles é exatamente o tipo de "integração arriscada"
+    # que não dá pra inventar sem o dono decidir qual vem primeiro. Página
+    # pública (web/loja_stands.py) já aceita PDF sem essa limitação — é o
+    # caminho que funciona hoje pra quem tem só o PDF."""
+
+    def confirmar_comprovante_stand(e: dict) -> str:
+        from . import evento_stands as _es
+        midia = getattr(livro, "midia_atual", None) if livro is not None else None
+        if not midia:
+            return ("Não chegou nenhuma foto/PDF nesta mensagem. Peça pro cliente "
+                    "mandar o comprovante do Pix de novo, junto com o código do estande.")
+        codigo = (e.get("codigo") or "").strip()
+        if not codigo:
+            return "Preciso do código do estande (ex: G58) pra saber qual reservar."
+        stand = _es.buscar(pool, conta_id, codigo)
+        if not stand:
+            return (f"Não achei o estande '{codigo}'. Confere o código com o cliente — "
+                    "ele está escrito na planta que ele estava olhando.")
+        r = _es.subir_e_registrar_comprovante(pool, conta_id, codigo, midia[0], midia[1])
+        if not r["ok"]:
+            return f"Não deu pra registrar: {r['erro']}"
+        livro.midia_atual = None          # o mesmo comprovante não entra duas vezes
+        s = r["stand"]
+        preco = f" ({formatar_brl(s['preco_centavos'])})" if s["preco_centavos"] else ""
+        return (f"Comprovante do estande {codigo}{preco} registrado. ✅ Ele fica reservado "
+                "esperando a equipe conferir e confirmar o pagamento no painel.")
+
+    return [
+        Ferramenta(
+            nome="confirmar_comprovante_stand",
+            descricao=("Registra o COMPROVANTE DE PAGAMENTO de um estande de feira que "
+                       "veio nesta mensagem em FOTO (print do Pix) — reserva o estande "
+                       "esperando a equipe confirmar. Use quando o cliente mandar a foto "
+                       "do comprovante pelo WhatsApp em vez de usar a página do estande. "
+                       "Se o cliente mandar em PDF, isso ainda não é lido por aqui — peça "
+                       "pra ele usar a página pública do estande ou mandar um print/foto. "
+                       "Pergunte o código do estande (ex: G58) se ele não disse."),
+            parametros={"type": "object",
+                        "properties": {"codigo": {"type": "string",
+                                                  "description": "código do estande, ex: G58"}},
+                        "required": ["codigo"]},
+            executar=confirmar_comprovante_stand,
         ),
     ]

@@ -216,67 +216,78 @@ def foto_stand(nome: str):
 # desenha o MESMO mapa — duas cópias divergiriam na primeira mudança de planta.
 # ─────────────────────────────────────────────────────────────────────────
 PLANTA_DEFS_JS = r"""
-  // grid coords are (col, colSpan, row, rowSpan) on each pavilion's own 24-col grid
+  // grid coords are (col, colSpan, row, rowSpan) on each pavilion's own 24-col grid.
+  // TRANSCRIÇÃO FIEL da planta oficial do PDF v2 (aprovada pelo dono, 29/09/2026):
+  // stand a stand na posição da planta. `w`/`h` no def sobrescrevem sizeDims
+  // (os 2x3 do Superior ficam "em pé", o 3x2 do G67/68 fica "deitado").
   var inferiorDefs = [
-    {prefix:'i', from:1, to:3, col:3, cspan:2, row:1, rspan:2, label:'Outlet Acessórios'},
-    {prefix:'i', from:4, to:15, col:6, cspan:8, row:1, rspan:2, label:'Outlet Make'},
-    {prefix:'G', from:43, to:54, col:15, cspan:8, row:1, rspan:2, label:'Outlet Grifes'},
-    {prefix:'i', from:16, to:19, col:3, cspan:1, row:4, rspan:5},
-    {prefix:'i', from:20, to:27, col:6, cspan:6, row:4, rspan:3, label:'Home Decor'},
-    {prefix:'i', from:28, to:31, col:12, cspan:1, row:4, rspan:5},
-    {prefix:'G', from:55, to:62, col:15, cspan:5, row:4, rspan:3},
-    {prefix:'G', from:63, to:66, col:21, cspan:2, row:4, rspan:5},
-    {prefix:'i', from:32, to:35, col:5, cspan:3, row:10, rspan:2, label:'Outlet Fitness'},
-    {prefix:'i', from:36, to:39, col:9, cspan:3, row:10, rspan:2, label:'Outlet Kids'},
-    {prefix:'i', from:40, to:42, col:12, cspan:1, row:10, rspan:3, label:'Multimarcas'},
-    {prefix:'G', from:67, to:68, col:15, cspan:2, row:10, rspan:2},
-    {prefix:'G', from:69, to:74, col:18, cspan:5, row:10, rspan:2}
+    {prefix:'i', from:1, to:3, col:1, cspan:3, row:1, rspan:2, label:'Outlet Acessórios'},
+    {prefix:'i', from:4, to:15, col:4, cspan:9, row:1, rspan:2, label:'Outlet Make'},
+    {prefix:'G', from:43, to:54, col:14, cspan:9, row:1, rspan:2, label:'Outlet Grifes'},
+    {prefix:'i', from:16, to:19, col:1, cspan:1, row:4, rspan:5},
+    {prefix:'i', from:20, to:27, col:4, cspan:4, row:4, rspan:4, label:'Home Decor'},
+    {prefix:'i', from:28, to:31, col:11, cspan:1, row:4, rspan:4},
+    {prefix:'G', from:55, to:62, col:14, cspan:4, row:4, rspan:4},
+    {prefix:'G', from:63, to:66, col:21, cspan:1, row:4, rspan:5},
+    {prefix:'i', from:32, to:35, col:2, cspan:4, row:10, rspan:2, label:'Outlet Fitness'},
+    {prefix:'i', from:36, to:39, col:6, cspan:4, row:10, rspan:2, label:'Outlet Kids'},
+    {prefix:'i', from:40, to:41, col:11, cspan:2, row:10, rspan:2, label:'Multimarcas'},
+    {prefix:'i', from:42, to:42, col:11, cspan:1, row:12, rspan:1},
+    {prefix:'G', from:67, to:68, col:14, cspan:2, row:10, rspan:2},
+    {prefix:'G', from:69, to:74, col:17, cspan:5, row:10, rspan:2}
   ];
   var inferiorDecor = [
-    {label:'Corredor Outlet Grifes', col:13, cspan:2, row:4, rspan:5, kind:'corridor'},
-    {label:'WC', col:13, cspan:2, row:9, rspan:1, kind:'wc'},
+    {label:'Outlet Acessórios', col:3, cspan:1, row:4, rspan:5, kind:'corridor'},
+    {label:'Corredor Outlet Grifes', col:12, cspan:1, row:3, rspan:7, kind:'corridor'},
+    {label:'WC', col:14, cspan:2, row:12, rspan:1, kind:'wc'},
     {label:'Entrada única →', col:23, cspan:1, row:5, rspan:4, kind:'gate'},
+    {label:'Saída', col:1, cspan:1, row:12, rspan:1, kind:'gate'},
+    {label:'Saída', col:9, cspan:1, row:12, rspan:1, kind:'gate'},
     {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:12, kind:'avenue'}
   ];
 
   var superiorDefs = [
-    {prefix:'S', from:75, to:83, col:5, cspan:5, row:1, rspan:2},
-    {prefix:'S', from:84, to:96, col:11, cspan:8, row:1, rspan:2},
-    {prefix:'S', from:97, to:97, col:3, cspan:1, row:4, rspan:2},
-    {prefix:'S', from:98, to:102, col:3, cspan:1, row:6, rspan:6},
-    {prefix:'S', from:103, to:106, col:5, cspan:4, row:4, rspan:1},
-    {prefix:'S', from:115, to:118, col:5, cspan:4, row:6, rspan:1},
-    {prefix:'S', from:107, to:110, col:10, cspan:4, row:4, rspan:1},
-    {prefix:'S', from:119, to:122, col:10, cspan:4, row:6, rspan:1},
-    {prefix:'S', from:111, to:114, col:15, cspan:4, row:4, rspan:1},
-    {prefix:'S', from:123, to:126, col:15, cspan:4, row:6, rspan:1},
-    {prefix:'S', from:127, to:129, col:8, cspan:2, row:8, rspan:1},
-    {prefix:'S', from:130, to:132, col:11, cspan:3, row:8, rspan:1},
-    {prefix:'S', from:133, to:136, col:15, cspan:4, row:8, rspan:1},
-    {prefix:'S', from:137, to:142, col:20, cspan:2, row:4, rspan:6},
-    {prefix:'S', from:143, to:150, col:11, cspan:5, row:10, rspan:2},
-    {prefix:'S', from:151, to:154, col:19, cspan:3, row:10, rspan:2}
+    {prefix:'S', from:75, to:83, col:3, cspan:8, row:1, rspan:2, w:24, h:22},
+    {prefix:'S', from:84, to:96, col:12, cspan:12, row:1, rspan:2, w:24, h:22},
+    {prefix:'S', from:97, to:97, col:2, cspan:2, row:3, rspan:2},
+    {prefix:'S', from:98, to:102, col:2, cspan:1, row:5, rspan:5, w:24, h:22},
+    {prefix:'S', from:103, to:106, col:5, cspan:5, row:3, rspan:1},
+    {prefix:'S', from:115, to:118, col:5, cspan:5, row:4, rspan:1},
+    {prefix:'S', from:107, to:110, col:11, cspan:5, row:3, rspan:1},
+    {prefix:'S', from:119, to:122, col:11, cspan:5, row:4, rspan:1},
+    {prefix:'S', from:111, to:114, col:17, cspan:5, row:3, rspan:1},
+    {prefix:'S', from:123, to:126, col:17, cspan:5, row:4, rspan:1},
+    {prefix:'S', from:130, to:132, col:11, cspan:3, row:6, rspan:1, w:24, h:22},
+    {prefix:'S', from:133, to:136, col:17, cspan:4, row:6, rspan:1, w:24, h:22},
+    {prefix:'S', from:127, to:129, col:6, cspan:3, row:7, rspan:1, w:24, h:22},
+    {prefix:'S', from:137, to:142, col:22, cspan:1, row:2, rspan:6, w:24, h:22},
+    {prefix:'S', from:143, to:150, col:8, cspan:6, row:9, rspan:2},
+    {prefix:'S', from:151, to:154, col:18, cspan:3, row:9, rspan:2}
   ];
   var superiorDecor = [
-    {label:'← Entrada', col:1, cspan:2, row:1, rspan:2, kind:'gate'},
-    {label:'Saída →', col:22, cspan:2, row:8, rspan:2, kind:'gate'},
-    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:11, kind:'avenue'}
+    {label:'Entrada →', col:1, cspan:1, row:1, rspan:2, kind:'gate'},
+    {label:'WC', col:5, cspan:1, row:9, rspan:1, kind:'wc'},
+    {label:'Saída', col:15, cspan:2, row:10, rspan:1, kind:'gate'},
+    {label:'Saída →', col:23, cspan:1, row:7, rspan:1, kind:'gate'},
+    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:10, kind:'avenue'}
   ];
 
   var carDefs = [
-    {prefix:'C', from:155, to:158, col:13, cspan:4, row:2, rspan:2, label:'Outlet Car'},
-    {prefix:'C', from:159, to:162, col:18, cspan:4, row:2, rspan:2}
+    {prefix:'C', from:155, to:158, col:8, cspan:5, row:3, rspan:2, label:'Espaço em Tenda', w:34, h:30},
+    {prefix:'C', from:159, to:162, col:15, cspan:5, row:3, rspan:2, label:'Stand Personalizado', w:34, h:30}
   ];
   var carDecor = [
-    {label:'Palco 6x6', col:2, cspan:3, row:1, rspan:4, kind:'stage'},
-    {label:'Praça de Alimentação', col:6, cspan:5, row:1, rspan:4, kind:'food'},
-    {label:'↓ Entrada', col:17, cspan:2, row:1, rspan:1, kind:'gate'},
-    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:6, kind:'avenue'}
+    {label:'Av. Marechal Castelo Branco', col:4, cspan:18, row:1, rspan:1, kind:'avenueh'},
+    {label:'Entrada ↓', col:13, cspan:2, row:2, rspan:1, kind:'gate'},
+    {label:'Palco · Shows', col:1, cspan:2, row:2, rspan:3, kind:'stage'},
+    {label:'Praça de Alimentação · Tenda 20x10', col:4, cspan:4, row:2, rspan:3, kind:'food'},
+    {label:'OUTLET CAR', col:9, cspan:10, row:5, rspan:1, kind:'faixa'},
+    {label:'OUTLET CHIC ↓', col:10, cspan:8, row:6, rspan:1, kind:'faixa'}
   ];
 
   var pavilions = [
-    {key:'inferior', label:'Pavilhão Inferior', sub:'i01–i42 · G43–G74', defs:inferiorDefs, decor:inferiorDecor, rows:13},
-    {key:'superior', label:'Pavilhão Superior', sub:'S75–S154', defs:superiorDefs, decor:superiorDecor, rows:12},
+    {key:'inferior', label:'Pavilhão Inferior', sub:'i01–i42 · G43–G74', defs:inferiorDefs, decor:inferiorDecor, rows:12},
+    {key:'superior', label:'Pavilhão Superior', sub:'S75–S154', defs:superiorDefs, decor:superiorDecor, rows:10},
     {key:'outlet_car', label:'Outlet Car', sub:'C155–C162', defs:carDefs, decor:carDecor, rows:6}
   ];
 """
@@ -444,6 +455,9 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
     font-size:8px;letter-spacing:0.06em;text-transform:uppercase;padding:8px 3px;
   }
   .decor.wc{border-style:dotted;font-size:8.5px;}
+  /* avenida horizontal e faixas beges do Outlet Car (planta oficial) */
+  .decor.avenueh{border:none;background:none;color:var(--fg-dim);opacity:0.6;font-size:9px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;}
+  .decor.faixa{border:none;background:#CFC8B8;color:#3A362C;font-weight:800;letter-spacing:0.08em;font-size:10px;border-radius:6px;}
   .decor.avenue{
     writing-mode:vertical-rl;text-orientation:mixed;border:none;background:none;
     color:var(--fg-dim);font-size:8.5px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;
@@ -611,7 +625,9 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
   var sizeLabel = {'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
   var sizePhoto = {'4x2':'/estatico/stands/4x2.jpg','4x3':'/estatico/stands/4x3.jpg','3x2':'/estatico/stands/3x2.jpg','2x2':'/estatico/stands/2x2.jpg','3x3':'/estatico/stands/3x3.jpg'};
   // proportional footprint per real stand size (bigger stands render as bigger tiles)
-  var sizeDims = {'2x2':{w:26,h:22},'3x2':{w:32,h:22},'3x3':{w:32,h:28},'4x2':{w:38,h:22},'4x3':{w:38,h:28},'tenda':{w:38,h:22},'personalizado':{w:38,h:28}};
+  // pegada proporcional REAL: largura = FRENTE do stand, altura = FUNDO
+  // (planta oficial v2). `w`/`h` no def sobrescrevem estes valores.
+  var sizeDims = {'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
 
 """ + PLANTA_DEFS_JS + r"""
   // A planta desenhada acima + o BANCO: cada def só vira stand se o código
@@ -744,10 +760,13 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     return out;
   }
 
-  function standButton(s){
+  function standButton(s, d){
     var btn = document.createElement('button');
     btn.className = 'stand st-' + s.status + ' sz-' + s.size + (s.code === selectedCode ? ' is-selected' : '');
-    var dims = sizeDims[s.size] || {w:32,h:22};
+    // o def (d) pode sobrescrever a pegada padrão do tamanho — é o que deixa
+    // o stand "em pé" ou "deitado" fiel à planta oficial
+    var base = sizeDims[s.size] || {w:32,h:22};
+    var dims = {w: (d && d.w) || base.w, h: (d && d.h) || base.h};
     btn.style.width = dims.w + 'px';
     btn.style.height = dims.h + 'px';
     btn.textContent = s.code;
@@ -796,7 +815,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
       codes.forEach(function(code){
         var s = stands.filter(function(x){ return x.code === code && x.pavilion === currentPavilion; })[0];
         if (!s) return;
-        cells.appendChild(standButton(s));
+        cells.appendChild(standButton(s, d));
       });
       block.appendChild(cells);
       grid.appendChild(block);

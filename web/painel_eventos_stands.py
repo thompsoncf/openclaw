@@ -446,6 +446,8 @@ _CSS = r"""<style>
 .es-pag .mapa-grid .decor.corridor{writing-mode:vertical-rl;text-orientation:mixed;font-size:7.5px;letter-spacing:0.06em;text-transform:uppercase;padding:6px 2px}
 .es-pag .mapa-grid .decor.wc{border-style:dotted}
 .es-pag .mapa-grid .decor.avenue{writing-mode:vertical-rl;text-orientation:mixed;border:none;font-size:8px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;opacity:0.6;justify-content:flex-start;padding-top:6px}
+.es-pag .mapa-grid .decor.avenueh{border:none;font-size:8px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;opacity:0.6}
+.es-pag .mapa-grid .decor.faixa{border:none;background:#CFC8B8;color:#3A362C;font-weight:800;letter-spacing:0.06em;font-size:9px}
 .es-pag .legend-mapa{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;font-size:12px;color:var(--fg-dim)}
 .es-pag .legend-mapa i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
 .es-pag .legend-mapa b{color:var(--fg);font-family:var(--mono,monospace)}
@@ -802,8 +804,10 @@ var PODE_GERIR = {{ 'true' if pode_gerir else 'false' }};
 (function(){
 """ + PLANTA_DEFS_JS + r"""
   var tamLabel = {'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
-  // mesma pegada de tile proporcional da página pública, um degrau menor
-  var dims = {'2x2':{w:24,h:20},'3x2':{w:29,h:20},'3x3':{w:29,h:25},'4x2':{w:34,h:20},'4x3':{w:34,h:25},'tenda':{w:34,h:20},'personalizado':{w:34,h:25}};
+  // mesma pegada proporcional da página pública (largura=frente, altura=fundo),
+  // escalada pra grid compacta do painel (colunas de 30px vs 34px da maquete)
+  var sizeBase = {'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
+  var ESCALA = 30/34;
 
   var pavAtual = 'inferior';
   var selecionado = null;
@@ -844,14 +848,15 @@ var PODE_GERIR = {{ 'true' if pode_gerir else 'false' }};
     pavsEl.appendChild(b);
   });
 
-  function standTile(code){
+  function standTile(code, def){
     var s = MAPA[code];
     if (!s) return null;
     var btn = document.createElement('button');
     btn.className = 'stand st-' + s.status + (code === selecionado ? ' is-selected' : '');
-    var d = dims[s.tamanho] || {w:29,h:20};
-    btn.style.width = d.w + 'px';
-    btn.style.height = d.h + 'px';
+    // o def da planta pode sobrescrever a pegada padrão (stand "em pé"/"deitado")
+    var base = sizeBase[s.tamanho] || {w:29,h:23};
+    btn.style.width = Math.round(((def && def.w) || base.w) * ESCALA) + 'px';
+    btn.style.height = Math.round(((def && def.h) || base.h) * ESCALA) + 'px';
     btn.textContent = code;
     btn.title = code + ' · ' + (tamLabel[s.tamanho] || s.tamanho) + ' · ' + s.status;
     btn.onclick = function(){ selecionado = code; renderMapa(); renderDetalhe(); };
@@ -887,7 +892,7 @@ var PODE_GERIR = {{ 'true' if pode_gerir else 'false' }};
       cells.className = 'cells';
       for (var n=d.from; n<=d.to; n++){
         var num = d.prefix === 'i' ? String(n).padStart(2,'0') : String(n);
-        var t = standTile(d.prefix + num);
+        var t = standTile(d.prefix + num, d);
         if (t) cells.appendChild(t);
       }
       block.appendChild(cells);

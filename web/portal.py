@@ -446,7 +446,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
      público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
      _render(), não é todo mundo do nicho que vende espaço numerado. #}
-  {% if tem_pj and caps.financeiro and tem_estandes %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
+  {% if tem_pj and (caps.vendas or caps.financeiro) and tem_estandes %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -511,7 +511,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
      público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
      _render(), não é todo mundo do nicho que vende espaço numerado. #}
-  {% if tem_pj and caps.financeiro and tem_estandes %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
+  {% if tem_pj and (caps.vendas or caps.financeiro) and tem_estandes %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}

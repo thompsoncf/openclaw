@@ -152,6 +152,12 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # só em 'eventos'), não a whitelist, que não conhece o nicho da conta.
     if caps["vendas"]:
         permitido += ["/painel/follow-up"]
+    # O mapa de estandes (eventos): o vendedor precisa ver o que está livre pra
+    # oferecer na conversa; o gestor confirma pagamento por lá. Quem barra conta
+    # de outro nicho é a própria rota (gate nicho+config em
+    # web/painel_eventos_stands._acesso), não a whitelist.
+    if caps["vendas"] or caps["financeiro"]:
+        permitido += ["/painel/eventos/estandes"]
     # Renovações (a carteira de apólices da corretora): o corretor vê a fila dele,
     # o dono e o gestor veem a carteira inteira — o recorte é da própria rota. Quem
     # barra conta de outro nicho também é a rota (só o perfil `seguros` abre), não a

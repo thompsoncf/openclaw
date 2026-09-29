@@ -216,7 +216,120 @@ def subir_e_registrar_comprovante(pool, conta_id: int, codigo: str, conteudo: by
         subir(caminho, conteudo, ct)
     except ValueError as e:
         return {"ok": False, "erro": str(e)}
-    return registrar_comprovante(pool, conta_id, codigo, caminho, prospeccao_id=prospeccao_id)
+    r = registrar_comprovante(pool, conta_id, codigo, caminho, prospeccao_id=prospeccao_id)
+    if r.get("ok"):
+        # o sinal "pagou" (comprovante na mão): nasce a proposta + o contrato
+        # pra assinatura — best-effort, o estande já está travado de qualquer
+        # jeito e o contrato é consequência, não condição.
+        try:
+            extra = garantir_orcamento_e_contrato(pool, conta_id, r["stand"])
+            if extra:
+                r.update(extra)
+                r["stand"]["orcamento_id"] = extra["orcamento_id"]
+        except Exception as e:  # noqa: BLE001
+            _log.warning("evento_stands: comprovante ok mas proposta/contrato do "
+                         "%s/%s falhou: %s: %s", conta_id, codigo, type(e).__name__, e)
+    return r
+
+
+def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict) -> dict | None:
+    """Quando o comprovante do SINAL chega, nascem a PROPOSTA e o CONTRATO do
+    estande (pedido do dono, 29/09/2026: "colocar o contrato quando pagar o
+    sinal") — reaproveitando o motor que a Prime Eventos já usa: a linha vai
+    pra `orcamentos` (mesma tabela/token da folha de proposta) e o contrato
+    nasce por `finance.contrato.criar_para_orcamento`, com o texto do
+    `contrato_modelo` da conta e o link público /contrato/<token> pronto pra
+    assinar.
+
+    IDEMPOTENTE: estande que já tem orcamento_id só devolve o contrato que
+    existe (reenvio de comprovante não duplica proposta). Sem lojista
+    identificado (prospeccao sem nome) devolve None — contrato sem parte não
+    faz sentido; o dono cria a proposta à mão no painel se quiser.
+
+    BEST-EFFORT no chamador: o comprovante — a parte que trava o estande — já
+    foi registrado; proposta e contrato são consequência, e falhar aqui não
+    pode desfazer a reserva."""
+    from . import contrato as ctr
+    from . import vendas
+    if stand.get("orcamento_id"):
+        ct = ctr.por_orcamento(pool, conta_id, stand["orcamento_id"])
+        return {"orcamento_id": stand["orcamento_id"],
+                "contrato_token": (ct or {}).get("token")}
+    pid = stand.get("prospeccao_id")
+    nome = zap = None
+    if pid:
+        with pool.connection() as c:
+            r = c.execute(
+                "select empresa, whatsapp from prospeccao where id=%s and conta_id=%s",
+                (pid, conta_id)).fetchone()
+        if r:
+            nome, zap = (r[0] or "").strip(), r[1]
+    if not nome:
+        return None
+
+    import json as _json
+    import secrets as _secrets
+    preco = int(stand.get("preco_centavos") or 0)
+    desc = f"Stand {stand['codigo']} · {stand['tamanho']}"
+    if stand.get("zona"):
+        desc += f" — {stand['zona']}"
+    # mesmo shape de item do cockpit/painel: nome + setup em REAIS (total da linha)
+    itens = [{"nome": desc, "setup": preco / 100, "mensal": 0}]
+    # data/local do evento pro quadro "Objeto" do contrato (mesmo jsonb da
+    # proposta de evento do painel)
+    cfg = obter_config(pool, conta_id) or {}
+    evento = None
+    if cfg.get("evento_inicio"):
+        evento = _json.dumps({"data": cfg["evento_inicio"].isoformat(),
+                              "local": cfg.get("evento_local") or ""})
+    modo = vendas.modo_do_orcamento(pool, conta_id)
+    token = _secrets.token_urlsafe(16)
+    with pool.connection() as c:
+        # mesmas colunas que o cockpit garante antes de inserir (espelho das
+        # migrações de orcamentos) — base velha não derruba o comprovante
+        try:
+            from web.painel_servicos import _garantir_tabela
+            _garantir_tabela(c)
+        except Exception:  # noqa: BLE001 — colunas já existem em produção
+            # o DDL falhado deixa a TRANSAÇÃO abortada — sem o rollback, o
+            # insert de baixo morreria com InFailedSqlTransaction mesmo com a
+            # tabela em ordem.
+            try:
+                c.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+        # nasce APROVADA, com o aceite datado: mandar o comprovante do sinal É a
+        # aprovação do lojista (não existe uma segunda folha pra ele aceitar) —
+        # e é o que libera a assinatura do contrato na página pública, em vez de
+        # travá-la esperando uma aprovação de proposta que nunca viria.
+        r = vendas.com_retry_numero(c, lambda: c.execute(
+            f"""insert into orcamentos
+                 (conta_id, cliente, empresa, whatsapp, itens, evento,
+                  setup_centavos, mensal_centavos, primeiro_ano_centavos,
+                  status, aprovada_por, aprovada_em,
+                  criado_por, canal, token, modo, numero)
+               values (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,0,%s,
+                       'aprovada',%s,now(),
+                       'pagina_stands','pagina_stands',%s,%s,
+                       {vendas.NUMERO_SQL})
+               returning id""",
+            (conta_id, nome[:200], nome[:200], (zap or None),
+             _json.dumps(itens), evento, preco, preco, nome[:120], token, modo,
+             conta_id)).fetchone())
+        if not r:
+            return None
+        oid = int(r[0])
+        c.execute("update evento_stands set orcamento_id=%s, atualizado_em=now() "
+                  "where conta_id=%s and codigo=%s",
+                  (oid, conta_id, stand["codigo"]))
+        c.execute("update prospeccao set orcamento_id=%s where id=%s and conta_id=%s",
+                  (oid, pid, conta_id))
+        c.commit()
+    ct = ctr.criar_para_orcamento(pool, conta_id, oid, valor_centavos=preco,
+                                  criado_por="pagina_stands")
+    _log.info("evento_stands: proposta %s + contrato %s nasceram do comprovante do "
+              "estande %s/%s", oid, (ct or {}).get("id"), conta_id, stand["codigo"])
+    return {"orcamento_id": oid, "contrato_token": (ct or {}).get("token")}
 
 
 def confirmar_pagamento(pool, conta_id: int, codigo: str,

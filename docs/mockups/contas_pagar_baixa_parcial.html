@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — baixa parcial em Contas a pagar</title>
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197;
+  --neon:#25D366;
+  --card:var(--surface); --card-2:var(--bg-2); --borda:var(--line);
+  --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  max-width:1180px;margin:0 auto;padding:30px 18px 90px;line-height:1.45}
+h1{font-size:1.2rem;margin-bottom:6px}
+.lead{color:var(--txt-mut);font-size:.88rem;margin-bottom:6px;line-height:1.6;max-width:920px}
+.lead b{color:var(--txt)}
+.fonte{font-size:.78rem;color:var(--txt-mut);margin-bottom:30px}
+.fonte code{color:#9fd6b8}
+
+.secao{margin-bottom:44px}
+.secao-h{font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--verde-claro);margin-bottom:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.secao-h .tag{font-size:.62rem;background:rgba(37,211,102,.14);border:1px solid rgba(37,211,102,.35);
+  padding:2px 8px;border-radius:20px;letter-spacing:0;text-transform:none;font-weight:600}
+.secao-h .tag.bad{background:rgba(224,87,79,.14);border-color:rgba(224,87,79,.4);color:var(--coral)}
+
+.achado{margin-top:6px;margin-bottom:36px;padding:.9rem 1.1rem;border-radius:12px;
+  background:var(--coral-fundo);border:1px solid var(--coral-borda);font-size:.86rem;line-height:1.6}
+.achado b{color:#f0a89e}
+.achado code{color:#f0c9c2}
+
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media(max-width:920px){.compare{grid-template-columns:1fr}}
+.col-h{font-size:.78rem;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.col-h .sel{font-size:.64rem;font-weight:700;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.04em}
+.sel.hoje{background:rgba(224,87,79,.14);color:var(--coral);border:1px solid rgba(224,87,79,.4)}
+.sel.proposta{background:rgba(37,211,102,.16);color:#8be6c4;border:1px solid rgba(37,211,102,.45)}
+
+/* ---- réplica das classes reais de web/portal.py (tela Empresa › Contas) ---- */
+.card{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:1.1rem 1.2rem}
+.tit-lin{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .8rem;padding:.7rem 0;border-bottom:1px solid var(--borda)}
+.tit-lin:last-child{border-bottom:0}
+.tit-id{flex:1 1 220px;min-width:0}
+.tit-desc{font-size:.92rem}
+.tit-meta{font-size:.76rem;color:var(--txt-mut);margin-top:.15rem}
+.tit-val{font-size:.95rem;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tit-acoes{display:flex;gap:.4rem;flex-wrap:wrap}
+.tit-acoes button{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt)}
+.selo{font-size:.66rem;padding:1px 7px;border-radius:20px;border:1px solid;margin-left:.3rem;white-space:nowrap}
+.selo.jur{border-color:#5A2B2B;background:#241313;color:#E0A32E}
+
+.tit-baixa{display:flex;flex:1 1 100%;flex-wrap:wrap;gap:.5rem .8rem;margin-top:.6rem;align-items:end;
+  background:var(--card-2);border:1px solid #5A4520;border-radius:9px;padding:.6rem .7rem}
+.tit-bx{display:flex;flex-direction:column;gap:.15rem;font-size:.68rem;color:#8a938a}
+.tit-baixa input{font-size:.8rem;padding:.32rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt);width:auto;max-width:140px}
+.tit-baixa button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
+.tit-bx-dica{flex:1 1 100%;font-size:.72rem;color:#8a938a}
+.tit-bx-tot{font-size:.82rem;font-weight:600;font-variant-numeric:tabular-nums;color:#f0dca6;align-self:center}
+
+.tit-dif{display:none;flex:1 1 100%;min-width:0;max-width:100%;box-sizing:border-box;flex-direction:column;gap:.4rem;
+  border:1px solid #5a4a22;background:rgba(240,192,90,.07);border-radius:8px;padding:.6rem .7rem;font-size:.78rem}
+.tit-dif.on{display:flex}
+.tit-dif p{margin:0;color:#F2E2C4}
+.tit-dif p.falta{color:#f0c05a;font-weight:600}
+.tit-dif label{display:flex;flex-wrap:nowrap;align-items:flex-start;gap:.45rem;cursor:pointer;margin:0;font-size:.8rem;color:var(--txt);line-height:1.35}
+.tit-dif input[type=radio]{width:auto;min-height:0;height:auto;margin:.15rem 0 0;padding:0;border:0;flex:0 0 auto}
+.tit-dif-menos,.tit-dif-mais{display:none;flex-direction:column;gap:.4rem}
+.tit-dif-menos.on,.tit-dif-mais.on{display:flex}
+.tit-dif input[type=date]{margin-left:1.4rem;font-size:.78rem;padding:.28rem .45rem;border-radius:6px;
+  border:1px solid #5a4a22;background:var(--bg);color:var(--txt);width:auto}
+.tit-dif-nota{font-size:.7rem;color:var(--txt-mut);margin-left:1.4rem;display:block}
+
+.rotulo{font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:.35rem}
+.nota{margin-top:14px;font-size:.8rem;color:var(--txt-mut);line-height:1.55;padding:.7rem .85rem;
+  border-radius:9px;background:var(--card-2);border:1px solid var(--borda)}
+.nota b{color:var(--txt)}
+
+.pergunta{margin-top:44px;padding:1rem 1.2rem;border-radius:12px;background:var(--card-2);
+  border:1px solid var(--verde-claro);font-size:.92rem;line-height:1.7}
+.pergunta b{color:var(--verde-claro)}
+.pergunta ul{margin:.5rem 0 0 1.2rem}
+</style>
+</head>
+<body>
+
+<h1>Mockup — baixa parcial em Contas a pagar</h1>
+<p class="lead">Hoje, dar baixa num título a <b>pagar</b> só aceita o valor cheio — o único ajuste possível é
+  "Multa e juros" (um acréscimo, pra cima ou pra baixo, em cima do valor inteiro). Não existe campo pra dizer
+  "paguei só uma parte, o resto fica pra depois".</p>
+<p class="fonte">Tela real de referência: <code>web/portal.py</code>, painel <code>.tit-baixa</code> (linhas ~4695–4736).</p>
+
+<div class="achado">
+  <b>O que já existe, e onde não chega:</b> o recurso que você lembra — "recebimento parcial" — foi construído em
+  23/09/2026 (<code>finance/recebido_diferente.py</code>), mas <b>só pra contas a RECEBER</b>. O código checa
+  <code>if t[1] != "receber"</code> e qualquer título a <b>pagar</b> sempre cai na baixa cheia — inclusive há um
+  teste (<code>tests/test_juros_e_multa.py</code>) que recusa de propósito conciliar um pagamento menor que a
+  face do título, "pra não esconder dívida". Contas a pagar nunca ganhou o equivalente.
+</div>
+
+<div class="secao">
+  <div class="secao-h">Comparação <span class="tag bad">hoje: só baixa cheia</span> <span class="tag">proposta: baixa parcial</span></div>
+  <div class="compare">
+
+    <div>
+      <div class="col-h"><span class="sel hoje">HOJE</span> Multa e juros, sem "paguei menos"</div>
+      <div class="card">
+        <div class="tit-lin">
+          <div class="tit-id">
+            <div class="tit-desc">Buffet Doces &amp; Cia — boleto</div>
+            <div class="tit-meta"><span style="color:#f0c05a">vence 30/09 ⚠ atrasado</span> · <span style="color:#e07a5f">a pagar</span></div>
+          </div>
+          <div class="tit-val" style="color:#e07a5f">R$ 3.200,00</div>
+          <div class="tit-acoes"><button>dar baixa ✓</button></div>
+          <form class="tit-baixa" style="display:flex">
+            <label class="tit-bx">Paguei em <input type="date" value="2026-09-29"></label>
+            <label class="tit-bx">Multa e juros
+              <input placeholder="0,00" title="negativo é desconto"></label>
+            <span class="tit-bx-dica">No prazo — sem multa nem juros.</span>
+            <span class="tit-bx-tot">Total R$ 3.200,00</span>
+            <button style="color:var(--verde-claro);border-color:#1E4A3A">confirmar baixa</button>
+          </form>
+        </div>
+      </div>
+      <div class="nota">
+        <b>O problema:</b> o financeiro da Prime só conseguiu pagar R$ 2.000 desta vez (fluxo de caixa apertado) e
+        combinou o resto pra daqui 15 dias com o fornecedor. Não existe onde escrever isso — ou lança R$ 3.200 que
+        não saíram do caixa, ou não dá baixa nenhuma e o título fica "atrasado" pro sistema, mesmo já tendo uma
+        parte paga.
+      </div>
+    </div>
+
+    <div>
+      <div class="col-h"><span class="sel proposta">PROPOSTA</span> "Valor pago" + a data da sobra é do gestor</div>
+      <div class="card">
+        <div class="tit-lin">
+          <div class="tit-id">
+            <div class="tit-desc">Buffet Doces &amp; Cia — boleto</div>
+            <div class="tit-meta"><span style="color:#f0c05a">vence 30/09 ⚠ atrasado</span> · <span style="color:#e07a5f">a pagar</span></div>
+          </div>
+          <div class="tit-val" style="color:#e07a5f">R$ 3.200,00</div>
+          <div class="tit-acoes"><button>dar baixa ✓</button></div>
+          <form class="tit-baixa" style="display:flex" id="f1">
+            <label class="tit-bx">Paguei em <input type="date" value="2026-09-29"></label>
+            <label class="tit-bx">Valor pago
+              <input id="pago1" value="2.000,00" oninput="calc(1)"></label>
+            <span class="tit-bx-dica" id="dica1"></span>
+            <div class="tit-dif on" id="dif1">
+              <p class="falta" id="txt1">Faltaram <b>R$ 1.200,00</b>. O que faço com a diferença?</p>
+              <div class="tit-dif-menos on">
+                <label><input type="radio" name="destino1" checked><span>ainda falta pagar — nasce uma conta de <b>R$ 1.200,00</b>. Vencimento da sobra:</span></label>
+                <input type="date" id="sobra1">
+                <span class="tit-dif-nota">em branco de propósito — é você quem combina com o fornecedor quando o resto sai.</span>
+                <label><input type="radio" name="destino1"><span>foi desconto combinado com o fornecedor</span></label>
+              </div>
+              <div class="tit-dif-mais">
+                <label><input type="radio" name="destino1"><span>foi multa e juros do atraso</span></label>
+              </div>
+            </div>
+            <button style="color:var(--verde-claro);border-color:#1E4A3A">confirmar baixa</button>
+          </form>
+        </div>
+        <div class="tit-lin" style="opacity:.85">
+          <div class="tit-id">
+            <div class="tit-desc">Buffet Doces &amp; Cia — boleto <span class="selo jur">o que faltou de um pagamento</span></div>
+            <div class="tit-meta">vence <b>15/10</b> — escolhido acima · <span style="color:#e07a5f">a pagar</span></div>
+          </div>
+          <div class="tit-val" style="color:#e07a5f">R$ 1.200,00</div>
+          <div class="tit-acoes"><button>dar baixa ✓</button></div>
+        </div>
+      </div>
+
+      <div class="rotulo" style="margin-top:16px">experimente — digite um valor diferente</div>
+      <div class="card" style="padding:.8rem 1rem">
+        <div class="tit-lin" style="border:0;padding:.3rem 0">
+          <div class="tit-id"><div class="tit-desc" style="font-size:.85rem">Locação de som — Fornecedor Áudio Prime</div></div>
+          <div class="tit-val" style="color:#e07a5f;font-size:.85rem">R$ 900,00</div>
+        </div>
+        <form class="tit-baixa" style="display:flex;margin-top:.4rem" id="f2" data-base="900">
+          <label class="tit-bx">Paguei em <input type="date" value="2026-09-29"></label>
+          <label class="tit-bx">Valor pago
+            <input id="pago2" value="900,00" oninput="calc(2)"></label>
+          <span class="tit-bx-dica" id="dica2"></span>
+          <div class="tit-dif" id="dif2">
+            <p class="falta" id="txt2"></p>
+            <div class="tit-dif-menos" id="menos2">
+              <label><input type="radio" name="destino2" checked><span>ainda falta pagar — nasce uma conta de <b id="val2a"></b>. Vencimento da sobra:</span></label>
+              <input type="date">
+              <span class="tit-dif-nota">em branco de propósito — é você quem combina com o fornecedor quando o resto sai.</span>
+              <label><input type="radio" name="destino2"><span>foi desconto combinado com o fornecedor</span></label>
+            </div>
+            <div class="tit-dif-mais" id="mais2">
+              <label><input type="radio" name="destino2"><span>foi multa e juros do atraso</span></label>
+            </div>
+          </div>
+          <button style="color:var(--verde-claro);border-color:#1E4A3A">confirmar baixa</button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="secao">
+  <div class="secao-h">O que muda por baixo</div>
+  <div class="nota">
+    Mesmo desenho de <code>finance/recebido_diferente.py</code> (que já existe e já é testado), só que espelhado
+    pro lado <code>pagar</code> — <b>com uma diferença de propósito</b>: no lado receber, a conta que falta nasce
+    automaticamente no <i>mesmo vencimento</i> do título original ("a cobrança continua atrasada se estava").
+    Pra pagar isso não serve — quem decide quando o resto sai é uma combinação com o fornecedor, não uma regra
+    fixa. Por isso o campo de data da sobra vem <b>em branco, escolhido pelo gestor</b>, do jeito que você pediu.
+  </div>
+  <div class="nota" style="margin-top:10px">
+    <b>Fica igual ao que já existe hoje:</b> "foi desconto combinado" e "foi multa e juros do atraso" continuam
+    usando o mesmo <code>acrescimo_centavos</code> (migração 197) que a baixa já tem — nenhuma conta muda de
+    comportamento, só ganha uma terceira opção quando o valor pago é menor que a face do título.
+  </div>
+</div>
+
+<div class="pergunta">
+  <b>Pra aprovar:</b>
+  <ul>
+    <li>A data da sobra vem <b>em branco</b> (o gestor escolhe) — é assim que você quer, ou prefere que já venha
+      sugerida com algum prazo padrão (7, 15, 30 dias) que dá pra editar?</li>
+    <li>Overpay ("paguei mais que o título") eu deixei só com "foi multa e juros", igual já funciona hoje — não
+      criei um "abater na próxima conta deste fornecedor" (o espelho do "abater" do lado receber) porque você não
+      pediu. Quer que eu inclua também?</li>
+  </ul>
+</div>
+
+<script>
+function brl(c){var n=(Math.abs(c)/100).toFixed(2).replace('.',',');
+  return (c<0?'- R$ ':'R$ ')+n.replace(/\B(?=(\d{3})+(?!\d),)/g,'.');}
+function calc(n){
+  var base=900, pago=document.getElementById('pago'+n).value;
+  var p=Math.round(parseFloat((pago||'0').replace(/\./g,'').replace(',','.'))*100)||0;
+  var dif=p-base, dica=document.getElementById('dica'+n), box=document.getElementById('dif'+n);
+  if(!p||!dif){box.classList.remove('on');dica.textContent=p?'':'Diga quanto você pagou.';return;}
+  box.classList.add('on');
+  var menos=dif<0;
+  document.getElementById('menos'+n).classList.toggle('on',menos);
+  document.getElementById('mais'+n).classList.toggle('on',!menos);
+  document.getElementById('txt'+n).innerHTML=(menos?'Faltaram ':'Pagou ')+'<b>'+brl(Math.abs(dif))+(menos?'':' a mais')+'</b>. O que faço com a diferença?';
+  var v=document.getElementById('val2a'); if(v) v.textContent=brl(Math.abs(dif));
+  dica.textContent='';
+}
+</script>
+</body>
+</html>

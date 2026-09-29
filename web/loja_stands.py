@@ -282,7 +282,11 @@ function abrir(codigo){
   document.getElementById('p-cod').textContent = codigo;
   document.getElementById('p-info').textContent = (s.pavilhao||'').replace('_',' ') + (s.zona ? ' · '+s.zona : '') + ' · ' + s.tamanho;
   document.getElementById('p-preco').textContent = s.preco ? s.preco : 'Consultar valor';
-  document.getElementById('p-codigo-form').value = codigo;
+  // o campo oculto só existe quando o formulário de upload está no ar
+  // (ver `sem_storage` no template) — sem essa checagem, storage fora do ar
+  // quebrava o painel inteiro de abrir, não só o upload.
+  var pCodigoForm = document.getElementById('p-codigo-form');
+  if (pCodigoForm) pCodigoForm.value = codigo;
   document.getElementById('veu').classList.add('on');
   document.getElementById('painel').classList.add('on');
 }

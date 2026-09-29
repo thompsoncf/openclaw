@@ -528,7 +528,115 @@ _CSS = r"""<style>
 .es-pag .oc-vazio{color:var(--fg-dim);font-size:13px;margin:.4rem 0}
 </style>"""
 
-_TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
+_TPL = r"""{% extends "base" %}{% block conteudo %}
+{#- A LINHA DE STAND no modelo da maquete aprovada (oc-hist): badge na cor do
+    tamanho, nome do interessado, "Criada em", WhatsApp, badge de pendência e
+    o expandir com as sub-abas Comprovante/Contrato/Cliente. UM macro pras
+    DUAS listas — o funil e o cadastro completo — porque o dono aprovou ESTE
+    visual (29/09/2026: "deixa a lista nesse modelo do mockup"). Stand livre
+    usa a mesma linha, sem expandir: as ações viram "copiar link"/"ver na
+    página". -#}
+{% macro linha_stand(d, grupo=None, escondido=False) %}
+{% set cor = cor_tam.get(d.tamanho, ('#8FA197','#0A0F0C')) %}
+{% set pav_label = d.pavilhao|replace('_',' ')|title %}
+{% set cli = d.get('cliente') or {} %}
+{% set ct = d.get('contrato') %}
+{% set pend = d.get('pend') or [] %}
+{% set rotulo = {'livre':'Livre','pre_reservado':'Reservado','vendido':'Vendido'}[d.status] %}
+<div class="oc-hist"{% if grupo %} data-grupo="{{ grupo }}"{% endif %} data-st="{{ d.status }}" data-cod="{{ d.codigo|lower }}"{% if escondido %} hidden{% endif %}>
+  <div class="oc-hist-top">
+    <div class="oc-open"{% if d.status != 'livre' %} title="Ver comprovante, contrato e cliente" onclick="ocToggle(this)"{% else %} style="cursor:default"{% endif %}>
+      <div class="oc-stand-badge" style="background:{{ cor[0] }};color:{{ cor[1] }}"><div class="c">{{ d.codigo }}</div><div class="z">{{ tam_label.get(d.tamanho, d.tamanho) }}</div></div>
+      <div class="oc-body"><b>{% if d.status == 'livre' %}Livre{% else %}{{ cli.get('empresa') or 'Interessado da página' }}{% endif %}</b>
+        <div class="oc-sub">{% if d.zona and d.zona != pav_label %}{{ d.zona }} · {% endif %}{{ pav_label }}</div>
+        <div class="oc-sub">{% if d.preco_centavos %}{{ brl(d.preco_centavos) }} · {% endif %}{{ d.get('resumo') or ('pronto pra oferecer' if d.status == 'livre' else rotulo) }}</div></div>
+    </div>
+    {% if d.get('comprovante_em') or cli.get('criado_em') %}
+    <div class="oc-criada"><div class="rot">Criada em</div><div class="dt">{{ data_curta(d.get('comprovante_em') or cli.get('criado_em')) }}</div></div>
+    {% endif %}
+    <div class="oc-acoes">
+      {% if cli.get('whatsapp') %}
+      <a class="oc-zap" target="_blank" rel="noopener" title="Falar no WhatsApp" href="https://wa.me/{{ cli.whatsapp|replace('+','')|replace(' ','')|replace('-','') }}?text=Olá! Sobre o stand {{ d.codigo }}...">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm5.8 14.2c-.3.7-1.4 1.3-2 1.4-.5.1-1.1.2-3.6-.8-3-1.2-4.9-4.2-5.1-4.4-.1-.2-1.2-1.6-1.2-3s.7-2.1 1-2.4c.3-.3.6-.4.8-.4h.6c.2 0 .4 0 .6.5l.9 2.1c.1.2.1.4 0 .6l-.5.7c-.1.2-.2.3-.1.6.2.3.8 1.3 1.7 2.1 1.1 1 2.1 1.3 2.4 1.5.3.1.5.1.6-.1l.8-.9c.2-.3.4-.2.6-.1l1.9 1c.2.1.4.2.4.4.1.2.1.9-.2 1.6Z"/></svg>
+      </a>
+      {% endif %}
+      {% if d.status == 'livre' %}
+      <button class="oc-ghost-btn" type="button" onclick="mapaCopiarLink(this, '{{ d.codigo }}')">Copiar link</button>
+      <a class="oc-ghost-btn" href="/e/{{ cfg.slug }}?stand={{ d.codigo }}" target="_blank" rel="noopener">Ver na página →</a>
+      {% else %}
+      {% for texto, tom in pend %}<span class="oc-badge {{ tom }}">{{ texto }}</span>{% endfor %}
+      {% if not pend %}<span class="oc-ok">✓ nada pendente</span>{% endif %}
+      <button class="oc-expand-btn" title="Abrir opções" onclick="ocToggle(this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      {% endif %}
+    </div>
+  </div>
+  {% if d.status != 'livre' %}
+  <div class="oc-detail" hidden>
+    <div class="oc-subtabs">
+      <button class="oc-subtab on" onclick="ocTab(this,'comprovante')">Comprovante</button>
+      <button class="oc-subtab" onclick="ocTab(this,'contrato')">Contrato</button>
+      <button class="oc-subtab" onclick="ocTab(this,'cliente')">Dados do cliente</button>
+    </div>
+    <div class="oc-detail-body" data-tab="comprovante">
+      {% if d.comprovante_url %}
+      <div class="oc-comprovante-item"><div class="ic">✓</div><div class="txt"><b>Comprovante do sinal</b><span>enviado pela página{% if d.comprovante_em %} em {{ data_curta(d.comprovante_em) }}{% endif %}{% if d.preco_centavos %} · {{ brl(d.preco_centavos) }}{% endif %}</span></div></div>
+      {% else %}
+      <p class="oc-vazio">Nenhum arquivo anexado a este stand.</p>
+      {% endif %}
+      <div class="oc-acoes-detail">
+        {% if pode_gerir and d.comprovante_url %}<a class="oc-ghost-btn" href="/painel/eventos/estandes/{{ d.codigo }}/comprovante" target="_blank">Ver comprovante →</a>{% endif %}
+        {% if pode_gerir and d.status == 'pre_reservado' %}
+        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/confirmar" style="display:inline">
+          <button class="oc-ghost-btn prim" type="submit">Confirmar pagamento</button>
+        </form>
+        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/liberar" style="display:inline"
+              onsubmit="return confirm('Liberar o estande {{ d.codigo }} de volta pra livre?')">
+          <button class="oc-ghost-btn" type="submit">Liberar stand</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if d.status == 'pre_reservado' and d.pre_reserva_ate %}
+      <p class="oc-vazio" style="margin-top:10px">Reserva vence em {{ d.pre_reserva_ate.strftime('%d/%m às %H:%M') }} — depois disso o stand volta pro mapa sozinho.</p>
+      {% endif %}
+    </div>
+    <div class="oc-detail-body" data-tab="contrato" hidden>
+      {% if ct %}
+      {% if ct.assinado_em %}
+      <span class="oc-contract-status assinado">✓ Assinado{% if ct.assinado_por %} por {{ ct.assinado_por }}{% endif %} em {{ data_curta(ct.assinado_em) }}</span>
+      {% else %}
+      <span class="oc-contract-status pendente">⏳ Aguardando assinatura do lojista</span>
+      {% endif %}
+      <p style="margin:0 0 10px">Contrato nº {{ '%04d'|format(ct.numero or 0) }} — nasceu junto com o comprovante do sinal, já com os dados do lojista e do stand.</p>
+      <div class="oc-acoes-detail">
+        <a class="oc-ghost-btn" href="/contrato/{{ ct.token }}" target="_blank">Abrir contrato (link do lojista) →</a>
+        {% if pode_gerir and d.orcamento_id %}<a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta →</a>{% endif %}
+      </div>
+      {% elif d.orcamento_id %}
+      <span class="oc-contract-status pendente">⏳ Proposta sem contrato</span>
+      <p style="margin:0 0 10px">A proposta existe mas o contrato ainda não nasceu — confere o modelo de contrato em Serviços.</p>
+      {% if pode_gerir %}<a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta →</a>{% endif %}
+      {% else %}
+      <span class="oc-contract-status pendente">⏳ Sem proposta vinculada</span>
+      <p style="margin:0">O contrato nasce sozinho quando o comprovante chega com o cadastro do lojista preenchido. Este envio veio sem nome — cria a proposta em Serviços e vincula o stand, se quiser contrato.</p>
+      {% endif %}
+    </div>
+    <div class="oc-detail-body" data-tab="cliente" hidden>
+      <div class="oc-field-grid">
+        <div class="oc-field"><span>Empresa / expositor</span><b>{{ cli.get('empresa') or '—' }}</b></div>
+        <div class="oc-field"><span>WhatsApp</span><b>{{ cli.get('whatsapp') or '—' }}</b></div>
+        <div class="oc-field"><span>Origem</span><b>Página de stands</b></div>
+        <div class="oc-field"><span>Stand</span><b>{{ d.codigo }} · {{ tam_label.get(d.tamanho, d.tamanho) }}</b></div>
+      </div>
+      {% if d.prospeccao_id %}<a class="oc-ghost-btn" href="/painel/prospeccao">Abrir no Funil →</a>
+      {% else %}<p class="oc-vazio" style="margin:0">Este envio veio sem nome — o interessado não preencheu o cadastro.</p>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+""" + _CSS + r"""
 <div class="es-pag">
 <div class="es-topo"><div><h2>Mapa de stands</h2>
   <div class="es-sub">{{ cfg.edicao_label or cfg.slug }} · página pública:
@@ -595,35 +703,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <button class="fn-tab" data-f="vendido" onclick="lstStatus(this)"><span class="pt" style="background:var(--coral)"></span>Vendidos <span class="n">{{ kpis.get('vendido',0) }}</span></button>
   <input type="text" id="lst-busca" placeholder="Buscar código…" oninput="lstFiltra()">
 </div>
-<div class="tbl-wrap">
-<table class="es-tbl">
-  <thead><tr><th>Stand</th><th>Tamanho</th><th>Zona</th><th>Pavilhão</th><th>Valor</th><th>Status</th><th>Interessado</th><th>Vínculo</th><th></th></tr></thead>
-  <tbody id="lst-corpo">
-  {% for s in stands %}
-  {% set v = vinculos.get(s.codigo) %}
-  <tr data-st="{{ s.status }}" data-cod="{{ s.codigo|lower }}">
-    <td class="cod">{{ s.codigo }}</td>
-    <td>{{ tam_label.get(s.tamanho, s.tamanho) }}</td>
-    <td>{{ s.zona or '—' }}</td>
-    <td>{{ s.pavilhao|replace('_',' ')|title }}</td>
-    <td class="num">{% if s.preco_centavos %}{{ brl(s.preco_centavos) }}{% else %}—{% endif %}</td>
-    <td><span class="stb {{ s.status }}">{{ {'livre':'Livre','pre_reservado':'Reservado','vendido':'Vendido'}[s.status] }}</span></td>
-    <td>{% if v and v.cliente.get('empresa') %}{{ v.cliente.empresa }}{% elif s.status != 'livre' %}<span class="dim">sem cadastro</span>{% else %}<span class="dim">—</span>{% endif %}</td>
-    <td>
-      {% if v and v.contrato %}
-        <a href="/contrato/{{ v.contrato.token }}" target="_blank">{% if v.contrato.assinado_em %}✓ contrato assinado{% else %}⏳ contrato enviado{% endif %}</a>
-      {% elif s.orcamento_id %}
-        {% if pode_gerir %}<a href="/painel/servicos?ab={{ s.orcamento_id }}">proposta vinculada</a>{% else %}proposta vinculada{% endif %}
-      {% else %}<span class="dim">—</span>{% endif %}
-    </td>
-    <td>
-      {% if s.status == 'livre' %}<button class="mini" type="button" onclick="mapaCopiarLink(this, '{{ s.codigo }}')">copiar link</button>
-      {% else %}<button class="mini" type="button" onclick="mapaAbrirFunil('{{ s.codigo }}')">abrir no funil</button>{% endif %}
-    </td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="oc-list" id="lista-stands">
+{% for s in stands %}{{ linha_stand(vinculos.get(s.codigo, s)) }}{% endfor %}
 </div>
 
 <h3 class="es-sec">Propostas — orçamento e contrato</h3>
@@ -635,98 +716,13 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <button class="fn-tab" data-grupo="fechada" onclick="fnSel(this)"><span class="pt" style="background:var(--mint)"></span>Fechada <span class="n">{{ funil.fechada|length }}</span></button>
 </div>
 
-<div class="oc-list">
+<div class="oc-list" id="funil-list">
 {% for grupo, itens in funil.items() %}
 <p class="oc-vazio" data-grupo="{{ grupo }}" {% if itens or grupo != 'precisa_de_mim' %}hidden{% endif %}>✓ Nada por aqui nessa aba.</p>
-{% for d in itens %}
-{% set cor = cor_tam.get(d.tamanho, ('#8FA197','#0A0F0C')) %}
-{% set pav_label = d.pavilhao|replace('_',' ')|title %}
-<div class="oc-hist" data-grupo="{{ grupo }}" data-cod="{{ d.codigo }}" {% if grupo != 'precisa_de_mim' %}hidden{% endif %}>
-  <div class="oc-hist-top">
-    <div class="oc-open" title="Ver comprovante, contrato e cliente" onclick="ocToggle('{{ d.codigo }}')">
-      <div class="oc-stand-badge" style="background:{{ cor[0] }};color:{{ cor[1] }}"><div class="c">{{ d.codigo }}</div><div class="z">{{ tam_label.get(d.tamanho, d.tamanho) }}</div></div>
-      <div class="oc-body"><b>{{ d.cliente.get('empresa') or 'Interessado da página' }}</b>
-        <div class="oc-sub">{% if d.zona and d.zona != pav_label %}{{ d.zona }} · {% endif %}{{ pav_label }}</div>
-        <div class="oc-sub">{% if d.preco_centavos %}{{ brl(d.preco_centavos) }} · {% endif %}{{ d.resumo }}</div></div>
-    </div>
-    <div class="oc-criada"><div class="rot">Criada em</div><div class="dt">{{ data_curta(d.comprovante_em or d.cliente.get('criado_em')) }}</div></div>
-    <div class="oc-acoes">
-      {% if d.cliente.get('whatsapp') %}
-      <a class="oc-zap" target="_blank" rel="noopener" title="Falar no WhatsApp" href="https://wa.me/{{ d.cliente.whatsapp|replace('+','')|replace(' ','')|replace('-','') }}?text=Olá! Sobre o stand {{ d.codigo }}...">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm5.8 14.2c-.3.7-1.4 1.3-2 1.4-.5.1-1.1.2-3.6-.8-3-1.2-4.9-4.2-5.1-4.4-.1-.2-1.2-1.6-1.2-3s.7-2.1 1-2.4c.3-.3.6-.4.8-.4h.6c.2 0 .4 0 .6.5l.9 2.1c.1.2.1.4 0 .6l-.5.7c-.1.2-.2.3-.1.6.2.3.8 1.3 1.7 2.1 1.1 1 2.1 1.3 2.4 1.5.3.1.5.1.6-.1l.8-.9c.2-.3.4-.2.6-.1l1.9 1c.2.1.4.2.4.4.1.2.1.9-.2 1.6Z"/></svg>
-      </a>
-      {% endif %}
-      {% for texto, tom in d.pend %}<span class="oc-badge {{ tom }}">{{ texto }}</span>{% endfor %}
-      {% if not d.pend %}<span class="oc-ok">✓ nada pendente</span>{% endif %}
-      <button class="oc-expand-btn" title="Abrir opções" onclick="ocToggle('{{ d.codigo }}')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-      </button>
-    </div>
-  </div>
-  <div class="oc-detail" hidden>
-    <div class="oc-subtabs">
-      <button class="oc-subtab on" onclick="ocTab(this,'comprovante')">Comprovante</button>
-      <button class="oc-subtab" onclick="ocTab(this,'contrato')">Contrato</button>
-      <button class="oc-subtab" onclick="ocTab(this,'cliente')">Dados do cliente</button>
-    </div>
-    <div class="oc-detail-body" data-tab="comprovante">
-      {% if d.comprovante_url %}
-      <div class="oc-comprovante-item"><div class="ic">✓</div><div class="txt"><b>Comprovante do sinal</b><span>enviado pela página{% if d.comprovante_em %} em {{ data_curta(d.comprovante_em) }}{% endif %}{% if d.preco_centavos %} · {{ brl(d.preco_centavos) }}{% endif %}</span></div></div>
-      {% else %}
-      <p class="oc-vazio">Nenhum arquivo anexado a este stand.</p>
-      {% endif %}
-      <div class="oc-acoes-detail">
-        {% if pode_gerir and d.comprovante_url %}<a class="oc-ghost-btn" href="/painel/eventos/estandes/{{ d.codigo }}/comprovante" target="_blank">Ver comprovante →</a>{% endif %}
-        {% if pode_gerir and grupo == 'precisa_de_mim' %}
-        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/confirmar" style="display:inline">
-          <button class="oc-ghost-btn prim" type="submit">Confirmar pagamento</button>
-        </form>
-        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/liberar" style="display:inline"
-              onsubmit="return confirm('Liberar o estande {{ d.codigo }} de volta pra livre?')">
-          <button class="oc-ghost-btn" type="submit">Liberar stand</button>
-        </form>
-        {% endif %}
-      </div>
-      {% if grupo == 'precisa_de_mim' and d.pre_reserva_ate %}
-      <p class="oc-vazio" style="margin-top:10px">Reserva vence em {{ d.pre_reserva_ate.strftime('%d/%m às %H:%M') }} — depois disso o stand volta pro mapa sozinho.</p>
-      {% endif %}
-    </div>
-    <div class="oc-detail-body" data-tab="contrato" hidden>
-      {% if d.contrato %}
-      {% if d.contrato.assinado_em %}
-      <span class="oc-contract-status assinado">✓ Assinado{% if d.contrato.assinado_por %} por {{ d.contrato.assinado_por }}{% endif %} em {{ data_curta(d.contrato.assinado_em) }}</span>
-      {% else %}
-      <span class="oc-contract-status pendente">⏳ Aguardando assinatura do lojista</span>
-      {% endif %}
-      <p style="margin:0 0 10px">Contrato nº {{ '%04d'|format(d.contrato.numero or 0) }} — nasceu junto com o comprovante do sinal, já com os dados do lojista e do stand.</p>
-      <div class="oc-acoes-detail">
-        <a class="oc-ghost-btn" href="/contrato/{{ d.contrato.token }}" target="_blank">Abrir contrato (link do lojista) →</a>
-        {% if pode_gerir and d.orcamento_id %}<a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta →</a>{% endif %}
-      </div>
-      {% elif d.orcamento_id %}
-      <span class="oc-contract-status pendente">⏳ Proposta sem contrato</span>
-      <p style="margin:0 0 10px">A proposta existe mas o contrato ainda não nasceu — confere o modelo de contrato em Serviços.</p>
-      {% if pode_gerir %}<a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta →</a>{% endif %}
-      {% else %}
-      <span class="oc-contract-status pendente">⏳ Sem proposta vinculada</span>
-      <p style="margin:0">O contrato nasce sozinho quando o comprovante chega com o cadastro do lojista preenchido. Este envio veio sem nome — cria a proposta em Serviços e vincula o stand, se quiser contrato.</p>
-      {% endif %}
-    </div>
-    <div class="oc-detail-body" data-tab="cliente" hidden>
-      <div class="oc-field-grid">
-        <div class="oc-field"><span>Empresa / expositor</span><b>{{ d.cliente.get('empresa') or '—' }}</b></div>
-        <div class="oc-field"><span>WhatsApp</span><b>{{ d.cliente.get('whatsapp') or '—' }}</b></div>
-        <div class="oc-field"><span>Origem</span><b>Página de stands</b></div>
-        <div class="oc-field"><span>Stand</span><b>{{ d.codigo }} · {{ tam_label.get(d.tamanho, d.tamanho) }}</b></div>
-      </div>
-      {% if d.prospeccao_id %}<a class="oc-ghost-btn" href="/painel/prospeccao">Abrir no Funil →</a>
-      {% else %}<p class="oc-vazio" style="margin:0">Este envio veio sem nome — o interessado não preencheu o cadastro.</p>{% endif %}
-    </div>
-  </div>
-</div>
-{% endfor %}
+{% for d in itens %}{{ linha_stand(d, grupo, escondido=(grupo != 'precisa_de_mim')) }}{% endfor %}
 {% endfor %}
 </div>
+
 </div>
 
 <script>
@@ -890,13 +886,17 @@ var PODE_GERIR = {{ 'true' if pode_gerir else 'false' }};
   };
 
   window.mapaAbrirFunil = function(code){
-    var row = document.querySelector('.oc-hist[data-cod="' + code + '"]');
+    // escopado no funil: o mesmo stand também vive na lista completa
+    var row = document.querySelector('#funil-list .oc-hist[data-cod="' + String(code).toLowerCase() + '"]');
     if (!row) return;
     var grupo = row.dataset.grupo;
     var tab = document.querySelector('.fn-tab[data-grupo="' + grupo + '"]');
     if (tab) fnSel(tab);
     var detail = row.querySelector('.oc-detail');
-    if (detail && detail.hidden) ocToggle(code);
+    if (detail && detail.hidden){
+      var b = row.querySelector('.oc-expand-btn');
+      if (b) ocToggle(b);
+    }
     row.scrollIntoView({behavior:'smooth', block:'center'});
   };
 
@@ -910,10 +910,13 @@ function fnSel(btn){
     el.hidden = el.dataset.grupo !== grupo;
   });
 }
-function ocToggle(cod){
-  var row = document.querySelector('.oc-hist[data-cod="' + cod + '"]');
+function ocToggle(el){
+  // recebe o ELEMENTO clicado (não o código): o mesmo stand aparece no funil
+  // E na lista completa, e buscar por data-cod abriria sempre a primeira cópia.
+  var row = el.closest('.oc-hist');
   if (!row) return;
   var detail = row.querySelector('.oc-detail');
+  if (!detail) return;
   var btn = row.querySelector('.oc-expand-btn');
   var aberto = !detail.hidden;
   detail.hidden = aberto;
@@ -933,9 +936,9 @@ function lstStatus(btn){
 }
 function lstFiltra(){
   var q = (document.getElementById('lst-busca').value || '').trim().toLowerCase();
-  document.querySelectorAll('#lst-corpo tr').forEach(function(tr){
-    var ok = (!lstF || tr.dataset.st === lstF) && (!q || tr.dataset.cod.indexOf(q) !== -1);
-    tr.hidden = !ok;
+  document.querySelectorAll('#lista-stands .oc-hist').forEach(function(el){
+    var ok = (!lstF || el.dataset.st === lstF) && (!q || el.dataset.cod.indexOf(q) !== -1);
+    el.hidden = !ok;
   });
 }
 </script>

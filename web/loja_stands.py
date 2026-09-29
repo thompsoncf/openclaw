@@ -8,17 +8,31 @@ já faz — mas o "catálogo" aqui é outra coisa (estande numerado com posiçã
 planta, não produto de prateleira), então nada do MODELO de dados da loja de
 fornecedor é reaproveitado, só o padrão de rota pública sem login.
 
-Sem maquete 3D: uma planta 2D por pavilhão/zona, colorida por status, com um
-painel de detalhe ao clicar um estande LIVRE (preço, Pix copiável, upload do
-comprovante). Mobile-first — é o link que vai pro Instagram/WhatsApp.
+O template é o PORT FIEL da maquete aprovada pelas sócias (visão do expositor
+de scratchpad/outlet-chic-mockup.html, 28/09/2026): abas de pavilhão, mapa 3D
+com perspectiva + planta técnica, zoom, cor por status OU por tamanho (a mesma
+legenda de cores da planta oficial do PDF), chips de zona e painel lateral com
+a foto do modelo de stand. A ÚNICA diferença é a fonte dos dados: status/preço
+vêm do banco, e o upload de comprovante é um formulário de verdade (multipart
+pro POST abaixo) em vez do clique fake da maquete.
+
+As POSIÇÕES no grid (col/row de cada bloco da planta) moram no JS do template,
+não no banco: são a transcrição manual da planta oficial do evento, feita na
+maquete e aprovada — o banco guarda o que MUDA (status, preço), a planta é
+desenho. Estande no banco que não esteja na planta desenhada (ou pavilhão de
+outra conta) cai num bloco corrido no fim do pavilhão/numa aba própria, pra
+página continuar multi-tenant sem exigir coordenadas.
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
+import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from db.conexao import get_pool
@@ -34,6 +48,19 @@ _TPL_NOME = "evento_stands_publico.html"
 
 def _data_br(d) -> str:
     return d.strftime("%d/%m/%Y") if d else ""
+
+
+def _dias_restantes(ate) -> int | None:
+    """Dias que faltam pra pré-reserva expirar — arredondado pra CIMA (o
+    expositor lê '3 dias' no dia em que enviou, como a config promete)."""
+    if not ate:
+        return None
+    try:
+        agora = datetime.now(timezone.utc) if ate.tzinfo else datetime.now()
+        seg = (ate - agora).total_seconds()
+        return max(0, math.ceil(seg / 86400))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _criar_prospeccao_simples(pool, conta_id: int, nome: str, whatsapp: str):
@@ -70,35 +97,36 @@ def loja_stands(request: Request, slug: str):
         return HTMLResponse("<h1>Página não encontrada</h1>", status_code=404)
     conta_id = cfg["conta_id"]
     stands = es.listar(pool, conta_id)
-    with pool.connection() as c:
-        r = c.execute("select nome from contas where id=%s", (conta_id,)).fetchone()
-    empresa_nome = (r[0] if r else "") or cfg["slug"]
 
-    # agrupa pra render: pavilhão -> zona -> [estandes], na ordem que `listar`
-    # já devolve (pavilhão, zona, ordem, código).
-    pavilhoes: dict = {}
-    for s in stands:
-        zonas = pavilhoes.setdefault(s["pavilhao"], {})
-        zonas.setdefault(s["zona"] or "", []).append(s)
-
-    totais = {"livre": 0, "pre_reservado": 0, "vendido": 0}
-    for s in stands:
-        totais[s["status"]] = totais.get(s["status"], 0) + 1
+    # A marca no hero vem do SLUG ("outlet-chic" -> "OUTLET CHIC"), não de
+    # contas.nome: o cadastro guarda a razão social ("M.R. ROCHA AURELIO
+    # ASSESSORIA..."), e o slug é o nome público que o dono escolheu.
+    marca = cfg["slug"].replace("-", " ").upper()
 
     # SÓ o que é público vai pro JS (nunca comprovante_url/prospeccao_id/etc):
-    # é este objeto que abastece o painel de detalhe ao clicar um estande.
+    # é este objeto que abastece mapa e painel de detalhe. Status traduzido pro
+    # vocabulário da maquete (pre_reservado -> 'reservado', classes .st-*).
     stands_json = json.dumps({
-        s["codigo"]: {"pavilhao": s["pavilhao"], "zona": s["zona"] or "",
-                      "tamanho": s["tamanho"],
-                      "preco": brl(s["preco_centavos"]) if s["preco_centavos"] else None}
+        s["codigo"]: {
+            "pavilhao": s["pavilhao"], "zona": s["zona"] or "",
+            "tamanho": s["tamanho"],
+            "status": "reservado" if s["status"] == "pre_reservado" else s["status"],
+            "preco": brl(s["preco_centavos"]) if s["preco_centavos"] else None,
+            "dias": _dias_restantes(s["pre_reserva_ate"]) if s["status"] == "pre_reservado" else None,
+        }
         for s in stands
     })
 
+    msg = request.query_params.get("msg") or ""
+    msg_codigo = (request.query_params.get("codigo") or "")[:20]
     html = _env.get_template(_TPL_NOME).render(
-        cfg=cfg, empresa_nome=empresa_nome, pavilhoes=pavilhoes, totais=totais,
-        n_total=len(stands), stands_json=stands_json, brl=brl, data_br=_data_br,
-        msg=(request.query_params.get("msg") or ""),
-        msg_codigo=(request.query_params.get("codigo") or ""),
+        cfg=cfg, marca=marca, n_total=len(stands), stands_json=stands_json,
+        data_br=_data_br, msg=msg, msg_codigo=msg_codigo,
+        # injeção segura no JS: sempre via json.dumps, nunca string crua
+        pix_json=json.dumps({"chave": cfg["pix_chave"], "titular": cfg["pix_titular"]}),
+        wa_json=json.dumps(cfg["whatsapp_numero"]),
+        just_sent_json=json.dumps(msg_codigo if msg == "ok" else None),
+        erro_codigo_json=json.dumps(msg_codigo if msg == "erro" else None),
         sem_storage=not comprov.configurado())
     return HTMLResponse(html)
 
@@ -147,190 +175,752 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Fotos do modelo de stand (renders do PDF oficial, recortadas) — mesmo padrão
+# da rota de fontes em web/app.py: NOME FIXO em whitelist (join direto com
+# caminho livre deixaria `../../` chegar em qualquer arquivo), cache em
+# memória, imutável (se a arte mudar, muda o nome).
+# ─────────────────────────────────────────────────────────────────────────
+_FOTOS_OK = {"2x2", "3x2", "3x3", "4x2", "4x3"}
+_FOTOS_DIR = os.path.join(os.path.dirname(__file__), "estatico", "stands")
+_fotos_cache: dict[str, bytes] = {}
+
+
+@router.get("/estatico/stands/{nome}.jpg", include_in_schema=False)
+def foto_stand(nome: str):
+    if nome not in _FOTOS_OK:
+        return Response(status_code=404)
+    if nome not in _fotos_cache:
+        try:
+            with open(os.path.join(_FOTOS_DIR, f"{nome}.jpg"), "rb") as fh:
+                _fotos_cache[nome] = fh.read()
+        except OSError:
+            return Response(status_code=404)
+    return Response(content=_fotos_cache[nome], media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Template — registrado como string no MESMO `_env` do portal (o padrão de
 # web/recibo_publico.py e outras páginas públicas): a extensão .html no NOME
 # é o que faz o Jinja escapar por padrão (select_autoescape olha a extensão),
 # e nome/observação de interessado digitados na página passam por aqui.
+#
+# CSS e JS abaixo são o mockup aprovado QUASE VERBATIM (mesmos seletores,
+# mesmos valores) — mudou só: dados fake -> STANDS do servidor, clique fake de
+# comprovante -> <form> multipart de verdade, e telefone/Pix vêm da config.
 # ─────────────────────────────────────────────────────────────────────────
 _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>{{ empresa_nome }}{% if cfg.edicao_label %} — {{ cfg.edicao_label }}{% endif %}</title>
+<title>{{ marca }} — Stands</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Manrope:wght@400;600;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 {% raw %}<style>
-:root{ --preto:#0A0A0A; --mint:#16E3AE; --amar:#FFDE2E; --card:#151515; --bord:#2A2A2A; --txt:#F2F2F0; --sub:#9A9A96; }
-*{box-sizing:border-box}
-body{margin:0;background:var(--preto);color:var(--txt);font-family:'Manrope',sans-serif;padding-bottom:40px}
-h1,h2,.titulo{font-family:'Anton',sans-serif;letter-spacing:.02em;text-transform:uppercase}
-.mono{font-family:'IBM Plex Mono',monospace}
-.topo{padding:22px 16px 14px;border-bottom:1px solid var(--bord);position:sticky;top:0;background:rgba(10,10,10,.94);backdrop-filter:blur(6px);z-index:5}
-.topo h1{margin:0;font-size:26px;color:var(--mint)}
-.topo .sub{color:var(--sub);font-size:13px;margin-top:4px}
-.topo .datas{color:var(--amar);font-size:12.5px;margin-top:6px;font-weight:600}
-.legenda{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--sub)}
-.legenda span{display:inline-flex;align-items:center;gap:5px}
-.dot{width:10px;height:10px;border-radius:3px;display:inline-block}
-.dot.livre{background:transparent;border:2px solid var(--mint)}
-.dot.pre_reservado{background:var(--amar)}
-.dot.vendido{background:#4A4A4A}
-.wrap{max-width:900px;margin:0 auto;padding:0 12px}
-.msg{margin:14px 12px 0;padding:12px 14px;border-radius:10px;font-size:13.5px;font-weight:600}
-.msg.ok{background:rgba(22,227,174,.12);border:1px solid var(--mint);color:var(--mint)}
-.msg.erro{background:rgba(255,222,46,.1);border:1px solid var(--amar);color:var(--amar)}
-.pav{margin:22px 12px 0}
-.pav h2{font-size:18px;color:var(--txt);margin:0 0 4px}
-.zona{margin-top:14px}
-.zona .nome{font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
-.stand{border-radius:9px;padding:8px 4px 7px;text-align:center;cursor:pointer;border:none;
-  transition:transform .12s ease, box-shadow .12s ease}
-.stand:active{transform:translateY(1px) scale(.98)}
-.stand .cod{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:13px}
-.stand .tam{font-size:9.5px;margin-top:2px;opacity:.82}
-.stand.livre{
-  background:linear-gradient(155deg, color-mix(in srgb, var(--mint) 88%, white 14%), var(--mint));
-  color:#04231B;box-shadow:0 3px 0 #0CAF87, 0 6px 10px rgba(0,0,0,.28);
-}
-.stand.livre:hover{transform:translateY(-1px);box-shadow:0 4px 0 #0CAF87, 0 9px 14px rgba(0,0,0,.32)}
-.stand.pre_reservado{
-  background:linear-gradient(155deg, color-mix(in srgb, var(--amar) 85%, white 16%), var(--amar));
-  color:#241C00;box-shadow:0 3px 0 #B99400, 0 6px 10px rgba(0,0,0,.24);
-}
-.stand.vendido{background:#1C1D18;color:#6A6A64;cursor:default;box-shadow:0 2px 0 #111208;border:1px solid #2A2A24}
-.stand.vendido .tam{color:#57574F}
-.resumo{display:flex;gap:18px;margin-top:10px;font-size:12px;color:var(--sub)}
-.resumo b{color:var(--txt)}
-/* painel de detalhe */
-.veu{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:20}
-.veu.on{display:block}
-.painel{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:2px solid var(--mint);border-radius:16px 16px 0 0;padding:20px 18px 26px;z-index:21;transform:translateY(110%);transition:transform .22s ease;max-height:85vh;overflow:auto}
-.painel.on{transform:translateY(0)}
-.painel .fechar{position:absolute;right:14px;top:14px;background:none;border:none;color:var(--sub);font-size:22px;cursor:pointer;line-height:1}
-.painel h3{font-family:'IBM Plex Mono',monospace;color:var(--mint);font-size:20px;margin:0 0 2px}
-.painel .info{color:var(--sub);font-size:13px;margin-bottom:14px}
-.preco{font-family:'Anton',sans-serif;color:var(--amar);font-size:28px;margin:6px 0 16px}
-.pix{background:#0F0F0F;border:1px solid var(--bord);border-radius:10px;padding:12px 14px;margin-bottom:16px}
-.pix .lbl{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em}
-.pix .chave{font-family:'IBM Plex Mono',monospace;font-size:14px;margin-top:4px;word-break:break-all}
-.pix .titular{font-size:12px;color:var(--sub);margin-top:4px}
-.copiar{margin-top:8px;background:var(--mint);color:#04231B;border:none;border-radius:8px;padding:8px 12px;font-weight:700;font-size:12.5px;cursor:pointer}
-form.up{display:flex;flex-direction:column;gap:10px}
-form.up label{font-size:12px;color:var(--sub)}
-form.up input[type=text]{background:#0F0F0F;border:1px solid var(--bord);border-radius:8px;padding:10px;color:var(--txt);font-size:14px;font-family:inherit}
-form.up input[type=file]{color:var(--sub);font-size:13px}
-.enviar{background:var(--mint);color:#04231B;border:none;border-radius:10px;padding:13px;font-weight:800;font-size:15px;cursor:pointer;margin-top:4px}
-.wa{display:inline-block;margin-top:10px;color:var(--sub);font-size:12.5px;text-decoration:underline}
-.avisosem{background:rgba(255,222,46,.1);border:1px solid var(--amar);color:var(--amar);padding:10px;border-radius:8px;font-size:12.5px;margin-top:10px}
-.tag-vendido, .tag-pre{font-size:12px;color:var(--sub);margin-top:2px}
+  /* Tema único, deliberadamente escuro — é a identidade visual real da Outlet
+     Chic (preto, mint, amarelo), não um dark-mode automático. */
+  :root{
+    --bg:#0F100A;
+    --surface:#181A10;
+    --surface-2:#212314;
+    --floor:#15160D;
+    --fg:#F5F3E6;
+    --fg-dim:#9FA087;
+    --line:rgba(245,243,230,0.12);
+    --mint:#16E3AE;
+    --mint-strong:#0CAF87;
+    --mint-fg:#052A1C;
+    --yellow:#FFDE2E;
+    --yellow-fg:#241C00;
+    --gold:#E9B44E;
+    --gold-strong:#F4CD82;
+    --gold-fg:#241800;
+    --coral:#8C6D62;
+    --coral-strong:#A98A7E;
+    --coral-fg:#F3E9E4;
+    --shadow:0 1px 2px rgba(0,0,0,0.35), 0 10px 26px rgba(0,0,0,0.4);
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:'Manrope',system-ui,sans-serif;padding-inline:16px;}
+  a{color:inherit;}
+  .wrap{max-width:1180px;margin:0 auto;}
+  .display{font-family:'Anton',sans-serif;font-weight:400;letter-spacing:0.01em;text-wrap:balance;}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+
+  .hero{background:#12130C;color:#F3F1E3;margin-inline:-16px;padding:28px 16px 24px;border-bottom:4px solid var(--mint);}
+  .hero-inner{max-width:1180px;margin:0 auto;}
+  .brand{font-size:clamp(34px,7vw,58px);line-height:0.95;margin:0;}
+  .brand span{color:var(--mint);}
+  .hero-meta{display:flex;flex-wrap:wrap;gap:14px 22px;margin-top:14px;font-size:14px;color:#C9C7B4;}
+  .hero-meta b{color:#F3F1E3;font-weight:700;}
+  .hero-pitch{max-width:62ch;margin-top:14px;color:#C9C7B4;font-size:14.5px;line-height:1.55;}
+  .info-strip{margin-top:18px;padding:10px 14px;border-radius:10px;background:rgba(22,227,174,0.12);border:1px solid rgba(22,227,174,0.35);font-size:13px;color:#D8F5E9;line-height:1.5;}
+
+  .msg{max-width:1180px;margin:16px auto 0;padding:12px 14px;border-radius:10px;font-size:13.5px;font-weight:600;line-height:1.5;}
+  .msg.ok{background:rgba(22,227,174,0.12);border:1px solid rgba(22,227,174,0.45);color:#D8F5E9;}
+  .msg.erro{background:rgba(255,222,46,0.12);border:1px solid rgba(255,222,46,0.4);color:#F5ECC0;}
+
+  h2.section-title{font-family:'Anton',sans-serif;font-weight:400;font-size:22px;letter-spacing:0.01em;margin:22px 0 4px;}
+  p.section-sub{margin:0 0 18px;color:var(--fg-dim);font-size:13.5px;}
+
+  .controls-row{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;margin-bottom:12px;}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;}
+  .tab{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:13px;padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--fg);}
+  .tab[aria-selected="true"]{background:var(--mint);border-color:var(--mint);color:var(--mint-fg);}
+  .tab small{display:block;font-weight:500;font-size:10.5px;opacity:0.75;margin-top:1px;}
+
+  .view-toggle{display:inline-flex;background:var(--surface-2);border-radius:10px;padding:3px;gap:3px;border:1px solid var(--line);height:fit-content;}
+  .view-btn{appearance:none;border:none;background:transparent;color:var(--fg-dim);font-family:inherit;font-weight:700;font-size:12px;padding:7px 12px;border-radius:8px;cursor:pointer;}
+  .view-btn[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:var(--shadow);}
+
+  .zoom-controls{display:inline-flex;align-items:center;gap:2px;background:var(--surface-2);border-radius:10px;padding:3px;border:1px solid var(--line);height:fit-content;}
+  .zoom-btn{appearance:none;border:none;background:var(--surface);color:var(--fg);font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:14px;width:28px;height:28px;border-radius:7px;cursor:pointer;box-shadow:var(--shadow);}
+  .zoom-btn:hover{background:var(--mint);color:var(--mint-fg);}
+  .zoom-level{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--fg-dim);width:42px;text-align:center;}
+
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:4px 0 16px;font-size:12.5px;color:var(--fg-dim);}
+  .legend-item{display:flex;align-items:center;gap:6px;}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block;}
+  .dot.livre{background:var(--mint);} .dot.reservado{background:var(--gold);} .dot.vendido{background:var(--coral);}
+
+  /* ---- floor stage ---- */
+  .floor-outer{overflow:auto;margin:0 -16px 18px;padding:36px 16px 54px;max-height:78vh;}
+  .floor-stage{display:flex;justify-content:center;min-width:min-content;perspective:2000px;}
+  .floor-zoom{transform-style:preserve-3d;transition:transform .25s ease;}
+  .floor-grid{
+    position:relative;display:grid;gap:5px;padding:20px;border-radius:18px;
+    background:
+      linear-gradient(160deg, color-mix(in srgb, var(--floor) 78%, var(--surface-2) 22%), var(--floor));
+    background-size:100% 100%;
+    box-shadow:inset 0 0 0 1px var(--line);
+    transform-style:preserve-3d;transition:transform .5s cubic-bezier(.2,.7,.3,1), box-shadow .5s;
+    transform-origin:50% 85%;
+  }
+  .floor-grid.is-3d{
+    transform:rotateX(50deg) rotateZ(0deg) scale(0.96);
+    box-shadow:inset 0 0 0 1px var(--line), 0 70px 55px -35px rgba(0,0,0,0.6);
+  }
+
+  .map-block{display:flex;flex-direction:column;gap:4px;transform-style:preserve-3d;}
+  .block-label{
+    font-size:7.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.03em;color:var(--fg-dim);
+    background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:2px 5px;white-space:nowrap;
+    width:fit-content;transform:translateZ(3px);box-shadow:0 2px 4px rgba(0,0,0,0.12);
+  }
+  .cells{display:flex;flex-wrap:wrap;align-content:flex-start;gap:4px;}
+
+  .stand{
+    appearance:none;cursor:pointer;border:none;border-radius:5px;
+    font-family:'IBM Plex Mono',monospace;font-size:8.6px;font-weight:700;line-height:1;
+    display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;
+    transform:translateZ(4px);transition:transform .15s ease, box-shadow .15s ease;
+    flex:0 0 auto;
+  }
+  .stand.st-livre{background:linear-gradient(155deg, color-mix(in srgb, var(--mint) 88%, white 16%), var(--mint));color:var(--mint-fg);box-shadow:0 3px 0 var(--mint-strong), 0 5px 8px rgba(0,0,0,0.16);}
+  .stand.st-reservado{background:linear-gradient(155deg, color-mix(in srgb, var(--gold) 85%, white 18%), var(--gold));color:var(--gold-fg);box-shadow:0 3px 0 var(--gold-strong), 0 5px 8px rgba(0,0,0,0.16);}
+  .stand.st-vendido{background:var(--coral);color:var(--coral-fg);box-shadow:0 2px 0 var(--coral-strong);opacity:0.82;}
+  .stand:hover{transform:translateZ(8px);}
+  .stand.is-selected{transform:translateZ(16px);outline:2px solid var(--fg);outline-offset:1px;}
+  .floor-grid:not(.is-3d) .stand{box-shadow:none;transform:none;border:1px solid var(--line);}
+  .floor-grid:not(.is-3d) .stand.st-livre{background:color-mix(in srgb, var(--mint) 20%, var(--surface));color:var(--fg);}
+  .floor-grid:not(.is-3d) .stand.st-reservado{background:color-mix(in srgb, var(--gold) 26%, var(--surface));color:var(--fg);}
+  .floor-grid:not(.is-3d) .stand.st-vendido{background:color-mix(in srgb, var(--coral) 30%, var(--surface));color:var(--fg-dim);opacity:1;}
+  .floor-grid:not(.is-3d) .stand:hover{transform:none;box-shadow:0 0 0 2px var(--fg) inset;}
+  .floor-grid:not(.is-3d) .stand.is-selected{outline:2px solid var(--fg);transform:none;}
+  .floor-grid:not(.is-3d) .block-label{box-shadow:none;transform:none;}
+
+  /* cor por tamanho — mesma legenda de cores da planta original do PDF */
+  .floor-grid.by-size .stand.sz-4x2{background:linear-gradient(155deg, color-mix(in srgb, #FF4FA3 88%, white 16%), #FF4FA3);color:#360019;box-shadow:0 3px 0 #C23378, 0 5px 8px rgba(0,0,0,0.16);}
+  .floor-grid.by-size .stand.sz-4x3{background:linear-gradient(155deg, color-mix(in srgb, #4C8DFF 88%, white 16%), #4C8DFF);color:#04143B;box-shadow:0 3px 0 #2F63C2, 0 5px 8px rgba(0,0,0,0.16);}
+  .floor-grid.by-size .stand.sz-3x2{background:linear-gradient(155deg, color-mix(in srgb, #2BD4E0 88%, white 16%), #2BD4E0);color:#022B2E;box-shadow:0 3px 0 #1DA3AD, 0 5px 8px rgba(0,0,0,0.16);}
+  .floor-grid.by-size .stand.sz-2x2{background:linear-gradient(155deg, color-mix(in srgb, #B073FF 88%, white 16%), #B073FF);color:#1D0940;box-shadow:0 3px 0 #8850D6, 0 5px 8px rgba(0,0,0,0.16);}
+  .floor-grid.by-size .stand.sz-3x3{background:linear-gradient(155deg, color-mix(in srgb, #FF9A3C 88%, white 16%), #FF9A3C);color:#3A1900;box-shadow:0 3px 0 #C97323, 0 5px 8px rgba(0,0,0,0.16);}
+  .floor-grid.by-size .stand.sz-tenda{background:linear-gradient(155deg, color-mix(in srgb, var(--yellow) 88%, white 16%), var(--yellow));color:var(--yellow-fg);box-shadow:0 3px 0 #C9A800, 0 5px 8px rgba(0,0,0,0.16);}
+  .floor-grid.by-size .stand.sz-personalizado{background:linear-gradient(155deg, color-mix(in srgb, #6B5CFF 88%, white 16%), #6B5CFF);color:#0D0836;box-shadow:0 3px 0 #4B3FC9, 0 5px 8px rgba(0,0,0,0.16);}
+  .floor-grid.by-size.is-3d .stand:hover{transform:translateZ(8px);}
+  .floor-grid.by-size.is-3d .stand.is-selected{transform:translateZ(16px);outline:2px solid var(--fg);}
+  .floor-grid.by-size:not(.is-3d) .stand{box-shadow:none !important;border:1px solid var(--line);}
+
+  .size-legend{display:flex;flex-wrap:wrap;gap:12px;margin:4px 0 16px;font-size:11.5px;color:var(--fg-dim);}
+  .size-legend .dot{width:10px;height:10px;border-radius:3px;display:inline-block;}
+
+  .decor{
+    display:flex;align-items:center;justify-content:center;text-align:center;border-radius:10px;
+    font-size:9.5px;font-weight:700;color:var(--fg-dim);letter-spacing:0.02em;
+    border:1.5px dashed var(--line);background:color-mix(in srgb, var(--surface) 60%, transparent);
+    padding:6px;transform:translateZ(1px);
+  }
+  .decor.gate{border-style:solid;background:transparent;color:var(--fg-dim);font-size:9px;}
+  .decor.corridor{
+    writing-mode:vertical-rl;text-orientation:mixed;border-style:dashed;
+    font-size:8px;letter-spacing:0.06em;text-transform:uppercase;padding:8px 3px;
+  }
+  .decor.wc{border-style:dotted;font-size:8.5px;}
+  .decor.avenue{
+    writing-mode:vertical-rl;text-orientation:mixed;border:none;background:none;
+    color:var(--fg-dim);font-size:8.5px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;
+    opacity:0.6;justify-content:flex-start;padding-top:6px;
+  }
+  .decor.stage, .decor.food{
+    flex-direction:column;gap:4px;font-size:8.5px;color:var(--fg-dim);
+    background:color-mix(in srgb, var(--surface) 45%, transparent);
+  }
+
+  /* ---- side panel ---- */
+  .layout{display:grid;grid-template-columns:1fr 300px;gap:22px;align-items:start;}
+  @media (max-width:860px){ .layout{grid-template-columns:1fr;} }
+  .panel{position:sticky;top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);}
+  @media (max-width:860px){ .panel{position:static;} }
+  .panel-empty{color:var(--fg-dim);font-size:13.5px;line-height:1.6;}
+  .panel-photo-wrap{position:relative;border-radius:10px 10px 0 0;overflow:hidden;margin:-18px -18px 14px;background:#0e0f0a;}
+  .panel-photo{width:100%;display:block;aspect-ratio:900/616;object-fit:cover;}
+  .panel-photo-cap{font-size:10px;color:var(--fg-dim);text-align:center;margin:6px 0 4px;}
+  .panel-code{font-family:'Anton',sans-serif;font-size:30px;line-height:1;}
+  .status-badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;margin:10px 0 14px;letter-spacing:0.02em;}
+  .status-badge.st-livre{background:var(--mint);color:var(--mint-fg);}
+  .status-badge.st-reservado{background:var(--gold);color:var(--gold-fg);}
+  .status-badge.st-vendido{background:var(--coral);color:var(--coral-fg);}
+  .panel-row{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);font-size:13px;gap:10px;}
+  .panel-row:first-of-type{border-top:none;}
+  .panel-row b{font-weight:700;text-align:right;}
+  .panel-price{font-family:'IBM Plex Mono',monospace;font-weight:600;}
+  .btn{display:block;width:100%;text-align:center;appearance:none;cursor:pointer;text-decoration:none;font-family:inherit;font-weight:700;font-size:13.5px;padding:12px 14px;border-radius:10px;border:none;margin-top:14px;}
+  .btn-primary{background:var(--mint);color:var(--mint-fg);}
+
+  .pix-box{background:var(--surface-2);border-radius:10px;padding:12px;margin-top:14px;}
+  .pix-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;color:var(--fg-dim);margin-bottom:6px;}
+  .pix-key-row{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;}
+  .pix-key{font-family:'IBM Plex Mono',monospace;font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pix-copy{appearance:none;cursor:pointer;border:none;background:var(--mint);color:var(--mint-fg);font-family:inherit;font-weight:700;font-size:11px;padding:6px 10px;border-radius:6px;flex:0 0 auto;}
+  .pix-titular{font-size:11px;color:var(--fg-dim);margin-top:6px;}
+  .up-input{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;color:var(--fg);font-family:inherit;font-size:13px;margin-top:8px;}
+  .up-input::placeholder{color:var(--fg-dim);}
+  .upload-box{
+    display:block;margin-top:10px;border:1.5px dashed var(--line);border-radius:10px;padding:14px;text-align:center;
+    cursor:pointer;background:var(--surface);
+  }
+  .upload-box:hover{border-color:var(--mint);}
+  .upload-box input{display:none;}
+  .upload-box.falta{border-color:var(--gold);}
+  .upload-label{font-size:12.5px;font-weight:700;}
+  .upload-sub{font-size:10.5px;color:var(--fg-dim);margin-top:2px;}
+  .upload-file{font-size:11px;color:var(--mint-strong);font-weight:700;margin-top:6px;word-break:break-all;}
+  .whatsapp-secondary{
+    display:flex;align-items:center;justify-content:center;gap:6px;margin-top:12px;
+    font-size:11.5px;color:var(--fg-dim);text-decoration:none;border-top:1px solid var(--line);padding-top:12px;
+  }
+  .whatsapp-secondary:hover{color:var(--mint-strong);}
+  .sent-state{background:color-mix(in srgb, var(--gold) 16%, var(--surface));border:1px solid var(--gold);border-radius:10px;padding:12px;margin-top:14px;font-size:12px;line-height:1.6;}
+  .sent-state b{display:block;font-size:13px;margin-bottom:3px;}
+
+  .zone-summary{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;}
+  .zone-chip{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:5px 10px;border-radius:999px;background:var(--surface);border:1px solid var(--line);}
+  .zone-chip b{font-family:'IBM Plex Mono',monospace;font-weight:700;}
+
+  footer{text-align:center;color:var(--fg-dim);font-size:12px;padding:24px 0 32px;}
 </style>{% endraw %}
 </head><body>
-<div class="topo">
-  <h1>{{ empresa_nome }}</h1>
-  <div class="sub">{% if cfg.edicao_label %}{{ cfg.edicao_label }}{% endif %}{% if cfg.evento_local %} · {{ cfg.evento_local }}{% endif %}</div>
-  {% if cfg.evento_inicio %}<div class="datas">{{ data_br(cfg.evento_inicio) }}{% if cfg.evento_fim and cfg.evento_fim != cfg.evento_inicio %} a {{ data_br(cfg.evento_fim) }}{% endif %}</div>{% endif %}
-  <div class="legenda">
-    <span><i class="dot livre"></i> Livre ({{ totais.get('livre',0) }})</span>
-    <span><i class="dot pre_reservado"></i> Em análise ({{ totais.get('pre_reservado',0) }})</span>
-    <span><i class="dot vendido"></i> Vendido ({{ totais.get('vendido',0) }})</span>
+
+<div class="hero">
+  <div class="hero-inner">
+    <h1 class="brand display"><span>{{ marca[:3] }}</span>{{ marca[3:] }} — STANDS</h1>
+    <div class="hero-meta">
+      {% if cfg.edicao_label %}<span><b>{{ cfg.edicao_label }}</b></span>{% endif %}
+      {% if cfg.evento_inicio %}<span><b>{{ data_br(cfg.evento_inicio) }}{% if cfg.evento_fim and cfg.evento_fim != cfg.evento_inicio %} a {{ data_br(cfg.evento_fim) }}{% endif %}</b></span>{% endif %}
+      {% if cfg.evento_local %}<span>{{ cfg.evento_local }}</span>{% endif %}
+    </div>
+    <p class="hero-pitch">Escolha seu stand direto no mapa da planta oficial do evento: toque em um stand livre, veja tamanho e valor, pague o sinal no Pix e envie o comprovante — a reserva é sua enquanto a equipe confirma.</p>
+    {% if cfg.whatsapp_numero %}<div class="info-strip">Cotas de patrocínio (Ouro, Prata e Bronze) são negociadas direto com a equipe — chama no WhatsApp.</div>{% endif %}
   </div>
 </div>
 
-{% if msg == 'ok' %}<div class="msg ok wrap">✓ Comprovante recebido{% if msg_codigo %} pro estande {{ msg_codigo }}{% endif %}! A equipe confere e confirma em breve.</div>{% endif %}
-{% if msg == 'erro' %}<div class="msg erro wrap">Não deu pra registrar o comprovante{% if msg_codigo %} do estande {{ msg_codigo }}{% endif %}. Ele pode já ter sido vendido — dá uma olhada no mapa e tenta outro, ou chama no WhatsApp.</div>{% endif %}
-{% if msg == 'erro_generico' %}<div class="msg erro wrap">Não deu pra processar. Tenta de novo.</div>{% endif %}
+{% if msg == 'ok' %}<div class="msg ok">✓ Comprovante recebido{% if msg_codigo %} — o stand {{ msg_codigo }} está reservado pra você{% endif %}! A equipe confere o pagamento e confirma em breve.</div>{% endif %}
+{% if msg == 'erro' %}<div class="msg erro">Não deu pra registrar o comprovante{% if msg_codigo %} do stand {{ msg_codigo }}{% endif %}. Ele pode já ter sido vendido — dá uma olhada no mapa e tenta outro{% if cfg.whatsapp_numero %}, ou chama no WhatsApp{% endif %}.</div>{% endif %}
+{% if msg == 'erro_generico' %}<div class="msg erro">Não deu pra processar. Tenta de novo.</div>{% endif %}
+{% if sem_storage %}<div class="msg erro">⚠ Envio de comprovante temporariamente indisponível{% if cfg.whatsapp_numero %} — manda pelo WhatsApp{% endif %}.</div>{% endif %}
 
 <div class="wrap">
-{% if sem_storage %}<div class="avisosem" style="margin:14px 0">⚠ Upload de comprovante temporariamente indisponível — chama no WhatsApp.</div>{% endif %}
-{% if n_total == 0 %}<p style="color:var(--sub);margin-top:30px">Nenhum estande cadastrado ainda.</p>{% endif %}
 
-{% for pavilhao, zonas in pavilhoes.items() %}
-<div class="pav">
-  <h2>{{ pavilhao|replace('_',' ')|title }}</h2>
-  {% for zona, lista in zonas.items() %}
-  <div class="zona">
-    {% if zona %}<div class="nome">{{ zona }}</div>{% endif %}
-    <div class="grid">
-      {% for s in lista %}
-      <div class="stand {{ s.status }}" data-codigo="{{ s.codigo }}" {% if s.status == 'livre' %}onclick="abrir('{{ s.codigo }}')"{% endif %}>
-        <div class="cod">{{ s.codigo }}</div>
-        <div class="tam">{{ s.tamanho }}</div>
+  <h2 class="section-title">Escolha seu stand</h2>
+  <p class="section-sub">Mapa fiel à planta oficial do evento, com o tamanho real de cada stand. Toque em um stand livre para ver valor e reservar.</p>
+
+  {% if n_total == 0 %}<p class="panel-empty">Nenhum stand cadastrado ainda.</p>{% endif %}
+
+  <div class="controls-row">
+    <div class="tabs" role="tablist" id="pavilion-tabs"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <div class="view-toggle">
+        <button class="view-btn" id="btn-color-status" aria-pressed="true" onclick="setColorMode('status')">Cor por status</button>
+        <button class="view-btn" id="btn-color-size" aria-pressed="false" onclick="setColorMode('tamanho')">Cor por tamanho</button>
       </div>
-      {% endfor %}
+      <div class="view-toggle">
+        <button class="view-btn" id="btn-view-3d" aria-pressed="true" onclick="setFloorView('3d')">Mapa 3D</button>
+        <button class="view-btn" id="btn-view-2d" aria-pressed="false" onclick="setFloorView('2d')">Planta técnica</button>
+      </div>
+      <div class="zoom-controls">
+        <button class="zoom-btn" onclick="zoomFloor(-1)" aria-label="Diminuir zoom">−</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="zoom-btn" onclick="zoomFloor(1)" aria-label="Aumentar zoom">+</button>
+      </div>
     </div>
   </div>
-  {% endfor %}
-</div>
-{% endfor %}
+
+  <div class="legend" id="legend-status">
+    <span class="legend-item"><span class="dot livre"></span>Livre</span>
+    <span class="legend-item"><span class="dot reservado"></span>Reservado (comprovante em confirmação)</span>
+    <span class="legend-item"><span class="dot vendido"></span>Vendido</span>
+  </div>
+  <div class="size-legend" id="legend-size" hidden>
+    <span class="legend-item"><span class="dot" style="background:#FF4FA3"></span>4x2m</span>
+    <span class="legend-item"><span class="dot" style="background:#4C8DFF"></span>4x3m</span>
+    <span class="legend-item"><span class="dot" style="background:#2BD4E0"></span>3x2m</span>
+    <span class="legend-item"><span class="dot" style="background:#B073FF"></span>2x2m</span>
+    <span class="legend-item"><span class="dot" style="background:#FF9A3C"></span>3x3m</span>
+    <span class="legend-item"><span class="dot" style="background:var(--yellow)"></span>Espaço em tenda</span>
+    <span class="legend-item"><span class="dot" style="background:#6B5CFF"></span>Stand personalizado</span>
+  </div>
+
+  <div class="zone-summary" id="zone-summary"></div>
+
+  <div class="floor-outer">
+    <div class="floor-stage">
+      <div class="floor-zoom" id="floor-zoom">
+        <div class="floor-grid is-3d" id="floor-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div></div>
+    <div class="panel" id="panel"></div>
+  </div>
+
 </div>
 
-<div class="veu" id="veu" onclick="fechar()"></div>
-<div class="painel" id="painel">
-  <button class="fechar" onclick="fechar()">✕</button>
-  <h3 id="p-cod"></h3>
-  <div class="info" id="p-info"></div>
-  <div id="p-preco" class="preco"></div>
-  <div class="pix">
-    <div class="lbl">Chave Pix</div>
-    <div class="chave mono" id="p-pix">{{ cfg.pix_chave or '—' }}</div>
-    {% if cfg.pix_titular %}<div class="titular">{{ cfg.pix_titular }}</div>{% endif %}
-    {% if cfg.pix_chave %}<button class="copiar" onclick="copiarPix()">Copiar chave</button>{% endif %}
-  </div>
-  {% if not sem_storage and cfg.pix_chave %}
-  <form class="up" method="post" action="/e/{{ cfg.slug }}/comprovante" enctype="multipart/form-data">
-    <input type="hidden" name="codigo" id="p-codigo-form">
-    <label>Seu nome
-      <input type="text" name="nome" required></label>
-    <label>WhatsApp (opcional)
-      <input type="text" name="whatsapp"></label>
-    <label>Comprovante do Pix (foto ou PDF)
-      <input type="file" name="arquivo" accept="image/*,application/pdf" required></label>
-    <button class="enviar" type="submit">Enviar comprovante e reservar</button>
-  </form>
-  {% elif sem_storage %}
-  <div class="avisosem">Upload indisponível no momento — manda o comprovante pelo WhatsApp.</div>
-  {% endif %}
-  {% if cfg.whatsapp_numero %}
-  <a class="wa" href="https://wa.me/{{ cfg.whatsapp_numero }}" target="_blank" rel="noopener">Prefere falar no WhatsApp?</a>
-  {% endif %}
-</div>
+<footer>{{ marca }}{% if cfg.edicao_label %} · {{ cfg.edicao_label }}{% endif %} — mapa oficial de stands</footer>
 
 <script>
 var STANDS = {{ stands_json|safe }};
-function abrir(codigo){
-  var s = STANDS[codigo];
-  if(!s) return;
-  document.getElementById('p-cod').textContent = codigo;
-  document.getElementById('p-info').textContent = (s.pavilhao||'').replace('_',' ') + (s.zona ? ' · '+s.zona : '') + ' · ' + s.tamanho;
-  document.getElementById('p-preco').textContent = s.preco ? s.preco : 'Consultar valor';
-  // o campo oculto só existe quando o formulário de upload está no ar
-  // (ver `sem_storage` no template) — sem essa checagem, storage fora do ar
-  // quebrava o painel inteiro de abrir, não só o upload.
-  var pCodigoForm = document.getElementById('p-codigo-form');
-  if (pCodigoForm) pCodigoForm.value = codigo;
-  document.getElementById('veu').classList.add('on');
-  document.getElementById('painel').classList.add('on');
-}
-function fechar(){
-  document.getElementById('veu').classList.remove('on');
-  document.getElementById('painel').classList.remove('on');
-}
-function copiarPix(){
-  var chave = document.getElementById('p-pix').textContent.trim();
-  if(!chave || chave === '—') return;
-  navigator.clipboard && navigator.clipboard.writeText(chave).then(function(){
-    var b = document.querySelector('.copiar');
-    if(b){ var t = b.textContent; b.textContent = 'Copiado ✓'; setTimeout(function(){ b.textContent = t; }, 1600); }
-  });
-}
-{% if msg_codigo %}
-document.addEventListener('DOMContentLoaded', function(){
-  var el = document.querySelector('[data-codigo="{{ msg_codigo }}"]');
-  if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
-});
-{% endif %}
+var PIX = {{ pix_json|safe }};
+var WA = {{ wa_json|safe }};
+var ACTION = '/e/{{ cfg.slug }}/comprovante';
+var JUST_SENT = {{ just_sent_json|safe }};
+var ERRO_CODIGO = {{ erro_codigo_json|safe }};
+var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
 </script>
+{% raw %}<script>
+(function(){
+  var sizeLabel = {'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
+  var sizePhoto = {'4x2':'/estatico/stands/4x2.jpg','4x3':'/estatico/stands/4x3.jpg','3x2':'/estatico/stands/3x2.jpg','2x2':'/estatico/stands/2x2.jpg','3x3':'/estatico/stands/3x3.jpg'};
+  // proportional footprint per real stand size (bigger stands render as bigger tiles)
+  var sizeDims = {'2x2':{w:26,h:22},'3x2':{w:32,h:22},'3x3':{w:32,h:28},'4x2':{w:38,h:22},'4x3':{w:38,h:28},'tenda':{w:38,h:22},'personalizado':{w:38,h:28}};
+
+  // grid coords are (col, colSpan, row, rowSpan) on each pavilion's own 24-col grid
+  var inferiorDefs = [
+    {prefix:'i', from:1, to:3, col:3, cspan:2, row:1, rspan:2, label:'Outlet Acessórios'},
+    {prefix:'i', from:4, to:15, col:6, cspan:8, row:1, rspan:2, label:'Outlet Make'},
+    {prefix:'G', from:43, to:54, col:15, cspan:8, row:1, rspan:2, label:'Outlet Grifes'},
+    {prefix:'i', from:16, to:19, col:3, cspan:1, row:4, rspan:5},
+    {prefix:'i', from:20, to:27, col:6, cspan:6, row:4, rspan:3, label:'Home Decor'},
+    {prefix:'i', from:28, to:31, col:12, cspan:1, row:4, rspan:5},
+    {prefix:'G', from:55, to:62, col:15, cspan:5, row:4, rspan:3},
+    {prefix:'G', from:63, to:66, col:21, cspan:2, row:4, rspan:5},
+    {prefix:'i', from:32, to:35, col:5, cspan:3, row:10, rspan:2, label:'Outlet Fitness'},
+    {prefix:'i', from:36, to:39, col:9, cspan:3, row:10, rspan:2, label:'Outlet Kids'},
+    {prefix:'i', from:40, to:42, col:12, cspan:1, row:10, rspan:3, label:'Multimarcas'},
+    {prefix:'G', from:67, to:68, col:15, cspan:2, row:10, rspan:2},
+    {prefix:'G', from:69, to:74, col:18, cspan:5, row:10, rspan:2}
+  ];
+  var inferiorDecor = [
+    {label:'Corredor Outlet Grifes', col:13, cspan:2, row:4, rspan:5, kind:'corridor'},
+    {label:'WC', col:13, cspan:2, row:9, rspan:1, kind:'wc'},
+    {label:'Entrada única →', col:23, cspan:1, row:5, rspan:4, kind:'gate'},
+    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:12, kind:'avenue'}
+  ];
+
+  var superiorDefs = [
+    {prefix:'S', from:75, to:83, col:5, cspan:5, row:1, rspan:2},
+    {prefix:'S', from:84, to:96, col:11, cspan:8, row:1, rspan:2},
+    {prefix:'S', from:97, to:97, col:3, cspan:1, row:4, rspan:2},
+    {prefix:'S', from:98, to:102, col:3, cspan:1, row:6, rspan:6},
+    {prefix:'S', from:103, to:106, col:5, cspan:4, row:4, rspan:1},
+    {prefix:'S', from:115, to:118, col:5, cspan:4, row:6, rspan:1},
+    {prefix:'S', from:107, to:110, col:10, cspan:4, row:4, rspan:1},
+    {prefix:'S', from:119, to:122, col:10, cspan:4, row:6, rspan:1},
+    {prefix:'S', from:111, to:114, col:15, cspan:4, row:4, rspan:1},
+    {prefix:'S', from:123, to:126, col:15, cspan:4, row:6, rspan:1},
+    {prefix:'S', from:127, to:129, col:8, cspan:2, row:8, rspan:1},
+    {prefix:'S', from:130, to:132, col:11, cspan:3, row:8, rspan:1},
+    {prefix:'S', from:133, to:136, col:15, cspan:4, row:8, rspan:1},
+    {prefix:'S', from:137, to:142, col:20, cspan:2, row:4, rspan:6},
+    {prefix:'S', from:143, to:150, col:11, cspan:5, row:10, rspan:2},
+    {prefix:'S', from:151, to:154, col:19, cspan:3, row:10, rspan:2}
+  ];
+  var superiorDecor = [
+    {label:'← Entrada', col:1, cspan:2, row:1, rspan:2, kind:'gate'},
+    {label:'Saída →', col:22, cspan:2, row:8, rspan:2, kind:'gate'},
+    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:11, kind:'avenue'}
+  ];
+
+  var carDefs = [
+    {prefix:'C', from:155, to:158, col:13, cspan:4, row:2, rspan:2, label:'Outlet Car'},
+    {prefix:'C', from:159, to:162, col:18, cspan:4, row:2, rspan:2}
+  ];
+  var carDecor = [
+    {label:'Palco 6x6', col:2, cspan:3, row:1, rspan:4, kind:'stage'},
+    {label:'Praça de Alimentação', col:6, cspan:5, row:1, rspan:4, kind:'food'},
+    {label:'↓ Entrada', col:17, cspan:2, row:1, rspan:1, kind:'gate'},
+    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:6, kind:'avenue'}
+  ];
+
+  var pavilions = [
+    {key:'inferior', label:'Pavilhão Inferior', sub:'i01–i42 · G43–G74', defs:inferiorDefs, decor:inferiorDecor, rows:13},
+    {key:'superior', label:'Pavilhão Superior', sub:'S75–S154', defs:superiorDefs, decor:superiorDecor, rows:12},
+    {key:'outlet_car', label:'Outlet Car', sub:'C155–C162', defs:carDefs, decor:carDecor, rows:6}
+  ];
+
+  // A planta desenhada acima + o BANCO: cada def só vira stand se o código
+  // existir no servidor (STANDS); status/zona/tamanho/preço vêm de lá.
+  var usados = {};
+  var stands = [];
+  pavilions.forEach(function(p){
+    p.defs.forEach(function(d){
+      for (var n=d.from; n<=d.to; n++){
+        var num = d.prefix === 'i' ? String(n).padStart(2,'0') : String(n);
+        var code = d.prefix + num;
+        var sv = STANDS[code];
+        if (!sv) continue;
+        usados[code] = true;
+        stands.push({ code:code, zone:sv.zona, pavilion:p.key, size:sv.tamanho,
+                      preco:sv.preco, status:sv.status, dias:sv.dias });
+      }
+    });
+  });
+  // Estandes do banco fora da planta desenhada (código novo, ou outra conta):
+  // caem num bloco corrido no fim do pavilhão — e pavilhão desconhecido vira
+  // aba própria. A página nunca esconde estande que existe no banco.
+  var extras = {};
+  Object.keys(STANDS).forEach(function(code){
+    if (usados[code]) return;
+    var sv = STANDS[code];
+    var pk = sv.pavilhao || 'outros';
+    (extras[pk] = extras[pk] || []).push(code);
+    stands.push({ code:code, zone:sv.zona, pavilion:pk, size:sv.tamanho,
+                  preco:sv.preco, status:sv.status, dias:sv.dias });
+  });
+  Object.keys(extras).forEach(function(pk){
+    var pav = pavilions.filter(function(p){ return p.key === pk; })[0];
+    if (!pav){
+      pav = { key:pk, label:pk.replace(/_/g,' ').replace(/\\b\\w/g,function(c){return c.toUpperCase();}),
+              sub:'', defs:[], decor:[], rows:1, extraRow:1 };
+      pavilions.push(pav);
+    } else {
+      pav.extraRow = pav.rows + 1;
+    }
+    pav.extraCodes = extras[pk].sort();
+  });
+
+  var currentPavilion = pavilions[0] ? pavilions[0].key : 'inferior';
+  var selectedCode = null;
+  var floorView = '3d';
+  var colorMode = 'status';
+  var zoomLevel = 1;
+
+  function setColorMode(mode){
+    colorMode = mode;
+    document.getElementById('btn-color-status').setAttribute('aria-pressed', mode === 'status' ? 'true':'false');
+    document.getElementById('btn-color-size').setAttribute('aria-pressed', mode === 'tamanho' ? 'true':'false');
+    document.getElementById('legend-status').hidden = mode !== 'status';
+    document.getElementById('legend-size').hidden = mode !== 'tamanho';
+    var grid = document.getElementById('floor-grid');
+    if (mode === 'tamanho') grid.classList.add('by-size'); else grid.classList.remove('by-size');
+  }
+  window.setColorMode = setColorMode;
+
+  function zoomFloor(dir){
+    zoomLevel = Math.min(1.8, Math.max(0.7, Math.round((zoomLevel + dir * 0.15) * 100) / 100));
+    document.getElementById('floor-zoom').style.transform = 'scale(' + zoomLevel + ')';
+    document.getElementById('zoom-level').textContent = Math.round(zoomLevel * 100) + '%';
+  }
+  window.zoomFloor = zoomFloor;
+
+  var tabsEl = document.getElementById('pavilion-tabs');
+  pavilions.forEach(function(p){
+    var b = document.createElement('button');
+    b.className = 'tab';
+    b.setAttribute('role','tab');
+    b.setAttribute('aria-selected', p.key === currentPavilion ? 'true' : 'false');
+    b.id = 'tab-' + p.key;
+    b.innerHTML = p.label + (p.sub ? '<small>' + p.sub + '</small>' : '');
+    b.onclick = function(){ selectPavilion(p.key); };
+    tabsEl.appendChild(b);
+  });
+
+  function selectPavilion(key){
+    currentPavilion = key;
+    selectedCode = null;
+    pavilions.forEach(function(p){ document.getElementById('tab-' + p.key).setAttribute('aria-selected', p.key === key ? 'true' : 'false'); });
+    renderFloor();
+    renderZoneSummary();
+    renderPanel();
+  }
+
+  function setFloorView(v){
+    floorView = v;
+    document.getElementById('btn-view-3d').setAttribute('aria-pressed', v === '3d' ? 'true':'false');
+    document.getElementById('btn-view-2d').setAttribute('aria-pressed', v === '2d' ? 'true':'false');
+    var grid = document.getElementById('floor-grid');
+    if (v === '3d') grid.classList.add('is-3d'); else grid.classList.remove('is-3d');
+  }
+  window.setFloorView = setFloorView;
+
+  function standsFor(from, to, prefix){
+    var out = [];
+    for (var n=from;n<=to;n++){
+      var num = prefix === 'i' ? String(n).padStart(2,'0') : String(n);
+      out.push(prefix+num);
+    }
+    return out;
+  }
+
+  function standButton(s){
+    var btn = document.createElement('button');
+    btn.className = 'stand st-' + s.status + ' sz-' + s.size + (s.code === selectedCode ? ' is-selected' : '');
+    var dims = sizeDims[s.size] || {w:32,h:22};
+    btn.style.width = dims.w + 'px';
+    btn.style.height = dims.h + 'px';
+    btn.textContent = s.code;
+    btn.title = s.code + ' · ' + (sizeLabel[s.size] || s.size);
+    btn.onclick = function(){ selectedCode = s.code; renderFloor(); renderPanel(); };
+    return btn;
+  }
+
+  function renderFloor(){
+    var grid = document.getElementById('floor-grid');
+    var pav = pavilions.filter(function(p){ return p.key === currentPavilion; })[0];
+    grid.style.gridTemplateColumns = 'repeat(24, 34px)';
+    grid.style.gridTemplateRows = 'repeat(' + pav.rows + ', 30px)';
+    if (floorView === '3d') grid.classList.add('is-3d'); else grid.classList.remove('is-3d');
+    grid.innerHTML = '';
+
+    pav.decor.forEach(function(d){
+      var el = document.createElement('div');
+      el.className = 'decor' + (d.kind ? ' ' + d.kind : '');
+      el.style.gridColumn = d.col + ' / span ' + d.cspan;
+      el.style.gridRow = d.row + ' / span ' + d.rspan;
+      el.textContent = d.label;
+      grid.appendChild(el);
+    });
+
+    pav.defs.forEach(function(d){
+      var block = document.createElement('div');
+      block.className = 'map-block';
+      block.style.gridColumn = d.col + ' / span ' + d.cspan;
+      block.style.gridRow = d.row + ' / span ' + d.rspan;
+
+      if (d.label){
+        var lab = document.createElement('div');
+        lab.className = 'block-label';
+        lab.textContent = d.label;
+        block.appendChild(lab);
+      }
+      var cells = document.createElement('div');
+      cells.className = 'cells';
+      var codes = standsFor(d.from, d.to, d.prefix);
+      codes.forEach(function(code){
+        var s = stands.filter(function(x){ return x.code === code && x.pavilion === currentPavilion; })[0];
+        if (!s) return;
+        cells.appendChild(standButton(s));
+      });
+      block.appendChild(cells);
+      grid.appendChild(block);
+    });
+
+    if (pav.extraCodes && pav.extraCodes.length){
+      var extraBlock = document.createElement('div');
+      extraBlock.className = 'map-block';
+      extraBlock.style.gridColumn = '1 / span 23';
+      extraBlock.style.gridRow = String(pav.extraRow || 1);
+      if (pav.defs.length){
+        var lab2 = document.createElement('div');
+        lab2.className = 'block-label';
+        lab2.textContent = 'Outros espaços';
+        extraBlock.appendChild(lab2);
+      }
+      var cells2 = document.createElement('div');
+      cells2.className = 'cells';
+      pav.extraCodes.forEach(function(code){
+        var s = stands.filter(function(x){ return x.code === code; })[0];
+        if (s) cells2.appendChild(standButton(s));
+      });
+      extraBlock.appendChild(cells2);
+      grid.appendChild(extraBlock);
+    }
+  }
+
+  function renderZoneSummary(){
+    var el = document.getElementById('zone-summary');
+    el.innerHTML = '';
+    var names = [];
+    stands.forEach(function(s){ if (s.pavilion === currentPavilion && names.indexOf(s.zone) === -1) names.push(s.zone); });
+    names.forEach(function(zoneName){
+      var zs = stands.filter(function(s){ return s.pavilion === currentPavilion && s.zone === zoneName; });
+      var livres = zs.filter(function(s){ return s.status === 'livre'; }).length;
+      var chip = document.createElement('span');
+      chip.className = 'zone-chip';
+      var nome = document.createTextNode(zoneName || 'Sem zona');
+      chip.appendChild(nome);
+      var b = document.createElement('b');
+      b.textContent = ' ' + livres + '/' + zs.length;
+      chip.appendChild(b);
+      el.appendChild(chip);
+    });
+  }
+
+  function waLink(text){ return 'https://wa.me/' + WA + '?text=' + encodeURIComponent(text); }
+
+  function esc(t){
+    return String(t).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function copyPix(){
+    var btn = event.currentTarget;
+    var restore = function(){ btn.textContent = 'Copiar'; };
+    navigator.clipboard.writeText(PIX.chave).then(function(){
+      btn.textContent = 'Copiado!';
+      setTimeout(restore, 1600);
+    }).catch(function(){
+      var sel = document.getElementById('pix-key-text');
+      if (sel){
+        var range = document.createRange();
+        range.selectNodeContents(sel);
+        var s = window.getSelection();
+        s.removeAllRanges(); s.addRange(range);
+      }
+      btn.textContent = 'Selecionado';
+      setTimeout(restore, 1600);
+    });
+  }
+  window.copyPix = copyPix;
+
+  function mostrarArquivo(input){
+    var box = input.closest('.upload-box');
+    var nomeEl = box && box.querySelector('.upload-file');
+    if (!nomeEl) return;
+    if (input.files && input.files.length){
+      nomeEl.textContent = '✓ ' + input.files[0].name;
+      nomeEl.hidden = false;
+      box.classList.remove('falta');
+    } else {
+      nomeEl.hidden = true;
+    }
+  }
+  window.mostrarArquivo = mostrarArquivo;
+
+  function validarEnvio(form){
+    // input[type=file] fica escondido dentro do .upload-box (label), então a
+    // validação nativa de `required` não consegue focar nele — checa na mão.
+    var arq = form.querySelector('input[type=file]');
+    if (!arq || !arq.files || !arq.files.length){
+      var box = form.querySelector('.upload-box');
+      if (box){ box.classList.add('falta'); box.scrollIntoView({behavior:'smooth', block:'center'}); }
+      return false;
+    }
+    return true;
+  }
+  window.validarEnvio = validarEnvio;
+
+  function renderPanel(){
+    var panel = document.getElementById('panel');
+    if (!selectedCode){
+      panel.innerHTML = '<p class="panel-empty">Selecione um stand no mapa acima para ver tamanho, valor e disponibilidade.</p>';
+      return;
+    }
+    var s = stands.filter(function(x){ return x.code === selectedCode; })[0];
+    var statusText = {livre:'Livre', reservado:'Reservado', vendido:'Vendido'}[s.status];
+    var pav = pavilions.filter(function(p){return p.key===s.pavilion;})[0];
+    var html = '';
+    var photo = sizePhoto[s.size];
+    if (photo){
+      html += '<div class="panel-photo-wrap">';
+      html += '  <img class="panel-photo" src="' + photo + '" alt="Modelo do stand ' + esc(sizeLabel[s.size] || s.size) + '">';
+      html += '</div>';
+      html += '<p class="panel-photo-cap">Render ilustrativo do padrão de montagem</p>';
+    }
+    html += '<div class="panel-code">' + esc(s.code) + '</div>';
+    html += '<span class="status-badge st-' + s.status + '">' + statusText + '</span>';
+    if (s.zone) html += '<div class="panel-row"><span>Zona</span><b>' + esc(s.zone) + '</b></div>';
+    html += '<div class="panel-row"><span>Pavilhão</span><b>' + esc(pav ? pav.label : s.pavilion) + '</b></div>';
+    html += '<div class="panel-row"><span>Tamanho</span><b>' + esc(sizeLabel[s.size] || s.size) + '</b></div>';
+    html += '<div class="panel-row"><span>Valor</span><b class="panel-price">' + esc(s.preco || 'Consultar') + '</b></div>';
+
+    if (s.status === 'livre'){
+      if (PIX.chave){
+        html += '<div class="pix-box">';
+        html += '  <div class="pix-label">Pagar com Pix e garantir o stand</div>';
+        html += '  <div class="pix-key-row"><span class="pix-key" id="pix-key-text">' + esc(PIX.chave) + '</span><button class="pix-copy" onclick="copyPix()">Copiar</button></div>';
+        if (PIX.titular) html += '  <div class="pix-titular">Titular: ' + esc(PIX.titular) + '</div>';
+        html += '</div>';
+      }
+      if (!SEM_STORAGE){
+        html += '<form method="post" action="' + ACTION + '" enctype="multipart/form-data" onsubmit="return validarEnvio(this)">';
+        html += '  <input type="hidden" name="codigo" value="' + esc(s.code) + '">';
+        html += '  <input class="up-input" type="text" name="nome" placeholder="Seu nome" required maxlength="200">';
+        html += '  <input class="up-input" type="text" name="whatsapp" placeholder="WhatsApp (opcional)" maxlength="40">';
+        html += '  <label class="upload-box">';
+        html += '    <div class="upload-label">Comprovante do Pix</div>';
+        html += '    <div class="upload-sub">Toque para escolher a foto ou o PDF do comprovante</div>';
+        html += '    <input type="file" name="arquivo" accept="image/*,application/pdf" onchange="mostrarArquivo(this)">';
+        html += '    <div class="upload-file" hidden></div>';
+        html += '  </label>';
+        html += '  <button class="btn btn-primary" type="submit">Enviar comprovante e reservar</button>';
+        html += '</form>';
+        html += '<p class="upload-sub" style="text-align:center;margin-top:8px;">Assim que o comprovante chegar, o stand fica reservado pra você enquanto a equipe confirma</p>';
+      } else {
+        html += '<div class="sent-state"><b>Envio temporariamente indisponível</b>' + (WA ? 'Manda o comprovante pelo WhatsApp que a equipe registra pra você.' : 'Tenta de novo daqui a pouco.') + '</div>';
+      }
+      if (WA){
+        var msg = 'Olá! Tenho uma dúvida sobre o stand ' + s.code + ' (' + (sizeLabel[s.size] || s.size) + ').';
+        html += '<a class="whatsapp-secondary" href="' + waLink(msg) + '" target="_blank" rel="noopener">Prefere tirar dúvida no WhatsApp?</a>';
+      }
+    } else if (s.status === 'reservado'){
+      if (JUST_SENT === s.code){
+        html += '<div class="sent-state"><b>Comprovante recebido</b>Assim que a equipe confirmar o pagamento, ele é seu — normalmente em algumas horas.</div>';
+      }
+      if (s.dias != null){
+        html += '<div class="panel-row"><span>Prazo de confirmação</span><b>' + s.dias + ' dia(s)</b></div>';
+      }
+      if (WA){
+        var msg2 = 'Olá! O stand ' + s.code + ' está reservado — fico na fila caso libere?';
+        html += '<a class="whatsapp-secondary" href="' + waLink(msg2) + '" target="_blank" rel="noopener">Entrar na fila de espera</a>';
+      }
+    } else {
+      html += '<p class="panel-empty" style="margin-top:14px;">Este stand já foi confirmado e não está mais disponível.</p>';
+    }
+    panel.innerHTML = html;
+  }
+
+  // depois do POST, volta com ?msg=ok|erro&codigo=X: abre o pavilhão certo e
+  // já seleciona o stand — o expositor vê o próprio comprovante refletido.
+  var initCode = JUST_SENT || ERRO_CODIGO;
+  var initPav = currentPavilion;
+  if (initCode){
+    var s0 = stands.filter(function(x){ return x.code === initCode; })[0];
+    if (s0) initPav = s0.pavilion;
+  }
+  if (pavilions.length){
+    selectPavilion(initPav);
+    if (initCode){
+      var s1 = stands.filter(function(x){ return x.code === initCode; })[0];
+      if (s1){ selectedCode = initCode; renderFloor(); renderPanel(); }
+    }
+  }
+})();
+</script>{% endraw %}
 </body></html>
 """
 

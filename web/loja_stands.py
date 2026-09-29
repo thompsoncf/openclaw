@@ -286,7 +286,10 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   .dot.livre{background:var(--mint);} .dot.reservado{background:var(--gold);} .dot.vendido{background:var(--coral);}
 
   /* ---- floor stage ---- */
-  .floor-outer{overflow:auto;margin:0 -16px 18px;padding:36px 16px 54px;max-height:78vh;}
+  /* Sem margem negativa: o mapa agora vive DENTRO da coluna esquerda do
+     .layout, com o painel de reserva colado do lado direito (pedido do dono,
+     29/09/2026: "a caixa da reserva embaixo não ficou legal"). */
+  .floor-outer{overflow:auto;margin:0;padding:36px 12px 54px;max-height:78vh;}
   .floor-stage{display:flex;justify-content:center;min-width:min-content;perspective:2000px;}
   .floor-zoom{transform-style:preserve-3d;transition:transform .25s ease;}
   .floor-grid{
@@ -484,16 +487,14 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 
   <div class="zone-summary" id="zone-summary"></div>
 
-  <div class="floor-outer">
-    <div class="floor-stage">
-      <div class="floor-zoom" id="floor-zoom">
-        <div class="floor-grid is-3d" id="floor-grid"></div>
+  <div class="layout">
+    <div class="floor-outer">
+      <div class="floor-stage">
+        <div class="floor-zoom" id="floor-zoom">
+          <div class="floor-grid is-3d" id="floor-grid"></div>
+        </div>
       </div>
     </div>
-  </div>
-
-  <div class="layout">
-    <div></div>
     <div class="panel" id="panel"></div>
   </div>
 
@@ -693,7 +694,12 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     btn.style.height = dims.h + 'px';
     btn.textContent = s.code;
     btn.title = s.code + ' · ' + (sizeLabel[s.size] || s.size);
-    btn.onclick = function(){ selectedCode = s.code; renderFloor(); renderPanel(); };
+    btn.onclick = function(){
+      selectedCode = s.code; renderFloor(); renderPanel();
+      // no celular o painel fica ABAIXO do mapa (o grid vira 1 coluna) — sem
+      // este scroll o toque parecia não fazer nada.
+      if (window.innerWidth < 860) document.getElementById('panel').scrollIntoView({behavior:'smooth', block:'nearest'});
+    };
     return btn;
   }
 

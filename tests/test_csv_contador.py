@@ -26,8 +26,19 @@ from finance.models import Lancamento, Tipo
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "053_modulo_pj.sql",
               "057_natureza_lancamento.sql",
+              "064_clientes_lojista.sql",
+              "066_pessoas_identidade.sql",
+              "067_titulos_cliente.sql",
+              "072_membro_login_web.sql",
+              "131_pessoa_cnpj.sql",
               "132_plano_contas_centros_custo.sql",
-              "143_plano_contas_locacao_buffet_servicos.sql")
+              "143_plano_contas_locacao_buffet_servicos.sql",
+              "162_titulo_parcela_do_orcamento.sql",
+              "195_titulo_aprovacao.sql",
+              "196_titulo_recorrencia.sql",
+              "197_titulo_acrescimo.sql",
+              "317_titulo_classificacao.sql",
+              "323_titulo_ajustes.sql")
 
 
 @pytest.fixture(scope="module")

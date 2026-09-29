@@ -2711,10 +2711,25 @@ def dre_pdf(pool, conta_id: int, ano: int, mes: int, empresa_nome: str) -> bytes
     return render_pdf([conteudo])
 
 
+def _cnpj_fmt(doc: str) -> str:
+    d = "".join(ch for ch in (doc or "") if ch.isdigit())
+    if len(d) == 14:
+        return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+    if len(d) == 11:
+        return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}"
+    return doc or ""
+
+
 def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
     """Relatório do mês pro contador: todos os lançamentos + títulos abertos.
 
-    CSV separado por ';' (Excel BR), valores em reais com vírgula.
+    CSV separado por ';' (Excel BR), valores em reais com vírgula. Pedido do
+    dono em 29/09/2026 (depois da Iris perguntar pelo formato): um cabeçalho
+    com empresa/CNPJ/período, no topo do arquivo, e o CÓDIGO do plano de
+    contas ao lado da categoria livre — é o que o contador de verdade bate
+    contra o plano de contas dele, a categoria é só o rótulo que o app usa.
+    Tolerante: banco sem a migração 132 (plano de contas) devolve o código em
+    branco em vez de quebrar.
     """
     def brl(cent: int) -> str:
         return f"{cent/100:.2f}".replace(".", ",")
@@ -2722,19 +2737,45 @@ def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
     ini = date(ano, mes, 1)
     fim = _mes_seguinte(ini)
     with pool.connection() as c:
-        lanc = c.execute(
-            """select data, tipo, categoria, descricao, valor_centavos, origem,
-                      natureza
-                 from lancamentos
-                where conta_id=%s and data >= %s and data < %s
-                order by data, id""",
-            (conta_id, ini, fim),
-        ).fetchall()
-    linhas = ["data;tipo;categoria;descricao;valor;origem;natureza"]
-    for d, t, cat, desc, v, orig, nat in lanc:
+        r = c.execute(
+            """select coalesce(nullif(nome_fantasia,''), nullif(razao_social,''), nome, ''),
+                      coalesce(documento,'')
+                 from contas where id=%s""",
+            (conta_id,)).fetchone()
+        empresa_nome, empresa_doc = (r[0] or "", r[1] or "") if r else ("", "")
+        tem_plano = c.execute(
+            "select to_regclass('public.plano_contas')").fetchone()[0] is not None
+        if tem_plano:
+            lanc = c.execute(
+                """select l.data, l.tipo, l.categoria, l.descricao, l.valor_centavos,
+                          l.origem, l.natureza, coalesce(p.codigo, '')
+                     from lancamentos l
+                     left join plano_contas p on p.id = l.plano_conta_id
+                    where l.conta_id=%s and l.data >= %s and l.data < %s
+                    order by l.data, l.id""",
+                (conta_id, ini, fim),
+            ).fetchall()
+        else:
+            lanc = [
+                (*row, "") for row in c.execute(
+                    """select data, tipo, categoria, descricao, valor_centavos,
+                              origem, natureza
+                         from lancamentos
+                        where conta_id=%s and data >= %s and data < %s
+                        order by data, id""",
+                    (conta_id, ini, fim),
+                ).fetchall()]
+
+    linhas = [f"Empresa;{empresa_nome}"]
+    if empresa_doc:
+        linhas.append(f"CNPJ;{_cnpj_fmt(empresa_doc)}")
+    linhas.append(f"Periodo;{mes:02d}/{ano}")
+    linhas.append("")
+    linhas.append("data;tipo;categoria;plano_conta_codigo;descricao;valor;origem;natureza")
+    for d, t, cat, desc, v, orig, nat, cod in lanc:
         desc = (desc or "").replace(";", ",").replace("\n", " ")
         linhas.append(
-            f"{d};{t};{cat};{desc};{brl(int(v or 0))};{orig};{nat or 'a definir'}")
+            f"{d};{t};{cat};{cod};{desc};{brl(int(v or 0))};{orig};{nat or 'a definir'}")
 
     abertos = listar_titulos(pool, conta_id, status="aberto")
     linhas.append("")

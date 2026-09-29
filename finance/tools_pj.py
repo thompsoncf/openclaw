@@ -1007,9 +1007,11 @@ def construir_ferramentas_evento_stands(pool, conta_id: int, livro=None,
         Ferramenta(
             nome="confirmar_comprovante_stand",
             descricao=("Registra o COMPROVANTE DE PAGAMENTO de um estande de feira que "
-                       "veio nesta mensagem (foto ou PDF do Pix) — reserva o estande "
-                       "esperando a equipe confirmar. Use quando o cliente mandar o "
-                       "comprovante pelo WhatsApp em vez de usar a página do estande. "
+                       "veio nesta mensagem em FOTO (print do Pix) — reserva o estande "
+                       "esperando a equipe confirmar. Use quando o cliente mandar a foto "
+                       "do comprovante pelo WhatsApp em vez de usar a página do estande. "
+                       "Se o cliente mandar em PDF, isso ainda não é lido por aqui — peça "
+                       "pra ele usar a página pública do estande ou mandar um print/foto. "
                        "Pergunte o código do estande (ex: G58) se ele não disse."),
             parametros={"type": "object",
                         "properties": {"codigo": {"type": "string",

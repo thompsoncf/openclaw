@@ -1970,7 +1970,11 @@ def _data(dt) -> str:
     from finance import agenda as ag
     try:
         return dt.astimezone(ag.BRT).strftime("%d/%m/%Y")
-    except (ValueError, TypeError):
+    # `date` (sem hora) não tem `astimezone` — é o caso do sinal confirmado antes
+    # de existir título (finance/vendas.pagamentos_do_orcamento devolve
+    # `sinal_pago_em.date()`), e é onde `/cockpit/orcamentos/{id}/pagamentos`
+    # quebrava com 500 (AttributeError) pra quem tinha o sinal pago assim.
+    except (ValueError, TypeError, AttributeError):
         return dt.strftime("%d/%m/%Y")
 
 

@@ -545,7 +545,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 {% set rotulo = {'livre':'Livre','pre_reservado':'Reservado','vendido':'Vendido'}[d.status] %}
 <div class="oc-hist"{% if grupo %} data-grupo="{{ grupo }}"{% endif %} data-st="{{ d.status }}" data-cod="{{ d.codigo|lower }}"{% if escondido %} hidden{% endif %}>
   <div class="oc-hist-top">
-    <div class="oc-open"{% if d.status != 'livre' %} title="Ver comprovante, contrato e cliente" onclick="ocToggle(this)"{% else %} style="cursor:default"{% endif %}>
+    <div class="oc-open" title="{% if d.status == 'livre' %}Abrir opções{% else %}Ver comprovante, contrato e cliente{% endif %}" onclick="ocToggle(this)">
       <div class="oc-stand-badge" style="background:{{ cor[0] }};color:{{ cor[1] }}"><div class="c">{{ d.codigo }}</div><div class="z">{{ tam_label.get(d.tamanho, d.tamanho) }}</div></div>
       <div class="oc-body"><b>{% if d.status == 'livre' %}Livre{% else %}{{ cli.get('empresa') or 'Interessado da página' }}{% endif %}</b>
         <div class="oc-sub">{% if d.zona and d.zona != pav_label %}{{ d.zona }} · {% endif %}{{ pav_label }}</div>
@@ -561,22 +561,31 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       </a>
       {% endif %}
       {% if d.status == 'livre' %}
-      <button class="oc-ghost-btn" type="button" onclick="mapaCopiarLink(this, '{{ d.codigo }}')">Copiar link</button>
-      <a class="oc-ghost-btn" href="/e/{{ cfg.slug }}?stand={{ d.codigo }}" target="_blank" rel="noopener">Ver na página →</a>
+      <span class="oc-ok">✓ pronto pra oferecer</span>
       {% else %}
       {% for texto, tom in pend %}<span class="oc-badge {{ tom }}">{{ texto }}</span>{% endfor %}
       {% if not pend %}<span class="oc-ok">✓ nada pendente</span>{% endif %}
+      {% endif %}
       <button class="oc-expand-btn" title="Abrir opções" onclick="ocToggle(this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </button>
-      {% endif %}
     </div>
   </div>
-  {% if d.status != 'livre' %}
+  {% if d.status == 'livre' %}
+  {#- livre expande igual (o botão de opções da maquete) — as opções são as
+      de venda: mandar o link certo pro interessado -#}
+  <div class="oc-detail" hidden>
+    <div class="oc-acoes-detail">
+      <button class="oc-ghost-btn prim" type="button" onclick="mapaCopiarLink(this, '{{ d.codigo }}')">Copiar link pro cliente</button>
+      <a class="oc-ghost-btn" href="/e/{{ cfg.slug }}?stand={{ d.codigo }}" target="_blank" rel="noopener">Ver na página →</a>
+    </div>
+    <p class="oc-vazio" style="margin:8px 0 0">O link abre a página pública já com o {{ d.codigo }} selecionado — manda direto pro interessado.</p>
+  </div>
+  {% else %}
   <div class="oc-detail" hidden>
     <div class="oc-subtabs">
-      <button class="oc-subtab on" onclick="ocTab(this,'comprovante')">Comprovante</button>
-      <button class="oc-subtab" onclick="ocTab(this,'contrato')">Contrato</button>
+      <button class="oc-subtab on" onclick="ocTab(this,'comprovante')">Anexar comprovante</button>
+      <button class="oc-subtab" onclick="ocTab(this,'contrato')">Abrir contrato</button>
       <button class="oc-subtab" onclick="ocTab(this,'cliente')">Dados do cliente</button>
     </div>
     <div class="oc-detail-body" data-tab="comprovante">

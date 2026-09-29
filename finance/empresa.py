@@ -2651,6 +2651,66 @@ def dre_por_centro(pool, conta_id: int, ano: int, mes: int) -> dict:
             "disponivel": True}
 
 
+def _brl(centavos: int) -> str:
+    return f"R$ {centavos/100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def dre_pdf(pool, conta_id: int, ano: int, mes: int, empresa_nome: str) -> bytes | None:
+    """PDF do DRE do mês, mesma estrutura da tela (dre_mes acima). Pedido da
+    Iris (cliente da Manoel Soares) via WhatsApp em 29/09/2026: "No caso da DRE
+    pode configurar pra imprimir em PDF na mesma estrutura?" — reaproveita o
+    motor de PDF que já existe pra clínica (clinica_documentos.render_pdf), sem
+    nada novo. None quando pymupdf não está disponível."""
+    from .clinica_documentos import render_pdf
+    import html as _html
+    e = _html.escape
+    dre = dre_mes(pool, conta_id, ano, mes)
+    estrutura = dre.get("estrutura") or {}
+    linhas_html = []
+    if estrutura.get("linhas"):
+        for l in estrutura["linhas"]:
+            valor = l["valor_centavos"]
+            texto = _brl(valor)
+            if "margem_pct" in l:
+                texto += f" · {l['margem_pct']}%"
+            cor = "color:#b23b2e" if valor < 0 else "color:#1a1a1a"
+            if l["tipo"] == "subtotal":
+                estilo_tr, peso = "border-top:1px solid #999", "font-weight:600"
+            elif l["tipo"] == "total":
+                estilo_tr, peso = "border-top:2px solid #333", "font-weight:700"
+            else:
+                estilo_tr, peso = "", "font-weight:400"
+            nome = e(l["nome"])
+            if l.get("n"):
+                nome += f" — {l['n']} lanç."
+            linhas_html.append(
+                f'<tr style="{estilo_tr}"><td style="padding:5px 4px;{peso}">{nome}</td>'
+                f'<td style="padding:5px 4px;text-align:right;{peso};{cor}">{texto}</td></tr>')
+    else:
+        cor_r = "#2f7d32" if dre["resultado_centavos"] >= 0 else "#b23b2e"
+        linhas_html = [
+            f'<tr><td style="padding:5px 4px">Receitas</td>'
+            f'<td style="padding:5px 4px;text-align:right;color:#2f7d32">{_brl(dre["receitas_centavos"])}</td></tr>',
+            f'<tr><td style="padding:5px 4px">(–) Despesas</td>'
+            f'<td style="padding:5px 4px;text-align:right">{_brl(dre["despesas_centavos"])}</td></tr>',
+            f'<tr style="border-top:2px solid #333"><td style="padding:5px 4px;font-weight:700">= Resultado</td>'
+            f'<td style="padding:5px 4px;text-align:right;font-weight:700;color:{cor_r}">'
+            f'{_brl(dre["resultado_centavos"])} · {dre["margem_pct"]}%</td></tr>',
+        ]
+    conteudo = (
+        f'<h2 style="margin-bottom:2px">{e(empresa_nome)}</h2>'
+        f'<p style="color:#666;font-size:9pt;margin-top:0">DRE do mês &middot; {mes:02d}/{ano}</p>'
+        f'<table style="width:100%;border-collapse:collapse;margin-top:14px;font-size:11pt">'
+        + "".join(linhas_html) + "</table>")
+    if dre.get("a_definir_n"):
+        conteudo += (
+            f'<p style="color:#a67c00;font-size:9pt;margin-top:16px">'
+            f'{_brl(dre["a_definir_centavos"])} em {dre["a_definir_n"]} lançamento(s) '
+            "ainda a classificar não entraram neste DRE.</p>")
+    conteudo += '<p style="color:#999;font-size:8pt;margin-top:26px">Gerado pelo Zaq</p>'
+    return render_pdf([conteudo])
+
+
 def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
     """Relatório do mês pro contador: todos os lançamentos + títulos abertos.
 

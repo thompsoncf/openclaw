@@ -11,7 +11,7 @@ import os
 import secrets
 
 from fastapi import APIRouter, Request, Form, Body, BackgroundTasks, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.concurrency import run_in_threadpool
 from jinja2 import Environment, DictLoader, select_autoescape
 from datetime import date as _date
@@ -5218,7 +5218,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   </div>
   {% endif %}
 
-  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
+  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a> · <a href="/painel/empresa/dre.pdf?ano={{ dre.ano }}&mes={{ dre.mes }}" target="_blank" style="color:var(--verde-claro)">baixar PDF ↓</a></div>
 </div>
 
 {% if a_classificar %}
@@ -13290,6 +13290,24 @@ def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
     csv = emp.csv_contador(pool, conta[0], ano, mes)
     return HTMLResponse(csv, media_type="text/csv; charset=utf-8", headers={
         "Content-Disposition": f'attachment; filename="empresa_{ano}_{mes:02d}.csv"'})
+
+
+@router.get("/painel/empresa/dre.pdf")
+def empresa_dre_pdf(request: Request, ano: int = 0, mes: int = 0):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    hoje = _date.today()
+    ano = ano or hoje.year
+    mes = mes if 1 <= mes <= 12 else hoje.month
+    pdf = emp.dre_pdf(pool, conta[0], ano, mes, conta[2])
+    if pdf is None:
+        return RedirectResponse("/painel/empresa", status_code=303)
+    return Response(pdf, media_type="application/pdf", headers={
+        "Cache-Control": "no-store, max-age=0", "Content-Security-Policy": "sandbox",
+        "Content-Disposition": f'inline; filename="dre_{ano}_{mes:02d}.pdf"'})
 
 
 

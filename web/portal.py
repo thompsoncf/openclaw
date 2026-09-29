@@ -11,7 +11,7 @@ import os
 import secrets
 
 from fastapi import APIRouter, Request, Form, Body, BackgroundTasks, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.concurrency import run_in_threadpool
 from jinja2 import Environment, DictLoader, select_autoescape
 from datetime import date as _date
@@ -443,6 +443,10 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
   {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
+     público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
+     _render(), não é todo mundo do nicho que vende espaço numerado. #}
+  {% if tem_pj and caps.financeiro and tem_estandes %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -504,6 +508,10 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
   {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
+     público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
+     _render(), não é todo mundo do nicho que vende espaço numerado. #}
+  {% if tem_pj and caps.financeiro and tem_estandes %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -5176,8 +5184,10 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
 <div class="emp-par{% if not (quadro_tipo and quadro_tipo|selectattr('total')|list) %} so-um{% endif %}">
 <div class="emp-col">
 <div class="card larga" id="dre">
-  <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
-    <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem"><strong>DRE do mês</strong>
+    <select onchange="location.href='/painel/empresa?mes='+this.value+'#dre'" style="font-size:.78rem;padding:.25rem .5rem;border-radius:6px;background:var(--card-2);color:var(--txt);border:1px solid var(--borda)">
+      {% for v, rotulo in meses_dre %}<option value="{{ v }}" {% if v==mes_dre_sel %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+    </select></div>
   {% if dre.estrutura and dre.estrutura.linhas %}
   <table class="dre-tbl" style="width:100%;margin-top:.6rem;font-size:.86rem">
     {% for l in dre.estrutura.linhas %}
@@ -5218,7 +5228,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   </div>
   {% endif %}
 
-  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
+  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a> · <a href="/painel/empresa/dre.pdf?ano={{ dre.ano }}&mes={{ dre.mes }}" target="_blank" style="color:var(--verde-claro)">baixar PDF ↓</a></div>
 </div>
 
 {% if a_classificar %}
@@ -8535,6 +8545,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("hoje", "/painel/hoje"),
                  ("clinica", "/painel/clinica"),
                  ("obras", "/painel/obras"),
+                 ("estandes", "/painel/eventos/estandes"),
                  ("follow_up", "/painel/follow-up"),
                  ("novidades", "/painel/novidades"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
@@ -8602,6 +8613,21 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             from finance import follow_up as _fu
             ctx["tem_follow_up"] = bool(
                 ctx.get("raio_x_perfil") and ctx["raio_x_perfil"]["chave"] in _fu.PERFIS_COM_TELA)
+        # Estandes de feira (finance/evento_stands, migração 448) é opt-in DENTRO
+        # do nicho 'eventos' — Prime Eventos (conta 34) não vende estande, só a
+        # Outlet Chic (conta 40) por enquanto. Por isso o gate não é
+        # `raio_x_perfil.chave == 'eventos'` (apareceria pra quem não usa a
+        # feature, como Obras faria pra quem não é construção) — é a config
+        # existir de verdade. Sem este item o painel existia mas não tinha como
+        # chegar nele sem colar a URL (achado do dono, 29/09/2026).
+        if "tem_estandes" not in ctx:
+            ctx["tem_estandes"] = False
+            if ctx.get("raio_x_perfil") and ctx["raio_x_perfil"]["chave"] == "eventos":
+                try:
+                    from finance import evento_stands as _es
+                    ctx["tem_estandes"] = bool(_es.obter_config(get_pool(), _c[0]))
+                except Exception:
+                    pass
     if "beta_gratis" not in ctx:
         try:
             from finance import config_app as _cfg
@@ -11832,7 +11858,7 @@ def _empresa_resumo(titulos: list[dict], planej: dict | None, dre: dict,
 
 
 @router.get("/painel/empresa", response_class=HTMLResponse)
-def painel_empresa(request: Request):
+def painel_empresa(request: Request, mes: str = ""):
     """Visão geral do módulo Empresa (PJ). Só pra conta com o módulo ativo."""
     from finance import empresa as emp
     conta = conta_logada(request)
@@ -11849,12 +11875,33 @@ def painel_empresa(request: Request):
                        nichos_lista=_nichos.lista_nichos(), eh_fornecedor=bool(conta[8]),
                        identidade=emp.obter_identidade(pool, conta[0]), margem_alvo=60.0)
     hoje = _date.today()
+    # O SELETOR DE MÊS DO DRE (pedido do dono em 29/09/2026, depois da Iris
+    # reparar que só dava pra ver o mês atual): só o card do DRE (e o "ver por
+    # centro de custo" dentro dele) olha pro mês escolhido — o resto da aba
+    # (títulos, folha, planejamento, "a classificar"...) é trabalho do MÊS
+    # ATUAL de verdade, e continua em `hoje`. Mesmo padrão de `?mes=AAAA-MM`
+    # que a aba Financeiro já usa.
+    try:
+        ano_dre, mes_dre = (int(x) for x in mes.split("-")) if mes else (hoje.year, hoje.month)
+    except ValueError:
+        ano_dre, mes_dre = hoje.year, hoje.month
+    mes_dre_sel = f"{ano_dre:04d}-{mes_dre:02d}"
+    _nomes_mes = ["jan", "fev", "mar", "abr", "mai", "jun",
+                 "jul", "ago", "set", "out", "nov", "dez"]
+    meses_dre = []
+    _y, _m = hoje.year, hoje.month
+    for _ in range(6):
+        meses_dre.append((f"{_y:04d}-{_m:02d}", f"{_nomes_mes[_m-1]}/{_y}"))
+        _m -= 1
+        if _m == 0:
+            _m = 12
+            _y -= 1
     # Só o DRE, não o dashboard inteiro. Esta tela já mostrou o bloco "Visão do negócio"
     # do /painel no topo — duplicata da mesma tela — e junto vinha o custo do
     # _painel_dashboard completo (resumo de títulos, fluxo de 4 semanas, MRR e a query do
     # funil de orçamentos) só pra aproveitar o `dre` de dentro dele. Sem o bloco, o resto
     # não tem consumidor: o único que a Empresa usa é este.
-    dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
+    dre = emp.dre_mes(pool, conta[0], ano_dre, mes_dre)
     # Plano de contas (árvore + liga/desliga), centros de custo e DRE por centro.
     # Tolerante: se a migração 132 ainda não rodou, as seções ficam vazias.
     from finance import plano_contas as _pc
@@ -11862,7 +11909,7 @@ def painel_empresa(request: Request):
     try:
         plano_arvore = _pc.arvore_habilitada(pool, conta[0])
         centros = _pc.listar_centros(pool, conta[0], incluir_inativos=True)
-        dre_centro = emp.dre_por_centro(pool, conta[0], hoje.year, hoje.month)
+        dre_centro = emp.dre_por_centro(pool, conta[0], ano_dre, mes_dre)
         # Painel "A classificar": lançamentos de empresa do mês sem conta contábil,
         # com as opções (contas habilitadas + centros ativos) pra resolver ali.
         a_classificar = LivroCaixa(pool, conta[0]).lancamentos_a_classificar(
@@ -12037,7 +12084,8 @@ def painel_empresa(request: Request):
                    # divide espaço com "aguardando você" e o nome do fornecedor.
                    RITMO_SELO={"quinzenal": "quinzenal", "mensal": "mensal",
                                "anual": "anual"},
-                   dre=dre, titulos=titulos, tit_blocos=tit_blocos,
+                   dre=dre, mes_dre_sel=mes_dre_sel, meses_dre=meses_dre,
+                   titulos=titulos, tit_blocos=tit_blocos,
                    tit_atrasadas=tit_atrasadas, planej=planej,
                    CAT_TITULO={"pagar": emp.categorias_titulo("pagar"),
                                "receber": emp.categorias_titulo("receber")},
@@ -13290,6 +13338,24 @@ def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
     csv = emp.csv_contador(pool, conta[0], ano, mes)
     return HTMLResponse(csv, media_type="text/csv; charset=utf-8", headers={
         "Content-Disposition": f'attachment; filename="empresa_{ano}_{mes:02d}.csv"'})
+
+
+@router.get("/painel/empresa/dre.pdf")
+def empresa_dre_pdf(request: Request, ano: int = 0, mes: int = 0):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    hoje = _date.today()
+    ano = ano or hoje.year
+    mes = mes if 1 <= mes <= 12 else hoje.month
+    pdf = emp.dre_pdf(pool, conta[0], ano, mes, conta[2])
+    if pdf is None:
+        return RedirectResponse("/painel/empresa", status_code=303)
+    return Response(pdf, media_type="application/pdf", headers={
+        "Cache-Control": "no-store, max-age=0", "Content-Security-Policy": "sandbox",
+        "Content-Disposition": f'inline; filename="dre_{ano}_{mes:02d}.pdf"'})
 
 
 

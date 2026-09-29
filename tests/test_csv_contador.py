@@ -26,6 +26,7 @@ from finance.models import Lancamento, Tipo
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "053_modulo_pj.sql",
               "057_natureza_lancamento.sql",
+              "058_dados_empresa.sql",
               "064_clientes_lojista.sql",
               "066_pessoas_identidade.sql",
               "067_titulos_cliente.sql",
@@ -60,7 +61,9 @@ def pool():
 def conta_id(pool):
     with pool.connection() as c:
         cid = c.execute(
-            "insert into contas (tipo, nome) values ('pj', 'Teste CSV') returning id"
+            """insert into contas (tipo, nome, nome_fantasia, documento)
+                    values ('pj', 'Teste CSV', 'Padaria do Zé', '12345678000199')
+               returning id"""
         ).fetchone()[0]
         c.commit()
     return cid
@@ -93,3 +96,59 @@ def test_o_csv_tem_a_secao_de_titulos_mesmo_sem_nenhum_aberto(pool, conta_id):
     csv = emp.csv_contador(pool, conta_id, hoje.year, hoje.month)
     assert "TITULOS EM ABERTO" in csv
     assert "vencimento;tipo;descricao;contraparte;valor;atrasado" in csv
+
+
+# ---------------------------------------------- cabeçalho (empresa/CNPJ/período)
+
+def test_o_cabecalho_traz_empresa_cnpj_e_periodo(pool, conta_id):
+    csv = emp.csv_contador(pool, conta_id, 2026, 9)
+    linhas = csv.lstrip("﻿").split("\n")
+    assert linhas[0] == "Empresa;Padaria do Zé"
+    assert linhas[1] == "CNPJ;12.345.678/0001-99"
+    assert linhas[2] == "Periodo;09/2026"
+    assert linhas[3] == ""
+    assert linhas[4] == (
+        "data;tipo;categoria;plano_conta_codigo;descricao;valor;origem;natureza")
+
+
+def test_o_cabecalho_pula_o_cnpj_quando_a_conta_nao_tem_documento(pool):
+    with pool.connection() as c:
+        cid = c.execute(
+            "insert into contas (tipo, nome) values ('pj', 'Sem Documento') returning id"
+        ).fetchone()[0]
+        c.commit()
+    hoje = date.today()
+    csv = emp.csv_contador(pool, cid, hoje.year, hoje.month)
+    linhas = csv.lstrip("﻿").split("\n")
+    assert linhas[0] == "Empresa;Sem Documento"
+    assert linhas[1] == "Periodo;%02d/%d" % (hoje.month, hoje.year)
+    assert not any(l.startswith("CNPJ;") for l in linhas)
+
+
+# --------------------------------------- código do plano de contas por lançamento
+
+def test_o_lancamento_leva_o_codigo_do_plano_de_contas(pool, conta_id):
+    from finance import plano_contas as pc
+    ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
+    hoje = date.today()
+    LivroCaixa(pool, conta_id).adicionar(
+        Lancamento(tipo=Tipo.RECEITA, valor_centavos=50000, categoria="Vendas",
+                  descricao="Venda classificada", natureza="empresa",
+                  plano_conta_id=ids["1.1.02"]), forcar=True)
+
+    csv = emp.csv_contador(pool, conta_id, hoje.year, hoje.month)
+    linha = next(l for l in csv.split("\n") if "Venda classificada" in l)
+    campos = linha.split(";")
+    assert campos[3] == "1.1.02"
+
+
+def test_o_lancamento_sem_plano_de_contas_leva_o_codigo_em_branco(pool, conta_id):
+    hoje = date.today()
+    LivroCaixa(pool, conta_id).adicionar(
+        Lancamento(tipo=Tipo.DESPESA, valor_centavos=8000, categoria="Outros",
+                  descricao="Sem plano ainda", natureza="empresa"), forcar=True)
+
+    csv = emp.csv_contador(pool, conta_id, hoje.year, hoje.month)
+    linha = next(l for l in csv.split("\n") if "Sem plano ainda" in l)
+    campos = linha.split(";")
+    assert campos[3] == ""

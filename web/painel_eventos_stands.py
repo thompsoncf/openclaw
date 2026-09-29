@@ -48,7 +48,7 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from db.conexao import get_pool
@@ -80,6 +80,20 @@ _MES = ["jan", "fev", "mar", "abr", "mai", "jun",
 
 def _data_curta(dt) -> str:
     return f"{dt.day} {_MES[dt.month - 1]}" if dt else "—"
+
+
+def _para_centavos(txt: str) -> int | None:
+    """'3.500', 'R$ 3.500,00', '3500' -> 350000. Formato BR: ponto é milhar,
+    vírgula é decimal. Vazio/zero/lixo -> None (campo não mexe no preço)."""
+    t = (txt or "").strip().replace("R$", "").replace(" ", "")
+    if not t:
+        return None
+    t = t.replace(".", "").replace(",", ".")
+    try:
+        v = round(float(t) * 100)
+    except ValueError:
+        return None
+    return v if v > 0 else None
 
 
 def _acesso(request: Request, papeis=_PAPEIS_GERIR):
@@ -188,13 +202,78 @@ def painel_eventos_stands(request: Request):
             funil["fechada"].append(item)
     funil["precisa_de_mim"].sort(key=lambda s: s["pre_reserva_ate"] or "")
 
+    # o vínculo (interessado/proposta/contrato) POR CÓDIGO, pra lista completa
+    # não repetir as consultas do funil
+    vinculos = {d["codigo"]: d for grupo in funil.values() for d in grupo}
+
+    # VALORES POR TAMANHO (achado do dono, 29/09/2026: "onde eu cadastro o
+    # valor?? por tamanho, alterável"): o valor mais comum de cada tamanho
+    # pré-preenche o formulário; misturado = aviso, salvar iguala os livres.
+    from collections import Counter
+    precos_tam = []
+    for tam in ("2x2", "3x2", "3x3", "4x2", "4x3", "tenda", "personalizado"):
+        do_tam = [s for s in stands if s["tamanho"] == tam]
+        if not do_tam:
+            continue
+        cont = Counter(int(s["preco_centavos"] or 0) for s in do_tam)
+        comum = cont.most_common(1)[0][0]
+        precos_tam.append({
+            "tamanho": tam, "rotulo": _TAM_LABEL.get(tam, tam),
+            "valor": (brl(comum)[3:] if comum else ""),
+            "n_livres": sum(1 for s in do_tam if s["status"] == "livre"),
+            "n_total": len(do_tam), "misto": len(cont) > 1})
+
     return _render(
         "estandes", request, titulo="Estandes", secao_ativa="estandes", brl=brl,
         cfg=cfg, kpis=kpis, por_pavilhao=por_pavilhao, funil=funil,
         cor_tam=_COR_TAM, tam_label=_TAM_LABEL, data_curta=_data_curta,
-        mapa_json=mapa_json, pode_gerir=pode_gerir,
+        mapa_json=mapa_json, pode_gerir=pode_gerir, stands=stands,
+        vinculos=vinculos, precos_tam=precos_tam,
         erro=(request.query_params.get("erro") or "").strip(),
         ok=(request.query_params.get("ok") or "").strip())
+
+
+@router.post("/painel/eventos/estandes/precos")
+def salvar_precos(request: Request,
+                  preco_2x2: str = Form(""), preco_3x2: str = Form(""),
+                  preco_3x3: str = Form(""), preco_4x2: str = Form(""),
+                  preco_4x3: str = Form(""), preco_tenda: str = Form(""),
+                  preco_personalizado: str = Form("")):
+    """O valor por TAMANHO — o cadastro de preço que faltava (o seed inicial
+    era SQL na mão; achado do dono, 29/09/2026). Só mexe em quem está LIVRE:
+    stand reservado/vendido mantém o valor do negócio que o comprovante
+    fechou — reprecificar por baixo de um Pix já enviado mudaria o combinado
+    sem ninguém avisar. Campo em branco/ilegível não mexe naquele tamanho."""
+    conta, cfg_ou_redir = _acesso(request)
+    if conta is None:
+        return cfg_ou_redir
+    valores = {"2x2": preco_2x2, "3x2": preco_3x2, "3x3": preco_3x3,
+               "4x2": preco_4x2, "4x3": preco_4x3, "tenda": preco_tenda,
+               "personalizado": preco_personalizado}
+    pool = get_pool()
+    mexidos = 0
+    tams = 0
+    with pool.connection() as c:
+        for tam, bruto in valores.items():
+            cent = _para_centavos(bruto)
+            if cent is None:
+                continue
+            cur = c.execute(
+                """update evento_stands set preco_centavos=%s, atualizado_em=now()
+                    where conta_id=%s and tamanho=%s and status='livre'
+                      and preco_centavos is distinct from %s""",
+                (cent, conta[0], tam, cent))
+            if cur.rowcount:
+                tams += 1
+                mexidos += cur.rowcount
+        c.commit()
+    if not mexidos:
+        return RedirectResponse("/painel/eventos/estandes?ok=Nenhum valor mudou.",
+                                status_code=303)
+    return RedirectResponse(
+        f"/painel/eventos/estandes?ok=Valores atualizados: {mexidos} stand(s) "
+        f"livre(s) em {tams} tamanho(s). Reservados e vendidos mantêm o valor do negócio.",
+        status_code=303)
 
 
 @router.post("/painel/eventos/estandes/{codigo}/confirmar")
@@ -338,6 +417,37 @@ _CSS = r"""<style>
 .es-pag .mapa-detalhe .md-badge.st-vendido{background:var(--coral);color:#fff}
 .es-pag .mapa-detalhe .md-acoes{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 
+/* ---- valores por tamanho (o cadastro de preço) ---- */
+.es-pag .preco-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:18px;box-shadow:var(--shadow)}
+.es-pag .preco-card h3{margin:0 0 4px;font-size:14px}
+.es-pag .preco-obs{margin:0 0 12px;color:var(--fg-dim);font-size:11.5px}
+.es-pag .preco-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 14px;margin-bottom:12px}
+.es-pag .preco-item span{display:block;font-size:10px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.03em;margin-bottom:3px}
+.es-pag .preco-item .pin{display:flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.es-pag .preco-item .pin b{font-size:11px;color:var(--fg-dim)}
+.es-pag .preco-item input{background:none;border:0;color:var(--fg);font-family:var(--mono,monospace);font-size:13px;width:100%;min-height:0;margin:0;padding:0}
+.es-pag .preco-item input:disabled{color:var(--fg-dim)}
+.es-pag .preco-item small{display:block;font-size:9.5px;color:var(--fg-dim);margin-top:3px}
+.es-pag .preco-item small.misto{color:var(--gold-strong)}
+
+/* ---- lista completa (o cadastro, stand a stand) ---- */
+.es-pag .lst-filtros{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.es-pag .lst-filtros input[type=text]{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;color:var(--fg);font-family:inherit;font-size:12px;padding:7px 13px;width:150px;min-height:0;margin:0}
+.es-pag .tbl-wrap{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:4px 10px 8px;margin-bottom:18px;max-height:60vh}
+.es-pag table.es-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.es-pag .es-tbl th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--fg-dim);padding:9px 10px 6px;position:sticky;top:0;background:var(--surface)}
+.es-pag .es-tbl td{padding:7px 10px;border-top:1px solid var(--line);white-space:nowrap}
+.es-pag .es-tbl .cod{font-family:var(--mono,monospace);font-weight:700}
+.es-pag .es-tbl .num{font-family:var(--mono,monospace)}
+.es-pag .es-tbl .stb{font-size:10px;font-weight:700;padding:3px 9px;border-radius:999px}
+.es-pag .es-tbl .stb.livre{background:color-mix(in srgb, var(--mint) 25%, var(--surface-2));color:var(--mint)}
+.es-pag .es-tbl .stb.pre_reservado{background:color-mix(in srgb, var(--gold) 25%, var(--surface-2));color:var(--gold-strong)}
+.es-pag .es-tbl .stb.vendido{background:color-mix(in srgb, var(--coral) 30%, var(--surface-2));color:var(--coral-strong)}
+.es-pag .es-tbl a{color:var(--mint);text-decoration:none;font-weight:600}
+.es-pag .es-tbl .mini{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:10.5px;padding:4px 9px;border-radius:7px;border:1px solid var(--line);background:var(--surface-2);color:var(--fg);width:auto;min-height:0;margin:0}
+.es-pag .es-tbl .mini:hover{border-color:var(--mint);color:var(--mint)}
+.es-pag .es-tbl .dim{color:var(--fg-dim)}
+
 /* ---- funil de propostas (maquete: .fn-tabs/.oc-*) ---- */
 .es-pag .fn-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .es-pag .fn-tab{
@@ -451,6 +561,23 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   {% endfor %}
 </div>
 
+<div class="preco-card">
+  <h3>Valores por tamanho</h3>
+  <p class="preco-obs">O preço que a página pública mostra. Salvar aplica em quem está <b>livre</b> — stand reservado ou vendido mantém o valor do negócio fechado.{% if not pode_gerir %} <b>Só dono/gestor altera.</b>{% endif %}</p>
+  <form method="post" action="/painel/eventos/estandes/precos">
+    <div class="preco-grid">
+      {% for p in precos_tam %}
+      <div class="preco-item">
+        <span>{{ p.rotulo }}</span>
+        <label class="pin"><b>R$</b><input type="text" name="preco_{{ p.tamanho }}" value="{{ p.valor }}" inputmode="decimal" {% if not pode_gerir %}disabled{% endif %}></label>
+        <small{% if p.misto %} class="misto"{% endif %}>{{ p.n_livres }} livres de {{ p.n_total }}{% if p.misto %} · valores diferentes — salvar iguala os livres{% endif %}</small>
+      </div>
+      {% endfor %}
+    </div>
+    {% if pode_gerir %}<button class="oc-ghost-btn prim" type="submit">Salvar valores</button>{% endif %}
+  </form>
+</div>
+
 <h3 class="es-sec">Todos os stands</h3>
 <p class="es-sec-sub">O cadastro completo, na MESMA planta da página pública — toca num stand pra ver a situação{% if pode_gerir %} e agir{% endif %}. Livre? Copia o link e manda pro interessado.</p>
 
@@ -458,6 +585,46 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="legend-mapa" id="mapa-legenda"></div>
 <div class="mapa-outer"><div class="mapa-grid" id="mapa-grid"></div></div>
 <div class="mapa-detalhe" id="mapa-detalhe" hidden></div>
+
+<h3 class="es-sec">Lista de stands</h3>
+<p class="es-sec-sub">Os {{ stands|length }} stands em lista — com o interessado e o vínculo (proposta/contrato) de cada um.</p>
+<div class="lst-filtros">
+  <button class="fn-tab on" data-f="" onclick="lstStatus(this)">Todos <span class="n">{{ stands|length }}</span></button>
+  <button class="fn-tab" data-f="livre" onclick="lstStatus(this)"><span class="pt" style="background:var(--mint)"></span>Livres <span class="n">{{ kpis.get('livre',0) }}</span></button>
+  <button class="fn-tab" data-f="pre_reservado" onclick="lstStatus(this)"><span class="pt" style="background:var(--gold)"></span>Reservados <span class="n">{{ kpis.get('pre_reservado',0) }}</span></button>
+  <button class="fn-tab" data-f="vendido" onclick="lstStatus(this)"><span class="pt" style="background:var(--coral)"></span>Vendidos <span class="n">{{ kpis.get('vendido',0) }}</span></button>
+  <input type="text" id="lst-busca" placeholder="Buscar código…" oninput="lstFiltra()">
+</div>
+<div class="tbl-wrap">
+<table class="es-tbl">
+  <thead><tr><th>Stand</th><th>Tamanho</th><th>Zona</th><th>Pavilhão</th><th>Valor</th><th>Status</th><th>Interessado</th><th>Vínculo</th><th></th></tr></thead>
+  <tbody id="lst-corpo">
+  {% for s in stands %}
+  {% set v = vinculos.get(s.codigo) %}
+  <tr data-st="{{ s.status }}" data-cod="{{ s.codigo|lower }}">
+    <td class="cod">{{ s.codigo }}</td>
+    <td>{{ tam_label.get(s.tamanho, s.tamanho) }}</td>
+    <td>{{ s.zona or '—' }}</td>
+    <td>{{ s.pavilhao|replace('_',' ')|title }}</td>
+    <td class="num">{% if s.preco_centavos %}{{ brl(s.preco_centavos) }}{% else %}—{% endif %}</td>
+    <td><span class="stb {{ s.status }}">{{ {'livre':'Livre','pre_reservado':'Reservado','vendido':'Vendido'}[s.status] }}</span></td>
+    <td>{% if v and v.cliente.get('empresa') %}{{ v.cliente.empresa }}{% elif s.status != 'livre' %}<span class="dim">sem cadastro</span>{% else %}<span class="dim">—</span>{% endif %}</td>
+    <td>
+      {% if v and v.contrato %}
+        <a href="/contrato/{{ v.contrato.token }}" target="_blank">{% if v.contrato.assinado_em %}✓ contrato assinado{% else %}⏳ contrato enviado{% endif %}</a>
+      {% elif s.orcamento_id %}
+        {% if pode_gerir %}<a href="/painel/servicos?ab={{ s.orcamento_id }}">proposta vinculada</a>{% else %}proposta vinculada{% endif %}
+      {% else %}<span class="dim">—</span>{% endif %}
+    </td>
+    <td>
+      {% if s.status == 'livre' %}<button class="mini" type="button" onclick="mapaCopiarLink(this, '{{ s.codigo }}')">copiar link</button>
+      {% else %}<button class="mini" type="button" onclick="mapaAbrirFunil('{{ s.codigo }}')">abrir no funil</button>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
 
 <h3 class="es-sec">Propostas — orçamento e contrato</h3>
 <p class="es-sec-sub">Sinal, parcelas e contrato moram na proposta — o mapa só mostra pra onde ela aponta.</p>
@@ -757,6 +924,19 @@ function ocTab(btn, tab){
   var detail = btn.closest('.oc-detail');
   detail.querySelectorAll('.oc-subtab').forEach(function(b){ b.classList.toggle('on', b === btn); });
   detail.querySelectorAll('.oc-detail-body').forEach(function(el){ el.hidden = el.dataset.tab !== tab; });
+}
+var lstF = '';
+function lstStatus(btn){
+  lstF = btn.dataset.f;
+  document.querySelectorAll('.lst-filtros .fn-tab').forEach(function(b){ b.classList.toggle('on', b === btn); });
+  lstFiltra();
+}
+function lstFiltra(){
+  var q = (document.getElementById('lst-busca').value || '').trim().toLowerCase();
+  document.querySelectorAll('#lst-corpo tr').forEach(function(tr){
+    var ok = (!lstF || tr.dataset.st === lstF) && (!q || tr.dataset.cod.indexOf(q) !== -1);
+    tr.hidden = !ok;
+  });
 }
 </script>
 {% endblock %}"""

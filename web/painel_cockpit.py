@@ -9449,6 +9449,8 @@ _STANDS_CSS = """<style>
 .stgrid .dec.avenue{border:none;opacity:.6;justify-content:flex-start;padding-top:6px}
 .stgrid .dec.gate{border-style:solid}
 .stgrid .dec.wc{border-style:dotted}
+.stgrid .dec.avenueh{border:none;font-size:7.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.6}
+.stgrid .dec.faixa{border:none;background:#CFC8B8;color:#3A362C;font-weight:800;letter-spacing:.06em;font-size:8.5px}
 .stdet{margin:.7rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);
   border-radius:12px;background:var(--surface,#121A16)}
 .stdet .cod{font-family:var(--mono,monospace);font-weight:800;font-size:1.05rem;margin-right:.5rem}
@@ -9467,7 +9469,9 @@ _STANDS_CSS = """<style>
 
 _STANDS_JS = r"""
   var tamLabel={'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
-  var dims={'2x2':{w:24,h:20},'3x2':{w:29,h:20},'3x3':{w:29,h:25},'4x2':{w:34,h:20},'4x3':{w:34,h:25},'tenda':{w:34,h:20},'personalizado':{w:34,h:25}};
+  // pegada proporcional (largura=frente, altura=fundo) escalada pra grid de 30px
+  var sizeBase={'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
+  var ESCALA=30/34;
   var pav='inferior', sel=null;
   function esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 
@@ -9482,12 +9486,13 @@ _STANDS_JS = r"""
     pavsEl.appendChild(b);
   });
 
-  function tile(code){
+  function tile(code, def){
     var s=STANDS[code]; if(!s)return null;
     var b=document.createElement('button');
     b.className='std '+s.status+(code===sel?' sel':'');
-    var d=dims[s.tamanho]||{w:29,h:20};
-    b.style.width=d.w+'px'; b.style.height=d.h+'px';
+    var base=sizeBase[s.tamanho]||{w:29,h:23};
+    b.style.width=Math.round(((def&&def.w)||base.w)*ESCALA)+'px';
+    b.style.height=Math.round(((def&&def.h)||base.h)*ESCALA)+'px';
     b.textContent=code;
     b.onclick=function(){sel=code;render();detalhe();
       document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});};
@@ -9515,7 +9520,7 @@ _STANDS_JS = r"""
       var cel=document.createElement('div'); cel.className='cel';
       for(var n=d.from;n<=d.to;n++){
         var num=d.prefix==='i'?String(n).padStart(2,'0'):String(n);
-        var t=tile(d.prefix+num); if(t)cel.appendChild(t);
+        var t=tile(d.prefix+num, d); if(t)cel.appendChild(t);
       }
       blk.appendChild(cel); grid.appendChild(blk);
     });

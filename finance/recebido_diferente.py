@@ -1,4 +1,5 @@
-"""Quando o dinheiro que entrou não fecha com a parcela — pedido 9 do dono.
+"""Quando o dinheiro que entrou (ou saiu) não fecha com a parcela — pedido 9 do
+dono, e a extensão pra CONTAS A PAGAR de 29/09/2026.
 
 "Ajuste da parcela do valor do sinal [quando] for outro valor que não o mesmo que
 foi gerado — se pode automatizar ou manual" (23/09/2026). A resposta dele, no
@@ -10,15 +11,26 @@ mesmo dia, depois do mockup:
 Então são DOIS caminhos, e nenhum é automático — a tela pergunta, o gestor
 escolhe, e só aí algo muda:
 
-* ENTROU A MENOS -> `restante`: a parcela passa a valer o que entrou e nasce uma
-  conta NOVA com o que falta, no MESMO vencimento (a cobrança continua atrasada
-  se estava). Ou `desconto`, quando a diferença foi combinada — o caminho que a
-  baixa já tinha (acréscimo negativo, migração 197).
+* ENTROU/SAIU A MENOS -> `restante`: a parcela passa a valer o que entrou (ou o
+  que foi pago) e nasce uma conta NOVA com o que falta. Ou `desconto`, quando a
+  diferença foi combinada — o caminho que a baixa já tinha (acréscimo negativo,
+  migração 197).
 
-* ENTROU A MAIS -> `abater`: a parcela passa a valer o que entrou e o que passou
-  ABATE da parcela que o gestor escolher; se passar dela, o resto segue pras
-  seguintes, por vencimento. Ou `juros`, quando o a mais foi multa e juros do
-  atraso — de novo o caminho que já existia.
+  O VENCIMENTO da conta que falta NÃO é o mesmo nos dois lados, de propósito:
+  receber cobra sozinho, então o vencimento repete o do título original (a
+  cobrança continua atrasada se estava) — `vencimento_sobra` vem `None`. Pagar
+  depende de combinar com o fornecedor quando o resto sai; não tem regra que
+  adivinhe isso, então `vencimento_sobra` é OBRIGATÓRIO e vem em branco na tela
+  — "sempre pergunta pro gestor" vale pra data também (mockup
+  docs/mockups/contas_pagar_baixa_parcial.html, aprovado 29/09/2026).
+
+* ENTROU/PAGOU A MAIS -> `abater` (só receber): a parcela passa a valer o que
+  entrou e o que passou ABATE da parcela que o gestor escolher; se passar dela,
+  o resto segue pras seguintes, por vencimento. Ou `juros` (os dois lados),
+  quando o a mais foi multa e juros do atraso — de novo o caminho que já
+  existia. Pagar não ganhou `abater`: abater crédito na PRÓXIMA conta do mesmo
+  fornecedor não foi pedido, e um crédito mal calculado ali é dinheiro que some
+  da conta errada — fica de fora até ter pedido de verdade.
 
 TUDO NUMA TRANSAÇÃO SÓ. As parcelas mudam e a baixa acontece juntas
 (`dar_baixa_titulo(conn=...)`): o crédito só abate se o dinheiro de fato entrou
@@ -29,17 +41,23 @@ NADA SE PERDE (regra 0): cada conta mexida ganha uma linha em `titulo_ajustes`
 inteira não é apagada: vira `cancelado`, com o valor combinado intacto e o
 motivo na descrição.
 
-O caso que motivou: orçamento nº 23 da Prime — sinal combinado de R$ 2.340,00,
-conta editada à mão pra R$ 2.415,00 e baixada; R$ 75,00 a mais que não abateram
-nada. `creditos_pendentes` acha esses casos já baixados e oferece o mesmo abater.
+O caso que motivou o lado receber: orçamento nº 23 da Prime — sinal combinado
+de R$ 2.340,00, conta editada à mão pra R$ 2.415,00 e baixada; R$ 75,00 a mais
+que não abateram nada. `creditos_pendentes` acha esses casos já baixados e
+oferece o mesmo abater. O lado pagar veio de um pedido direto do dono: fluxo de
+caixa apertado paga uma PARTE do boleto do fornecedor, combina o resto pra
+outra data, e não havia onde registrar isso sem lançar dinheiro que não saiu.
 """
 from __future__ import annotations
 
 from datetime import date, datetime, time
 
-#: As escolhas que a tela oferece, por lado da diferença.
+#: As escolhas que a tela oferece do lado que falta — igual nos dois tipos.
 MENOS = ("restante", "desconto")
+#: Do lado que sobra: receber ganha "abater" (crédito noutra parcela); pagar só
+#: "juros" — abater na próxima conta do fornecedor não foi pedido (ver acima).
 MAIS = ("abater", "juros")
+MAIS_PAGAR = ("juros",)
 
 
 def _titulo(c, conta_id: int, titulo_id: int):
@@ -183,32 +201,48 @@ def _avisar_orcamento_do_sinal(c, conta_id: int, titulo_id: int, pago_em: date) 
 
 def baixar(pool, conta_id: int, titulo_id: int, recebido_centavos: int | None,
            destino: str = "", alvo_id: int | None = None,
-           data_pagto: date | None = None, membro_id: int | None = None) -> dict:
-    """A baixa de uma conta a receber com o valor que DE FATO entrou.
+           data_pagto: date | None = None, membro_id: int | None = None,
+           vencimento_sobra: date | None = None) -> dict:
+    """A baixa de um título (a receber ou a pagar) com o valor que DE FATO
+    entrou ou foi pago.
 
     `recebido_centavos` None (ou igual à parcela) é a baixa de sempre. Diferente,
-    exige `destino` do lado certo (MENOS ou MAIS) — sem ele, nada acontece e a
-    tela pergunta de novo. Devolve o que `dar_baixa_titulo` devolve, mais
-    `restante_id` quando nasceu a conta do que falta."""
+    exige `destino` do lado certo (MENOS ou MAIS/MAIS_PAGAR, conforme o tipo do
+    título) — sem ele, nada acontece e a tela pergunta de novo.
+
+    `vencimento_sobra` só é lido no `restante` de um título a PAGAR — lá é
+    OBRIGATÓRIO (não tem regra que adivinhe quando o fornecedor recebe o resto;
+    ver o módulo). No `restante` de um título a RECEBER é ignorado: o vencimento
+    da conta que falta continua copiando o do título original.
+
+    Devolve o que `dar_baixa_titulo` devolve, mais `restante_id` quando nasceu a
+    conta do que falta, e `tipo` (do título baixado, pra quem chama montar a
+    mensagem certa)."""
     from finance import empresa as emp
     data_pagto = data_pagto or date.today()
     with pool.connection() as c:
         t = _titulo(c, conta_id, titulo_id)
         if not t:
             return {"ok": False, "erro": "Título não encontrado."}
+        tipo = t[1]
         valor = int(t[3])
         dif = 0 if recebido_centavos is None else int(recebido_centavos) - valor
-        if t[1] != "receber" or dif == 0:
+        if dif == 0:
             r = emp.dar_baixa_titulo(pool, conta_id, titulo_id, data_pagto=data_pagto,
                                      membro_id=membro_id, conn=c)
         else:
             if t[2] != "aberto":
                 return {"ok": False, "erro": f"Título já está '{t[2]}'."}
             if int(recebido_centavos) <= 0:
-                return {"ok": False, "erro": "Diga quanto entrou."}
-            if (dif < 0 and destino not in MENOS) or (dif > 0 and destino not in MAIS):
-                return {"ok": False, "erro": "Entrou um valor diferente da parcela: "
+                return {"ok": False, "erro": "Diga quanto " +
+                                             ("entrou." if tipo == "receber" else "você pagou.")}
+            mais_validos = MAIS if tipo == "receber" else MAIS_PAGAR
+            if (dif < 0 and destino not in MENOS) or (dif > 0 and destino not in mais_validos):
+                verbo = "Entrou" if tipo == "receber" else "Você pagou"
+                return {"ok": False, "erro": f"{verbo} um valor diferente da parcela: "
                                              "escolha o que fazer com a diferença."}
+            if destino == "restante" and tipo == "pagar" and not vencimento_sobra:
+                return {"ok": False, "erro": "Escolha a data da conta que ainda falta pagar."}
             if destino in ("desconto", "juros"):
                 r = emp.dar_baixa_titulo(pool, conta_id, titulo_id, data_pagto=data_pagto,
                                          membro_id=membro_id, acrescimo_centavos=dif, conn=c)
@@ -226,17 +260,21 @@ def baixar(pool, conta_id: int, titulo_id: int, recebido_centavos: int | None,
                         membro_id)
                 restante_id = None
                 if destino == "restante":
+                    # receber copia o vencimento do título original (coalesce com
+                    # vencimento_sobra=None); pagar usa a data que o gestor deu —
+                    # a validação acima já garantiu que ela existe.
                     restante_id = c.execute(
                         """insert into titulos
                              (conta_id, tipo, descricao, contraparte, valor_centavos,
                               vencimento, categoria, recorrente, criado_por, cliente_id,
                               orcamento_id, aprovacao, plano_conta_id, centro_custo_id)
                            select conta_id, tipo, descricao || ' — restante', contraparte,
-                                  %s, vencimento, categoria, false, criado_por, cliente_id,
-                                  orcamento_id, aprovacao, plano_conta_id, centro_custo_id
+                                  %s, coalesce(%s, vencimento), categoria, false, criado_por,
+                                  cliente_id, orcamento_id, aprovacao, plano_conta_id,
+                                  centro_custo_id
                              from titulos where id=%s and conta_id=%s
                            returning id""",
-                        (valor - recebido, titulo_id, conta_id)).fetchone()[0]
+                        (valor - recebido, vencimento_sobra, titulo_id, conta_id)).fetchone()[0]
                     _ajuste(c, conta_id, restante_id, titulo_id, "restante", 0,
                             valor - recebido, membro_id)
                 r = emp.dar_baixa_titulo(pool, conta_id, titulo_id, data_pagto=data_pagto,
@@ -252,6 +290,7 @@ def baixar(pool, conta_id: int, titulo_id: int, recebido_centavos: int | None,
         if not r.get("ok"):
             c.rollback()
             return r
+        r["tipo"] = tipo
         if t[1] == "receber" and t[4]:
             # consequência, não o registro: num savepoint, pra que um orçamento
             # estranho nunca desfaça a baixa que já está feita

@@ -4600,7 +4600,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
       seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
       "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}{#- o PORQUÊ de um valor mexido pelo painel da diferença (323): sem isto,
-      "por que outubro é R$ 1.067 e não R$ 1.142?" não teria resposta na tela. -#}{% if t.tipo_despesa %} · <span class="tit-cls" style="color:{{ TIPO_DESPESA_COR[t.tipo_despesa] }}">{{ TIPO_DESPESA_ROTULO[t.tipo_despesa] }}</span>{% endif %}{% set _aj = (ajustes or {}).get(t.id) %}{% if _aj and _aj.tipo == 'abatimento' %} · <span class="selo jur" title="valor combinado: {{ _aj.antes|brl }}">− {{ (_aj.antes - _aj.depois)|brl }} de crédito abatido</span>{% elif _aj and _aj.tipo == 'restante' %} · <span class="selo jur">o que faltou de um recebimento</span>{% endif %}</div>
+      "por que outubro é R$ 1.067 e não R$ 1.142?" não teria resposta na tela. -#}{% if t.tipo_despesa %} · <span class="tit-cls" style="color:{{ TIPO_DESPESA_COR[t.tipo_despesa] }}">{{ TIPO_DESPESA_ROTULO[t.tipo_despesa] }}</span>{% endif %}{% set _aj = (ajustes or {}).get(t.id) %}{% if _aj and _aj.tipo == 'abatimento' %} · <span class="selo jur" title="valor combinado: {{ _aj.antes|brl }}">− {{ (_aj.antes - _aj.depois)|brl }} de crédito abatido</span>{% elif _aj and _aj.tipo == 'restante' %} · <span class="selo jur">o que faltou de um {{ 'pagamento' if t.tipo=='pagar' else 'recebimento' }}</span>{% endif %}</div>
     </div>
     {#- R$ 0,00 seria mentira de dois jeitos: diz que a conta é de graça e some
        na soma da lista. A conta de valor variável (196) nasce sem valor de
@@ -4694,23 +4694,41 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
        campo é editável, inclusive pra zerar quando o fornecedor perdoou. -#}
     {% if t.valor_centavos %}
     <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa" class="tit-baixa"
-          style="display:none" data-base="{{ t.valor_centavos }}"
+          style="display:none" data-base="{{ t.valor_centavos }}" data-tipo="{{ t.tipo }}"
           data-venc="{{ t.vencimento.isoformat() if t.vencimento else '' }}"
           data-multa="{{ MULTA_ATRASO_PCT }}" data-juros="{{ JUROS_MORA_PCT_MES }}"
       {%- if t.tipo=='pagar' and t.aprovacao!='autorizado' %} onsubmit="return confirm('Esta conta {{ 'foi RECUSADA' if t.aprovacao=='recusado' else 'ainda não foi liberada' }} pelo dono. Dar baixa mesmo assim? Fica registrado que ela foi paga sem autorização.')"{% endif %}>
       <label class="tit-bx">{{ 'Paguei em' if t.tipo=='pagar' else 'Recebi em' }}
         <input type="date" name="pago_em" value="{{ hoje_iso }}" oninput="titBaixaConta(this)"></label>
+      {#- QUANTO de fato entrou ou saiu (pedido 9, 23/09/2026 — e a extensão pra
+         pagar, 29/09/2026). Igual à parcela, é a baixa de sempre. Diferente,
+         abre o painel e o gestor escolhe — "sempre pergunta pro gestor": nenhuma
+         opção vem marcada, e sem escolha o servidor recusa (ver
+         finance/recebido_diferente.py). -#}
       {% if t.tipo=='pagar' %}
-      <label class="tit-bx">Multa e juros
-        <input name="acrescimo" inputmode="decimal" placeholder="0,00" oninput="titBaixaConta(this)"
-               title="negativo é desconto: quem pagou adiantado escreve -20,00"></label>
+      {#- PAGAR: sem "abater" (não foi pedido — ver o módulo) e a data da conta
+         que falta é OBRIGATÓRIA e vem em branco: quem sabe quando o resto sai é
+         a combinação com o fornecedor, não uma regra da casa. O valor já nasce
+         preenchido com a sugestão de multa/juros do atraso (cláusula 3.4),
+         recalculada por `titBaixaConta` quando a data muda — mockup
+         docs/mockups/contas_pagar_baixa_parcial.html, aprovado 29/09/2026. -#}
+      <label class="tit-bx">Valor pago
+        <input name="recebido" inputmode="decimal" value="{{ (t.valor_centavos/100)|n2 }}" oninput="titBaixaConta(this)"
+               title="pagou menos que o título? o resto vira uma conta nova, com a data que você escolher"></label>
       <span class="tit-bx-dica"></span>
-      <span class="tit-bx-tot"></span>
+      <div class="tit-dif" style="display:none">
+        <p class="tit-dif-txt"></p>
+        <div class="tit-dif-menos">
+          <label><input type="radio" name="destino" value="restante"><span>ainda falta pagar — nasce uma conta de <b class="tit-dif-val"></b>. Vencimento da sobra:</span></label>
+          <input type="date" name="vencimento_sobra">
+          <span class="mut tit-dif-nota" style="margin-left:1.4rem">em branco de propósito — é você quem combina com o fornecedor quando o resto sai</span>
+          <label><input type="radio" name="destino" value="desconto"><span>foi desconto combinado com o fornecedor</span></label>
+        </div>
+        <div class="tit-dif-mais">
+          <label><input type="radio" name="destino" value="juros"><span>foi multa e juros do atraso</span></label>
+        </div>
+      </div>
       {% else %}
-      {#- CONTA A RECEBER: pergunta QUANTO ENTROU (pedido 9, 23/09/2026). Igual à
-         parcela, é a baixa de sempre. Diferente, abre o painel e o gestor escolhe
-         — "sempre pergunta pro gestor": nenhuma opção vem marcada, e sem escolha
-         o servidor recusa (ver finance/recebido_diferente.py). -#}
       {% set _alv = (alvos_credito or {}).get(t.id) or [] %}
       <label class="tit-bx">Valor recebido
         <input name="recebido" inputmode="decimal" value="{{ (t.valor_centavos/100)|n2 }}" oninput="titRecebido(this)"></label>
@@ -4909,16 +4927,20 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     var aberto = f.style.display === 'flex';
     f.style.display = aberto ? 'none' : 'flex';
     if(!aberto){
-      if(f.querySelector('input[name=acrescimo]')) titBaixaConta(f.querySelector('input[name=pago_em]'));
+      if(f.dataset.tipo === 'pagar') titBaixaConta(f.querySelector('input[name=pago_em]'));
       else titRecebido(f.querySelector('input[name=recebido]'));
     }
   }
-  // O PAINEL DA DIFERENÇA (pedido 9). Só abre quando o que entrou não é a
-  // parcela, e mostra só o lado que vale: a menos (restante ou desconto) ou a
-  // mais (abater ou juros). A escolha que ficou do outro lado é desmarcada —
-  // senão um "abater" esquecido iria junto com um valor a menos.
+  // O PAINEL DA DIFERENÇA (pedido 9, e a extensão pra pagar em 29/09/2026). Só
+  // abre quando o que entrou/saiu não é a parcela, e mostra só o lado que vale:
+  // a menos (restante ou desconto) ou a mais (abater — só receber — ou juros).
+  // A escolha que ficou do outro lado é desmarcada — senão um "abater"
+  // esquecido iria junto com um valor a menos. Serve as DUAS telas (receber
+  // chama direto no oninput; pagar chama no fim de `titBaixaConta`, depois de
+  // preencher a sugestão de multa/juros).
   function titRecebido(el){
     var f = el && el.closest('.tit-baixa'); if(!f) return;
+    var pagar = f.dataset.tipo === 'pagar';
     var base = parseInt(f.dataset.base, 10) || 0;
     var rec = Math.round(parseFloat((el.value || '0').replace(/\\./g,'').replace(',','.')) * 100) || 0;
     var dif = rec - base, box = f.querySelector('.tit-dif');
@@ -4927,7 +4949,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     if(!rec || !dif){
       box.style.display = 'none';
       f.querySelectorAll('input[name=destino]').forEach(function(r){ r.checked = false; });
-      dica.textContent = rec ? '' : 'Diga quanto entrou.';
+      dica.textContent = rec ? '' : (pagar ? 'Diga quanto você pagou.' : 'Diga quanto entrou.');
       return;
     }
     box.style.display = 'flex';
@@ -4936,8 +4958,11 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     f.querySelector('.tit-dif-mais').style.display = menos ? 'none' : 'flex';
     f.querySelectorAll('.tit-dif-' + (menos ? 'mais' : 'menos') + ' input[name=destino]')
      .forEach(function(r){ r.checked = false; });
-    f.querySelector('.tit-dif-txt').innerHTML = 'Entraram <b>' + titBrl(Math.abs(dif))
-      + (menos ? ' a menos' : ' a mais') + '</b> que a parcela. O que faço com a diferença?';
+    f.querySelector('.tit-dif-txt').innerHTML = (pagar
+        ? (menos ? 'Faltaram <b>' + titBrl(Math.abs(dif)) + '</b>'
+                 : 'Você pagou <b>' + titBrl(Math.abs(dif)) + ' a mais</b>')
+        : 'Entraram <b>' + titBrl(Math.abs(dif)) + (menos ? ' a menos' : ' a mais') + '</b> que a parcela')
+      + '. O que faço com a diferença?';
     f.querySelector('.tit-dif-val').textContent = titBrl(Math.abs(dif));
     dica.textContent = '';
   }
@@ -4954,10 +4979,11 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   // o boleto atualizado manda, a sugestão é só o primeiro palpite.
   function titBaixaConta(el){
     var f = el && el.closest('.tit-baixa'); if(!f) return;
+    if(f.dataset.tipo !== 'pagar') return;   // a sugestão de multa/juros é só de pagar
     var base = parseInt(f.dataset.base, 10) || 0;
     var venc = f.dataset.venc;
-    var campo = f.querySelector('input[name=acrescimo]');
-    if(!campo) return;   // conta a receber: quem fala é o "valor recebido"
+    var campo = f.querySelector('input[name=recebido]');
+    if(!campo) return;
     var quando = f.querySelector('input[name=pago_em]').value;
     var dias = 0;
     if(venc && quando){
@@ -4970,16 +4996,16 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     }
     if(el === campo) campo.dataset.tocado = '1';
     if(!campo.dataset.tocado){
-      campo.value = (multa + juros) ? ((multa + juros)/100).toFixed(2).replace('.', ',') : '';
+      campo.value = ((base + multa + juros)/100).toFixed(2).replace('.', ',');
     }
-    var acr = Math.round(parseFloat((campo.value || '0').replace(/\\./g,'').replace(',','.')) * 100) || 0;
     f.querySelector('.tit-bx-dica').textContent = dias > 0
       ? ('Sugerido pela regra da casa: ' + dias + ' dia(s) de atraso — multa '
-         + titBrl(multa) + ' + juros ' + titBrl(juros) + '. Troque pelo que o boleto cobrou.')
+         + titBrl(multa) + ' + juros ' + titBrl(juros) + '. Editável: o boleto atualizado manda.')
       : (dias < 0
-         ? ('Pagando ' + (-dias) + ' dia(s) antes do vencimento. Boleto com desconto? Escreva negativo: -20,00')
+         ? ('Pagando ' + (-dias) + ' dia(s) antes do vencimento. Boleto com desconto? Edite o valor pago.')
          : 'No prazo — sem multa nem juros.');
-    f.querySelector('.tit-bx-tot').textContent = 'Total ' + titBrl(base + acr);
+    // reaplica o painel de diferença com o valor (sugerido ou digitado)
+    titRecebido(campo);
   }
   // Pergunta antes de gravar, pra quem usa `data-confirmar`. Delegado no
   // documento porque os formulários nascem linha a linha.
@@ -12701,7 +12727,7 @@ def empresa_centro_desativar(request: Request, centro_id: int, ativo: str = Form
 def empresa_titulo_baixa(request: Request, titulo_id: int,
                          pago_em: str = Form(""), acrescimo: str = Form(""),
                          recebido: str = Form(""), destino: str = Form(""),
-                         alvo_id: str = Form("")):
+                         alvo_id: str = Form(""), vencimento_sobra: str = Form("")):
     """Fecha a conta e lança no caixa. Agora com a DATA e o ACRÉSCIMO (197).
 
     Os dois são opcionais de propósito: formulário antigo, link salvo ou chamada
@@ -12709,6 +12735,10 @@ def empresa_titulo_baixa(request: Request, titulo_id: int,
 
     `acrescimo` aceita NEGATIVO (desconto por antecipação), e é por isso que ele
     não passa por `_reais_para_centavos`, que descarta o sinal.
+
+    `vencimento_sobra` só é lida quando sobra valor num título a PAGAR — a tela
+    manda em branco de propósito (ver finance/recebido_diferente.py), e sem ela
+    `rd.baixar` recusa.
     """
     from finance import empresa as emp
     g = _guard_pj(request)
@@ -12724,17 +12754,24 @@ def empresa_titulo_baixa(request: Request, titulo_id: int,
                                  membro_id=request.session.get("membro_id"),
                                  acrescimo_centavos=_acrescimo_para_centavos(acrescimo))
     else:
-        # CONTA A RECEBER: o formulário diz quanto ENTROU, e a diferença (se
-        # houver) vai pra onde o gestor escolheu — pedido 9, 23/09/2026. Sem
-        # escolha, `baixar` recusa e nada muda.
+        # O formulário diz quanto DE FATO entrou (receber) ou foi pago (pagar), e
+        # a diferença (se houver) vai pra onde o gestor escolheu — pedido 9,
+        # 23/09/2026, estendido pra pagar em 29/09/2026. Sem escolha, `baixar`
+        # recusa e nada muda.
         from finance import recebido_diferente as rd
+        try:
+            venc_sobra = _date.fromisoformat(vencimento_sobra) if vencimento_sobra.strip() else None
+        except ValueError:
+            venc_sobra = None
         r = rd.baixar(pool, conta[0], titulo_id, _reais_para_centavos(recebido),
                       destino=(destino or "").strip(),
                       alvo_id=int(alvo_id) if alvo_id.strip().isdigit() else None,
-                      data_pagto=quando, membro_id=request.session.get("membro_id"))
+                      data_pagto=quando, membro_id=request.session.get("membro_id"),
+                      vencimento_sobra=venc_sobra)
         if r.get("ok") and r.get("restante_id"):
-            request.session["emp_aviso"] = ("Baixa feita. O que faltou virou uma conta "
-                                            "nova, no mesmo vencimento — está na lista.")
+            request.session["emp_aviso"] = ("Baixa feita. O que faltou virou uma conta nova, "
+                "com o vencimento que você escolheu — está na lista." if r.get("tipo") == "pagar"
+                else "Baixa feita. O que faltou virou uma conta nova, no mesmo vencimento — está na lista.")
     if not r.get("ok"):
         request.session["emp_aviso"] = r.get("erro") or "Não consegui dar baixa."
         return RedirectResponse("/painel/empresa#titulos", status_code=303)

@@ -119,9 +119,14 @@ def loja_stands(request: Request, slug: str):
 
     msg = request.query_params.get("msg") or ""
     msg_codigo = (request.query_params.get("codigo") or "")[:20]
+    ct = (request.query_params.get("ct") or "")[:64] if msg == "ok" else ""
+    # ?stand=G58 abre a página já com o stand selecionado — é o link que o
+    # vendedor manda pro interessado a partir do mapa do painel.
+    stand_link = (request.query_params.get("stand") or "")[:20]
     html = _env.get_template(_TPL_NOME).render(
         cfg=cfg, marca=marca, n_total=len(stands), stands_json=stands_json,
-        data_br=_data_br, msg=msg, msg_codigo=msg_codigo,
+        data_br=_data_br, msg=msg, msg_codigo=msg_codigo, ct=ct,
+        ct_json=json.dumps(ct or None), stand_link_json=json.dumps(stand_link or None),
         # injeção segura no JS: sempre via json.dumps, nunca string crua
         pix_json=json.dumps({"chave": cfg["pix_chave"], "titular": cfg["pix_titular"]}),
         wa_json=json.dumps(cfg["whatsapp_numero"]),
@@ -171,7 +176,12 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
         _log.info("loja_stands: comprovante recusado (%s/%s): %s", conta_id, codigo,
                   r.get("erro"))
         return RedirectResponse(f"/e/{slug}?msg=erro&codigo={codigo}", status_code=303)
-    return RedirectResponse(f"/e/{slug}?msg=ok&codigo={codigo}", status_code=303)
+    destino = f"/e/{slug}?msg=ok&codigo={codigo}"
+    # o contrato nasceu junto com o comprovante (evento_stands.garantir_orcamento_
+    # e_contrato) — o token vai na URL pra página oferecer "assinar agora".
+    if r.get("contrato_token"):
+        destino += f"&ct={r['contrato_token']}"
+    return RedirectResponse(destino, status_code=303)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -198,6 +208,78 @@ def foto_stand(nome: str):
     return Response(content=_fotos_cache[nome], media_type="image/jpeg",
                     headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# A PLANTA DESENHADA (posições col/row de cada bloco no grid de 24 colunas):
+# transcrição manual da planta oficial do evento, aprovada na maquete. Vive
+# numa constante própria porque o PAINEL do gestor (web/painel_eventos_stands)
+# desenha o MESMO mapa — duas cópias divergiriam na primeira mudança de planta.
+# ─────────────────────────────────────────────────────────────────────────
+PLANTA_DEFS_JS = r"""
+  // grid coords are (col, colSpan, row, rowSpan) on each pavilion's own 24-col grid
+  var inferiorDefs = [
+    {prefix:'i', from:1, to:3, col:3, cspan:2, row:1, rspan:2, label:'Outlet Acessórios'},
+    {prefix:'i', from:4, to:15, col:6, cspan:8, row:1, rspan:2, label:'Outlet Make'},
+    {prefix:'G', from:43, to:54, col:15, cspan:8, row:1, rspan:2, label:'Outlet Grifes'},
+    {prefix:'i', from:16, to:19, col:3, cspan:1, row:4, rspan:5},
+    {prefix:'i', from:20, to:27, col:6, cspan:6, row:4, rspan:3, label:'Home Decor'},
+    {prefix:'i', from:28, to:31, col:12, cspan:1, row:4, rspan:5},
+    {prefix:'G', from:55, to:62, col:15, cspan:5, row:4, rspan:3},
+    {prefix:'G', from:63, to:66, col:21, cspan:2, row:4, rspan:5},
+    {prefix:'i', from:32, to:35, col:5, cspan:3, row:10, rspan:2, label:'Outlet Fitness'},
+    {prefix:'i', from:36, to:39, col:9, cspan:3, row:10, rspan:2, label:'Outlet Kids'},
+    {prefix:'i', from:40, to:42, col:12, cspan:1, row:10, rspan:3, label:'Multimarcas'},
+    {prefix:'G', from:67, to:68, col:15, cspan:2, row:10, rspan:2},
+    {prefix:'G', from:69, to:74, col:18, cspan:5, row:10, rspan:2}
+  ];
+  var inferiorDecor = [
+    {label:'Corredor Outlet Grifes', col:13, cspan:2, row:4, rspan:5, kind:'corridor'},
+    {label:'WC', col:13, cspan:2, row:9, rspan:1, kind:'wc'},
+    {label:'Entrada única →', col:23, cspan:1, row:5, rspan:4, kind:'gate'},
+    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:12, kind:'avenue'}
+  ];
+
+  var superiorDefs = [
+    {prefix:'S', from:75, to:83, col:5, cspan:5, row:1, rspan:2},
+    {prefix:'S', from:84, to:96, col:11, cspan:8, row:1, rspan:2},
+    {prefix:'S', from:97, to:97, col:3, cspan:1, row:4, rspan:2},
+    {prefix:'S', from:98, to:102, col:3, cspan:1, row:6, rspan:6},
+    {prefix:'S', from:103, to:106, col:5, cspan:4, row:4, rspan:1},
+    {prefix:'S', from:115, to:118, col:5, cspan:4, row:6, rspan:1},
+    {prefix:'S', from:107, to:110, col:10, cspan:4, row:4, rspan:1},
+    {prefix:'S', from:119, to:122, col:10, cspan:4, row:6, rspan:1},
+    {prefix:'S', from:111, to:114, col:15, cspan:4, row:4, rspan:1},
+    {prefix:'S', from:123, to:126, col:15, cspan:4, row:6, rspan:1},
+    {prefix:'S', from:127, to:129, col:8, cspan:2, row:8, rspan:1},
+    {prefix:'S', from:130, to:132, col:11, cspan:3, row:8, rspan:1},
+    {prefix:'S', from:133, to:136, col:15, cspan:4, row:8, rspan:1},
+    {prefix:'S', from:137, to:142, col:20, cspan:2, row:4, rspan:6},
+    {prefix:'S', from:143, to:150, col:11, cspan:5, row:10, rspan:2},
+    {prefix:'S', from:151, to:154, col:19, cspan:3, row:10, rspan:2}
+  ];
+  var superiorDecor = [
+    {label:'← Entrada', col:1, cspan:2, row:1, rspan:2, kind:'gate'},
+    {label:'Saída →', col:22, cspan:2, row:8, rspan:2, kind:'gate'},
+    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:11, kind:'avenue'}
+  ];
+
+  var carDefs = [
+    {prefix:'C', from:155, to:158, col:13, cspan:4, row:2, rspan:2, label:'Outlet Car'},
+    {prefix:'C', from:159, to:162, col:18, cspan:4, row:2, rspan:2}
+  ];
+  var carDecor = [
+    {label:'Palco 6x6', col:2, cspan:3, row:1, rspan:4, kind:'stage'},
+    {label:'Praça de Alimentação', col:6, cspan:5, row:1, rspan:4, kind:'food'},
+    {label:'↓ Entrada', col:17, cspan:2, row:1, rspan:1, kind:'gate'},
+    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:6, kind:'avenue'}
+  ];
+
+  var pavilions = [
+    {key:'inferior', label:'Pavilhão Inferior', sub:'i01–i42 · G43–G74', defs:inferiorDefs, decor:inferiorDecor, rows:13},
+    {key:'superior', label:'Pavilhão Superior', sub:'S75–S154', defs:superiorDefs, decor:superiorDecor, rows:12},
+    {key:'outlet_car', label:'Outlet Car', sub:'C155–C162', defs:carDefs, decor:carDecor, rows:6}
+  ];
+"""
 
 # ─────────────────────────────────────────────────────────────────────────
 # Template — registrado como string no MESMO `_env` do portal (o padrão de
@@ -261,6 +343,7 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   .msg{max-width:1180px;margin:16px auto 0;padding:12px 14px;border-radius:10px;font-size:13.5px;font-weight:600;line-height:1.5;}
   .msg.ok{background:rgba(22,227,174,0.12);border:1px solid rgba(22,227,174,0.45);color:#D8F5E9;}
   .msg.erro{background:rgba(255,222,46,0.12);border:1px solid rgba(255,222,46,0.4);color:#F5ECC0;}
+  .msg-link{color:var(--mint);font-weight:800;text-decoration:underline;margin-left:6px;white-space:nowrap;}
 
   h2.section-title{font-family:'Anton',sans-serif;font-weight:400;font-size:22px;letter-spacing:0.01em;margin:22px 0 4px;}
   p.section-sub{margin:0 0 18px;color:var(--fg-dim);font-size:13.5px;}
@@ -291,7 +374,7 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
      29/09/2026: "a caixa da reserva embaixo não ficou legal"). */
   .floor-outer{overflow:auto;margin:0;padding:36px 12px 54px;max-height:78vh;}
   .floor-stage{display:flex;justify-content:center;min-width:min-content;perspective:2000px;}
-  .floor-zoom{transform-style:preserve-3d;transition:transform .25s ease;}
+  .floor-zoom{transform-style:preserve-3d;transition:transform .25s ease;transform-origin:50% 0;}
   .floor-grid{
     position:relative;display:grid;gap:5px;padding:20px;border-radius:18px;
     background:
@@ -373,7 +456,17 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 
   /* ---- side panel ---- */
   .layout{display:grid;grid-template-columns:1fr 300px;gap:22px;align-items:start;}
-  @media (max-width:860px){ .layout{grid-template-columns:1fr;} }
+  @media (max-width:860px){
+    .layout{grid-template-columns:1fr;}
+    /* celular: o mapa encolhe pra caber (ver ajustarEscala no JS) — sem
+       scroll lateral e sem o vão que a escala deixaria embaixo. O stage
+       ancora à ESQUERDA e a escala parte do canto 0,0: centralizado, o
+       conteúdo encolhido ficava no meio de um stage de 970px e o overflow
+       hidden mostrava só o vazio da borda. */
+    .floor-outer{overflow:hidden;padding:16px 4px 10px;max-height:none;}
+    .floor-stage{min-width:0;justify-content:flex-start;}
+    .floor-zoom{transform-origin:0 0;}
+  }
   .panel{position:sticky;top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);}
   @media (max-width:860px){ .panel{position:static;} }
   .panel-empty{color:var(--fg-dim);font-size:13.5px;line-height:1.6;}
@@ -439,7 +532,7 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   </div>
 </div>
 
-{% if msg == 'ok' %}<div class="msg ok">✓ Comprovante recebido{% if msg_codigo %} — o stand {{ msg_codigo }} está reservado pra você{% endif %}! A equipe confere o pagamento e confirma em breve.</div>{% endif %}
+{% if msg == 'ok' %}<div class="msg ok">✓ Comprovante recebido{% if msg_codigo %} — o stand {{ msg_codigo }} está reservado pra você{% endif %}! A equipe confere o pagamento e confirma em breve.{% if ct %} <a class="msg-link" href="/contrato/{{ ct }}">Assinar o contrato agora →</a>{% endif %}</div>{% endif %}
 {% if msg == 'erro' %}<div class="msg erro">Não deu pra registrar o comprovante{% if msg_codigo %} do stand {{ msg_codigo }}{% endif %}. Ele pode já ter sido vendido — dá uma olhada no mapa e tenta outro{% if cfg.whatsapp_numero %}, ou chama no WhatsApp{% endif %}.</div>{% endif %}
 {% if msg == 'erro_generico' %}<div class="msg erro">Não deu pra processar. Tenta de novo.</div>{% endif %}
 {% if sem_storage %}<div class="msg erro">⚠ Envio de comprovante temporariamente indisponível{% if cfg.whatsapp_numero %} — manda pelo WhatsApp{% endif %}.</div>{% endif %}
@@ -509,6 +602,8 @@ var WA = {{ wa_json|safe }};
 var ACTION = '/e/{{ cfg.slug }}/comprovante';
 var JUST_SENT = {{ just_sent_json|safe }};
 var ERRO_CODIGO = {{ erro_codigo_json|safe }};
+var CT = {{ ct_json|safe }};
+var STAND_LINK = {{ stand_link_json|safe }};
 var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
 </script>
 {% raw %}<script>
@@ -518,70 +613,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
   // proportional footprint per real stand size (bigger stands render as bigger tiles)
   var sizeDims = {'2x2':{w:26,h:22},'3x2':{w:32,h:22},'3x3':{w:32,h:28},'4x2':{w:38,h:22},'4x3':{w:38,h:28},'tenda':{w:38,h:22},'personalizado':{w:38,h:28}};
 
-  // grid coords are (col, colSpan, row, rowSpan) on each pavilion's own 24-col grid
-  var inferiorDefs = [
-    {prefix:'i', from:1, to:3, col:3, cspan:2, row:1, rspan:2, label:'Outlet Acessórios'},
-    {prefix:'i', from:4, to:15, col:6, cspan:8, row:1, rspan:2, label:'Outlet Make'},
-    {prefix:'G', from:43, to:54, col:15, cspan:8, row:1, rspan:2, label:'Outlet Grifes'},
-    {prefix:'i', from:16, to:19, col:3, cspan:1, row:4, rspan:5},
-    {prefix:'i', from:20, to:27, col:6, cspan:6, row:4, rspan:3, label:'Home Decor'},
-    {prefix:'i', from:28, to:31, col:12, cspan:1, row:4, rspan:5},
-    {prefix:'G', from:55, to:62, col:15, cspan:5, row:4, rspan:3},
-    {prefix:'G', from:63, to:66, col:21, cspan:2, row:4, rspan:5},
-    {prefix:'i', from:32, to:35, col:5, cspan:3, row:10, rspan:2, label:'Outlet Fitness'},
-    {prefix:'i', from:36, to:39, col:9, cspan:3, row:10, rspan:2, label:'Outlet Kids'},
-    {prefix:'i', from:40, to:42, col:12, cspan:1, row:10, rspan:3, label:'Multimarcas'},
-    {prefix:'G', from:67, to:68, col:15, cspan:2, row:10, rspan:2},
-    {prefix:'G', from:69, to:74, col:18, cspan:5, row:10, rspan:2}
-  ];
-  var inferiorDecor = [
-    {label:'Corredor Outlet Grifes', col:13, cspan:2, row:4, rspan:5, kind:'corridor'},
-    {label:'WC', col:13, cspan:2, row:9, rspan:1, kind:'wc'},
-    {label:'Entrada única →', col:23, cspan:1, row:5, rspan:4, kind:'gate'},
-    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:12, kind:'avenue'}
-  ];
-
-  var superiorDefs = [
-    {prefix:'S', from:75, to:83, col:5, cspan:5, row:1, rspan:2},
-    {prefix:'S', from:84, to:96, col:11, cspan:8, row:1, rspan:2},
-    {prefix:'S', from:97, to:97, col:3, cspan:1, row:4, rspan:2},
-    {prefix:'S', from:98, to:102, col:3, cspan:1, row:6, rspan:6},
-    {prefix:'S', from:103, to:106, col:5, cspan:4, row:4, rspan:1},
-    {prefix:'S', from:115, to:118, col:5, cspan:4, row:6, rspan:1},
-    {prefix:'S', from:107, to:110, col:10, cspan:4, row:4, rspan:1},
-    {prefix:'S', from:119, to:122, col:10, cspan:4, row:6, rspan:1},
-    {prefix:'S', from:111, to:114, col:15, cspan:4, row:4, rspan:1},
-    {prefix:'S', from:123, to:126, col:15, cspan:4, row:6, rspan:1},
-    {prefix:'S', from:127, to:129, col:8, cspan:2, row:8, rspan:1},
-    {prefix:'S', from:130, to:132, col:11, cspan:3, row:8, rspan:1},
-    {prefix:'S', from:133, to:136, col:15, cspan:4, row:8, rspan:1},
-    {prefix:'S', from:137, to:142, col:20, cspan:2, row:4, rspan:6},
-    {prefix:'S', from:143, to:150, col:11, cspan:5, row:10, rspan:2},
-    {prefix:'S', from:151, to:154, col:19, cspan:3, row:10, rspan:2}
-  ];
-  var superiorDecor = [
-    {label:'← Entrada', col:1, cspan:2, row:1, rspan:2, kind:'gate'},
-    {label:'Saída →', col:22, cspan:2, row:8, rspan:2, kind:'gate'},
-    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:11, kind:'avenue'}
-  ];
-
-  var carDefs = [
-    {prefix:'C', from:155, to:158, col:13, cspan:4, row:2, rspan:2, label:'Outlet Car'},
-    {prefix:'C', from:159, to:162, col:18, cspan:4, row:2, rspan:2}
-  ];
-  var carDecor = [
-    {label:'Palco 6x6', col:2, cspan:3, row:1, rspan:4, kind:'stage'},
-    {label:'Praça de Alimentação', col:6, cspan:5, row:1, rspan:4, kind:'food'},
-    {label:'↓ Entrada', col:17, cspan:2, row:1, rspan:1, kind:'gate'},
-    {label:'Av. Marechal Castelo Branco', col:24, cspan:1, row:1, rspan:6, kind:'avenue'}
-  ];
-
-  var pavilions = [
-    {key:'inferior', label:'Pavilhão Inferior', sub:'i01–i42 · G43–G74', defs:inferiorDefs, decor:inferiorDecor, rows:13},
-    {key:'superior', label:'Pavilhão Superior', sub:'S75–S154', defs:superiorDefs, decor:superiorDecor, rows:12},
-    {key:'outlet_car', label:'Outlet Car', sub:'C155–C162', defs:carDefs, decor:carDecor, rows:6}
-  ];
-
+""" + PLANTA_DEFS_JS + r"""
   // A planta desenhada acima + o BANCO: cada def só vira stand se o código
   // existir no servidor (STANDS); status/zona/tamanho/preço vêm de lá.
   var usados = {};
@@ -628,6 +660,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
   var floorView = '3d';
   var colorMode = 'status';
   var zoomLevel = 1;
+  var baseScale = 1;
 
   function setColorMode(mode){
     colorMode = mode;
@@ -640,12 +673,36 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
   }
   window.setColorMode = setColorMode;
 
-  function zoomFloor(dir){
-    zoomLevel = Math.min(1.8, Math.max(0.7, Math.round((zoomLevel + dir * 0.15) * 100) / 100));
-    document.getElementById('floor-zoom').style.transform = 'scale(' + zoomLevel + ')';
+  function aplicarZoom(){
+    document.getElementById('floor-zoom').style.transform = 'scale(' + (baseScale * zoomLevel) + ')';
     document.getElementById('zoom-level').textContent = Math.round(zoomLevel * 100) + '%';
   }
+  function zoomFloor(dir){
+    zoomLevel = Math.min(1.8, Math.max(0.7, Math.round((zoomLevel + dir * 0.15) * 100) / 100));
+    aplicarZoom();
+  }
   window.zoomFloor = zoomFloor;
+
+  // No celular a planta (24 colunas × 34px) não cabe na tela: em vez de scroll
+  // lateral, o mapa inteiro encolhe pra caber (escala-base); o zoom manual
+  // continua funcionando por cima dela.
+  function ajustarEscala(){
+    var outer = document.querySelector('.floor-outer');
+    var stage = document.querySelector('.floor-stage');
+    var grid = document.getElementById('floor-grid');
+    if (!outer || !stage || !grid) return;
+    if (window.innerWidth >= 860){
+      baseScale = 1; stage.style.height = ''; aplicarZoom(); return;
+    }
+    var w = grid.offsetWidth || 1;
+    baseScale = Math.min(1, (outer.clientWidth - 12) / w);
+    // com rotateX(50°) a altura projetada é menor que a do layout — sem o
+    // fator, sobrava um vão vazio embaixo do mapa 3D no celular.
+    var fator3d = grid.classList.contains('is-3d') ? 0.82 : 1;
+    stage.style.height = Math.ceil(grid.offsetHeight * baseScale * fator3d + 30) + 'px';
+    aplicarZoom();
+  }
+  window.addEventListener('resize', ajustarEscala);
 
   var tabsEl = document.getElementById('pavilion-tabs');
   pavilions.forEach(function(p){
@@ -674,6 +731,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     document.getElementById('btn-view-2d').setAttribute('aria-pressed', v === '2d' ? 'true':'false');
     var grid = document.getElementById('floor-grid');
     if (v === '3d') grid.classList.add('is-3d'); else grid.classList.remove('is-3d');
+    ajustarEscala();
   }
   window.setFloorView = setFloorView;
 
@@ -764,6 +822,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
       extraBlock.appendChild(cells2);
       grid.appendChild(extraBlock);
     }
+    ajustarEscala();
   }
 
   function renderZoneSummary(){
@@ -896,6 +955,10 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     } else if (s.status === 'reservado'){
       if (JUST_SENT === s.code){
         html += '<div class="sent-state"><b>Comprovante recebido</b>Assim que a equipe confirmar o pagamento, ele é seu — normalmente em algumas horas.</div>';
+        if (CT){
+          html += '<a class="btn btn-primary" style="text-decoration:none" href="/contrato/' + encodeURIComponent(CT) + '">Assinar o contrato agora</a>';
+          html += '<p class="upload-sub" style="text-align:center;margin-top:6px;">O contrato de locação do stand já está pronto com seus dados — assina online em 1 minuto</p>';
+        }
       }
       if (s.dias != null){
         html += '<div class="panel-row"><span>Prazo de confirmação</span><b>' + s.dias + ' dia(s)</b></div>';
@@ -912,7 +975,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
 
   // depois do POST, volta com ?msg=ok|erro&codigo=X: abre o pavilhão certo e
   // já seleciona o stand — o expositor vê o próprio comprovante refletido.
-  var initCode = JUST_SENT || ERRO_CODIGO;
+  var initCode = JUST_SENT || ERRO_CODIGO || STAND_LINK;
   var initPav = currentPavilion;
   if (initCode){
     var s0 = stands.filter(function(x){ return x.code === initCode; })[0];

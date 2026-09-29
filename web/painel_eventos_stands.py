@@ -22,25 +22,30 @@ item de menu correspondente mora em web/portal.py (`tem_estandes` em
 
 O CONTEÚDO é o port fiel da "Visão do Gestor" da maquete aprovada
 (scratchpad/outlet-chic-mockup.html, v11 — que já usava os tokens reais de
-web/tema.py de propósito): linha de KPIs, barras de ocupação por espaço e o
-funil de propostas em 3 abas (Precisa de mim / Com o cliente / Fechada) com
-linha expansível — badge do stand na cor do tamanho, sub-abas de comprovante,
-contrato e cliente (achado do dono, 29/09/2026: "no painel com aba da lista
-não está fiel"). A diferença pra maquete é só a fonte dos dados: status vem de
-evento_stands, o interessado vem de prospeccao, e as ações (confirmar/liberar/
-ver comprovante) são os POSTs reais abaixo, não stubs.
+web/tema.py de propósito): linha de KPIs, barras de ocupação por espaço, o
+CADASTRO COMPLETO dos stands no MESMO mapa da página pública (pedido do dono,
+29/09/2026: "tem que ter o cadastro de todos os stands vinculado ao do site —
+os vendedores vão saber o que tá livre") e o funil de propostas em 3 abas
+(Precisa de mim / Com o cliente / Fechada) com linha expansível — badge do
+stand na cor do tamanho, sub-abas de comprovante, contrato e cliente. A
+diferença pra maquete é só a fonte dos dados: status vem de evento_stands, o
+interessado vem de prospeccao, o contrato de finance/contrato (nasce junto com
+o comprovante do sinal — ver evento_stands.garantir_orcamento_e_contrato), e
+as ações (confirmar/liberar/ver comprovante) são os POSTs reais abaixo.
 
 GATE (opt-in, igual ao resto do módulo): nicho 'eventos' E a conta ter
 `evento_stands_config` — nem toda conta de eventos vende estande numerado
 (Prime Eventos, conta 34, não vende).
 
-QUEM VÊ: dono e gestor — confirmar pagamento é decisão de quem administra a
-venda, mesmo corte de painel_obras (financeiro entra lá porque obra é custo;
-aqui é receita e ainda não existe um terceiro papel dedicado a vendas de
-estande, então fica com quem sempre decidiu preço/venda no eventos).
+QUEM VÊ: dono, gestor E vendedor — o vendedor precisa saber na hora o que está
+livre pra oferecer na conversa (pedido do dono, 29/09/2026); a rota dele entra
+na whitelist em contas/equipe.rotas_do_papel. Quem AGE (confirmar pagamento,
+liberar, abrir comprovante) continua sendo dono/gestor: confirmar venda é
+decisão de quem administra, mesmo corte de painel_obras.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Request
@@ -48,13 +53,16 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from db.conexao import get_pool
 from finance import comprovantes as comprov
+from finance import contrato as ctr
 from finance import evento_stands as es
+from web.loja_stands import PLANTA_DEFS_JS
 from web.portal import _env, _render, brl, conta_logada, nicho_da_conta
 
 router = APIRouter()
 _log = logging.getLogger("openclaw.painel_eventos_stands")
 
-_PAPEIS_OK = ("dono", "gestor")
+_PAPEIS_GERIR = ("dono", "gestor")
+_PAPEIS_VER = ("dono", "gestor", "vendedor")
 
 # Cores por tamanho — a MESMA paleta da planta oficial do PDF que a página
 # pública usa na legenda "cor por tamanho" (e que a maquete usava no badge).
@@ -74,13 +82,14 @@ def _data_curta(dt) -> str:
     return f"{dt.day} {_MES[dt.month - 1]}" if dt else "—"
 
 
-def _acesso(request: Request):
+def _acesso(request: Request, papeis=_PAPEIS_GERIR):
     """(conta, config) ou (None, redirect) — mesma dupla checagem de nicho +
-    feature ligada que o resto do painel usa."""
+    feature ligada que o resto do painel usa. `papeis` abre a LEITURA pro
+    vendedor sem abrir as ações (cada rota escolhe o corte)."""
     conta = conta_logada(request)
     if conta is None:
         return None, RedirectResponse("/login", status_code=303)
-    if request.session.get("papel", "dono") not in _PAPEIS_OK:
+    if request.session.get("papel", "dono") not in papeis:
         return None, RedirectResponse("/painel", status_code=303)
     if nicho_da_conta(conta) != "eventos":
         return None, RedirectResponse("/painel", status_code=303)
@@ -105,10 +114,11 @@ def _prospeccoes(pool, conta_id: int, ids: list[int]) -> dict[int, dict]:
 
 @router.get("/painel/eventos/estandes", response_class=HTMLResponse)
 def painel_eventos_stands(request: Request):
-    conta, cfg_ou_redir = _acesso(request)
+    conta, cfg_ou_redir = _acesso(request, papeis=_PAPEIS_VER)
     if conta is None:
         return cfg_ou_redir
     cfg = cfg_ou_redir
+    pode_gerir = request.session.get("papel", "dono") in _PAPEIS_GERIR
     pool = get_pool()
     stands = es.listar(pool, conta[0])
 
@@ -126,14 +136,30 @@ def painel_eventos_stands(request: Request):
         pav["total"] += 1
         pav[s["status"]] += 1
 
+    interessados = _prospeccoes(pool, conta[0],
+                                [s["prospeccao_id"] for s in stands if s["prospeccao_id"]])
+
+    # O CADASTRO COMPLETO pro mapa (mesma planta da página pública): status já
+    # traduzido pras classes .st-*, e o nome do interessado só onde não é livre
+    # — é o que o vendedor precisa ver antes de oferecer.
+    mapa_json = json.dumps({
+        s["codigo"]: {
+            "pavilhao": s["pavilhao"], "zona": s["zona"] or "",
+            "tamanho": s["tamanho"],
+            "status": "reservado" if s["status"] == "pre_reservado" else s["status"],
+            "preco": brl(s["preco_centavos"]) if s["preco_centavos"] else None,
+            "cliente": ((interessados.get(s["prospeccao_id"]) or {}).get("empresa")
+                        if s["status"] != "livre" else None),
+        }
+        for s in stands
+    })
+
     # O funil de 3 abas da maquete, com o mapeamento REAL de cada grupo:
     # - precisa_de_mim: pré-reservado (comprovante chegou, sinal esperando o
     #   dono conferir — é a fila de trabalho)
     # - com_o_cliente: vendido COM proposta vinculada (sinal confirmado, o
     #   resto do plano — parcelas, contrato — mora na proposta)
     # - fechada: vendido sem pendência de proposta (venda direta pela página)
-    interessados = _prospeccoes(pool, conta[0],
-                                [s["prospeccao_id"] for s in stands if s["prospeccao_id"]])
     funil = {"precisa_de_mim": [], "com_o_cliente": [], "fechada": []}
     for s in stands:
         if s["status"] == "livre":
@@ -141,9 +167,16 @@ def painel_eventos_stands(request: Request):
         cli = interessados.get(s["prospeccao_id"]) or {}
         item = dict(s)
         item["cliente"] = cli
+        # o contrato VIVO da proposta do estande (nasce junto com o comprovante
+        # do sinal — evento_stands.garantir_orcamento_e_contrato); tolerante:
+        # sem a migração 164, a aba abre sem contrato.
+        item["contrato"] = (ctr.por_orcamento(pool, conta[0], s["orcamento_id"])
+                            if s["orcamento_id"] else None)
         if s["status"] == "pre_reservado":
             item["resumo"] = "Comprovante recebido · sinal aguardando confirmação"
             item["pend"] = [("Confirmar sinal", "coral")]
+            if item["contrato"] and not item["contrato"]["assinado_em"]:
+                item["pend"].append(("Contrato na mão do lojista", "azul"))
             funil["precisa_de_mim"].append(item)
         elif s["orcamento_id"]:
             item["resumo"] = "Sinal confirmado · parcelas e contrato na proposta"
@@ -159,6 +192,7 @@ def painel_eventos_stands(request: Request):
         "estandes", request, titulo="Estandes", secao_ativa="estandes", brl=brl,
         cfg=cfg, kpis=kpis, por_pavilhao=por_pavilhao, funil=funil,
         cor_tam=_COR_TAM, tam_label=_TAM_LABEL, data_curta=_data_curta,
+        mapa_json=mapa_json, pode_gerir=pode_gerir,
         erro=(request.query_params.get("erro") or "").strip(),
         ok=(request.query_params.get("ok") or "").strip())
 
@@ -215,12 +249,12 @@ def ver_comprovante(request: Request, codigo: str):
 # Mesmo casco de toda tela do painel (`{% extends "base" %}` + o `_render` de
 # web/portal.py) — não uma página solta.
 #
-# O CSS dos componentes (kpi, occ-*, fn-tab, oc-*) é o da maquete aprovada
-# QUASE VERBATIM, escopado em .es-pag. As variáveis --mint/--gold/--coral são
-# redefinidas AQUI com os valores reais de web/tema.py (os mesmos que a
-# maquete v11 já usava no bloco #view-gestor) — redefinir em vez de apontar
-# pra var(--card) evita ciclo de custom property (--card já é var(--surface)
-# no :root do tema).
+# O CSS dos componentes (kpi, occ-*, fn-tab, oc-*, mapa) é o da maquete
+# aprovada QUASE VERBATIM, escopado em .es-pag. As variáveis --mint/--gold/
+# --coral são redefinidas AQUI com os valores reais de web/tema.py (os mesmos
+# que a maquete v11 já usava no bloco #view-gestor) — redefinir em vez de
+# apontar pra var(--card) evita ciclo de custom property (--card já é
+# var(--surface) no :root do tema).
 # ─────────────────────────────────────────────────────────────────────────
 _CSS = r"""<style>
 .es-pag{
@@ -264,6 +298,45 @@ _CSS = r"""<style>
 .es-pag .occ-label span:last-child{color:var(--fg-dim);font-weight:400;text-transform:none}
 .es-pag .occ-bar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--surface-2)}
 .es-pag .occ-bar span{height:100%}
+
+/* ---- o mapa (cadastro completo — a MESMA planta da página pública, na
+        variação "planta técnica": tiles chapados por status) ---- */
+.es-pag .mapa-outer{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow);margin-bottom:12px}
+.es-pag .mapa-grid{position:relative;display:grid;gap:4px;width:max-content}
+.es-pag .mapa-grid .map-block{display:flex;flex-direction:column;gap:3px}
+.es-pag .mapa-grid .block-label{font-size:7.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.03em;color:var(--fg-dim);background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:2px 5px;white-space:nowrap;width:fit-content}
+.es-pag .mapa-grid .cells{display:flex;flex-wrap:wrap;align-content:flex-start;gap:3px}
+.es-pag .mapa-grid .stand{
+  appearance:none;cursor:pointer;border:1px solid var(--line);border-radius:5px;width:auto;min-height:0;margin:0;
+  font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;line-height:1;
+  display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;flex:0 0 auto;
+}
+.es-pag .mapa-grid .stand.st-livre{background:color-mix(in srgb, var(--mint) 20%, var(--surface));color:var(--fg)}
+.es-pag .mapa-grid .stand.st-reservado{background:color-mix(in srgb, var(--gold) 30%, var(--surface));color:var(--fg)}
+.es-pag .mapa-grid .stand.st-vendido{background:color-mix(in srgb, var(--coral) 32%, var(--surface));color:var(--fg-dim)}
+.es-pag .mapa-grid .stand:hover{box-shadow:0 0 0 2px var(--fg) inset}
+.es-pag .mapa-grid .stand.is-selected{outline:2px solid var(--mint)}
+.es-pag .mapa-grid .decor{
+  display:flex;align-items:center;justify-content:center;text-align:center;border-radius:8px;
+  font-size:8.5px;font-weight:700;color:var(--fg-dim);letter-spacing:0.02em;
+  border:1.5px dashed var(--line);padding:4px;
+}
+.es-pag .mapa-grid .decor.gate{border-style:solid}
+.es-pag .mapa-grid .decor.corridor{writing-mode:vertical-rl;text-orientation:mixed;font-size:7.5px;letter-spacing:0.06em;text-transform:uppercase;padding:6px 2px}
+.es-pag .mapa-grid .decor.wc{border-style:dotted}
+.es-pag .mapa-grid .decor.avenue{writing-mode:vertical-rl;text-orientation:mixed;border:none;font-size:8px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;opacity:0.6;justify-content:flex-start;padding-top:6px}
+.es-pag .legend-mapa{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;font-size:12px;color:var(--fg-dim)}
+.es-pag .legend-mapa i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+.es-pag .legend-mapa b{color:var(--fg);font-family:var(--mono,monospace)}
+.es-pag .mapa-detalhe{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);margin-bottom:18px}
+.es-pag .mapa-detalhe .md-topo{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.es-pag .mapa-detalhe .md-cod{font-family:var(--mono,monospace);font-weight:800;font-size:18px}
+.es-pag .mapa-detalhe .md-sub{color:var(--fg-dim);font-size:12.5px;flex:1}
+.es-pag .mapa-detalhe .md-badge{font-size:10.5px;font-weight:700;padding:4px 10px;border-radius:999px}
+.es-pag .mapa-detalhe .md-badge.st-livre{background:var(--mint);color:var(--mint-fg)}
+.es-pag .mapa-detalhe .md-badge.st-reservado{background:var(--gold);color:var(--gold-fg)}
+.es-pag .mapa-detalhe .md-badge.st-vendido{background:var(--coral);color:#fff}
+.es-pag .mapa-detalhe .md-acoes{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 
 /* ---- funil de propostas (maquete: .fn-tabs/.oc-*) ---- */
 .es-pag .fn-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
@@ -378,6 +451,14 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   {% endfor %}
 </div>
 
+<h3 class="es-sec">Todos os stands</h3>
+<p class="es-sec-sub">O cadastro completo, na MESMA planta da página pública — toca num stand pra ver a situação{% if pode_gerir %} e agir{% endif %}. Livre? Copia o link e manda pro interessado.</p>
+
+<div class="fn-tabs" id="mapa-pavs"></div>
+<div class="legend-mapa" id="mapa-legenda"></div>
+<div class="mapa-outer"><div class="mapa-grid" id="mapa-grid"></div></div>
+<div class="mapa-detalhe" id="mapa-detalhe" hidden></div>
+
 <h3 class="es-sec">Propostas — orçamento e contrato</h3>
 <p class="es-sec-sub">Sinal, parcelas e contrato moram na proposta — o mapa só mostra pra onde ela aponta.</p>
 
@@ -418,7 +499,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="oc-detail" hidden>
     <div class="oc-subtabs">
       <button class="oc-subtab on" onclick="ocTab(this,'comprovante')">Comprovante</button>
-      <button class="oc-subtab" onclick="ocTab(this,'contrato')">Abrir contrato</button>
+      <button class="oc-subtab" onclick="ocTab(this,'contrato')">Contrato</button>
       <button class="oc-subtab" onclick="ocTab(this,'cliente')">Dados do cliente</button>
     </div>
     <div class="oc-detail-body" data-tab="comprovante">
@@ -428,8 +509,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <p class="oc-vazio">Nenhum arquivo anexado a este stand.</p>
       {% endif %}
       <div class="oc-acoes-detail">
-        {% if d.comprovante_url %}<a class="oc-ghost-btn" href="/painel/eventos/estandes/{{ d.codigo }}/comprovante" target="_blank">Ver comprovante →</a>{% endif %}
-        {% if grupo == 'precisa_de_mim' %}
+        {% if pode_gerir and d.comprovante_url %}<a class="oc-ghost-btn" href="/painel/eventos/estandes/{{ d.codigo }}/comprovante" target="_blank">Ver comprovante →</a>{% endif %}
+        {% if pode_gerir and grupo == 'precisa_de_mim' %}
         <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/confirmar" style="display:inline">
           <button class="oc-ghost-btn prim" type="submit">Confirmar pagamento</button>
         </form>
@@ -444,13 +525,24 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       {% endif %}
     </div>
     <div class="oc-detail-body" data-tab="contrato" hidden>
-      {% if d.orcamento_id %}
-      <span class="oc-contract-status assinado">✓ Proposta vinculada</span>
-      <p style="margin:0 0 10px">Sinal, parcelas e contrato deste stand moram na proposta — abre lá pra ver assinatura e plano de pagamento.</p>
-      <a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta e contrato →</a>
+      {% if d.contrato %}
+      {% if d.contrato.assinado_em %}
+      <span class="oc-contract-status assinado">✓ Assinado{% if d.contrato.assinado_por %} por {{ d.contrato.assinado_por }}{% endif %} em {{ data_curta(d.contrato.assinado_em) }}</span>
+      {% else %}
+      <span class="oc-contract-status pendente">⏳ Aguardando assinatura do lojista</span>
+      {% endif %}
+      <p style="margin:0 0 10px">Contrato nº {{ '%04d'|format(d.contrato.numero or 0) }} — nasceu junto com o comprovante do sinal, já com os dados do lojista e do stand.</p>
+      <div class="oc-acoes-detail">
+        <a class="oc-ghost-btn" href="/contrato/{{ d.contrato.token }}" target="_blank">Abrir contrato (link do lojista) →</a>
+        {% if pode_gerir and d.orcamento_id %}<a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta →</a>{% endif %}
+      </div>
+      {% elif d.orcamento_id %}
+      <span class="oc-contract-status pendente">⏳ Proposta sem contrato</span>
+      <p style="margin:0 0 10px">A proposta existe mas o contrato ainda não nasceu — confere o modelo de contrato em Serviços.</p>
+      {% if pode_gerir %}<a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta →</a>{% endif %}
       {% else %}
       <span class="oc-contract-status pendente">⏳ Sem proposta vinculada</span>
-      <p style="margin:0">Venda direta pela página (Pix + comprovante). Se quiser contrato e parcelas, cria a proposta em Serviços e vincula o stand.</p>
+      <p style="margin:0">O contrato nasce sozinho quando o comprovante chega com o cadastro do lojista preenchido. Este envio veio sem nome — cria a proposta em Serviços e vincula o stand, se quiser contrato.</p>
       {% endif %}
     </div>
     <div class="oc-detail-body" data-tab="cliente" hidden>
@@ -471,9 +563,182 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 </div>
 
 <script>
+var MAPA = {{ mapa_json|safe }};
+var PUB_URL = '/e/{{ cfg.slug }}';
+var PODE_GERIR = {{ 'true' if pode_gerir else 'false' }};
+</script>
+<script>
+(function(){
+""" + PLANTA_DEFS_JS + r"""
+  var tamLabel = {'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
+  // mesma pegada de tile proporcional da página pública, um degrau menor
+  var dims = {'2x2':{w:24,h:20},'3x2':{w:29,h:20},'3x3':{w:29,h:25},'4x2':{w:34,h:20},'4x3':{w:34,h:25},'tenda':{w:34,h:20},'personalizado':{w:34,h:25}};
+
+  var pavAtual = 'inferior';
+  var selecionado = null;
+
+  // pavilhões extras (stand do banco fora da planta desenhada) viram aba própria
+  var usados = {};
+  pavilions.forEach(function(p){ p.defs.forEach(function(d){
+    for (var n=d.from; n<=d.to; n++){
+      var num = d.prefix === 'i' ? String(n).padStart(2,'0') : String(n);
+      usados[d.prefix + num] = p.key;
+    }
+  }); });
+  var extras = {};
+  Object.keys(MAPA).forEach(function(code){
+    if (usados[code]) return;
+    var pk = MAPA[code].pavilhao || 'outros';
+    (extras[pk] = extras[pk] || []).push(code);
+  });
+  Object.keys(extras).forEach(function(pk){
+    var pav = pavilions.filter(function(p){ return p.key === pk; })[0];
+    if (!pav){
+      pav = { key:pk, label:pk.replace(/_/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}),
+              sub:'', defs:[], decor:[], rows:1, extraRow:1 };
+      pavilions.push(pav);
+    } else { pav.extraRow = pav.rows + 1; }
+    pav.extraCodes = extras[pk].sort();
+  });
+
+  var pavsEl = document.getElementById('mapa-pavs');
+  pavilions.forEach(function(p){
+    var b = document.createElement('button');
+    b.className = 'fn-tab' + (p.key === pavAtual ? ' on' : '');
+    b.id = 'mapa-tab-' + p.key;
+    b.innerHTML = p.label + (p.sub ? ' <span class="n">' + p.sub + '</span>' : '');
+    b.onclick = function(){ pavAtual = p.key; selecionado = null;
+      pavilions.forEach(function(q){ var el = document.getElementById('mapa-tab-' + q.key); if (el) el.classList.toggle('on', q.key === pavAtual); });
+      renderMapa(); renderLegenda(); renderDetalhe(); };
+    pavsEl.appendChild(b);
+  });
+
+  function standTile(code){
+    var s = MAPA[code];
+    if (!s) return null;
+    var btn = document.createElement('button');
+    btn.className = 'stand st-' + s.status + (code === selecionado ? ' is-selected' : '');
+    var d = dims[s.tamanho] || {w:29,h:20};
+    btn.style.width = d.w + 'px';
+    btn.style.height = d.h + 'px';
+    btn.textContent = code;
+    btn.title = code + ' · ' + (tamLabel[s.tamanho] || s.tamanho) + ' · ' + s.status;
+    btn.onclick = function(){ selecionado = code; renderMapa(); renderDetalhe(); };
+    return btn;
+  }
+
+  function renderMapa(){
+    var grid = document.getElementById('mapa-grid');
+    var pav = pavilions.filter(function(p){ return p.key === pavAtual; })[0];
+    grid.style.gridTemplateColumns = 'repeat(24, 30px)';
+    grid.style.gridTemplateRows = 'repeat(' + pav.rows + ', 26px)';
+    grid.innerHTML = '';
+    pav.decor.forEach(function(d){
+      var el = document.createElement('div');
+      el.className = 'decor' + (d.kind ? ' ' + d.kind : '');
+      el.style.gridColumn = d.col + ' / span ' + d.cspan;
+      el.style.gridRow = d.row + ' / span ' + d.rspan;
+      el.textContent = d.label;
+      grid.appendChild(el);
+    });
+    pav.defs.forEach(function(d){
+      var block = document.createElement('div');
+      block.className = 'map-block';
+      block.style.gridColumn = d.col + ' / span ' + d.cspan;
+      block.style.gridRow = d.row + ' / span ' + d.rspan;
+      if (d.label){
+        var lab = document.createElement('div');
+        lab.className = 'block-label';
+        lab.textContent = d.label;
+        block.appendChild(lab);
+      }
+      var cells = document.createElement('div');
+      cells.className = 'cells';
+      for (var n=d.from; n<=d.to; n++){
+        var num = d.prefix === 'i' ? String(n).padStart(2,'0') : String(n);
+        var t = standTile(d.prefix + num);
+        if (t) cells.appendChild(t);
+      }
+      block.appendChild(cells);
+      grid.appendChild(block);
+    });
+    if (pav.extraCodes && pav.extraCodes.length){
+      var bl = document.createElement('div');
+      bl.className = 'map-block';
+      bl.style.gridColumn = '1 / span 23';
+      bl.style.gridRow = String(pav.extraRow || 1);
+      var cs = document.createElement('div'); cs.className = 'cells';
+      pav.extraCodes.forEach(function(code){ var t = standTile(code); if (t) cs.appendChild(t); });
+      bl.appendChild(cs);
+      grid.appendChild(bl);
+    }
+  }
+
+  function renderLegenda(){
+    var tot = {livre:0, reservado:0, vendido:0};
+    Object.keys(MAPA).forEach(function(code){
+      if (MAPA[code].pavilhao !== pavAtual) return;
+      tot[MAPA[code].status] = (tot[MAPA[code].status] || 0) + 1;
+    });
+    document.getElementById('mapa-legenda').innerHTML =
+      '<span><i style="background:var(--mint)"></i>Livre <b>' + (tot.livre||0) + '</b></span>' +
+      '<span><i style="background:var(--gold)"></i>Reservado <b>' + (tot.reservado||0) + '</b></span>' +
+      '<span><i style="background:var(--coral)"></i>Vendido <b>' + (tot.vendido||0) + '</b></span>';
+  }
+
+  function esc(t){
+    return String(t).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function renderDetalhe(){
+    var box = document.getElementById('mapa-detalhe');
+    if (!selecionado){ box.hidden = true; box.innerHTML = ''; return; }
+    var s = MAPA[selecionado];
+    var statusTxt = {livre:'Livre', reservado:'Reservado', vendido:'Vendido'}[s.status];
+    var html = '<div class="md-topo">';
+    html += '<span class="md-cod">' + esc(selecionado) + '</span>';
+    html += '<span class="md-badge st-' + s.status + '">' + statusTxt + '</span>';
+    html += '<span class="md-sub">' + (s.zona ? esc(s.zona) + ' · ' : '') + esc((s.pavilhao||'').replace(/_/g,' ')) +
+            ' · ' + esc(tamLabel[s.tamanho] || s.tamanho) + (s.preco ? ' · ' + esc(s.preco) : '') +
+            (s.cliente ? ' · <b style="color:var(--fg)">' + esc(s.cliente) + '</b>' : '') + '</span>';
+    html += '</div><div class="md-acoes">';
+    if (s.status === 'livre'){
+      html += '<button class="oc-ghost-btn prim" onclick="mapaCopiarLink(this, \'' + esc(selecionado) + '\')">Copiar link pro interessado</button>';
+      html += '<a class="oc-ghost-btn" target="_blank" rel="noopener" href="' + PUB_URL + '?stand=' + encodeURIComponent(selecionado) + '">Ver na página pública →</a>';
+    } else {
+      html += '<button class="oc-ghost-btn" onclick="mapaAbrirFunil(\'' + esc(selecionado) + '\')">Abrir no funil ↓</button>';
+    }
+    html += '</div>';
+    box.innerHTML = html;
+    box.hidden = false;
+  }
+
+  window.mapaCopiarLink = function(btn, code){
+    var url = location.origin + PUB_URL + '?stand=' + encodeURIComponent(code);
+    var done = function(){ var t = btn.textContent; btn.textContent = 'Copiado ✓'; setTimeout(function(){ btn.textContent = t; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done); }
+    else { window.prompt('Copia o link:', url); }
+  };
+
+  window.mapaAbrirFunil = function(code){
+    var row = document.querySelector('.oc-hist[data-cod="' + code + '"]');
+    if (!row) return;
+    var grupo = row.dataset.grupo;
+    var tab = document.querySelector('.fn-tab[data-grupo="' + grupo + '"]');
+    if (tab) fnSel(tab);
+    var detail = row.querySelector('.oc-detail');
+    if (detail && detail.hidden) ocToggle(code);
+    row.scrollIntoView({behavior:'smooth', block:'center'});
+  };
+
+  renderMapa(); renderLegenda(); renderDetalhe();
+})();
+
 function fnSel(btn){
   var grupo = btn.dataset.grupo;
-  document.querySelectorAll('.fn-tab').forEach(function(b){ b.classList.toggle('on', b === btn); });
+  document.querySelectorAll('.fn-tab[data-grupo]').forEach(function(b){ b.classList.toggle('on', b === btn); });
   document.querySelectorAll('.oc-hist[data-grupo], .oc-vazio[data-grupo]').forEach(function(el){
     el.hidden = el.dataset.grupo !== grupo;
   });

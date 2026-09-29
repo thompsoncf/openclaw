@@ -2457,6 +2457,29 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     nome_vend = ck.nome_do_vendedor(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if l["sua_vez"])
 
+    # O MAPA DE STANDS no app do vendedor (pedido do dono, 29/09/2026): quem
+    # vende estande numerado (evento_stands_config) ganha o atalho pro mapa —
+    # é ali que ele vê o que está livre ANTES de prometer na conversa. Cartão
+    # com estilo inline de propósito: o app.css é folha versionada no service
+    # worker, e uma classe nova pra um atalho opcional não paga o redeploy.
+    stands_atalho = ""
+    try:
+        from finance import evento_stands as _es
+        if _es.obter_config(pool, conta_id):
+            _livres = sum(1 for s in _es.listar(pool, conta_id)
+                          if s["status"] == "livre")
+            stands_atalho = (
+                f"<a href='{_BASE}/stands' style=\"display:flex;align-items:center;"
+                "gap:.6rem;margin:.6rem .8rem 0;padding:.6rem .8rem;border:1px solid "
+                "var(--line,#1E2A23);border-radius:12px;background:var(--surface,#121A16);"
+                "text-decoration:none;color:inherit\">🗺️<span style='flex:1;min-width:0'>"
+                "<b style='display:block;font-size:.9rem'>Mapa de stands</b>"
+                f"<span style='font-size:.76rem;color:var(--text-dim,#8FA197)'>{_livres} "
+                "livres agora — toca pra ver a planta e mandar o link</span></span>"
+                "<span style='color:var(--neon,#25D366);font-weight:700'>→</span></a>")
+    except Exception:  # noqa: BLE001 — atalho é enfeite; a fila abre sem ele
+        pass
+
     # a fila já tem os leads em mão: soma daqui, sem uma consulta a mais só pra aba.
     # É a carteira INTEIRA: o de fora do mês some da lista, nunca do número.
     # (buscando, a lista é um recorte — a aba continua contando a carteira toda.)
@@ -2702,6 +2725,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              # o repasse vem DEPOIS da novidade e antes do foco: é sobre um lead
              # que já é dele agora, então pertence ao trabalho, não ao noticiário.
              + ("" if gestor else _faixa_recebidos(conta_id, membro_id))
+             + stands_atalho
              + f"<div id=filabusca>{caixa}</div>"
              + f"<div id=filafoco>{foco}</div>"
              + f"<div class=scroll id=filalista>{pushcard}{lista}{dica}{volta}</div>"
@@ -9379,3 +9403,231 @@ def painel_equipe_cockpit_link(request: Request, membro_id: int = Form(...)):
         if enviado else
         "Link do app gerado abaixo — mande pra pessoa (vale 15 min).")
     return RedirectResponse("/painel/equipe", status_code=303)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# O MAPA DE STANDS (pedido do dono, 29/09/2026): a MESMA planta da página
+# pública (web/loja_stands.PLANTA_DEFS_JS — uma fonte só de posições), do jeito
+# do celular: encolhida pra caber na tela, cor por status, toque abre o detalhe
+# com o interessado e o botão de copiar o link público já com o stand
+# selecionado (/e/<slug>?stand=CODIGO). LEITURA apenas — confirmar pagamento e
+# liberar continuam no painel do dono/gestor; o vendedor usa isto pra saber o
+# que pode prometer na conversa. CSS inline na página (não no app.css): folha
+# versionada no service worker não paga redeploy por uma tela opcional.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STANDS_CSS = """<style>
+.stpav{display:flex;gap:8px;flex-wrap:wrap;padding:.7rem .8rem 0}
+.stpav button{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem;
+  padding:8px 12px;border-radius:999px;border:1px solid var(--line,#1E2A23);
+  background:var(--surface,#121A16);color:var(--text-dim,#8FA197);width:auto;min-height:0;margin:0}
+.stpav button.on{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
+.stleg{display:flex;gap:14px;flex-wrap:wrap;padding:.6rem .9rem;font-size:.74rem;color:var(--text-dim,#8FA197)}
+.stleg i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+.stleg b{color:var(--text,#EAF2ED);font-family:var(--mono,monospace)}
+.stouter{overflow:hidden;padding:.2rem .4rem 0}
+.ststage{display:flex;justify-content:flex-start}
+.stzoom{transform-origin:0 0}
+.stgrid{position:relative;display:grid;gap:4px;width:max-content;padding:14px;border-radius:14px;
+  background:#0D120F;box-shadow:inset 0 0 0 1px var(--line,#1E2A23)}
+.stgrid .blk{display:flex;flex-direction:column;gap:3px}
+.stgrid .lbl{font-size:7.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;
+  color:var(--text-dim,#8FA197);background:var(--surface,#121A16);border:1px solid var(--line,#1E2A23);
+  border-radius:4px;padding:2px 5px;white-space:nowrap;width:fit-content}
+.stgrid .cel{display:flex;flex-wrap:wrap;align-content:flex-start;gap:3px}
+.stgrid .std{appearance:none;cursor:pointer;border:1px solid var(--line,#1E2A23);border-radius:5px;
+  width:auto;min-height:0;margin:0;font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;
+  line-height:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;flex:0 0 auto}
+.stgrid .std.livre{background:rgba(37,211,102,.22);color:var(--text,#EAF2ED)}
+.stgrid .std.reservado{background:rgba(224,163,46,.3);color:var(--text,#EAF2ED)}
+.stgrid .std.vendido{background:rgba(224,87,79,.3);color:var(--text-dim,#8FA197)}
+.stgrid .std.sel{outline:2px solid var(--neon,#25D366)}
+.stgrid .dec{display:flex;align-items:center;justify-content:center;text-align:center;border-radius:8px;
+  font-size:8px;font-weight:700;color:var(--text-dim,#8FA197);border:1.5px dashed var(--line,#1E2A23);padding:4px}
+.stgrid .dec.corridor,.stgrid .dec.avenue{writing-mode:vertical-rl;text-orientation:mixed;
+  font-size:7.5px;letter-spacing:.06em;text-transform:uppercase;padding:6px 2px}
+.stgrid .dec.avenue{border:none;opacity:.6;justify-content:flex-start;padding-top:6px}
+.stgrid .dec.gate{border-style:solid}
+.stgrid .dec.wc{border-style:dotted}
+.stdet{margin:.7rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);
+  border-radius:12px;background:var(--surface,#121A16)}
+.stdet .cod{font-family:var(--mono,monospace);font-weight:800;font-size:1.05rem;margin-right:.5rem}
+.stdet .bdg{font-size:.68rem;font-weight:700;padding:3px 9px;border-radius:999px;vertical-align:2px}
+.stdet .bdg.livre{background:var(--neon,#25D366);color:#04150C}
+.stdet .bdg.reservado{background:#E0A32E;color:#2B1D00}
+.stdet .bdg.vendido{background:#E0574F;color:#fff}
+.stdet .inf{font-size:.78rem;color:var(--text-dim,#8FA197);margin-top:.35rem;line-height:1.5}
+.stdet .inf b{color:var(--text,#EAF2ED)}
+.stdet .ac{display:flex;gap:8px;flex-wrap:wrap;margin-top:.6rem}
+.stdet .ac a,.stdet .ac button{appearance:none;cursor:pointer;text-decoration:none;font-family:inherit;
+  font-weight:700;font-size:.78rem;padding:8px 13px;border-radius:8px;border:1px solid var(--line,#1E2A23);
+  background:var(--surface-2,#16201B);color:var(--text,#EAF2ED);width:auto;min-height:0;margin:0;display:inline-flex}
+.stdet .ac .prim{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
+</style>"""
+
+_STANDS_JS = r"""
+  var tamLabel={'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
+  var dims={'2x2':{w:24,h:20},'3x2':{w:29,h:20},'3x3':{w:29,h:25},'4x2':{w:34,h:20},'4x3':{w:34,h:25},'tenda':{w:34,h:20},'personalizado':{w:34,h:25}};
+  var pav='inferior', sel=null;
+  function esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+  var pavsEl=document.getElementById('stpav');
+  pavilions.forEach(function(p){
+    var b=document.createElement('button');
+    b.textContent=p.label; b.id='stpav-'+p.key;
+    if(p.key===pav)b.classList.add('on');
+    b.onclick=function(){pav=p.key;sel=null;
+      pavilions.forEach(function(q){var e=document.getElementById('stpav-'+q.key);if(e)e.classList.toggle('on',q.key===pav);});
+      render();legenda();detalhe();};
+    pavsEl.appendChild(b);
+  });
+
+  function tile(code){
+    var s=STANDS[code]; if(!s)return null;
+    var b=document.createElement('button');
+    b.className='std '+s.status+(code===sel?' sel':'');
+    var d=dims[s.tamanho]||{w:29,h:20};
+    b.style.width=d.w+'px'; b.style.height=d.h+'px';
+    b.textContent=code;
+    b.onclick=function(){sel=code;render();detalhe();
+      document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});};
+    return b;
+  }
+
+  function render(){
+    var grid=document.getElementById('stgrid');
+    var p=pavilions.filter(function(x){return x.key===pav;})[0];
+    grid.style.gridTemplateColumns='repeat(24, 30px)';
+    grid.style.gridTemplateRows='repeat('+p.rows+', 26px)';
+    grid.innerHTML='';
+    p.decor.forEach(function(d){
+      var e=document.createElement('div');
+      e.className='dec'+(d.kind?' '+d.kind:'');
+      e.style.gridColumn=d.col+' / span '+d.cspan;
+      e.style.gridRow=d.row+' / span '+d.rspan;
+      e.textContent=d.label; grid.appendChild(e);
+    });
+    p.defs.forEach(function(d){
+      var blk=document.createElement('div'); blk.className='blk';
+      blk.style.gridColumn=d.col+' / span '+d.cspan;
+      blk.style.gridRow=d.row+' / span '+d.rspan;
+      if(d.label){var l=document.createElement('div');l.className='lbl';l.textContent=d.label;blk.appendChild(l);}
+      var cel=document.createElement('div'); cel.className='cel';
+      for(var n=d.from;n<=d.to;n++){
+        var num=d.prefix==='i'?String(n).padStart(2,'0'):String(n);
+        var t=tile(d.prefix+num); if(t)cel.appendChild(t);
+      }
+      blk.appendChild(cel); grid.appendChild(blk);
+    });
+    escala();
+  }
+
+  // celular: a planta (24 col) encolhe pra caber na tela — mesma regra da
+  // página pública
+  function escala(){
+    var outer=document.getElementById('stouter'), stage=document.getElementById('ststage'),
+        zoom=document.getElementById('stzoom'), grid=document.getElementById('stgrid');
+    var w=grid.offsetWidth||1, avail=outer.clientWidth-8;
+    var k=Math.min(1,avail/w);
+    zoom.style.transform='scale('+k+')';
+    stage.style.height=Math.ceil(grid.offsetHeight*k+6)+'px';
+  }
+  window.addEventListener('resize',escala);
+
+  function legenda(){
+    var t={livre:0,reservado:0,vendido:0};
+    Object.keys(STANDS).forEach(function(c){ if(STANDS[c].pavilhao!==pav)return;
+      t[STANDS[c].status]=(t[STANDS[c].status]||0)+1; });
+    document.getElementById('stleg').innerHTML=
+      '<span><i style="background:#25D366"></i>Livre <b>'+(t.livre||0)+'</b></span>'+
+      '<span><i style="background:#E0A32E"></i>Reservado <b>'+(t.reservado||0)+'</b></span>'+
+      '<span><i style="background:#E0574F"></i>Vendido <b>'+(t.vendido||0)+'</b></span>';
+  }
+
+  function detalhe(){
+    var box=document.getElementById('stdet');
+    if(!sel){box.hidden=true;box.innerHTML='';return;}
+    var s=STANDS[sel];
+    var st={livre:'Livre',reservado:'Reservado',vendido:'Vendido'}[s.status];
+    var h='<span class=cod>'+esc(sel)+'</span><span class="bdg '+s.status+'">'+st+'</span>';
+    h+='<div class=inf>'+(s.zona?esc(s.zona)+' · ':'')+esc((s.pavilhao||'').replace(/_/g,' '))+
+       ' · '+esc(tamLabel[s.tamanho]||s.tamanho)+(s.preco?' · <b>'+esc(s.preco)+'</b>':'')+
+       (s.cliente?'<br>Interessado: <b>'+esc(s.cliente)+'</b>':'')+'</div>';
+    h+='<div class=ac>';
+    if(s.status==='livre'){
+      h+='<button class=prim type=button onclick="stCopiar(this,\''+esc(sel)+'\')">Copiar link pro cliente</button>';
+      h+='<a href="'+PUB+'?stand='+encodeURIComponent(sel)+'" target=_blank rel=noopener>Ver na página →</a>';
+    } else {
+      h+='<span class=inf style="margin:0">'+(s.status==='reservado'?'Comprovante em conferência — não prometa este.':'Já vendido.')+'</span>';
+    }
+    h+='</div>';
+    box.innerHTML=h; box.hidden=false;
+  }
+
+  window.stCopiar=function(btn,code){
+    var url=location.origin+PUB+'?stand='+encodeURIComponent(code);
+    var ok=function(){var t=btn.textContent;btn.textContent='Copiado ✓';setTimeout(function(){btn.textContent=t;},1600);};
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(ok);}
+    else{window.prompt('Copia o link:',url);}
+  };
+
+  render();legenda();
+"""
+
+
+@router.get("/cockpit/stands", response_class=HTMLResponse)
+def cockpit_stands(request: Request):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    if conta_id is None:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    pool = get_pool()
+    from finance import evento_stands as _es
+    cfg = _es.obter_config(pool, conta_id)
+    if not cfg:
+        return RedirectResponse(_BASE, status_code=303)
+    stands = _es.listar(pool, conta_id)
+
+    # o nome de quem reservou/comprou — o vendedor responde "esse já foi?" na hora
+    nomes = {}
+    ids = [s["prospeccao_id"] for s in stands if s["prospeccao_id"]]
+    if ids:
+        try:
+            with pool.connection() as c:
+                nomes = dict(c.execute(
+                    "select id, empresa from prospeccao where conta_id=%s and id=any(%s)",
+                    (conta_id, ids)).fetchall())
+        except Exception:  # noqa: BLE001 — sem nome a planta continua servindo
+            nomes = {}
+
+    tot = {"livre": 0, "pre_reservado": 0, "vendido": 0}
+    dados = {}
+    for s in stands:
+        tot[s["status"]] = tot.get(s["status"], 0) + 1
+        dados[s["codigo"]] = {
+            "pavilhao": s["pavilhao"], "zona": s["zona"] or "",
+            "tamanho": s["tamanho"],
+            "status": "reservado" if s["status"] == "pre_reservado" else s["status"],
+            "preco": _brl(s["preco_centavos"]) if s["preco_centavos"] else None,
+            "cliente": (nomes.get(s["prospeccao_id"]) if s["status"] != "livre" else None),
+        }
+
+    from web.loja_stands import PLANTA_DEFS_JS
+    sub = (f"{tot['livre']} livres · {tot['pre_reservado']} reservados · "
+           f"{tot['vendido']} vendidos")
+    corpo = (
+        _hdr("Mapa de stands", sub, voltar=_BASE)
+        + _STANDS_CSS
+        + "<div class=scroll>"
+        + "<div class=stpav id=stpav></div>"
+        + "<div class=stleg id=stleg></div>"
+        + "<div class=stouter id=stouter><div class=ststage id=ststage>"
+        + "<div class=stzoom id=stzoom><div class=stgrid id=stgrid></div></div></div></div>"
+        + "<div class=stdet id=stdet hidden></div>"
+        + "</div>"
+        + f"<script>var STANDS={_json_mod.dumps(dados)};"
+        + f"var PUB='/e/{cfg['slug']}';</script>"
+        + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS + "})();</script>"
+    )
+    return _page("Mapa de stands", corpo)

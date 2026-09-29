@@ -5176,8 +5176,10 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
 <div class="emp-par{% if not (quadro_tipo and quadro_tipo|selectattr('total')|list) %} so-um{% endif %}">
 <div class="emp-col">
 <div class="card larga" id="dre">
-  <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
-    <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem"><strong>DRE do mês</strong>
+    <select onchange="location.href='/painel/empresa?mes='+this.value+'#dre'" style="font-size:.78rem;padding:.25rem .5rem;border-radius:6px;background:var(--card-2);color:var(--txt);border:1px solid var(--borda)">
+      {% for v, rotulo in meses_dre %}<option value="{{ v }}" {% if v==mes_dre_sel %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+    </select></div>
   {% if dre.estrutura and dre.estrutura.linhas %}
   <table class="dre-tbl" style="width:100%;margin-top:.6rem;font-size:.86rem">
     {% for l in dre.estrutura.linhas %}
@@ -11832,7 +11834,7 @@ def _empresa_resumo(titulos: list[dict], planej: dict | None, dre: dict,
 
 
 @router.get("/painel/empresa", response_class=HTMLResponse)
-def painel_empresa(request: Request):
+def painel_empresa(request: Request, mes: str = ""):
     """Visão geral do módulo Empresa (PJ). Só pra conta com o módulo ativo."""
     from finance import empresa as emp
     conta = conta_logada(request)
@@ -11849,12 +11851,33 @@ def painel_empresa(request: Request):
                        nichos_lista=_nichos.lista_nichos(), eh_fornecedor=bool(conta[8]),
                        identidade=emp.obter_identidade(pool, conta[0]), margem_alvo=60.0)
     hoje = _date.today()
+    # O SELETOR DE MÊS DO DRE (pedido do dono em 29/09/2026, depois da Iris
+    # reparar que só dava pra ver o mês atual): só o card do DRE (e o "ver por
+    # centro de custo" dentro dele) olha pro mês escolhido — o resto da aba
+    # (títulos, folha, planejamento, "a classificar"...) é trabalho do MÊS
+    # ATUAL de verdade, e continua em `hoje`. Mesmo padrão de `?mes=AAAA-MM`
+    # que a aba Financeiro já usa.
+    try:
+        ano_dre, mes_dre = (int(x) for x in mes.split("-")) if mes else (hoje.year, hoje.month)
+    except ValueError:
+        ano_dre, mes_dre = hoje.year, hoje.month
+    mes_dre_sel = f"{ano_dre:04d}-{mes_dre:02d}"
+    _nomes_mes = ["jan", "fev", "mar", "abr", "mai", "jun",
+                 "jul", "ago", "set", "out", "nov", "dez"]
+    meses_dre = []
+    _y, _m = hoje.year, hoje.month
+    for _ in range(6):
+        meses_dre.append((f"{_y:04d}-{_m:02d}", f"{_nomes_mes[_m-1]}/{_y}"))
+        _m -= 1
+        if _m == 0:
+            _m = 12
+            _y -= 1
     # Só o DRE, não o dashboard inteiro. Esta tela já mostrou o bloco "Visão do negócio"
     # do /painel no topo — duplicata da mesma tela — e junto vinha o custo do
     # _painel_dashboard completo (resumo de títulos, fluxo de 4 semanas, MRR e a query do
     # funil de orçamentos) só pra aproveitar o `dre` de dentro dele. Sem o bloco, o resto
     # não tem consumidor: o único que a Empresa usa é este.
-    dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
+    dre = emp.dre_mes(pool, conta[0], ano_dre, mes_dre)
     # Plano de contas (árvore + liga/desliga), centros de custo e DRE por centro.
     # Tolerante: se a migração 132 ainda não rodou, as seções ficam vazias.
     from finance import plano_contas as _pc
@@ -11862,7 +11885,7 @@ def painel_empresa(request: Request):
     try:
         plano_arvore = _pc.arvore_habilitada(pool, conta[0])
         centros = _pc.listar_centros(pool, conta[0], incluir_inativos=True)
-        dre_centro = emp.dre_por_centro(pool, conta[0], hoje.year, hoje.month)
+        dre_centro = emp.dre_por_centro(pool, conta[0], ano_dre, mes_dre)
         # Painel "A classificar": lançamentos de empresa do mês sem conta contábil,
         # com as opções (contas habilitadas + centros ativos) pra resolver ali.
         a_classificar = LivroCaixa(pool, conta[0]).lancamentos_a_classificar(
@@ -12037,7 +12060,8 @@ def painel_empresa(request: Request):
                    # divide espaço com "aguardando você" e o nome do fornecedor.
                    RITMO_SELO={"quinzenal": "quinzenal", "mensal": "mensal",
                                "anual": "anual"},
-                   dre=dre, titulos=titulos, tit_blocos=tit_blocos,
+                   dre=dre, mes_dre_sel=mes_dre_sel, meses_dre=meses_dre,
+                   titulos=titulos, tit_blocos=tit_blocos,
                    tit_atrasadas=tit_atrasadas, planej=planej,
                    CAT_TITULO={"pagar": emp.categorias_titulo("pagar"),
                                "receber": emp.categorias_titulo("receber")},

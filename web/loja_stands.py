@@ -184,14 +184,22 @@ h1,h2,.titulo{font-family:'Anton',sans-serif;letter-spacing:.02em;text-transform
 .zona{margin-top:14px}
 .zona .nome{font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
-.stand{border-radius:9px;padding:8px 4px 7px;text-align:center;cursor:pointer;border:2px solid var(--bord);background:var(--card);transition:transform .1s}
-.stand:active{transform:scale(.96)}
-.stand .cod{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:13px}
-.stand .tam{font-size:9.5px;color:var(--sub);margin-top:2px}
-.stand.livre{border-color:var(--mint)}
-.stand.pre_reservado{border-color:var(--amar);background:rgba(255,222,46,.08)}
-.stand.vendido{border-color:#3A3A3A;background:#1A1A1A;color:#6A6A6A;cursor:default}
-.stand.vendido .tam{color:#5A5A5A}
+.stand{border-radius:9px;padding:8px 4px 7px;text-align:center;cursor:pointer;border:none;
+  transition:transform .12s ease, box-shadow .12s ease}
+.stand:active{transform:translateY(1px) scale(.98)}
+.stand .cod{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:13px}
+.stand .tam{font-size:9.5px;margin-top:2px;opacity:.82}
+.stand.livre{
+  background:linear-gradient(155deg, color-mix(in srgb, var(--mint) 88%, white 14%), var(--mint));
+  color:#04231B;box-shadow:0 3px 0 #0CAF87, 0 6px 10px rgba(0,0,0,.28);
+}
+.stand.livre:hover{transform:translateY(-1px);box-shadow:0 4px 0 #0CAF87, 0 9px 14px rgba(0,0,0,.32)}
+.stand.pre_reservado{
+  background:linear-gradient(155deg, color-mix(in srgb, var(--amar) 85%, white 16%), var(--amar));
+  color:#241C00;box-shadow:0 3px 0 #B99400, 0 6px 10px rgba(0,0,0,.24);
+}
+.stand.vendido{background:#1C1D18;color:#6A6A64;cursor:default;box-shadow:0 2px 0 #111208;border:1px solid #2A2A24}
+.stand.vendido .tam{color:#57574F}
 .resumo{display:flex;gap:18px;margin-top:10px;font-size:12px;color:var(--sub)}
 .resumo b{color:var(--txt)}
 /* painel de detalhe */

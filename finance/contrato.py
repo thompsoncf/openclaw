@@ -254,6 +254,10 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None,
                   for s in (catalogo or []) if s.get("slug")},
         "evento": {
             "data": data_br(ev.get("data")),
+            # "13 a 15/11/2026": a data de um evento de VÁRIOS dias (feira). Sem
+            # `periodo` gravado, cai na data única de sempre — quem já usa
+            # {evento.data} não muda nada.
+            "periodo": ev.get("periodo") or data_br(ev.get("data")),
             "inicio": ev.get("inicio") or "",
             "fim": ev.get("fim") or "",
             "tipo": ev.get("tipo") or "",
@@ -282,7 +286,13 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None,
             "cep": o.get("cep") or "",
             "cidade": o.get("cidade") or "",
             "uf": (o.get("uf") or "").upper(),
+            # quem assina pelo contratante (o cadastro do estande grava aqui)
+            "representante": o.get("representante") or "",
         },
+        # O OBJETO: o que foi contratado, do jeito que o orçamento o descreve —
+        # pra estande, "Stand G60 — 4x3m — Outlet Grifes (Pavilhão Inferior)".
+        # Vem dos itens da proposta (o que o cliente aprovou), não de uma cópia.
+        "objeto": {"descricao": o.get("objeto") or ""},
         "valor": {
             "total": reais(total),
             "entrada": reais(entrada),
@@ -411,7 +421,7 @@ def montar(clausulas, ctx: dict) -> tuple[list[dict], list[str]]:
 
 # Os grupos que vêm de CADA orçamento. O valor não mora na configuração: chega
 # junto com a proposta, e é diferente em cada uma.
-GRUPOS_DA_PROPOSTA = ("cliente", "evento", "valor")
+GRUPOS_DA_PROPOSTA = ("cliente", "evento", "valor", "objeto")
 
 # Onde o dono conserta o que é dele. Endereço, não nome de campo: "{empresa.cnpj}"
 # não diz a ninguém o que fazer; "preencha na aba Empresa" diz.
@@ -506,7 +516,9 @@ _CAMPOS_FIXOS = [
     ("cliente.telefone", "telefone do cliente"), ("cliente.email", "e-mail do cliente"),
     ("evento.data", "data do evento"), ("evento.inicio", "horário de início"),
     ("evento.fim", "horário de término"), ("evento.tipo", "tipo de evento"),
-    ("evento.convidados", "nº de convidados"),
+    ("evento.convidados", "nº de convidados"), ("evento.periodo", "período do evento"),
+    ("cliente.representante", "representante legal do cliente"),
+    ("objeto.descricao", "o que foi contratado (ex.: o estande)"),
     ("valor.total", "valor total"), ("valor.entrada", "valor da entrada"),
     ("valor.saldo", "saldo a pagar"), ("valor.numero", "nº do orçamento"),
     ("regra.sinal_pct", "% da entrada"), ("regra.multa_cancelamento", "% da multa"),

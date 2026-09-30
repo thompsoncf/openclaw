@@ -3352,6 +3352,8 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
           <span id="nc-badge" class="doc-badge"></span>
         </div>
         <div class="col-2"><label>Nome / Razão social *</label><input id="nc-nome" name="nome" required></div>
+        <div><label>Razão social <span class="mut">(se for diferente do nome)</span></label><input name="razao_social" maxlength="200" placeholder="Como sai no contrato"></div>
+        <div><label>Representante legal</label><input name="representante" maxlength="200" placeholder="Quem assina pela empresa"></div>
         {# nao e' escolha unica: a mesma pessoa/empresa pode comprar de voce E vender
            pra voce ao mesmo tempo — mesmo padrao de vende_produto/vende_servico,
            ja independentes na conta. Cliente vem marcado, e' o caso mais comum. #}
@@ -3411,6 +3413,8 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
             <form method="post" action="/painel/clientes/{{ c.id }}/editar">
               <div class="mini-grid">
                 <div class="col-2"><label>Nome / Razão social</label><input name="nome" value="{{ c.nome or '' }}"></div>
+                <div><label>Razão social <span class="mut">(contrato)</span></label><input name="razao_social" value="{{ c.razao_social or '' }}" maxlength="200"></div>
+                <div><label>Representante legal</label><input name="representante" value="{{ c.representante or '' }}" maxlength="200"></div>
                 <div class="col-2" style="display:flex;gap:.7rem;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;margin:.15rem 0 .2rem">
                   <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
                     <input type="checkbox" name="eh_cliente" value="1" {% if c.eh_cliente %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
@@ -3761,6 +3765,8 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
     <form method="post" action="/painel/clientes/{{ cliente.id }}/editar" style="margin-top:.7rem">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
         <div><label>Nome</label><input name="nome" value="{{ cliente.nome or '' }}" style="width:100%"></div>
+        <div><label>Razão social</label><input name="razao_social" value="{{ cliente.razao_social or '' }}" maxlength="200" style="width:100%"></div>
+        <div><label>Representante legal</label><input name="representante" value="{{ cliente.representante or '' }}" maxlength="200" style="width:100%"></div>
         <div><label>Telefone</label><input name="telefone" value="{{ cliente.telefone or '' }}" style="width:100%"></div>
         <div><label>CPF</label><input name="cpf" value="{{ cliente.cpf or '' }}" style="width:100%"></div>
         <div><label>E-mail</label><input name="email" value="{{ cliente.email or '' }}" style="width:100%"></div>
@@ -11260,6 +11266,7 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
                          obs: str = Form(""), cidade: str = Form(""),
                          uf: str = Form(""), endereco: str = Form(""),
                          cep: str = Form(""),
+                         razao_social: str = Form(""), representante: str = Form(""),
                          eh_cliente: str = Form(""), eh_fornecedor: str = Form("")):
     from finance import empresa as emp, clientes as cli, validadoc
     conta = conta_logada(request)
@@ -11269,7 +11276,7 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
     if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     tipo, d = validadoc.classificar(documento or cpf)
-    kw = {}
+    kw = {"razao_social": (razao_social or None), "representante": (representante or None)}
     if tipo == "pf":
         kw["cpf"] = d
     elif tipo == "pj":
@@ -11508,6 +11515,8 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
                           obs: str = Form(""), cidade: str = Form(""),
                           uf: str = Form(""), endereco: str = Form(""),
                           cep: str = Form(""),
+                          razao_social: str | None = Form(None),
+                          representante: str | None = Form(None),
                           eh_cliente: str = Form(""), eh_fornecedor: str = Form("")):
     from finance import empresa as emp, clientes as cli, validadoc
     conta = conta_logada(request)
@@ -11522,6 +11531,12 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
               "eh_cliente": bool(eh_cliente), "eh_fornecedor": bool(eh_fornecedor)}
     if (nome or "").strip():
         campos["nome"] = nome
+    # só quando o formulário trouxe o campo: outros formulários que postam aqui
+    # (ficha do cliente de serviço) não podem apagar o que não mostram
+    if razao_social is not None:
+        campos["razao_social"] = razao_social
+    if representante is not None:
+        campos["representante"] = representante
     tipo, d = validadoc.classificar(documento or cpf)
     if tipo == "pf":
         campos["cpf"] = d

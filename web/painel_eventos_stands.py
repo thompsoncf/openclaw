@@ -79,6 +79,13 @@ _MES = ["jan", "fev", "mar", "abr", "mai", "jun",
         "jul", "ago", "set", "out", "nov", "dez"]
 
 
+def _wa_num(txt) -> str:
+    """Só dígitos, com o 55 na frente quando vier sem país (o cliente digita
+    '(86) 9 8888-7777' na página): wa.me sem DDI abre a conversa errada."""
+    d = "".join(ch for ch in (txt or "") if ch.isdigit())
+    return "55" + d if 10 <= len(d) <= 11 else d
+
+
 def _data_curta(dt) -> str:
     return f"{dt.day} {_MES[dt.month - 1]}" if dt else "—"
 
@@ -165,6 +172,9 @@ def painel_eventos_stands(request: Request):
 
     interessados = _prospeccoes(pool, conta[0],
                                 [s["prospeccao_id"] for s in stands if s["prospeccao_id"]])
+    # o cadastro de verdade do cliente de cada stand ocupado (clientes/pessoas):
+    # é o que o formulário "Dados do cliente" edita e o contrato lê
+    cadastros = es.cadastros_dos_stands(pool, conta[0], stands)
 
     # O CADASTRO COMPLETO pro mapa (mesma planta da página pública): status já
     # traduzido pras classes .st-*, e o nome do interessado só onde não é livre
@@ -194,6 +204,12 @@ def painel_eventos_stands(request: Request):
         cli = interessados.get(s["prospeccao_id"]) or {}
         item = dict(s)
         item["cliente"] = cli
+        cad = cadastros.get(s["codigo"])
+        item["cad"] = cad
+        item["objeto"] = es.descricao_objeto(s)
+        # selo "Cadastro 2/7" enquanto faltar dado do contrato
+        cad_badge = ([(f"Cadastro {cad['n_ok']}/{cad['n_total']}", "ambar")]
+                     if cad and cad["faltam"] else [])
         # o contrato VIVO da proposta do estande (nasce junto com o comprovante
         # do sinal — evento_stands.garantir_orcamento_e_contrato); tolerante:
         # sem a migração 164, a aba abre sem contrato.
@@ -201,17 +217,17 @@ def painel_eventos_stands(request: Request):
                             if s["orcamento_id"] else None)
         if s["status"] == "pre_reservado":
             item["resumo"] = "Comprovante recebido · sinal aguardando confirmação"
-            item["pend"] = [("Confirmar sinal", "coral")]
+            item["pend"] = [("Confirmar sinal", "coral")] + cad_badge
             if item["contrato"] and not item["contrato"]["assinado_em"]:
                 item["pend"].append(("Contrato na mão do lojista", "azul"))
             funil["precisa_de_mim"].append(item)
         elif s["orcamento_id"]:
             item["resumo"] = "Sinal confirmado · parcelas e contrato na proposta"
-            item["pend"] = [("Acompanhar proposta", "azul")]
+            item["pend"] = [("Acompanhar proposta", "azul")] + cad_badge
             funil["com_o_cliente"].append(item)
         else:
             item["resumo"] = "Pagamento confirmado · stand vendido"
-            item["pend"] = []
+            item["pend"] = list(cad_badge)
             funil["fechada"].append(item)
     funil["precisa_de_mim"].sort(key=lambda s: s["pre_reserva_ate"] or "")
 
@@ -262,7 +278,7 @@ def painel_eventos_stands(request: Request):
         cor_tam=_COR_TAM, tam_label=_TAM_LABEL, data_curta=_data_curta,
         mapa_json=mapa_json, pode_gerir=pode_gerir, stands=stands,
         vinculos=vinculos, precos_tam=precos_tam,
-        vendedores=vendedores, vend_nomes=vend_nomes,
+        vendedores=vendedores, vend_nomes=vend_nomes, wa_num=_wa_num,
         links_vendas=links_vendas, meu_cod=meu_cod,
         sem_storage=not comprov.configurado(),
         erro=(request.query_params.get("erro") or "").strip(),
@@ -322,6 +338,59 @@ def confirmar(request: Request, codigo: str):
     if not r["ok"]:
         return RedirectResponse(f"/painel/eventos/estandes?erro={r['erro']}", status_code=303)
     return RedirectResponse(f"/painel/eventos/estandes?ok=Estande {codigo} confirmado.",
+                            status_code=303)
+
+
+@router.get("/painel/eventos/estandes/consulta-cnpj")
+def consulta_cnpj(request: Request, doc: str = ""):
+    """"Buscar na Receita" do formulário Dados do cliente. É a MESMA consulta da
+    aba Clientes (finance.cnpj_info, BrasilAPI) — mas numa rota daqui porque o
+    gate de papéis só libera ao gestor o prefixo /painel/eventos/estandes; a de
+    Clientes é do dono. Devolve razão social, e-mail, cidade e UF (o que a
+    consulta traz; endereço e CEP o gestor digita)."""
+    from fastapi.responses import JSONResponse as _J
+    from finance import cnpj_info, validadoc
+    conta, cfg_ou_redir = _acesso(request)
+    if conta is None:
+        return _J({"ok": False, "erro": "login"}, status_code=401)
+    ok, tipo, d = validadoc.valida(doc)
+    if tipo != "pj" or not ok:
+        return _J({"ok": False, "erro": "CNPJ inválido"})
+    info = cnpj_info.consultar_cnpj(d)
+    if not info:
+        return _J({"ok": False, "erro": "CNPJ não encontrado na Receita"})
+    return _J({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
+               "cidade": info.get("cidade"), "uf": info.get("uf")})
+
+
+@router.post("/painel/eventos/estandes/{codigo}/cliente")
+def salvar_cliente_do_stand(request: Request, codigo: str,
+                            fantasia: str = Form(""), whats: str = Form(""),
+                            razao: str = Form(""), doc: str = Form(""),
+                            rep: str = Form(""), email: str = Form(""),
+                            end: str = Form(""), cep: str = Form(""),
+                            cidade: str = Form(""), uf: str = Form(""),
+                            obs: str = Form("")):
+    """Salva o formulário "Dados do cliente": cria/atualiza o cliente na aba
+    Clientes (sem duplicar) e leva os dados pro contrato. Só dono/gestor."""
+    conta, cfg_ou_redir = _acesso(request)
+    if conta is None:
+        return cfg_ou_redir
+    r = es.salvar_cadastro_stand(get_pool(), conta[0], codigo, {
+        "fantasia": fantasia, "whats": whats, "razao": razao, "doc": doc, "rep": rep,
+        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf, "obs": obs})
+    if not r["ok"]:
+        return RedirectResponse(
+            f"/painel/eventos/estandes?erro={r['erro']}&abrir={codigo}", status_code=303)
+    msg = (f"Cliente do {codigo} salvo em Clientes"
+           + (" (cadastro novo)." if r["acao"] == "criado" else " (atualizado)."))
+    if r["congelado"]:
+        msg += " O contrato já foi assinado — ele não muda."
+    elif r["faltam"]:
+        msg += " Ainda falta pro contrato: " + ", ".join(f["l"].lower() for f in r["faltam"]) + "."
+    else:
+        msg += " Contrato com todos os dados do contratante."
+    return RedirectResponse(f"/painel/eventos/estandes?ok={msg}&abrir={codigo}",
                             status_code=303)
 
 
@@ -560,6 +629,38 @@ _CSS = r"""<style>
 .es-pag .es-tbl .mini:hover{border-color:var(--mint);color:var(--mint)}
 .es-pag .es-tbl .dim{color:var(--fg-dim)}
 
+/* ---- cadastro do cliente (aprovado na maquete, 30/09/2026) ---- */
+.es-pag .oc-badge.ambar{background:color-mix(in srgb, var(--gold) 28%, var(--surface-2));color:var(--gold-strong)}
+.es-pag .cad-tit{font-size:11.5px;color:var(--fg-dim);margin-bottom:10px}
+.es-pag .cad-tit b{color:var(--fg)}
+.es-pag .cad-prog{display:flex;align-items:center;gap:10px;background:var(--surface-2);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+.es-pag .cad-prog .barra{flex:1;height:8px;border-radius:5px;background:var(--surface);overflow:hidden}
+.es-pag .cad-prog .barra span{display:block;height:100%;background:var(--mint)}
+.es-pag .cad-prog.incompleto .barra span{background:var(--gold)}
+.es-pag .cad-prog b{font-family:var(--mono,monospace);font-size:12px;white-space:nowrap}
+.es-pag .cad-prog small{display:block;font-size:10.5px;color:var(--fg-dim)}
+.es-pag .cad-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:2px 14px;margin-bottom:6px}
+.es-pag .cad-form .fld.largo{grid-column:1 / -1}
+.es-pag .fld{display:block;margin-top:10px}
+.es-pag .fld > span{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--fg-dim);margin-bottom:4px;white-space:nowrap}
+.es-pag .fld > span i{font-style:normal;color:var(--gold-strong)}
+.es-pag .fld input{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--fg);font-family:inherit;font-size:13px;padding:9px 11px;min-height:0;margin:0;box-sizing:border-box}
+.es-pag .fld input:focus{outline:none;border-color:var(--mint)}
+.es-pag .fld.falta input{border-color:var(--gold)}
+.es-pag .fld-nota{font-size:10.5px;color:var(--fg-dim);line-height:1.5}
+.es-pag .cad-linha{display:flex;gap:8px;align-items:flex-end;grid-column:span 2}
+.es-pag .cad-linha .fld{flex:1}
+.es-pag .cad-linha .oc-ghost-btn{height:38px;flex:0 0 auto}
+.es-pag .cad-aviso{background:color-mix(in srgb, var(--gold) 14%, var(--surface));border:1px solid var(--gold);border-radius:10px;padding:11px 13px;margin-top:12px;font-size:12px;line-height:1.6}
+.es-pag .cad-aviso b{display:block;font-size:13px;margin-bottom:2px}
+.es-pag .cad-aviso .acoes{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+.es-pag .partes{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-bottom:12px}
+.es-pag .parte{background:var(--surface-2);border-radius:10px;padding:10px 12px}
+.es-pag .parte .p{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-dim);margin-bottom:3px}
+.es-pag .parte b{display:block;font-size:13px}
+.es-pag .parte small{display:block;font-size:11px;color:var(--fg-dim);line-height:1.5;margin-top:2px}
+.es-pag .parte .falta{color:var(--gold-strong);font-weight:700}
+
 /* ---- funil de propostas (maquete: .fn-tabs/.oc-*) ---- */
 .es-pag .fn-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .es-pag .fn-tab{
@@ -658,14 +759,16 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 {% set cor = cor_tam.get(d.tamanho, ('#8FA197','#0A0F0C')) %}
 {% set pav_label = d.pavilhao|replace('_',' ')|title %}
 {% set cli = d.get('cliente') or {} %}
+{% set cad = d.get('cad') or {} %}
 {% set ct = d.get('contrato') %}
+{% set zap = wa_num(cad.get('whats') or cli.get('whatsapp')) %}
 {% set pend = d.get('pend') or [] %}
 {% set rotulo = {'livre':'Livre','pre_reservado':'Reservado','vendido':'Vendido'}[d.status] %}
 <div class="oc-hist"{% if grupo %} data-grupo="{{ grupo }}"{% endif %} data-st="{{ d.status }}" data-cod="{{ d.codigo|lower }}"{% if escondido %} hidden{% endif %}>
   <div class="oc-hist-top">
     <div class="oc-open" title="{% if d.status == 'livre' %}Abrir opções{% else %}Ver comprovante, contrato e cliente{% endif %}" onclick="ocToggle(this)">
       <div class="oc-stand-badge" style="background:{{ cor[0] }};color:{{ cor[1] }}"><div class="c">{{ d.codigo }}</div><div class="z">{{ tam_label.get(d.tamanho, d.tamanho) }}</div></div>
-      <div class="oc-body"><b>{% if d.status == 'livre' %}Livre{% else %}{{ cli.get('empresa') or 'Interessado da página' }}{% endif %}</b>
+      <div class="oc-body"><b>{% if d.status == 'livre' %}Livre{% else %}{{ cad.get('fantasia') or cli.get('empresa') or 'Interessado da página' }}{% endif %}</b>
         <div class="oc-sub">{% if d.zona and d.zona != pav_label %}{{ d.zona }} · {% endif %}{{ pav_label }}</div>
         <div class="oc-sub">{% if d.preco_centavos %}{{ brl(d.preco_centavos) }} · {% endif %}{{ d.get('resumo') or ('pronto pra oferecer' if d.status == 'livre' else rotulo) }}</div></div>
     </div>
@@ -673,8 +776,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="oc-criada"><div class="rot">Criada em</div><div class="dt">{{ data_curta(d.get('comprovante_em') or cli.get('criado_em')) }}</div></div>
     {% endif %}
     <div class="oc-acoes">
-      {% if cli.get('whatsapp') %}
-      <a class="oc-zap" target="_blank" rel="noopener" title="Falar no WhatsApp" href="https://wa.me/{{ cli.whatsapp|replace('+','')|replace(' ','')|replace('-','') }}?text=Olá! Sobre o stand {{ d.codigo }}...">
+      {% if zap %}
+      <a class="oc-zap" target="_blank" rel="noopener" title="Falar no WhatsApp" href="https://wa.me/{{ zap }}?text=Olá! Sobre o stand {{ d.codigo }}...">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm5.8 14.2c-.3.7-1.4 1.3-2 1.4-.5.1-1.1.2-3.6-.8-3-1.2-4.9-4.2-5.1-4.4-.1-.2-1.2-1.6-1.2-3s.7-2.1 1-2.4c.3-.3.6-.4.8-.4h.6c.2 0 .4 0 .6.5l.9 2.1c.1.2.1.4 0 .6l-.5.7c-.1.2-.2.3-.1.6.2.3.8 1.3 1.7 2.1 1.1 1 2.1 1.3 2.4 1.5.3.1.5.1.6-.1l.8-.9c.2-.3.4-.2.6-.1l1.9 1c.2.1.4.2.4.4.1.2.1.9-.2 1.6Z"/></svg>
       </a>
       {% endif %}
@@ -708,7 +811,9 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         {% endif %}
         {% if pode_gerir and d.comprovante_url %}<a class="oc-ghost-btn" href="/painel/eventos/estandes/{{ d.codigo }}/comprovante" target="_blank">Ver comprovante →</a>{% endif %}
         {% if pode_gerir and d.status == 'pre_reservado' %}
-        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/confirmar" style="display:inline">
+        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/confirmar" style="display:inline"
+              data-faltam="{{ cad.faltam|map(attribute='l')|join(', ')|lower|replace('cnpj / cpf','CNPJ/CPF') if cad.get('faltam') else '' }}"
+              onsubmit="return esConfirmar(this)">
           <button class="oc-ghost-btn prim" type="submit">Confirmar pagamento</button>
         </form>
         <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/liberar" style="display:inline"
@@ -735,6 +840,16 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       {% elif pode_gerir and d.status != 'vendido' and sem_storage %}
       <p class="oc-vazio" style="margin-top:10px">⚠ Upload temporariamente indisponível (storage fora do ar).</p>
       {% endif %}
+      {% if d.status == 'pre_reservado' and pode_gerir and cad.get('faltam') %}
+      {#- o aviso da maquete: confirmar NUNCA é bloqueado (o dinheiro já entrou e o
+          stand precisa ficar garantido) — só se avisa que o contrato depende do cadastro -#}
+      <div class="cad-aviso" hidden><b>⚠ O cadastro do cliente está incompleto ({{ cad.n_ok }}/{{ cad.n_total }})</b>
+        Você pode confirmar o pagamento agora — o stand fica garantido — mas o contrato só sai completo depois de preencher: {{ cad.faltam|map(attribute='l')|join(', ')|lower|replace('cnpj / cpf','CNPJ/CPF') }}.
+        <div class="acoes">
+          <button type="button" class="oc-ghost-btn prim" onclick="esIrCadastro(this)">Completar cadastro agora</button>
+          <button type="button" class="oc-ghost-btn" onclick="esConfirmarMesmoAssim(this)">Confirmar assim mesmo</button>
+        </div></div>
+      {% endif %}
       {% if d.status == 'pre_reservado' and d.pre_reserva_ate %}
       <p class="oc-vazio" style="margin-top:10px">Reserva vence em {{ d.pre_reserva_ate.strftime('%d/%m às %H:%M') }} — depois disso o stand volta pro mapa sozinho.</p>
       {% endif %}
@@ -747,6 +862,23 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       <span class="oc-contract-status pendente">⏳ Aguardando assinatura do lojista</span>
       {% endif %}
       <p style="margin:0 0 10px">Contrato nº {{ '%04d'|format(ct.numero or 0) }} — nasceu junto com o comprovante do sinal, já com os dados do lojista e do stand.</p>
+      <div class="partes">
+        <div class="parte"><div class="p">Contratante (lido do cadastro)</div>
+          <b>{% if cad.get('razao') %}{{ cad.razao }}{% else %}<span class="falta">⚠ falta a razão social</span>{% endif %}</b>
+          <small>{% if cad.get('doc') %}CNPJ/CPF {{ cad.doc }}{% else %}<span class="falta">⚠ falta o CNPJ/CPF</span>{% endif %}<br>
+            {% if cad.get('end') %}{{ cad.end }}{% if cad.get('cidade') %} · {{ cad.cidade }}{% if cad.get('uf') %}/{{ cad.uf }}{% endif %}{% endif %}{% else %}<span class="falta">⚠ falta o endereço</span>{% endif %}<br>
+            Representante: {% if cad.get('rep') %}{{ cad.rep }}{% else %}<span class="falta">⚠ falta</span>{% endif %}</small></div>
+        <div class="parte"><div class="p">Objeto</div><b>{{ d.get('objeto') or ('Stand ' ~ d.codigo) }}</b>
+          <small>{% if d.preco_centavos %}{{ brl(d.preco_centavos) }}{% endif %}<br>Vai no contrato como o espaço locado, com o evento e o período</small></div>
+      </div>
+      {% if cad.get('faltam') and not ct.assinado_em %}
+      <div class="cad-aviso" style="margin-top:0;margin-bottom:12px"><b>Contrato com campos em branco</b>
+        Falta preencher {{ cad.faltam|map(attribute='l')|join(', ')|lower|replace('cnpj / cpf','CNPJ/CPF') }}.
+        <div class="acoes"><button type="button" class="oc-ghost-btn prim" onclick="esIrCadastro(this)">Preencher no cadastro</button></div></div>
+      {% elif not ct.assinado_em %}
+      <p style="margin:0 0 10px;color:var(--mint-strong);font-weight:700">✓ Cadastro completo — o contrato sai com todos os dados do contratante.</p>
+      {% endif %}
+      <p class="fld-nota" style="margin:0 0 10px">{% if ct.assinado_em %}Contrato assinado: fica congelado como o cliente aprovou.{% else %}Enquanto o contrato não estiver assinado, ele relê o cadastro: corrigiu aqui, o documento acompanha.{% endif %}</p>
       <div class="oc-acoes-detail">
         <a class="oc-ghost-btn" href="/contrato/{{ ct.token }}" target="_blank">Abrir contrato (link do lojista) →</a>
         {% if pode_gerir and d.orcamento_id %}<a class="oc-ghost-btn" href="/painel/servicos?ab={{ d.orcamento_id }}">Abrir proposta →</a>{% endif %}
@@ -761,13 +893,50 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       {% endif %}
     </div>
     <div class="oc-detail-body" data-tab="cliente" hidden>
+      {% if d.status == 'livre' %}
+      <p class="oc-vazio" style="margin:0">Sem interessado ainda — o cadastro nasce quando o comprovante chegar.</p>
+      {% else %}
+      <div class="cad-tit">Mesmo formulário da aba <b>Clientes</b> do Zaq{% if pode_gerir %} — salvar já cria/atualiza o cliente lá{% endif %}.</div>
+      <div class="cad-prog{% if cad.get('faltam') %} incompleto{% endif %}">
+        <div class="barra"><span style="width:{{ (cad.n_ok / cad.n_total * 100) if cad.get('n_total') else 0 }}%"></span></div>
+        <div><b>{{ cad.get('n_ok', 0) }}/{{ cad.get('n_total', 7) }}</b>
+          <small>{% if cad.get('faltam') %}faltam pro contrato: {{ cad.faltam|map(attribute='l')|join(', ')|lower|replace('cnpj / cpf','CNPJ/CPF') }}{% else %}completo — o contrato sai com todos os dados{% endif %}</small></div>
+      </div>
+      {% if pode_gerir %}
+      {% macro falta(k) %}{% if cad.get('faltam') and k in (cad.faltam|map(attribute='k')|list) %} falta{% endif %}{% endmacro %}
+      <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/cliente" oninput="esCadProg(this)">
+        <div class="cad-form">
+          <label class="fld{{ falta('fantasia') }}"><span>Nome fantasia <i>*</i></span><input name="fantasia" data-req="1" maxlength="200" value="{{ cad.get('fantasia','') }}" required></label>
+          <label class="fld{{ falta('razao') }}"><span>Razão social <i>*</i></span><input name="razao" data-req="1" maxlength="200" value="{{ cad.get('razao','') }}" placeholder="Como sai no contrato"></label>
+          <div class="cad-linha"><label class="fld{{ falta('doc') }}"><span>CNPJ / CPF <i>*</i></span><input name="doc" data-req="1" maxlength="20" value="{{ cad.get('doc','') }}" placeholder="00.000.000/0000-00"></label>
+            <button type="button" class="oc-ghost-btn" onclick="esReceita(this)">Buscar na Receita</button></div>
+          <label class="fld{{ falta('rep') }}"><span>Representante legal <i>*</i></span><input name="rep" data-req="1" maxlength="200" value="{{ cad.get('rep','') }}" placeholder="Quem assina pelo lojista"></label>
+          <label class="fld{{ falta('whats') }}"><span>WhatsApp <i>*</i></span><input name="whats" data-req="1" maxlength="40" value="{{ cad.get('whats','') }}"></label>
+          <label class="fld"><span>E-mail</span><input name="email" type="email" maxlength="200" value="{{ cad.get('email','') }}" placeholder="contato@loja.com.br"></label>
+          <label class="fld largo{{ falta('end') }}"><span>Endereço <i>*</i></span><input name="end" data-req="1" maxlength="300" value="{{ cad.get('end','') }}" placeholder="Rua, número, bairro"></label>
+          <label class="fld"><span>CEP</span><input name="cep" maxlength="12" value="{{ cad.get('cep','') }}" placeholder="00000-000"></label>
+          <label class="fld{{ falta('cidade') }}"><span>Cidade <i>*</i></span><input name="cidade" data-req="1" maxlength="120" value="{{ cad.get('cidade','') }}" placeholder="Teresina"></label>
+          <label class="fld"><span>UF</span><input name="uf" maxlength="2" value="{{ cad.get('uf','') }}" placeholder="PI" style="text-transform:uppercase"></label>
+          <label class="fld largo"><span>Observações</span><input name="obs" maxlength="500" value="{{ cad.get('obs','') }}" placeholder="Anotação livre"></label>
+        </div>
+        <div class="cad-receita fld-nota" hidden></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+          <button class="oc-ghost-btn prim" type="submit">Salvar cadastro</button>
+          <span class="fld-nota" style="margin:0">Se o CNPJ/CPF ou o WhatsApp já existirem em Clientes, os dados entram no mesmo cadastro — sem duplicar.</span>
+        </div>
+      </form>
+      {% else %}
       <div class="oc-field-grid">
-        <div class="oc-field"><span>Empresa / expositor</span><b>{{ cli.get('empresa') or '—' }}</b></div>
-        <div class="oc-field"><span>WhatsApp</span><b>{{ cli.get('whatsapp') or '—' }}</b></div>
+        <div class="oc-field"><span>Nome fantasia</span><b>{{ cad.get('fantasia') or '—' }}</b></div>
+        <div class="oc-field"><span>WhatsApp</span><b>{{ cad.get('whats') or '—' }}</b></div>
         <div class="oc-field"><span>Origem</span><b>Página de stands</b></div>
         <div class="oc-field"><span>Stand</span><b>{{ d.codigo }} · {{ tam_label.get(d.tamanho, d.tamanho) }}</b></div>
       </div>
-      {% if d.prospeccao_id %}
+      <p class="fld-nota" style="margin:0 0 10px">Só dono/gestor edita os dados do contrato.</p>
+      {% endif %}
+      {% endif %}
+      {% if d.prospeccao_id and d.status != 'livre' %}
+      <div style="border-top:1px solid var(--line);margin:16px 0 4px"></div>
       {#- vendedor da venda: mostra o atual e (pra gestão) deixa trocar/corrigir.
           O automático vem do link do vendedor; isto é a correção manual. -#}
       <div class="oc-field" style="margin-bottom:12px">
@@ -783,8 +952,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         {% else %}<b>{{ vend_nomes.get(cli.get('vendedor_id')) or 'Sem vendedor' }}</b>{% endif %}
       </div>
       <a class="oc-ghost-btn" href="/painel/prospeccao">Abrir no Funil →</a>
-      {% elif d.status == 'livre' %}<p class="oc-vazio" style="margin:0">Sem interessado ainda — o cadastro nasce quando o comprovante chegar.</p>
-      {% else %}<p class="oc-vazio" style="margin:0">Este envio veio sem nome — o interessado não preencheu o cadastro.</p>{% endif %}
+      {% elif d.status != 'livre' %}<p class="oc-vazio" style="margin:0">Este envio veio sem nome — o interessado não preencheu o cadastro.</p>{% endif %}
     </div>
   </div>
 </div>
@@ -1102,6 +1270,78 @@ function ocTab(btn, tab){
   detail.querySelectorAll('.oc-subtab').forEach(function(b){ b.classList.toggle('on', b === btn); });
   detail.querySelectorAll('.oc-detail-body').forEach(function(el){ el.hidden = el.dataset.tab !== tab; });
 }
+// ---- cadastro do cliente ----
+function esCadProg(form){
+  // progresso e destaque de "falta" ao vivo, sem recarregar — como na maquete
+  var reqs = form.querySelectorAll('[data-req]');
+  var ok = 0, faltam = [];
+  reqs.forEach(function(inp){
+    var vazio = !inp.value.trim();
+    inp.closest('.fld').classList.toggle('falta', vazio);
+    if (vazio) faltam.push(inp.closest('.fld').querySelector('span').textContent.replace('*','').trim().toLowerCase().replace('cnpj / cpf','CNPJ/CPF'));
+    else ok++;
+  });
+  var tab = form.closest('.oc-detail-body');
+  var prog = tab.querySelector('.cad-prog');
+  if (prog){
+    prog.classList.toggle('incompleto', faltam.length > 0);
+    prog.querySelector('.barra span').style.width = (reqs.length ? ok / reqs.length * 100 : 0) + '%';
+    prog.querySelector('b').textContent = ok + '/' + reqs.length;
+    prog.querySelector('small').textContent = faltam.length ? 'faltam pro contrato: ' + faltam.join(', ') : 'completo — o contrato sai com todos os dados';
+  }
+  var linha = form.closest('.oc-hist');
+  linha.querySelectorAll('.oc-badge.ambar').forEach(function(b){
+    if (faltam.length) b.textContent = 'Cadastro ' + ok + '/' + reqs.length; else b.remove();
+  });
+}
+function esReceita(btn){
+  var form = btn.closest('form');
+  var msg = form.querySelector('.cad-receita');
+  var doc = form.elements['doc'].value.trim();
+  msg.hidden = false;
+  if (!doc){ msg.textContent = 'Digite o CNPJ antes de buscar.'; return; }
+  msg.textContent = 'Consultando a Receita…';
+  fetch('/painel/eventos/estandes/consulta-cnpj?doc=' + encodeURIComponent(doc), {headers:{'x-requested-with':'fetch'}})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (!j.ok){ msg.textContent = j.erro || 'Não consegui consultar agora.'; return; }
+      if (j.nome) form.elements['razao'].value = j.nome;
+      if (j.email && !form.elements['email'].value.trim()) form.elements['email'].value = j.email;
+      if (j.cidade) form.elements['cidade'].value = j.cidade;
+      if (j.uf) form.elements['uf'].value = j.uf;
+      msg.textContent = '✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      esCadProg(form);
+    })
+    .catch(function(){ msg.textContent = 'Não consegui consultar agora — digite os dados.'; });
+}
+function esIrCadastro(btn){
+  var detail = btn.closest('.oc-detail');
+  var abas = detail.querySelectorAll('.oc-subtab');
+  if (abas[2]) abas[2].click();
+}
+function esConfirmar(form){
+  // confirmar NUNCA é bloqueado: com cadastro incompleto só avisa (o dinheiro
+  // já entrou e o stand precisa ficar garantido)
+  if (form.dataset.faltam && !form.dataset.ok){
+    var aviso = form.closest('.oc-detail-body').querySelector('.cad-aviso');
+    if (aviso){ aviso.hidden = false; return false; }
+  }
+  return true;
+}
+function esConfirmarMesmoAssim(btn){
+  var form = btn.closest('.oc-detail-body').querySelector('form[data-faltam]');
+  form.dataset.ok = '1';
+  form.submit();
+}
+// volta do POST com ?abrir=G60: reabre a linha no funil e a aba "Dados do cliente"
+document.addEventListener('DOMContentLoaded', function(){
+  var cod = (new URLSearchParams(location.search).get('abrir') || '').toLowerCase();
+  if (!cod || !window.mapaAbrirFunil) return;
+  window.mapaAbrirFunil(cod);
+  var linha = document.querySelector('#funil-list .oc-hist[data-cod="' + cod + '"]');
+  var abas = linha && linha.querySelectorAll('.oc-subtab');
+  if (abas && abas[2]) abas[2].click();
+});
 function esCopiarLink(btn){
   var txt = btn.dataset.link;
   if (!txt) return;

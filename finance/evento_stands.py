@@ -53,7 +53,7 @@ PRE_RESERVA_DIAS_PADRAO = 3
 
 _COLS = ("id, conta_id, codigo, pavilhao, zona, tamanho, preco_centavos, status, "
         "pre_reserva_ate, comprovante_url, comprovante_em, prospeccao_id, "
-        "orcamento_id, ordem, criado_em, atualizado_em")
+        "orcamento_id, ordem, criado_em, atualizado_em, cliente_id")
 
 
 def _fmt(row) -> dict:
@@ -61,7 +61,8 @@ def _fmt(row) -> dict:
             "zona": row[4], "tamanho": row[5], "preco_centavos": row[6], "status": row[7],
             "pre_reserva_ate": row[8], "comprovante_url": row[9], "comprovante_em": row[10],
             "prospeccao_id": row[11], "orcamento_id": row[12], "ordem": row[13],
-            "criado_em": row[14], "atualizado_em": row[15]}
+            "criado_em": row[14], "atualizado_em": row[15],
+            "cliente_id": row[16] if len(row) > 16 else None}
 
 
 _CFG_COLS = ("conta_id, slug, bloqueia_em, pre_reserva_dias, whatsapp_numero, pix_chave, "
@@ -319,18 +320,15 @@ def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict) -> dict | No
     import json as _json
     import secrets as _secrets
     preco = int(stand.get("preco_centavos") or 0)
-    desc = f"Stand {stand['codigo']} · {stand['tamanho']}"
-    if stand.get("zona"):
-        desc += f" — {stand['zona']}"
+    # O OBJETO do contrato: vira o nome do item da proposta, e é dele que o
+    # contrato tira "Espaço locado" e o campo {objeto.descricao} das cláusulas.
     # mesmo shape de item do cockpit/painel: nome + setup em REAIS (total da linha)
-    itens = [{"nome": desc, "setup": preco / 100, "mensal": 0}]
-    # data/local do evento pro quadro "Objeto" do contrato (mesmo jsonb da
-    # proposta de evento do painel)
+    itens = [{"nome": descricao_objeto(stand), "setup": preco / 100, "mensal": 0}]
+    # o EVENTO completo pro quadro "Objeto": tipo (marca + edição), período de
+    # vários dias e local (mesmo jsonb da proposta de evento do painel). `data`
+    # segue ISO (a data de início) porque é o que o resto do sistema lê.
     cfg = obter_config(pool, conta_id) or {}
-    evento = None
-    if cfg.get("evento_inicio"):
-        evento = _json.dumps({"data": cfg["evento_inicio"].isoformat(),
-                              "local": cfg.get("evento_local") or ""})
+    evento = _json.dumps(_evento_da_config(pool, conta_id, cfg)) if cfg.get("evento_inicio") else None
     modo = vendas.modo_do_orcamento(pool, conta_id)
     token = _secrets.token_urlsafe(16)
     with pool.connection() as c:
@@ -374,11 +372,270 @@ def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict) -> dict | No
         c.execute("update prospeccao set orcamento_id=%s where id=%s and conta_id=%s",
                   (oid, pid, conta_id))
         c.commit()
+    # QUEM RESERVA JÁ VIRA CADASTRO (aprovado na maquete, 30/09/2026): nome
+    # fantasia + WhatsApp entram em `clientes` agora, sem esperar o gestor. O
+    # Zaq junta por WhatsApp — o mesmo lojista comprando um segundo stand não
+    # vira dois clientes. O gestor completa o resto em "Dados do cliente".
+    _garantir_cliente_do_stand(pool, conta_id, stand["codigo"], oid, nome, zap)
     ct = ctr.criar_para_orcamento(pool, conta_id, oid, valor_centavos=preco,
                                   criado_por="pagina_stands")
     _log.info("evento_stands: proposta %s + contrato %s nasceram do comprovante do "
               "estande %s/%s", oid, (ct or {}).get("id"), conta_id, stand["codigo"])
     return {"orcamento_id": oid, "contrato_token": (ct or {}).get("token")}
+
+
+# ---------------------------------------------------------------------------
+# O CADASTRO DO CLIENTE DO STAND
+#
+# Aprovado na maquete (30/09/2026): quem reserva vira cliente na hora; o
+# gestor/vendedor completa os dados que o CONTRATO pede; salvar já cria ou
+# atualiza o cliente na aba Clientes (sem duplicar) e leva os dados ao
+# contrato. O formulário é o de Clientes que já existe, mais razão social e
+# representante legal (migração 451).
+# ---------------------------------------------------------------------------
+
+#: o que o contrato precisa do lojista. Só a ordem e os rótulos moram aqui — a
+#: tela (painel e cockpit) e o aviso de "confirmar pagamento" leem esta lista.
+CAMPOS_CONTRATO = (
+    ("fantasia", "Nome fantasia"), ("whats", "WhatsApp"), ("razao", "Razão social"),
+    ("doc", "CNPJ / CPF"), ("rep", "Representante legal"), ("end", "Endereço"),
+    ("cidade", "Cidade"),
+)
+
+_ROTULO_TAM = {"tenda": "Espaço em tenda", "personalizado": "Stand personalizado"}
+
+
+def rotulo_tamanho(tam: str) -> str:
+    """'4x3' -> '4x3m'; tenda/personalizado por extenso."""
+    return _ROTULO_TAM.get(tam) or (f"{tam}m" if tam else "")
+
+
+def rotulo_pavilhao(pav: str) -> str:
+    """'inferior' -> 'Pavilhão Inferior'; 'outlet_car' -> 'Outlet Car' (não é
+    um pavilhão — é o nome da área, como a página pública o mostra)."""
+    nome = (pav or "").replace("_", " ").title()
+    return f"Pavilhão {nome}" if (pav or "") in ("inferior", "superior") else nome
+
+
+def descricao_objeto(stand: dict) -> str:
+    """O stand como o contrato o descreve: 'Stand G60 — 4x3m — Outlet Grifes
+    (Pavilhão Inferior)'."""
+    partes = [f"Stand {stand['codigo']}", rotulo_tamanho(stand.get("tamanho") or "")]
+    if stand.get("zona"):
+        partes.append(stand["zona"])
+    txt = " — ".join(p for p in partes if p)
+    pav = rotulo_pavilhao(stand.get("pavilhao") or "")
+    return f"{txt} ({pav})" if pav else txt
+
+
+def _periodo(ini, fim) -> str:
+    """13/11/2026 + 15/11/2026 -> '13 a 15/11/2026' (mesmo mês) — como um
+    contrato escreve o período de uma feira de vários dias."""
+    if not ini:
+        return ""
+    if not fim or fim == ini:
+        return ini.strftime("%d/%m/%Y")
+    if (ini.year, ini.month) == (fim.year, fim.month):
+        return f"{ini:%d} a {fim:%d/%m/%Y}"
+    return f"{ini:%d/%m} a {fim:%d/%m/%Y}"
+
+
+def _evento_da_config(pool, conta_id: int, cfg: dict) -> dict:
+    """O jsonb `orcamentos.evento` do estande: tipo, data, período e local."""
+    nome = ""
+    try:
+        from . import empresa as _emp
+        d = _emp.obter_dados_empresa(pool, conta_id) or {}
+        nome = (d.get("nome_fantasia") or "").strip()
+    except Exception:  # noqa: BLE001 — sem o nome fantasia, cai no slug
+        nome = ""
+    marca = nome or (cfg.get("slug") or "").replace("-", " ").title()
+    tipo = " — ".join(x for x in (marca, cfg.get("edicao_label")) if x)
+    return {"tipo": tipo, "data": cfg["evento_inicio"].isoformat(),
+            "periodo": _periodo(cfg["evento_inicio"], cfg.get("evento_fim")),
+            "local": cfg.get("evento_local") or ""}
+
+
+def _garantir_cliente_do_stand(pool, conta_id: int, codigo: str, orcamento_id,
+                               nome: str, whatsapp) -> int | None:
+    """Cria (ou reaproveita, por WhatsApp) o cliente de quem reservou e o liga
+    ao stand e à proposta. Best-effort: o comprovante já travou o stand."""
+    try:
+        from . import clientes as _cli
+        r = _cli.salvar_cliente(pool, conta_id, nome, telefone=(whatsapp or None))
+        cid = int(r["id"])
+        with pool.connection() as c:
+            c.execute("update evento_stands set cliente_id=%s, atualizado_em=now() "
+                      "where conta_id=%s and codigo=%s", (cid, conta_id, codigo))
+            if orcamento_id:
+                c.execute("update orcamentos set cliente_id=%s where id=%s and conta_id=%s",
+                          (cid, orcamento_id, conta_id))
+            c.commit()
+        return cid
+    except Exception as e:  # noqa: BLE001
+        _log.warning("evento_stands: não deu pra criar o cliente do %s/%s: %s: %s",
+                     conta_id, codigo, type(e).__name__, e)
+        return None
+
+
+def _montar_cadastro(d: dict, cliente_id=None) -> dict:
+    """Normaliza os campos do cadastro e diz o que ainda falta pro contrato."""
+    cad = {"fantasia": d.get("fantasia") or "", "whats": d.get("whats") or "",
+           "razao": d.get("razao") or "", "doc": d.get("doc") or "",
+           "rep": d.get("rep") or "", "email": d.get("email") or "",
+           "end": d.get("end") or "", "cep": d.get("cep") or "",
+           "cidade": d.get("cidade") or "", "uf": d.get("uf") or "",
+           "obs": d.get("obs") or "", "cliente_id": cliente_id}
+    cad["faltam"] = [{"k": k, "l": rot} for k, rot in CAMPOS_CONTRATO
+                     if not str(cad.get(k) or "").strip()]
+    cad["n_total"] = len(CAMPOS_CONTRATO)
+    cad["n_ok"] = cad["n_total"] - len(cad["faltam"])
+    return cad
+
+
+def cadastros_dos_stands(pool, conta_id: int, stands: list[dict]) -> dict[str, dict]:
+    """{codigo: cadastro} dos stands que NÃO estão livres — lido de `clientes`
+    (o cadastro de verdade) e, enquanto o cliente não existir, da prospecção
+    (só nome e WhatsApp). Em lote: a lista de estandes mostra tudo de uma vez."""
+    from . import clientes as _cli
+    ocup = [s for s in stands if s["status"] != "livre"]
+    clientes = _cli.obter_clientes(pool, conta_id,
+                                   [s.get("cliente_id") for s in ocup])
+    pids = [s["prospeccao_id"] for s in ocup
+            if s.get("prospeccao_id") and s.get("cliente_id") not in clientes]
+    prosp = {}
+    if pids:
+        with pool.connection() as c:
+            prosp = {r[0]: r for r in c.execute(
+                "select id, empresa, whatsapp from prospeccao "
+                "where conta_id=%s and id = any(%s)", (conta_id, pids)).fetchall()}
+    out = {}
+    for s in ocup:
+        c = clientes.get(s.get("cliente_id"))
+        if c:
+            out[s["codigo"]] = _montar_cadastro({
+                "fantasia": c.get("nome"), "whats": c.get("telefone"),
+                "razao": c.get("razao_social"), "doc": c.get("documento_fmt") or "",
+                "rep": c.get("representante"), "email": c.get("email"),
+                "end": c.get("endereco"), "cep": c.get("cep"),
+                "cidade": c.get("cidade"), "uf": c.get("uf"), "obs": c.get("obs")},
+                cliente_id=c["id"])
+        else:
+            p = prosp.get(s.get("prospeccao_id"))
+            out[s["codigo"]] = _montar_cadastro(
+                {"fantasia": p[1] if p else "", "whats": p[2] if p else ""})
+    return out
+
+
+def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict) -> dict:
+    """Salva o formulário "Dados do cliente" do stand.
+
+    Cria o cliente na aba Clientes se ele ainda não existe (dedup por CNPJ/CPF
+    ou WhatsApp, o de sempre do Zaq) e SOBRESCREVE com o que a pessoa digitou —
+    é uma edição explícita, não um enriquecimento. Depois liga o stand e a
+    proposta ao cliente e, se o contrato AINDA NÃO foi assinado, leva os dados
+    pra ele (o assinado é documento congelado). Devolve
+    {"ok", "cliente_id", "acao", "faltam", "congelado"} ou {"ok": False, "erro"}."""
+    from . import clientes as _cli
+    from . import contrato as _ctr
+    from . import validadoc
+    stand = buscar(pool, conta_id, codigo)
+    if not stand:
+        return {"ok": False, "erro": "Estande não encontrado."}
+    if stand["status"] == "livre":
+        return {"ok": False, "erro": "Este estande ainda está livre — o cadastro nasce "
+                                     "quando o comprovante chega."}
+    g = lambda k: (dados.get(k) or "").strip()  # noqa: E731
+    fantasia = g("fantasia")
+    if not fantasia:
+        return {"ok": False, "erro": "Preencha o nome fantasia."}
+    doc = g("doc")
+    tipo, digitos = validadoc.classificar(doc) if doc else (None, "")
+    if doc and tipo not in ("pf", "pj"):
+        return {"ok": False, "erro": "Documento deve ter 11 (CPF) ou 14 (CNPJ) dígitos."}
+    campos = {"nome": fantasia, "telefone": g("whats"), "email": g("email"),
+              "endereco": g("end"), "cep": g("cep"), "cidade": g("cidade"),
+              "uf": g("uf"), "obs": g("obs"),
+              "razao_social": g("razao"), "representante": g("rep")}
+    if tipo == "pf":
+        campos["cpf"] = digitos
+    elif tipo == "pj":
+        campos["cnpj"] = digitos
+    cid = stand.get("cliente_id")
+    acao = "atualizado"
+    try:
+        if not cid:
+            r = _cli.salvar_cliente(pool, conta_id, fantasia, telefone=g("whats") or None,
+                                    cpf=campos.get("cpf"), cnpj=campos.get("cnpj"))
+            cid, acao = int(r["id"]), r["acao"]
+        _cli.atualizar_cliente(pool, conta_id, cid, **campos)
+    except ValueError as e:
+        return {"ok": False, "erro": str(e)}
+    except Exception as e:  # noqa: BLE001 — ex.: CPF/CNPJ já é de OUTRO cliente
+        if type(e).__name__ == "UniqueViolation":
+            return {"ok": False, "erro": "Esse CPF/CNPJ já está cadastrado em outro "
+                                         "cliente — abra o cadastro dele em Clientes."}
+        raise
+
+    oid = stand.get("orcamento_id")
+    with pool.connection() as c:
+        c.execute("update evento_stands set cliente_id=%s, atualizado_em=now() "
+                  "where conta_id=%s and codigo=%s", (cid, conta_id, codigo))
+        if stand.get("prospeccao_id"):
+            c.execute("update prospeccao set empresa=%s, whatsapp=%s "
+                      "where id=%s and conta_id=%s",
+                      (fantasia[:200], g("whats")[:40] or None,
+                       stand["prospeccao_id"], conta_id))
+        c.commit()
+
+    congelado = False
+    if oid:
+        try:
+            congelado = _ctr.assinado_do_orcamento(pool, conta_id, oid)
+        except Exception:  # noqa: BLE001 — base sem a 164: segue como não assinado
+            congelado = False
+        _espelhar_no_orcamento(pool, conta_id, oid, cid, campos, tipo, digitos,
+                               congelado)
+    cad = cadastros_dos_stands(pool, conta_id, [dict(stand, cliente_id=cid)])[codigo]
+    return {"ok": True, "cliente_id": cid, "acao": acao,
+            "faltam": cad["faltam"], "congelado": congelado}
+
+
+def _espelhar_no_orcamento(pool, conta_id: int, orcamento_id: int, cliente_id: int,
+                           campos: dict, tipo, digitos: str, congelado: bool) -> None:
+    """Leva o cadastro pra proposta, que é o que o contrato lê. O NOME do
+    contratante é `empresa` (razão social; na falta, o fantasia) e o
+    representante legal vai em `socio` — a mesma regra de `_espelhar_cliente`
+    (web/painel_servicos). Contrato ASSINADO não muda (só o vínculo)."""
+    from . import validadoc
+    with pool.connection() as c:
+        try:
+            from web.painel_servicos import _garantir_tabela
+            _garantir_tabela(c)
+        except Exception:  # noqa: BLE001 — colunas já existem em produção
+            try:
+                c.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+        c.execute("update orcamentos set cliente_id=%s where id=%s and conta_id=%s",
+                  (cliente_id, orcamento_id, conta_id))
+        if not congelado:
+            doc_fmt = validadoc.formatar(digitos) if digitos else None
+            c.execute(
+                """update orcamentos
+                      set empresa=%s, cliente=%s, socio=%s, whatsapp=%s, email=%s,
+                          endereco=%s, cep=%s, cidade=%s, uf=%s,
+                          cnpj=%s, cpf=%s
+                    where id=%s and conta_id=%s""",
+                (campos["razao_social"] or campos["nome"],
+                 campos["representante"] or campos["nome"],
+                 campos["representante"] or None, campos["telefone"] or None,
+                 campos["email"] or None, campos["endereco"] or None,
+                 campos["cep"] or None, campos["cidade"] or None,
+                 (campos["uf"] or "")[:2].upper() or None,
+                 doc_fmt if tipo == "pj" else None, doc_fmt if tipo == "pf" else None,
+                 orcamento_id, conta_id))
+        c.commit()
 
 
 def confirmar_pagamento(pool, conta_id: int, codigo: str,

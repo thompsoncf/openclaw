@@ -9473,6 +9473,43 @@ _STANDS_CSS = """<style>
   font-weight:700;font-size:.78rem;padding:8px 13px;border-radius:8px;border:1px solid var(--line,#1E2A23);
   background:var(--surface-2,#16201B);color:var(--text,#EAF2ED);width:auto;min-height:0;margin:0;display:inline-flex}
 .stdet .ac .prim{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
+.stcad{margin-top:.75rem;padding-top:.7rem;border-top:1px solid var(--line,#1E2A23)}
+.stcad .stbar{height:7px;border-radius:4px;background:var(--surface-2,#16201B);overflow:hidden}
+.stcad .stbar span{display:block;height:100%;background:var(--neon,#25D366)}
+.stcad.inc .stbar span{background:#E0A32E}
+.stcad .stcadt{font-size:.74rem;color:var(--text-dim,#8FA197);margin:.4rem 0 .6rem;line-height:1.45}
+.stcad .stcadt b{color:var(--text,#EAF2ED);font-family:var(--mono,monospace)}
+.stcad .stbtn,.stcad .stsalvar,.stcad .strec{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;
+  font-size:.8rem;padding:10px 14px;border-radius:9px;border:1px solid var(--line,#1E2A23);
+  background:var(--surface-2,#16201B);color:var(--text,#EAF2ED);width:auto;min-height:0;margin:0}
+.stcad .stsalvar{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
+.stcad .stfld{display:block;margin-top:.55rem}
+.stcad .stfld>span{display:block;font-size:.66rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.03em;color:var(--text-dim,#8FA197);margin-bottom:3px}
+.stcad .stfld>span i{font-style:normal;color:#E0A32E}
+.stcad .stfld input{width:100%;box-sizing:border-box;background:var(--surface-2,#16201B);
+  border:1px solid var(--line,#1E2A23);border-radius:8px;color:var(--text,#EAF2ED);font-family:inherit;
+  font-size:16px;padding:10px 11px;margin:0;min-height:0}
+.stcad .stfld.falta input{border-color:#E0A32E}
+.stcad .stlin{display:flex;gap:8px;align-items:flex-end}
+.stcad .stlin .stfld{flex:1;min-width:0}
+.stcad .stac{display:flex;gap:8px;flex-wrap:wrap;margin-top:.8rem}
+.stcad .stnota{font-size:.7rem;color:var(--text-dim,#8FA197);margin-top:.5rem;line-height:1.45}
+.stcad .stok{font-size:.76rem;color:var(--neon,#25D366);font-weight:700;margin-top:.5rem}
+.stcad .sterr{font-size:.76rem;color:#E0574F;font-weight:700;margin-top:.5rem}
+.stmin{margin:.7rem .8rem 0;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);border-radius:12px;
+  background:var(--surface,#121A16)}
+.stmin>b{display:block;font-size:.88rem;margin-bottom:.15rem}
+.stmin>span{display:block;font-size:.72rem;color:var(--text-dim,#8FA197);margin-bottom:.5rem}
+.stmin .lin{appearance:none;cursor:pointer;font-family:inherit;text-align:left;width:100%;min-height:0;margin:0;
+  display:flex;align-items:center;gap:.6rem;padding:.55rem 0;border:0;border-top:1px solid var(--line,#1E2A23);
+  background:none;color:var(--text,#EAF2ED)}
+.stmin .lin .cod{font-family:var(--mono,monospace);font-weight:800;font-size:.85rem;min-width:2.6rem}
+.stmin .lin .nm{flex:1;min-width:0;font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stmin .lin .nm small{display:block;font-size:.68rem;font-weight:500;color:var(--text-dim,#8FA197)}
+.stmin .chip{font-size:.66rem;font-weight:800;padding:3px 8px;border-radius:999px;white-space:nowrap}
+.stmin .chip.amb{background:rgba(224,163,46,.22);color:#E0A32E}
+.stmin .chip.ok{background:rgba(37,211,102,.2);color:var(--neon,#25D366)}
 </style>"""
 
 _STANDS_JS = r"""
@@ -9480,7 +9517,11 @@ _STANDS_JS = r"""
   // pegada proporcional (largura=frente, altura=fundo) escalada pra grid de 30px
   var sizeBase={'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
   var ESCALA=30/34;
-  var pav='inferior', sel=null;
+  var pav='inferior', sel=null, editando=false;
+  // o que o contrato precisa do cliente (mesma lista do painel do gestor)
+  var REQ=[['fantasia','Nome fantasia'],['whats','WhatsApp'],['razao','Razão social'],['doc','CNPJ/CPF'],
+           ['rep','Representante legal'],['end','Endereço'],['cidade','Cidade']];
+  function faltando(c){return REQ.filter(function(r){return !String(c[r[0]]||'').trim();}).map(function(r){return r[1];});}
   function esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 
   var pavsEl=document.getElementById('stpav');
@@ -9502,7 +9543,7 @@ _STANDS_JS = r"""
     b.style.width=Math.round(((def&&def.w)||base.w)*ESCALA)+'px';
     b.style.height=Math.round(((def&&def.h)||base.h)*ESCALA)+'px';
     b.textContent=code;
-    b.onclick=function(){sel=code;render();detalhe();
+    b.onclick=function(){sel=code;editando=false;render();detalhe();
       document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});};
     return b;
   }
@@ -9571,11 +9612,124 @@ _STANDS_JS = r"""
       h+='<button class=prim type=button onclick="stCopiar(this,\''+esc(sel)+'\')">Copiar link pro cliente</button>';
       h+='<a href="'+PUB+'?stand='+encodeURIComponent(sel)+'" target=_blank rel=noopener>Ver na página →</a>';
     } else {
-      h+='<span class=inf style="margin:0">'+(s.status==='reservado'?'Comprovante em conferência — não prometa este.':'Já vendido.')+'</span>';
+      h+='<span class=inf style="margin:0">'+(s.status==='reservado'?
+        (s.pode?'Aguardando a equipe confirmar o pagamento — o stand já está segurado pra ele.':'Comprovante em conferência — não prometa este.')
+        :'Já vendido.')+'</span>';
     }
     h+='</div>';
+    if(s.status!=='livre'&&s.cad)h+=cadHTML(s);
     box.innerHTML=h; box.hidden=false;
   }
+
+  // O CADASTRO DO CLIENTE DO STAND (30/09/2026): o vendedor completa os dados
+  // do contrato do cliente DELE pelo celular. Só aparece nas vendas dele (a
+  // gestão vê todas) — `s.cad` nem chega no aparelho das dos outros. O servidor
+  // revalida a posse no POST. Confirmar pagamento continua sendo da gestão.
+  function cadHTML(s){
+    var c=s.cad, f=faltando(c), n=REQ.length-f.length;
+    var h='<div class="stcad'+(f.length?' inc':'')+'" id=stcad>';
+    h+='<div class=stbar><span style="width:'+Math.round(n/REQ.length*100)+'%"></span></div>';
+    h+='<div class=stcadt><b id=stn>'+n+'/'+REQ.length+'</b> <span id=stfalta>'+
+       (f.length?'faltam pro contrato: '+esc(f.join(', ')):'cadastro completo — o contrato sai com todos os dados')+'</span></div>';
+    if(!editando){
+      h+='<button class=stbtn type=button onclick="stEditar()">'+(f.length?'Completar dados do cliente':'Ver / editar dados do cliente')+'</button>';
+    } else {
+      h+=formHTML(c);
+    }
+    return h+'</div>';
+  }
+  function campo(k,rot,c,req,extra){
+    var falta=req&&!String(c[k]||'').trim();
+    return '<label class="stfld'+(falta?' falta':'')+'"><span>'+rot+(req?' <i>*</i>':'')+'</span>'+
+      '<input name='+k+' value="'+esc(c[k]||'')+'" '+(extra||'')+(req?' data-req=1':'')+' maxlength=300></label>';
+  }
+  function formHTML(c){
+    var h='<form id=stform onsubmit="return stSalvar(this)" oninput="stProg()">';
+    h+=campo('fantasia','Nome fantasia',c,1,'autocomplete=organization');
+    h+=campo('razao','Razão social',c,1,'placeholder="Como sai no contrato"');
+    h+='<div class=stlin>'+campo('doc','CNPJ / CPF',c,1,'inputmode=numeric placeholder="00.000.000/0000-00"')+
+       '<button class=strec type=button onclick="stReceita(this)">Receita</button></div>';
+    h+=campo('rep','Representante legal',c,1,'placeholder="Quem assina pelo lojista"');
+    h+=campo('whats','WhatsApp',c,1,'inputmode=tel autocomplete=tel');
+    h+=campo('email','E-mail',c,0,'inputmode=email');
+    h+=campo('end','Endereço',c,1,'placeholder="Rua, número, bairro"');
+    h+='<div class=stlin>'+campo('cep','CEP',c,0,'inputmode=numeric')+campo('cidade','Cidade',c,1,'')+
+       campo('uf','UF',c,0,'style="text-transform:uppercase"')+'</div>';
+    h+='<div class=stnota id=strecmsg hidden></div>';
+    h+='<div class=stac><button class=stsalvar type=submit>Salvar cadastro</button>'+
+       '<button class=stbtn type=button onclick="stFechar()">Fechar</button></div>';
+    h+='<div class=stnota>Salvar já cria o cliente no cadastro (sem duplicar) e leva os dados pro contrato.</div>';
+    h+='<div id=stmsg></div></form>';
+    return h;
+  }
+  function dadosDoForm(form){
+    var o={}; Array.prototype.forEach.call(form.elements,function(e){if(e.name)o[e.name]=e.value;}); return o;
+  }
+  window.stEditar=function(){editando=true;detalhe();};
+  window.stFechar=function(){editando=false;detalhe();};
+  window.stProg=function(){
+    var form=document.getElementById('stform'); if(!form)return;
+    var d=dadosDoForm(form), f=faltando(d), n=REQ.length-f.length;
+    Array.prototype.forEach.call(form.querySelectorAll('.stfld'),function(l){
+      var i=l.querySelector('input'); if(i.hasAttribute('data-req'))l.classList.toggle('falta',!i.value.trim());});
+    var box=document.getElementById('stcad');
+    box.classList.toggle('inc',f.length>0);
+    box.querySelector('.stbar span').style.width=Math.round(n/REQ.length*100)+'%';
+    document.getElementById('stn').textContent=n+'/'+REQ.length;
+    document.getElementById('stfalta').textContent=f.length?'faltam pro contrato: '+f.join(', '):'cadastro completo — o contrato sai com todos os dados';
+  };
+  window.stReceita=function(btn){
+    var form=document.getElementById('stform'), msg=document.getElementById('strecmsg');
+    var doc=form.elements['doc'].value.trim(); msg.hidden=false;
+    if(!doc){msg.textContent='Digite o CNPJ antes.';return;}
+    msg.textContent='Consultando a Receita…';
+    zapFetch(BASE_STANDS+'/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+      if(!j){msg.textContent='Não consegui consultar agora — digite os dados.';return;}
+      if(!j.ok){msg.textContent=j.erro||'Não consegui consultar agora.';return;}
+      if(j.nome)form.elements['razao'].value=j.nome;
+      if(j.email&&!form.elements['email'].value.trim())form.elements['email'].value=j.email;
+      if(j.cidade)form.elements['cidade'].value=j.cidade;
+      if(j.uf)form.elements['uf'].value=j.uf;
+      msg.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      stProg();
+    });
+  };
+  window.stSalvar=function(form){
+    var code=sel, msg=document.getElementById('stmsg'), fd=new FormData(form);
+    msg.className=''; msg.textContent='Salvando…';
+    zapFetch(BASE_STANDS+'/'+encodeURIComponent(code)+'/cliente',{method:'POST',headers:{'x-cockpit':'1'},body:fd}).then(function(j){
+      if(!j)return;
+      if(!j.ok){msg.className='sterr';msg.textContent=j.erro||'Não consegui salvar.';return;}
+      STANDS[code].cad=j.cad; STANDS[code].cliente=j.cad.fantasia||STANDS[code].cliente;
+      editando=false; detalhe(); minhas();
+      var ok=document.getElementById('stcad');
+      if(ok){var m=document.createElement('div');m.className='stok';
+        m.textContent='✓ Salvo em Clientes'+(j.cad.faltam.length?' — ainda falta '+j.cad.faltam.length+' pro contrato.':' — contrato com todos os dados.');
+        ok.appendChild(m);}
+    });
+    return false;
+  };
+
+  // MINHAS VENDAS: as reservas/vendas que caíram no link dele, com o cadastro de cada
+  function minhas(){
+    var box=document.getElementById('stmin'); if(!box)return;
+    var lin=Object.keys(STANDS).filter(function(c){return STANDS[c].minha&&STANDS[c].status!=='livre';});
+    if(!lin.length){box.hidden=true;box.innerHTML='';return;}
+    var h='<b>Minhas vendas</b><span>Toque numa pra completar os dados do cliente pro contrato.</span>';
+    lin.forEach(function(c){
+      var s=STANDS[c], f=s.cad?faltando(s.cad):[];
+      h+='<button type=button class=lin onclick="stIr(\''+esc(c)+'\')"><span class=cod>'+esc(c)+'</span>'+
+         '<span class=nm>'+esc(s.cliente||'Cliente')+'<small>'+(s.status==='vendido'?'Vendido':'Aguardando confirmação')+'</small></span>'+
+         (f.length?'<span class="chip amb">Cadastro '+(REQ.length-f.length)+'/'+REQ.length+'</span>':'<span class="chip ok">Completo ✓</span>')+'</button>';
+    });
+    box.innerHTML=h; box.hidden=false;
+  }
+  window.stIr=function(code){
+    sel=code; editando=false; pav=STANDS[code].pavilhao;
+    pavilions.forEach(function(q){var e=document.getElementById('stpav-'+q.key);if(e)e.classList.toggle('on',q.key===pav);});
+    render();legenda();detalhe();
+    document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});
+  };
 
   // O LINK DE VENDAS: o vendedor manda pro CLIENTE DELE; o cliente abre a
   // página pública, escolhe qualquer stand e compra — a venda cai na conta do
@@ -9596,7 +9750,7 @@ _STANDS_JS = r"""
   window.stCopiar=function(btn,code){copiar(btn,linkVendas(code));};
   window.stCopiarMeuLink=function(btn){copiar(btn,linkVendas(null));};
 
-  render();legenda();
+  render();legenda();minhas();
 """
 
 
@@ -9615,17 +9769,24 @@ def cockpit_stands(request: Request):
         return RedirectResponse(_BASE, status_code=303)
     stands = _es.listar(pool, conta_id)
 
-    # o nome de quem reservou/comprou — o vendedor responde "esse já foi?" na hora
-    nomes = {}
+    # o nome de quem reservou/comprou — o vendedor responde "esse já foi?" na hora —
+    # e de QUEM É a venda (o vendedor do link), pra abrir o cadastro só das dele
+    nomes, donos = {}, {}
     ids = [s["prospeccao_id"] for s in stands if s["prospeccao_id"]]
     if ids:
         try:
             with pool.connection() as c:
-                nomes = dict(c.execute(
-                    "select id, empresa from prospeccao where conta_id=%s and id=any(%s)",
-                    (conta_id, ids)).fetchall())
+                for pid, emp, vid in c.execute(
+                        "select id, empresa, vendedor_id from prospeccao "
+                        "where conta_id=%s and id=any(%s)", (conta_id, ids)).fetchall():
+                    nomes[pid], donos[pid] = emp, vid
         except Exception:  # noqa: BLE001 — sem nome a planta continua servindo
-            nomes = {}
+            nomes, donos = {}, {}
+    gestao = _eh_gestao(request, g)
+    try:
+        cads = _es.cadastros_dos_stands(pool, conta_id, stands)
+    except Exception:  # noqa: BLE001 — sem o cadastro a planta continua servindo
+        cads = {}
 
     tot = {"livre": 0, "pre_reservado": 0, "vendido": 0}
     dados = {}
@@ -9638,6 +9799,16 @@ def cockpit_stands(request: Request):
             "preco": _brl(s["preco_centavos"]) if s["preco_centavos"] else None,
             "cliente": (nomes.get(s["prospeccao_id"]) if s["status"] != "livre" else None),
         }
+        # o cadastro completo (CNPJ, endereço…) só vai pro aparelho de quem pode
+        # mexer nele: a gestão, ou o vendedor dono da venda. Os outros veem só o nome.
+        cad = cads.get(s["codigo"])
+        minha = bool(meu_id) and donos.get(s["prospeccao_id"]) == meu_id
+        if cad and (gestao or minha):
+            dados[s["codigo"]]["pode"] = True
+            dados[s["codigo"]]["cad"] = cad
+            dados[s["codigo"]]["cliente"] = cad["fantasia"] or dados[s["codigo"]]["cliente"]
+        if minha and s["status"] != "livre":
+            dados[s["codigo"]]["minha"] = True
 
     # o código ASSINADO do link de vendas de quem está logado (dono sem
     # membro_id não tem: vai o link neutro)
@@ -9662,9 +9833,71 @@ def cockpit_stands(request: Request):
         + "<div class=stouter id=stouter><div class=ststage id=ststage>"
         + "<div class=stzoom id=stzoom><div class=stgrid id=stgrid></div></div></div></div>"
         + "<div class=stdet id=stdet hidden></div>"
+        + "<div class=stmin id=stmin hidden></div>"
         + "</div>"
         + f"<script>var STANDS={_json_mod.dumps(dados)};"
-        + f"var PUB='/e/{cfg['slug']}';var MEU_COD={_json_mod.dumps(meu_cod)};</script>"
+        + f"var PUB='/e/{cfg['slug']}';var MEU_COD={_json_mod.dumps(meu_cod)};"
+        + f"var BASE_STANDS='{_BASE}/stands';</script>"
         + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS + "})();</script>"
     )
     return _page("Mapa de stands", corpo)
+
+
+
+@router.get("/cockpit/stands/consulta-cnpj")
+def cockpit_stands_consulta_cnpj(request: Request, doc: str = ""):
+    """"Receita" do formulário do cliente do stand: razão social, e-mail, cidade e
+    UF pelo CNPJ (a mesma consulta da aba Clientes). Endereço e CEP o vendedor digita."""
+    if not (_sessao(request) or _gerencia(request)):
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import cnpj_info, validadoc
+    ok, tipo, d = validadoc.valida(doc)
+    if tipo != "pj" or not ok:
+        return JSONResponse({"ok": False, "erro": "CNPJ inválido"})
+    info = cnpj_info.consultar_cnpj(d)
+    if not info:
+        return JSONResponse({"ok": False, "erro": "CNPJ não encontrado na Receita"})
+    return JSONResponse({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
+                         "cidade": info.get("cidade"), "uf": info.get("uf")})
+
+
+@router.post("/cockpit/stands/{codigo}/cliente")
+def cockpit_stand_salvar_cliente(request: Request, codigo: str,
+                                 fantasia: str = Form(""), whats: str = Form(""),
+                                 razao: str = Form(""), doc: str = Form(""),
+                                 rep: str = Form(""), email: str = Form(""),
+                                 end: str = Form(""), cep: str = Form(""),
+                                 cidade: str = Form(""), uf: str = Form("")):
+    """Salva os dados do cliente do stand pelo celular do vendedor.
+
+    O vendedor só mexe nas vendas DELE (a prospecção do stand foi criada pelo link
+    dele: `prospeccao.vendedor_id`); dono e gestor, em todas. A posse é conferida
+    aqui, no servidor — o app só esconde o formulário. Confirmar pagamento não
+    passa por aqui: continua sendo do painel da gestão."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not (sess or g):
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    conta_id, meu_id = sess if sess else g
+    from finance import evento_stands as _es
+    pool = get_pool()
+    stand = _es.buscar(pool, conta_id, codigo)
+    if not stand:
+        return JSONResponse({"ok": False, "erro": "Stand não encontrado."}, status_code=404)
+    if not _eh_gestao(request, g):
+        dono = None
+        if stand.get("prospeccao_id"):
+            with pool.connection() as c:
+                r = c.execute("select vendedor_id from prospeccao where conta_id=%s and id=%s",
+                              (conta_id, stand["prospeccao_id"])).fetchone()
+            dono = r[0] if r else None
+        if not meu_id or dono != meu_id:
+            return JSONResponse({"ok": False, "erro": "Este stand não é de uma venda sua."},
+                                status_code=403)
+    r = _es.salvar_cadastro_stand(pool, conta_id, codigo, {
+        "fantasia": fantasia, "whats": whats, "razao": razao, "doc": doc, "rep": rep,
+        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf})
+    if not r["ok"]:
+        return JSONResponse({"ok": False, "erro": r["erro"]})
+    cad = _es.cadastros_dos_stands(pool, conta_id, [_es.buscar(pool, conta_id, codigo)])[codigo]
+    return JSONResponse({"ok": True, "acao": r["acao"], "congelado": r["congelado"], "cad": cad})

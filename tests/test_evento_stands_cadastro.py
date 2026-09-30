@@ -350,7 +350,8 @@ def test_a_pagina_publica_exige_nome_fantasia_e_whatsapp(pool, conta_id, monkeyp
     # nada travou: o stand segue livre e nenhum interessado nasceu
     assert es.buscar(pool, conta_id, "G60")["status"] == "livre"
     with pool.connection() as c:
-        assert c.execute("select count(*) from prospeccao").fetchone()[0] == 0
+        assert c.execute("select count(*) from prospeccao where conta_id=%s",
+                         (conta_id,)).fetchone()[0] == 0
 
 
 def _cockpit(pool, conta_id, monkeypatch, membro, papel="vendedor"):
@@ -429,3 +430,30 @@ def test_o_cadastro_completo_so_vai_pro_aparelho_de_quem_pode(pool, conta_id, mo
     assert "cad" not in alheia and "pode" not in alheia
     assert alheia["cliente"] == "Boutique Nova Era"      # o nome todos veem
     assert "11444777000161" not in json.dumps(alheia) and "Frei Serafim" not in json.dumps(alheia)
+
+
+# ------------------------------------------- o nome da empresa na página pública
+
+def test_o_nome_da_empresa_so_aparece_com_pagamento_confirmado_e_contrato_assinado(
+        pool, conta_id):
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    with pool.connection() as c:
+        for m in ("164_contratos.sql", "165_contrato_token.sql", "201_contrato_aditivos.sql"):
+            c.execute((base / m).read_text(encoding="utf-8"))
+        c.commit()
+    oid = _venda(pool, conta_id, "G60", status="vendido")
+    es.salvar_cadastro_stand(pool, conta_id, "G60", _dados(fantasia="Boutique Nova Era"))
+    _venda(pool, conta_id, "G61", nome="Casa Bela", zap="86977776666", status="pre_reservado")
+
+    def nomes():
+        return es.expositores_publicos(pool, conta_id, es.listar(pool, conta_id))
+
+    assert nomes() == {}                     # vendido, mas sem contrato assinado
+    with pool.connection() as c:
+        c.execute("insert into contratos (conta_id, orcamento_id, numero, token, assinado_em) "
+                  "values (%s,%s,1,'tk-exp-1', now())", (conta_id, oid))
+        c.commit()
+    assert nomes() == {"G60": "Boutique Nova Era"}     # o reservado segue anônimo
+    with pool.connection() as c:            # não deixa lixo pro banco compartilhado
+        c.execute("delete from contratos where conta_id=%s", (conta_id,))
+        c.commit()

@@ -116,6 +116,12 @@ def loja_stands(request: Request, slug: str):
     # SÓ o que é público vai pro JS (nunca comprovante_url/prospeccao_id/etc):
     # é este objeto que abastece mapa e painel de detalhe. Status traduzido pro
     # vocabulário da maquete (pre_reservado -> 'reservado', classes .st-*).
+    # o nome da empresa só aparece pra stand vendido COM contrato assinado
+    try:
+        expositores = es.expositores_publicos(pool, conta_id, stands)
+    except Exception as e:  # noqa: BLE001 — sem o nome a página continua servindo
+        _log.info("loja_stands: sem os nomes dos expositores: %s: %s", type(e).__name__, e)
+        expositores = {}
     stands_json = json.dumps({
         s["codigo"]: {
             "pavilhao": s["pavilhao"], "zona": s["zona"] or "",
@@ -123,6 +129,7 @@ def loja_stands(request: Request, slug: str):
             "status": "reservado" if s["status"] == "pre_reservado" else s["status"],
             "preco": brl(s["preco_centavos"]) if s["preco_centavos"] else None,
             "dias": _dias_restantes(s["pre_reserva_ate"]) if s["status"] == "pre_reservado" else None,
+            "expositor": expositores.get(s["codigo"]),
         }
         for s in stands
     })
@@ -510,6 +517,9 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   .panel{position:sticky;top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);}
   @media (max-width:860px){ .panel{position:static;} }
   .panel-empty{color:var(--fg-dim);font-size:13.5px;line-height:1.6;}
+  .panel-expositor{margin:10px 0 4px;padding:10px 14px;border-radius:10px;background:color-mix(in srgb, var(--coral) 14%, var(--surface));border:1px solid color-mix(in srgb, var(--coral) 45%, var(--line));}
+  .panel-expositor span{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-dim);margin-bottom:2px;}
+  .panel-expositor b{font-size:17px;}
   .panel-photo-wrap{position:relative;border-radius:10px 10px 0 0;overflow:hidden;margin:-18px -18px 14px;background:#0e0f0a;}
   .panel-photo{width:100%;display:block;aspect-ratio:900/616;object-fit:cover;}
   .panel-photo-cap{font-size:10px;color:var(--fg-dim);text-align:center;margin:6px 0 4px;}
@@ -678,7 +688,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         if (!sv) continue;
         usados[code] = true;
         stands.push({ code:code, zone:sv.zona, pavilion:p.key, size:sv.tamanho,
-                      preco:sv.preco, status:sv.status, dias:sv.dias });
+                      preco:sv.preco, status:sv.status, dias:sv.dias, expositor:sv.expositor });
       }
     });
   });
@@ -692,7 +702,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     var pk = sv.pavilhao || 'outros';
     (extras[pk] = extras[pk] || []).push(code);
     stands.push({ code:code, zone:sv.zona, pavilion:pk, size:sv.tamanho,
-                  preco:sv.preco, status:sv.status, dias:sv.dias });
+                  preco:sv.preco, status:sv.status, dias:sv.dias, expositor:sv.expositor });
   });
   Object.keys(extras).forEach(function(pk){
     var pav = pavilions.filter(function(p){ return p.key === pk; })[0];
@@ -984,6 +994,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     }
     html += '<div class="panel-code">' + esc(s.code) + '</div>';
     html += '<span class="status-badge st-' + s.status + '">' + statusText + '</span>';
+    if (s.status === 'vendido' && s.expositor) html += '<div class="panel-expositor"><span>Expositor</span><b>' + esc(s.expositor) + '</b></div>';
     if (s.zone) html += '<div class="panel-row"><span>Zona</span><b>' + esc(s.zone) + '</b></div>';
     html += '<div class="panel-row"><span>Pavilhão</span><b>' + esc(pav ? pav.label : s.pavilion) + '</b></div>';
     html += '<div class="panel-row"><span>Tamanho</span><b>' + esc(sizeLabel[s.size] || s.size) + '</b></div>';
@@ -1036,7 +1047,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         html += '<a class="whatsapp-secondary" href="' + waLink(msg2) + '" target="_blank" rel="noopener">Entrar na fila de espera</a>';
       }
     } else {
-      html += '<p class="panel-empty" style="margin-top:14px;">Este stand já foi confirmado e não está mais disponível.</p>';
+      html += '<p class="panel-empty" style="margin-top:14px;">' + (s.expositor ? 'Stand confirmado: pagamento feito e contrato assinado. Você encontra a marca aqui na feira.' : 'Este stand já foi confirmado e não está mais disponível.') + '</p>';
     }
     panel.innerHTML = html;
   }

@@ -527,6 +527,30 @@ def cadastros_dos_stands(pool, conta_id: int, stands: list[dict]) -> dict[str, d
     return out
 
 
+def expositores_publicos(pool, conta_id: int, stands: list[dict]) -> dict[str, str]:
+    """{codigo: nome fantasia} dos stands que a página pública pode nomear.
+
+    Só aparece quem CUMPRIU os dois passos: o pagamento foi confirmado (status
+    'vendido') e o contrato foi ASSINADO. Reservado ou com contrato pendente
+    continua anônimo — nome de empresa na vitrine pública é o sinal de que o
+    espaço é dela de fato, e não uma intenção. O nome é o fantasia do cadastro
+    (o mesmo do formulário 'Dados do cliente'); sem cadastro, o da prospecção."""
+    vend = [s for s in stands if s["status"] == "vendido" and s.get("orcamento_id")]
+    if not vend:
+        return {}
+    with pool.connection() as c:
+        assinados = {r[0] for r in c.execute(
+            "select orcamento_id from contratos where orcamento_id = any(%s) "
+            "and assinado_em is not null and substitui_id is null",
+            ([s["orcamento_id"] for s in vend],)).fetchall()}
+    vend = [s for s in vend if s["orcamento_id"] in assinados]
+    if not vend:
+        return {}
+    cads = cadastros_dos_stands(pool, conta_id, vend)
+    return {s["codigo"]: cads[s["codigo"]]["fantasia"] for s in vend
+            if cads.get(s["codigo"], {}).get("fantasia")}
+
+
 def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict) -> dict:
     """Salva o formulário "Dados do cliente" do stand.
 

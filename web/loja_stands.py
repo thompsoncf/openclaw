@@ -56,7 +56,10 @@ def _dias_restantes(ate) -> int | None:
     if not ate:
         return None
     try:
-        agora = datetime.now(timezone.utc) if ate.tzinfo else datetime.now()
+        # `ate` ingênuo vem de coluna sem fuso, gravada em UTC (o banco fala UTC)
+        agora = datetime.now(timezone.utc)
+        if not ate.tzinfo:
+            agora = agora.replace(tzinfo=None)
         seg = (ate - agora).total_seconds()
         return max(0, math.ceil(seg / 86400))
     except Exception:  # noqa: BLE001

@@ -346,10 +346,14 @@ def _escreveu_depois(c, conversa_id: int | None, desde: datetime) -> bool:
                                 and criado_em > %s limit 1""", (conversa_id, desde)).fetchone())
 
 
-def _reivindicar(pool, evento_id: int, coluna: str) -> bool:
+def _reivindicar(pool, evento_id: int, coluna: str, quando: datetime) -> bool:
+    """Carimba o passo com o `agora` do CICLO, não com o `now()` do banco. A resposta
+    do cliente é lida "depois da pergunta" (`ler_resposta_em`): com dois relógios, o
+    ciclo decidia por um e carimbava pelo outro — e o teste que roda o ciclo num dia
+    fixo quebrou no dia em que o relógio real passou dele (30/09/2026)."""
     with pool.connection() as c:
-        r = c.execute(f"update visita_rotinas set {coluna}=now() where evento_id=%s "
-                      f"and {coluna} is null returning evento_id", (evento_id,)).fetchone()
+        r = c.execute(f"update visita_rotinas set {coluna}=%s where evento_id=%s "
+                      f"and {coluna} is null returning evento_id", (quando, evento_id)).fetchone()
         c.commit()
     return bool(r)
 
@@ -382,7 +386,7 @@ def _ao_cliente(pool, conta_id: int, v: dict, conversa_id: int, coluna: str | No
         c.commit()
     if not pode:
         return False
-    if coluna and not _reivindicar(pool, v["evento_id"], coluna):
+    if coluna and not _reivindicar(pool, v["evento_id"], coluna, agora):
         return False
     with pool.connection() as c:
         try:
@@ -518,7 +522,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
         resposta_ok = (out["enviadas"] < TETO_CICLO and not parou and not v["fechado"]
                        and (cliente_ok or bool(resp_em and agora - resp_em <= RESPOSTA_NA_HORA)))
         if resp in ("confirmou", "confirmou_e_mais"):
-            if _reivindicar(pool, v["evento_id"], "confirmado_em"):
+            if _reivindicar(pool, v["evento_id"], "confirmado_em", agora):
                 out["confirmadas"] += 1
                 # o "sim, qual o endereço?" fica pro vendedor: responder só o "sim"
                 # por cima de uma pergunta seria a empresa ignorando o cliente
@@ -528,7 +532,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
                         out["enviadas"] += 1
             return
         if resp == "remarcar":
-            if _reivindicar(pool, v["evento_id"], "pede_remarcar_em"):
+            if _reivindicar(pool, v["evento_id"], "pede_remarcar_em", agora):
                 out["remarcar"] += 1
                 if resposta_ok and _mandar_cli(None,
                                                texto_remarcar(nome_dono)):
@@ -555,7 +559,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
                 ja_avisado = _escreveu_depois(c, conversa_id, marcada_em - timedelta(minutes=1))
                 c.commit()
             if ja_avisado:
-                _reivindicar(pool, v["evento_id"], "ao_marcar_em")
+                _reivindicar(pool, v["evento_id"], "ao_marcar_em", agora)
                 return
             if _mandar_cli("ao_marcar_em",
                            texto_ao_marcar(ini, nome, esp["nome"], nome_recebe,
@@ -584,7 +588,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
         if ((v["vespera_em"] or v["duas_horas_em"]) and not v["confirmado_em"]
                 and not v["sem_resposta_em"] and ini - agora <= timedelta(minutes=90)
                 and equipe_ok):
-            if _reivindicar(pool, v["evento_id"], "sem_resposta_em"):
+            if _reivindicar(pool, v["evento_id"], "sem_resposta_em", agora):
                 avisar(pool, conta_id, recebe, "⏰ Visita sem confirmação",
                        f"{quem} não confirmou a visita das {_hora(ini)}. Continua marcada.", link)
                 out["sem_resposta"] += 1
@@ -602,14 +606,14 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
         loc = agora.astimezone(ag.BRT)
         mesmo_dia = ini.astimezone(ag.BRT).date() == loc.date()
         if not v["veio_1_em"] and agora >= ini + VEIO_DEPOIS:
-            if _reivindicar(pool, v["evento_id"], "veio_1_em"):
+            if _reivindicar(pool, v["evento_id"], "veio_1_em", agora):
                 avisar(pool, conta_id, recebe, pergunta, corpo, "/cockpit/agenda")
                 out["veio"] += 1
             return
         segunda = datetime(loc.year, loc.month, loc.day, VEIO_HORA_2, tzinfo=ag.BRT)
         if (v["veio_1_em"] and not v["veio_2_em"] and mesmo_dia and agora >= segunda
                 and v["veio_1_em"] < segunda - timedelta(minutes=30)):
-            if _reivindicar(pool, v["evento_id"], "veio_2_em"):
+            if _reivindicar(pool, v["evento_id"], "veio_2_em", agora):
                 avisar(pool, conta_id, recebe, pergunta, corpo, "/cockpit/agenda")
                 out["veio"] += 1
         return
@@ -621,7 +625,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
     if v["desfecho"] == "nao_realizado":
         if v["da_ia"] or v["falta_aviso_em"] or not equipe_ok:
             return
-        if _reivindicar(pool, v["evento_id"], "falta_aviso_em") and dono and dono != recebe:
+        if _reivindicar(pool, v["evento_id"], "falta_aviso_em", agora) and dono and dono != recebe:
             avisar(pool, conta_id, dono, f"❌ {quem} faltou à visita",
                    "O card voltou pra Qualificado. Chame pra remarcar.", link)
             out["faltou"] += 1
@@ -643,7 +647,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
         c.commit()
     if ja_falou:
         # nada a fazer, e fica feito — sem selo: o selo é só do lembrete que saiu
-        if _reivindicar(pool, v["evento_id"], "depois_em"):
+        if _reivindicar(pool, v["evento_id"], "depois_em", agora):
             _acao(pool, v["evento_id"], "ja_falou")
         return
     if v["da_ia"]:
@@ -654,7 +658,7 @@ def _uma_visita(pool, conta_id: int, cfg: dict, v: dict, agora: datetime,
                 out["agradecimentos"] += 1
                 out["enviadas"] += 1
         return
-    if equipe_ok and _reivindicar(pool, v["evento_id"], "depois_em"):
+    if equipe_ok and _reivindicar(pool, v["evento_id"], "depois_em", agora):
         _acao(pool, v["evento_id"], "lembrete")
         avisar(pool, conta_id, dono, f"💬 Fale com {nome or 'o cliente'}",
                f"A visita foi às {_hora(ini)} e ninguém escreveu depois. Mande a proposta "
@@ -708,7 +712,7 @@ def rodar(pool, agora: datetime | None = None) -> dict:
 
 # ------------------------------------------------------------------ o card
 
-def selos(c, conta_id: int, lead_ids: list[int]) -> dict:
+def selos(c, conta_id: int, lead_ids: list[int], agora: datetime | None = None) -> dict:
     """O selo da visita no card, numa consulta só: {lead: (texto, classe)}.
 
         confirmada ✓        o cliente respondeu 1 (a da IA também, pelo `ia_visitas`)
@@ -716,9 +720,11 @@ def selos(c, conta_id: int, lead_ids: list[int]) -> dict:
         não confirmou       perguntamos e ninguém respondeu até 1h30 antes
         falar com o cliente veio, o lembrete saiu, e ainda ninguém escreveu
         agradecida ✓        veio, e a IA agradeceu (visita da IA)
-    Tolerante: sem as tabelas, nenhum selo."""
+    Tolerante: sem as tabelas, nenhum selo. `agora` é o do quadro (o relógio real);
+    o teste passa o do cenário — um relógio só pro SQL e pro Python."""
     if not lead_ids:
         return {}
+    agora = agora or datetime.now(timezone.utc)
     try:
         with c.transaction():
             rows = c.execute(
@@ -732,17 +738,16 @@ def selos(c, conta_id: int, lead_ids: list[int]) -> dict:
                           -- conversa: o quadro faz UMA consulta de conversas pro board
                           -- inteiro (tests/test_kanban_chat.py), e o selo não é motivo pra
                           -- uma segunda
-                          v.depois_acao = 'lembrete' and e.inicio > now() - interval '2 days',
+                          v.depois_acao = 'lembrete' and e.inicio > %s - interval '2 days',
                           v.depois_acao = 'agradecimento', e.inicio
                      from visita_rotinas v
                      join eventos_agenda e on e.id = v.evento_id and e.conta_id = v.conta_id
                      left join ia_visitas iv on iv.evento_id = v.evento_id
                     where v.conta_id=%s and v.prospeccao_id = any(%s) and e.status='ativo'
                     order by v.prospeccao_id, e.inicio desc""",
-                (conta_id, list(lead_ids))).fetchall()
+                (agora, conta_id, list(lead_ids))).fetchall()
     except Exception:  # noqa: BLE001
         return {}
-    agora = datetime.now(timezone.utc)
     out = {}
     for lead, conf, remarcar, sem_resp, desfecho, falar, agradeceu, ini in rows:
         # o desfecho manda: com ele marcado, a visita aconteceu (ou não), seja qual for

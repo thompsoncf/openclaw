@@ -222,7 +222,7 @@ def test_o_1_confirma_e_ganha_a_resposta_e_o_2h_sai_sem_pergunta(pool, rec, prim
     vr.rodar(pool, datetime(2026, 9, 30, 8, 35, tzinfo=BRT))
     assert not [z for z in rec["zap"] if "sem confirmação" in z[1]]
     with pool.connection() as c:
-        assert vr.selos(c, PRIME, [lead]) == {lead: ("confirmada ✓", "ok")}
+        assert vr.selos(c, PRIME, [lead], datetime(2026, 9, 30, 8, 35, tzinfo=BRT)) == {lead: ("confirmada ✓", "ok")}
 
 
 def test_sim_com_pergunta_confirma_mas_a_resposta_fica_pro_vendedor(pool, rec, prime):
@@ -249,7 +249,7 @@ def test_o_2_avisa_o_dono_do_card_e_a_ia_nao_entra(pool, rec, prime):
     vr.rodar(pool, datetime(2026, 9, 30, 8, 5, tzinfo=BRT))
     assert len(rec["cliente"]) == n
     with pool.connection() as c:
-        assert vr.selos(c, PRIME, [lead])[lead] == ("pediu pra remarcar", "bad")
+        assert vr.selos(c, PRIME, [lead], datetime(2026, 9, 30, 8, 5, tzinfo=BRT))[lead] == ("pediu pra remarcar", "bad")
 
 
 def test_sim_depois_de_a_equipe_falar_de_outra_coisa_nao_e_resposta(pool, rec, prime):
@@ -447,7 +447,7 @@ def test_veio_e_ninguem_escreveu_lembra_o_vendedor(pool, rec, prime):
     assert len(fale) == 1 and fale[0][0] == "5586900000002"       # o dono do card
     assert "Mande a proposta enquanto a festa está fresca" in fale[0][1]
     with pool.connection() as c:
-        assert vr.selos(c, PRIME, [lead])[lead] == ("falar com o cliente", "at")
+        assert vr.selos(c, PRIME, [lead], datetime(2026, 9, 30, 13, 5, tzinfo=BRT))[lead] == ("falar com o cliente", "at")
         # o vendedor escreveu: o selo sai
         c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em) "
                   "values (%s,'whatsapp','out','humano','oi Hana!',%s)",
@@ -456,7 +456,7 @@ def test_veio_e_ninguem_escreveu_lembra_o_vendedor(pool, rec, prime):
     vr.rodar(pool, datetime(2026, 9, 30, 13, 25, tzinfo=BRT))
     assert _estado(pool, ev)["depois_acao"] == "respondido"
     with pool.connection() as c:
-        assert lead not in vr.selos(c, PRIME, [lead])
+        assert lead not in vr.selos(c, PRIME, [lead], datetime(2026, 9, 30, 13, 25, tzinfo=BRT))
 
 
 def test_veio_e_alguem_ja_escreveu_nao_lembra(pool, rec, prime):
@@ -483,7 +483,7 @@ def test_na_visita_da_ia_a_ia_agradece_e_oferece_o_orcamento(pool, rec, prime):
     assert rec["cliente"] == [(conv, "Oi, Hana! Foi um prazer te receber hoje 😊 Gostou do espaço? "
                                      "Já posso montar o orçamento da sua festa (15 anos, 150 convidados)?")]
     with pool.connection() as c:
-        assert vr.selos(c, PRIME, [lead])[lead] == ("agradecida ✓", "ia")
+        assert vr.selos(c, PRIME, [lead], datetime(2026, 9, 30, 13, 2, tzinfo=BRT))[lead] == ("agradecida ✓", "ia")
 
 
 def test_faltou_avisa_o_dono_do_card_so_se_outro_recebeu(pool, rec, prime):

@@ -13387,7 +13387,8 @@ def empresa_dre_pdf(request: Request, ano: int = 0, mes: int = 0):
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    hoje = _date.today()
+    from finance import relogio
+    hoje = relogio.hoje()   # o mês de Brasília: às 22h do dia 30 ainda é este mês
     ano = ano or hoje.year
     mes = mes if 1 <= mes <= 12 else hoje.month
     pdf = emp.dre_pdf(pool, conta[0], ano, mes, conta[2])

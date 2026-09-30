@@ -56,6 +56,10 @@ def _garantir_cols(pool) -> None:
                           "eh_cliente boolean not null default true")
                 c.execute("alter table clientes add column if not exists "
                           "eh_fornecedor boolean not null default false")
+                # razão social e representante legal (migração 451): o que o
+                # CONTRATO pede do lojista e o cadastro não tinha
+                c.execute("alter table clientes add column if not exists razao_social text")
+                c.execute("alter table clientes add column if not exists representante text")
                 c.commit()
         except Exception:  # noqa: BLE001 — sem permissao de DDL, segue o jogo
             pass
@@ -242,7 +246,8 @@ def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
 # nunca sobrescreve, e nunca apaga. Salvar de novo com o campo em branco tem que
 # ser inofensivo, senao um segundo salvamento incompleto destruiria o cadastro
 # bom feito no primeiro (regra 0 do CLAUDE.md).
-_ENRIQUECIVEIS = ("email", "cidade", "uf", "endereco", "cep", "obs")
+_ENRIQUECIVEIS = ("email", "cidade", "uf", "endereco", "cep", "obs",
+                  "razao_social", "representante")
 
 
 def salvar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
@@ -251,7 +256,9 @@ def salvar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None
                    cpf: str | None = None, cnpj: str | None = None,
                    cidade: str | None = None, uf: str | None = None,
                    endereco: str | None = None, cep: str | None = None,
-                   eh_cliente: bool = True, eh_fornecedor: bool = False) -> dict:
+                   eh_cliente: bool = True, eh_fornecedor: bool = False,
+                   razao_social: str | None = None,
+                   representante: str | None = None) -> dict:
     """Cadastra OU atualiza — e diz qual dos dois fez.
 
     Devolve {"id", "acao", "papel_mudou", "nome"}, com acao em:
@@ -293,11 +300,17 @@ def salvar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None
                 aniversario=aniversario, obs=obs, cidade=cidade, uf=uf,
                 endereco=endereco, cep=cep, eh_cliente=eh_cliente,
                 eh_fornecedor=eh_fornecedor)
+            extra = {k: v for k, v in (("razao_social", razao_social),
+                                       ("representante", representante))
+                     if (v or "").strip()}
+            if extra:
+                atualizar_cliente(pool, dono_id, novo_id, **extra)
             return {"id": novo_id, "acao": "criado", "papel_mudou": False, "nome": nome}
 
     # --- daqui pra baixo: JA' EXISTE. Enriquece e aplica o papel. ---
     entrando = {"email": email, "cidade": cidade, "uf": uf,
-                "endereco": endereco, "cep": cep, "obs": obs}
+                "endereco": endereco, "cep": cep, "obs": obs,
+                "razao_social": razao_social, "representante": representante}
     mudar = {k: v for k, v in entrando.items()
              if k in _ENRIQUECIVEIS and (v or "").strip()
              and not (existente.get(k) or "").strip()}
@@ -332,7 +345,9 @@ _SEL = """select c.id,
                  c.endereco,
                  c.cep,
                  c.eh_cliente,
-                 c.eh_fornecedor
+                 c.eh_fornecedor,
+                 c.razao_social,
+                 c.representante
             from clientes c
             left join pessoas p on p.id = c.pessoa_id"""
 
@@ -373,6 +388,22 @@ def obter_cliente(pool, dono_id: int, cliente_id: int) -> dict | None:
         r = c.execute(_SEL + " where c.id=%s and c.dono_id=%s and c.ativo",
                       (cliente_id, dono_id)).fetchone()
     return _row_para_dict(r) if r else None
+
+
+def obter_clientes(pool, dono_id: int, ids) -> dict[int, dict]:
+    """Vários clientes de uma vez ({id: cliente}), isolados por dono_id.
+
+    Existe pra lista de estandes: ela mostra o cadastro de cada stand vendido, e
+    uma consulta por linha viraria N idas ao banco numa tela que abre toda hora.
+    Id que não é do lojista (ou foi arquivado) simplesmente não vem."""
+    ids = [int(i) for i in (ids or []) if i]
+    if not ids:
+        return {}
+    _garantir_cols(pool)
+    with pool.connection() as c:
+        rows = c.execute(_SEL + " where c.dono_id=%s and c.ativo and c.id = any(%s)",
+                         (dono_id, ids)).fetchall()
+    return {r[0]: _row_para_dict(r) for r in rows}
 
 
 def achar_cliente_por_nome(pool, dono_id: int, nome: str,
@@ -463,7 +494,7 @@ def atualizar_cliente(pool, dono_id: int, cliente_id: int, **campos) -> bool:
     id_map = {"nome": "nome", "telefone": "celular", "email": "email",
               "cpf": "cpf", "cnpj": "cnpj", "conta_zaq_id": "conta_zaq_id"}
     rel_permit = {"aniversario", "obs", "cidade", "uf", "endereco", "cep",
-                  "eh_cliente", "eh_fornecedor"}
+                  "eh_cliente", "eh_fornecedor", "razao_social", "representante"}
     mudou = False
     _garantir_cols(pool)
     with pool.connection() as c:
@@ -660,4 +691,6 @@ def _row_para_dict(r) -> dict:
         "cep": r[14] if len(r) > 14 else None,
         "eh_cliente": bool(r[15]) if len(r) > 15 and r[15] is not None else True,
         "eh_fornecedor": bool(r[16]) if len(r) > 16 and r[16] is not None else False,
+        "razao_social": r[17] if len(r) > 17 else None,
+        "representante": r[18] if len(r) > 18 else None,
     }

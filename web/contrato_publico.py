@@ -99,7 +99,11 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
                       -- lido pelo jsonb da linha, não pela coluna: base sem a 311
                       -- (ou tabela montada à mão) continua abrindo o contrato
                       coalesce((to_jsonb(o)->>'pagamento_anual')::boolean, false),
-                      (to_jsonb(o)->>'dia_vencimento')::int
+                      (to_jsonb(o)->>'dia_vencimento')::int,
+                      -- o REPRESENTANTE LEGAL do contratante mora em `socio` (o
+                      -- cadastro de estandes grava ali) e o CANAL diz de onde a
+                      -- proposta nasceu — a página de estandes tem objeto próprio
+                      to_jsonb(o)->>'socio', to_jsonb(o)->>'canal'
                  from orcamentos o join contas ct on ct.id = o.conta_id
                 where o.id=%s and o.conta_id=%s""",
             (orcamento_id, conta_id)).fetchone()
@@ -109,7 +113,7 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
      cli_uf, numero, evento, total, parcelas, orc_status, sinal_pago_em,
      c_nome, c_razao, c_fantasia, c_doc, c_end, c_bairro, c_cep, c_cid, c_uf,
      c_tel, c_email, c_logo, cliente_id, modo_orc, setup_c, mensal_c, itens,
-     anual, dia_venc) = r
+     anual, dia_venc, representante, canal) = r
     evento = evento if isinstance(evento, dict) else {}
     empresa = {"razao_social": c_razao or c_fantasia or c_nome or "",
                "nome_fantasia": c_fantasia or "", "documento": c_doc or "",
@@ -123,7 +127,11 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
     # pra PJ) e às vezes chega com um telefone que o agente de IA capturou
     # antes do nome — relato em produção: o LOCATÁRIO saiu identificado como
     # "86998192489" na folha do contrato.
+    lista_itens = itens if isinstance(itens, list) else []
+    objeto = " · ".join(str((i or {}).get("nome") or "").strip()
+                        for i in lista_itens if (i or {}).get("nome"))
     orcamento = {"cliente": emp_nome or cli or "", "empresa": emp_nome or "",
+                 "representante": (representante or "").strip(), "objeto": objeto,
                  "cnpj": cli_doc or "", "whatsapp": whats or "", "email": cli_email or "",
                  "telefone": cli_tel or "", "endereco": cli_end or "", "cep": cli_cep or "",
                  "cidade": cli_cid or "", "uf": cli_uf or "", "numero": numero,
@@ -173,12 +181,20 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
             # quem responde pela empresa contratante ("A/C"), quando é outra pessoa
             "responsavel": (cli or "").strip() if (cli or "").strip()
                            and (cli or "").strip() != (emp_nome or "").strip() else "",
+            # quem ASSINA pelo lojista (locação de espaço: o cadastro do estande)
+            "representante": orcamento.get("representante") or "",
         },
+        # o que foi locado. `espaco` = a venda nasceu na página de estandes: o
+        # quadro do objeto troca horário/convidados (que não existem ali) pelo
+        # espaço locado e pelo período do evento
+        "objeto": objeto,
+        "espaco": (canal or "") == "pagina_stands",
         "evento": {
             "tipo": evento.get("tipo") or "Evento",
             # mesma função que preenche {evento.data} nas cláusulas: a data no
             # quadro do objeto e a data no texto não podem sair diferentes
             "data": ctr.data_br(evento.get("data")),
+            "periodo": evento.get("periodo") or ctr.data_br(evento.get("data")),
             "horario": _linha_end(evento.get("inicio"), evento.get("fim")).replace(" · ", " às "),
             "local": evento.get("local") or "",
             "convidados": evento.get("convidados") or "",
@@ -505,6 +521,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
           <b>{{ d.contratante.nome }}</b>
           {% if d.contratante.doc %}<small>CPF/CNPJ {{ d.contratante.doc }}</small>{% endif %}
           {% if d.servico and d.contratante.responsavel %}<small>A/C {{ d.contratante.responsavel }}</small>{% endif %}
+          {% if not d.servico and d.contratante.representante %}<small>Representante legal: {{ d.contratante.representante }}</small>{% endif %}
           {% if d.contratante.endereco %}<small>{{ d.contratante.endereco }}</small>{% endif %}
           {% if d.contratante.contato %}<small>{{ d.contratante.contato }}</small>{% endif %}
         </div>
@@ -525,6 +542,21 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         <div><div class="k">Mensalidade</div><div class="v">{{ d.mensal }}</div></div>
         <div><div class="k">Pagamento</div><div class="v">{{ 'Anual à vista (-15%)' if d.anual else ('Mensal · dia ' ~ d.dia_vencimento if d.dia_vencimento else 'Mensal') }}</div></div>
         <div><div class="k">Total 1º ano</div><div class="v">{{ d.valor }}</div></div>
+      </div>
+      {% elif d.espaco %}
+      {# LOCAÇÃO DE ESTANDE: sem horário nem convidados — o que se aluga é o
+         ESPAÇO (código, tamanho e zona) e o que vale é o período do evento. #}
+      <div class="ev" style="grid-template-columns:1fr 1fr">
+        <div><div class="k">Evento</div><div class="v">{{ d.evento.tipo }}</div></div>
+        <div><div class="k">Período</div><div class="v">{{ d.evento.periodo or '—' }}</div></div>
+      </div>
+      <div class="ev" style="margin-top:8px;grid-template-columns:1fr">
+        <div><div class="k">Espaço locado</div><div class="v">{{ d.objeto or '—' }}</div></div>
+      </div>
+      <div class="ev" style="margin-top:8px;grid-template-columns:2fr 1fr 1fr">
+        <div><div class="k">Local</div><div class="v">{{ d.evento.local or '—' }}</div></div>
+        <div><div class="k">Valor total</div><div class="v">{{ d.valor }}</div></div>
+        <div><div class="k">Orçamento</div><div class="v">nº {{ d.orcamento_numero or '—' }}</div></div>
       </div>
       {% else %}
       <div class="ev">

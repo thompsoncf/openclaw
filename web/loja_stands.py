@@ -116,6 +116,12 @@ def loja_stands(request: Request, slug: str):
     # SÓ o que é público vai pro JS (nunca comprovante_url/prospeccao_id/etc):
     # é este objeto que abastece mapa e painel de detalhe. Status traduzido pro
     # vocabulário da maquete (pre_reservado -> 'reservado', classes .st-*).
+    # o nome da empresa só aparece pra stand vendido COM contrato assinado
+    try:
+        expositores = es.expositores_publicos(pool, conta_id, stands)
+    except Exception as e:  # noqa: BLE001 — sem o nome a página continua servindo
+        _log.info("loja_stands: sem os nomes dos expositores: %s: %s", type(e).__name__, e)
+        expositores = {}
     stands_json = json.dumps({
         s["codigo"]: {
             "pavilhao": s["pavilhao"], "zona": s["zona"] or "",
@@ -123,6 +129,7 @@ def loja_stands(request: Request, slug: str):
             "status": "reservado" if s["status"] == "pre_reservado" else s["status"],
             "preco": brl(s["preco_centavos"]) if s["preco_centavos"] else None,
             "dias": _dias_restantes(s["pre_reserva_ate"]) if s["status"] == "pre_reservado" else None,
+            "expositor": expositores.get(s["codigo"]),
         }
         for s in stands
     })
@@ -188,6 +195,12 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
     codigo = (codigo or "").strip()
     if not codigo:
         return RedirectResponse(f"/e/{slug}?msg=erro_generico", status_code=303)
+
+    # nome fantasia + WhatsApp são o cadastro que nasce da reserva: sem os dois a
+    # equipe não teria como chamar o cliente pra fechar o contrato (a checagem do
+    # navegador é só conforto — quem posta direto cai aqui)
+    if not (nome or "").strip() or len("".join(ch for ch in (whatsapp or "") if ch.isdigit())) < 10:
+        return RedirectResponse(f"/e/{slug}?msg=erro_dados&codigo={codigo}", status_code=303)
 
     prospeccao_id = _criar_prospeccao_simples(pool, conta_id, nome, whatsapp, vendedor)
     r = es.subir_e_registrar_comprovante(pool, conta_id, codigo, conteudo, content_type,
@@ -504,6 +517,9 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   .panel{position:sticky;top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);}
   @media (max-width:860px){ .panel{position:static;} }
   .panel-empty{color:var(--fg-dim);font-size:13.5px;line-height:1.6;}
+  .panel-expositor{margin:10px 0 4px;padding:10px 14px;border-radius:10px;background:color-mix(in srgb, var(--coral) 14%, var(--surface));border:1px solid color-mix(in srgb, var(--coral) 45%, var(--line));}
+  .panel-expositor span{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-dim);margin-bottom:2px;}
+  .panel-expositor b{font-size:17px;}
   .panel-photo-wrap{position:relative;border-radius:10px 10px 0 0;overflow:hidden;margin:-18px -18px 14px;background:#0e0f0a;}
   .panel-photo{width:100%;display:block;aspect-ratio:900/616;object-fit:cover;}
   .panel-photo-cap{font-size:10px;color:var(--fg-dim);text-align:center;margin:6px 0 4px;}
@@ -527,6 +543,12 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   .pix-titular{font-size:11px;color:var(--fg-dim);margin-top:6px;}
   .up-input{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;color:var(--fg);font-family:inherit;font-size:13px;margin-top:8px;}
   .up-input::placeholder{color:var(--fg-dim);}
+  .fld{display:block;margin-top:10px;}
+  .fld > span{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--fg-dim);margin-bottom:4px;}
+  .fld > span i{font-style:normal;color:var(--gold-strong);}
+  .fld .up-input{margin-top:0;}
+  .fld.falta .up-input{border-color:var(--gold);}
+  .fld-erro{color:var(--gold-strong);font-size:11px;margin-top:6px;}
   .upload-box{
     display:block;margin-top:10px;border:1.5px dashed var(--line);border-radius:10px;padding:14px;text-align:center;
     cursor:pointer;background:var(--surface);
@@ -569,6 +591,7 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 
 {% if msg == 'ok' %}<div class="msg ok">✓ Comprovante recebido{% if msg_codigo %} — o stand {{ msg_codigo }} está reservado pra você{% endif %}! A equipe confere o pagamento e confirma em breve.{% if ct %} <a class="msg-link" href="/contrato/{{ ct }}">Assinar o contrato agora →</a>{% endif %}</div>{% endif %}
 {% if msg == 'erro' %}<div class="msg erro">Não deu pra registrar o comprovante{% if msg_codigo %} do stand {{ msg_codigo }}{% endif %}. Ele pode já ter sido vendido — dá uma olhada no mapa e tenta outro{% if cfg.whatsapp_numero %}, ou chama no WhatsApp{% endif %}.</div>{% endif %}
+{% if msg == 'erro_dados' %}<div class="msg erro">Faltou o nome fantasia ou o WhatsApp (com DDD). Preencha os dois e envie o comprovante de novo.</div>{% endif %}
 {% if msg == 'erro_generico' %}<div class="msg erro">Não deu pra processar. Tenta de novo.</div>{% endif %}
 {% if sem_storage %}<div class="msg erro">⚠ Envio de comprovante temporariamente indisponível{% if cfg.whatsapp_numero %} — manda pelo WhatsApp{% endif %}.</div>{% endif %}
 
@@ -665,7 +688,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         if (!sv) continue;
         usados[code] = true;
         stands.push({ code:code, zone:sv.zona, pavilion:p.key, size:sv.tamanho,
-                      preco:sv.preco, status:sv.status, dias:sv.dias });
+                      preco:sv.preco, status:sv.status, dias:sv.dias, expositor:sv.expositor });
       }
     });
   });
@@ -679,7 +702,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     var pk = sv.pavilhao || 'outros';
     (extras[pk] = extras[pk] || []).push(code);
     stands.push({ code:code, zone:sv.zona, pavilion:pk, size:sv.tamanho,
-                  preco:sv.preco, status:sv.status, dias:sv.dias });
+                  preco:sv.preco, status:sv.status, dias:sv.dias, expositor:sv.expositor });
   });
   Object.keys(extras).forEach(function(pk){
     var pav = pavilions.filter(function(p){ return p.key === pk; })[0];
@@ -930,6 +953,18 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
   function validarEnvio(form){
     // input[type=file] fica escondido dentro do .upload-box (label), então a
     // validação nativa de `required` não consegue focar nele — checa na mão.
+    var erro = form.querySelector('[data-erro]');
+    var nome = form.elements['nome'], zap = form.elements['whatsapp'];
+    var zapOk = zap && zap.value.replace(/[^0-9]/g, '').length >= 10;
+    if (!nome.value.trim() || !zapOk){
+      form.querySelectorAll('.fld').forEach(function(f){
+        var inp = f.querySelector('input');
+        f.classList.toggle('falta', inp === nome ? !nome.value.trim() : !zapOk);
+      });
+      if (erro){ erro.hidden = false; erro.textContent = 'Preencha o nome fantasia e o WhatsApp (com DDD) pra reservar.'; }
+      return false;
+    }
+    if (erro) erro.hidden = true;
     var arq = form.querySelector('input[type=file]');
     if (!arq || !arq.files || !arq.files.length){
       var box = form.querySelector('.upload-box');
@@ -959,6 +994,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     }
     html += '<div class="panel-code">' + esc(s.code) + '</div>';
     html += '<span class="status-badge st-' + s.status + '">' + statusText + '</span>';
+    if (s.status === 'vendido' && s.expositor) html += '<div class="panel-expositor"><span>Expositor</span><b>' + esc(s.expositor) + '</b></div>';
     if (s.zone) html += '<div class="panel-row"><span>Zona</span><b>' + esc(s.zone) + '</b></div>';
     html += '<div class="panel-row"><span>Pavilhão</span><b>' + esc(pav ? pav.label : s.pavilion) + '</b></div>';
     html += '<div class="panel-row"><span>Tamanho</span><b>' + esc(sizeLabel[s.size] || s.size) + '</b></div>';
@@ -976,8 +1012,9 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         html += '<form method="post" action="' + ACTION + '" enctype="multipart/form-data" onsubmit="return validarEnvio(this)">';
         html += '  <input type="hidden" name="codigo" value="' + esc(s.code) + '">';
         if (VENDEDOR_LINK) html += '  <input type="hidden" name="vendedor" value="' + esc(VENDEDOR_LINK) + '">';
-        html += '  <input class="up-input" type="text" name="nome" placeholder="Seu nome" required maxlength="200">';
-        html += '  <input class="up-input" type="text" name="whatsapp" placeholder="WhatsApp (opcional)" maxlength="40">';
+        html += '  <label class="fld"><span>Nome fantasia</span><input class="up-input" type="text" name="nome" placeholder="Ex.: Boutique Nova Era" required maxlength="200" autocomplete="organization"></label>';
+        html += '  <label class="fld"><span>WhatsApp <i>*</i></span><input class="up-input" type="tel" name="whatsapp" placeholder="(86) 9 9999-9999" required maxlength="40" autocomplete="tel"></label>';
+        html += '  <div class="fld-erro" data-erro hidden></div>';
         html += '  <label class="upload-box">';
         html += '    <div class="upload-label">Comprovante do Pix</div>';
         html += '    <div class="upload-sub">Toque para escolher a foto ou o PDF do comprovante</div>';
@@ -996,7 +1033,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
       }
     } else if (s.status === 'reservado'){
       if (JUST_SENT === s.code){
-        html += '<div class="sent-state"><b>Comprovante recebido</b>Assim que a equipe confirmar o pagamento, ele é seu — normalmente em algumas horas.</div>';
+        html += '<div class="sent-state"><b>Comprovante recebido</b>Assim que a equipe confirmar o pagamento, ele é seu — normalmente em algumas horas. Seu cadastro já foi criado; a equipe vai pedir os dados do contrato.</div>';
         if (CT){
           html += '<a class="btn btn-primary" style="text-decoration:none" href="/contrato/' + encodeURIComponent(CT) + '">Assinar o contrato agora</a>';
           html += '<p class="upload-sub" style="text-align:center;margin-top:6px;">O contrato de locação do stand já está pronto com seus dados — assina online em 1 minuto</p>';
@@ -1010,7 +1047,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         html += '<a class="whatsapp-secondary" href="' + waLink(msg2) + '" target="_blank" rel="noopener">Entrar na fila de espera</a>';
       }
     } else {
-      html += '<p class="panel-empty" style="margin-top:14px;">Este stand já foi confirmado e não está mais disponível.</p>';
+      html += '<p class="panel-empty" style="margin-top:14px;">' + (s.expositor ? 'Stand confirmado: pagamento feito e contrato assinado. Você encontra a marca aqui na feira.' : 'Este stand já foi confirmado e não está mais disponível.') + '</p>';
     }
     panel.innerHTML = html;
   }

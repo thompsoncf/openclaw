@@ -2034,7 +2034,9 @@ def _abas_stands(ativo: str) -> str:
     """As abas do app de VENDA DE ESTANDES (Outlet Chic): mapa, as vendas do vendedor
     e o perfil. Nada de Fila, Agenda, Propostas ou Raio-X: aquilo é o app de festa."""
     return _abas([("stands", "mapa", "Stands", f"{_BASE}/stands"),
-                  ("vendas", "orc", "Minhas vendas", f"{_BASE}/stands/vendas"),
+                  ("leads", "fila", "Leads", f"{_BASE}/leads"),
+                  ("vendas", "orc", "Vendas", f"{_BASE}/stands/vendas"),
+                  ("clientes", "ficha", "Clientes", f"{_BASE}/stands/clientes"),
                   ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
 
 
@@ -2053,7 +2055,7 @@ def _abas_vend(ativo: str, pend: int = 0, novas: int = 0, raiox: int = 0,
     # conta com o app de estandes (Outlet Chic): outra barra. Sem `conta_id`, ou
     # conta sem o perfil, a barra de sempre (a Prime não muda).
     if conta_id and _perfil_stands(conta_id):
-        return _abas_stands(ativo)
+        return _abas_stands("leads" if ativo == "fila" else ativo)
     # "resultado" continua sendo a CHAVE da aba (os testes e as telas a chamam
     # assim); o que mudou é o rótulo e o destino: a aba é o Raio-X, e o resultado
     # (comissão, recebido) é o último bloco dele.
@@ -2450,7 +2452,11 @@ def _acoes_card(ia: bool) -> str:
 
 def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = False,
           entrou: str = "", fora: str | None = None, q: str = "",
-          ordem: str = "", fragmento: bool = False):
+          ordem: str = "", fragmento: bool = False, base: str = ""):
+    # `base`: onde esta lista mora. A de sempre é a raiz do app; no app de estandes a
+    # raiz é o mapa, e a lista de leads mora em /cockpit/leads (filtros e busca voltam
+    # pra ela).
+    base = base or _BASE
     pool = get_pool()
     from finance import evento_lead as _evl
     from urllib.parse import quote as _quote
@@ -2529,7 +2535,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         p_ = {"entrou": "", "fora": None, "q": "", "ordem": ""}
         p_.update(over)
         partes = [f"{k}={_quote(str(v))}" for k, v in p_.items() if v not in ("", None)]
-        return _BASE + ("?" + "&".join(partes) if partes else "")
+        return base + ("?" + "&".join(partes) if partes else "")
 
     # O SELETOR DE ORDEM. Duas perguntas diferentes, e as duas são verdadeiras:
     # "cadê quem acabou de falar comigo" e "o que eu faço agora". Buscando ele some
@@ -2545,11 +2551,11 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
 
     # a caixa de busca é um GET simples: sem JS, funciona com o teclado do celular e
     # o "Ir" fecha o teclado sozinho. O ✕ só aparece quando há o que limpar.
-    caixa = (f"<form class='busca{' on' if buscando else ''}' method=get action='{_BASE}'>"
+    caixa = (f"<form class='busca{' on' if buscando else ''}' method=get action='{base}'>"
              f"<span class=bq>🔎</span>"
              f"<input name=q value='{esc(termo)}' autocomplete=off enterkeyhint=search "
              f"placeholder='Procurar por nome ou número'>"
-             + (f"<a class=lm href='{_BASE}' aria-label='Limpar busca'>✕</a>" if buscando else "")
+             + (f"<a class=lm href='{base}' aria-label='Limpar busca'>✕</a>" if buscando else "")
              + "</form>")
 
     pil = "".join(f"<a class='pil{' nova' if m.get('nova') else ''}{' on' if m['on'] else ''}' "
@@ -2734,7 +2740,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     # que o vendedor talvez nem olhe agora. A tela sai sem ele e o número chega
     # por `/raio-x/selo` depois do `load` (ver `_selo_js`). Zero aqui não é "não
     # tem": é "ainda não sei", e a aba nasce sem selo em vez de com um errado.
-    abas = _abas_vend("fila", total_pend, novas, 0)
+    abas = _abas_vend("fila", total_pend, novas, 0, conta_id=conta_id)
 
     # As PARTES QUE MUDAM sozinhas: o topo (busca, ordem, pílulas), a lista, o
     # subtítulo e as abas com os selos. É o que a tela troca quando chega mensagem,
@@ -9549,6 +9555,12 @@ _STANDS_CSS = """<style>
 .cvd .chip.ok{background:rgba(37,211,102,.2);color:var(--neon,#25D366)}
 .cvd .chip.az{background:rgba(91,157,255,.2);color:#9DBFFF}
 .cvd .ir{color:var(--neon,#25D366);font-weight:700}
+.cvd .abrirv{display:block;color:inherit;text-decoration:none}
+.cvd a.chip{text-decoration:none}
+.cvres{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:.7rem .8rem 0}
+.cvres div{background:var(--surface,#121A16);border:1px solid var(--line,#1E2A23);border-radius:12px;padding:.6rem .7rem}
+.cvres span{display:block;font-size:.66rem;color:var(--text-dim,#8FA197);line-height:1.3}
+.cvres b{display:block;font-family:var(--mono,monospace);font-size:.98rem;margin-top:.15rem}
 .stvazio{margin:1.2rem .8rem;padding:1rem;border:1px dashed var(--line,#1E2A23);border-radius:12px;
   color:var(--text-dim,#8FA197);font-size:.85rem;line-height:1.5}
 </style>"""
@@ -9956,10 +9968,10 @@ def cockpit_stand_salvar_cliente(request: Request, codigo: str,
 
 @router.get("/cockpit/stands/vendas", response_class=HTMLResponse)
 def cockpit_stands_vendas(request: Request):
-    """MINHAS VENDAS (app de estandes): as reservas que caíram no link do vendedor,
-    uma por cartão (2 stands da mesma empresa = 1 cartão), com o que falta: a
-    confirmação do sinal, os dados do cliente pro contrato, o saldo. Tocar abre a
-    venda no mapa, já com o formulário do cliente. A gestão vê todas."""
+    """VENDAS (app de estandes): as reservas que caíram no link do vendedor, uma por
+    cartão (2 stands da mesma empresa = 1 cartão), com o que falta: a confirmação do
+    sinal, os dados do cliente pro contrato, o saldo. No topo, o resumo em reais.
+    Tocar abre a venda no mapa, já com o formulário do cliente. A gestão vê todas."""
     sess = _sessao(request)
     g = _gerencia(request)
     conta_id = sess[0] if sess else (g[0] if g else None)
@@ -9968,25 +9980,15 @@ def cockpit_stands_vendas(request: Request):
         return RedirectResponse("/cockpit/login", status_code=303)
     pool = get_pool()
     from finance import evento_stands as _es
-    cfg = _es.obter_config(pool, conta_id)
+    gestao = _eh_gestao(request, g)
+    cfg, meus, cads, fin = _minhas_vendas(pool, conta_id, meu_id, gestao)
     if not cfg:
         return RedirectResponse(_BASE, status_code=303)
-    gestao = _eh_gestao(request, g)
-    stands = [s for s in _es.listar(pool, conta_id) if s["status"] != "livre"]
-    donos = {}
-    pids = [s["prospeccao_id"] for s in stands if s["prospeccao_id"]]
-    if pids:
-        with pool.connection() as c:
-            donos = dict(c.execute(
-                "select id, vendedor_id from prospeccao where conta_id=%s and id=any(%s)",
-                (conta_id, pids)).fetchall())
-    meus = [s for s in stands if gestao or (meu_id and donos.get(s["prospeccao_id"]) == meu_id)]
-    cads = _es.cadastros_dos_stands(pool, conta_id, meus)
-    fin = _es.situacao_financeira(pool, conta_id, [s["orcamento_id"] for s in meus])
     reg = _es.regras_de_pagamento(cfg)
     saldo_ate = reg["saldo_ate"].strftime("%d/%m") if reg["saldo_ate"] else ""
 
     cartoes, vistos = [], set()
+    vendido = recebido = a_receber = aguardando = 0
     for s in meus:
         chave = s.get("grupo_id") or s["codigo"]
         if chave in vistos:
@@ -9997,18 +9999,23 @@ def cockpit_stands_vendas(request: Request):
         f = fin.get(s["orcamento_id"]) or {}
         total = sum(int(x["preco_centavos"] or 0) for x in grupo)
         if s["status"] == "pre_reservado":
+            aguardando += total
             situacao = "<span class='chip amb'>Aguardando a gestão confirmar o sinal</span>"
             linha = "Comprovante recebido · o stand está segurado pra ele."
-        elif f.get("aberto", 0) > 0:
-            situacao = "<span class='chip az'>Saldo em aberto</span>"
-            linha = (f"Sinal confirmado · falta {_brl(f['aberto'])}"
-                     + (f" até {saldo_ate}" if saldo_ate else "") + " — lembre o cliente.")
-        elif f.get("pago", 0) > 0:
-            situacao = "<span class='chip ok'>Quitado ✓</span>"
-            linha = "Sinal e saldo pagos — venda concluída."
         else:
-            situacao = "<span class='chip ok'>Vendido</span>"
-            linha = "Pagamento confirmado."
+            vendido += total
+            recebido += int(f.get("pago", 0))
+            a_receber += int(f.get("aberto", 0))
+            if f.get("aberto", 0) > 0:
+                situacao = "<span class='chip az'>Saldo em aberto</span>"
+                linha = (f"Sinal confirmado · falta {_brl(f['aberto'])}"
+                         + (f" até {saldo_ate}" if saldo_ate else "") + " — lembre o cliente.")
+            elif f.get("pago", 0) > 0:
+                situacao = "<span class='chip ok'>Quitado ✓</span>"
+                linha = "Sinal e saldo pagos — venda concluída."
+            else:
+                situacao = "<span class='chip ok'>Vendido</span>"
+                linha = "Pagamento confirmado."
         falta = cad.get("faltam") or []
         cadastro = (f"<span class='chip amb'>Cadastro {cad.get('n_ok', 0)}/{cad.get('n_total', 7)}</span>"
                     if falta else "<span class='chip ok'>Cadastro completo ✓</span>")
@@ -10020,12 +10027,117 @@ def cockpit_stands_vendas(request: Request):
             f"<div class=sub>{len(grupo)} stand{'s' if len(grupo) > 1 else ''} · {_brl(total)}"
             f"{' · num contrato só' if len(grupo) > 1 else ''}<br>{esc(linha)}</div>"
             f"<div class=chips>{situacao}{cadastro}</div></a>")
+    resumo = ""
+    if cartoes:
+        resumo = (
+            "<div class=cvres>"
+            f"<div><span>Vendido (sinal confirmado)</span><b>{_brl(vendido)}</b></div>"
+            f"<div><span>Já recebido</span><b>{_brl(recebido)}</b></div>"
+            f"<div><span>Saldo a receber</span><b>{_brl(a_receber)}</b></div>"
+            f"<div><span>Aguardando confirmação</span><b>{_brl(aguardando)}</b></div></div>")
     vazio = ("<div class=stvazio>Você ainda não tem vendas pelo seu link. Copie o link na aba "
              "<b>Stands</b> e mande pro seu cliente: quando ele reservar, a venda aparece aqui.</div>")
     sub = (f"{len(cartoes)} venda{'s' if len(cartoes) != 1 else ''}" if cartoes
            else "nenhuma ainda")
     com_abas = bool(sess) and not gestao and _perfil_stands(conta_id)
-    corpo = (_hdr("Minhas vendas", sub, voltar="" if com_abas else _BASE)
-             + _STANDS_CSS + "<div class=scroll>" + ("".join(cartoes) or vazio) + "</div>"
+    corpo = (_hdr("Vendas", sub, voltar="" if com_abas else _BASE)
+             + _STANDS_CSS + "<div class=scroll>" + resumo + ("".join(cartoes) or vazio) + "</div>"
              + (_abas_stands("vendas") if com_abas else ""))
-    return _page("Minhas vendas", corpo)
+    return _page("Vendas", corpo)
+
+
+@router.get("/cockpit/leads", response_class=HTMLResponse)
+def cockpit_leads(request: Request, entrou: str = "", fora: str | None = None,
+                  q: str = "", ordem: str = ""):
+    """A fila de LEADS do vendedor no app de estandes (o mesmo componente da Fila da
+    Prime, agora numa aba própria, já que a raiz do app é o mapa). Conta sem o perfil
+    de estandes volta pra raiz: lá a Fila continua onde sempre esteve."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    if not _perfil_stands(sess[0]):
+        return RedirectResponse(_BASE, status_code=303)
+    return _fila(request, sess[0], sess[1], gestor=False, entrou=entrou, fora=fora,
+                 q=q, ordem=ordem, base=f"{_BASE}/leads")
+
+
+def _minhas_vendas(pool, conta_id: int, meu_id, gestao: bool):
+    """As vendas de estande do vendedor (a gestão vê todas) + o que a leitura delas
+    precisa: cadastros, financeiro e as regras. Compartilhado por Vendas e Clientes."""
+    from finance import evento_stands as _es
+    cfg = _es.obter_config(pool, conta_id)
+    stands = [x for x in _es.listar(pool, conta_id) if x["status"] != "livre"]
+    donos = {}
+    pids = [x["prospeccao_id"] for x in stands if x["prospeccao_id"]]
+    if pids:
+        with pool.connection() as c:
+            donos = dict(c.execute(
+                "select id, vendedor_id from prospeccao where conta_id=%s and id=any(%s)",
+                (conta_id, pids)).fetchall())
+    meus = [x for x in stands
+            if gestao or (meu_id and donos.get(x["prospeccao_id"]) == meu_id)]
+    cads = _es.cadastros_dos_stands(pool, conta_id, meus)
+    fin = _es.situacao_financeira(pool, conta_id, [x["orcamento_id"] for x in meus])
+    return cfg, meus, cads, fin
+
+
+@router.get("/cockpit/stands/clientes", response_class=HTMLResponse)
+def cockpit_stands_clientes(request: Request):
+    """CLIENTES do vendedor no app de estandes: as empresas que compraram pelo link
+    dele, uma por cartão, com o WhatsApp a um toque e o que falta no cadastro."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    pool = get_pool()
+    gestao = _eh_gestao(request, g)
+    cfg, meus, cads, fin = _minhas_vendas(pool, conta_id, meu_id, gestao)
+    if not cfg:
+        return RedirectResponse(_BASE, status_code=303)
+    empresas: dict = {}
+    for x in meus:
+        cad = cads.get(x["codigo"]) or {}
+        chave = x.get("cliente_id") or f"p{x['prospeccao_id']}"
+        e = empresas.setdefault(chave, {"cad": cad, "codigos": [], "abrir": x["codigo"]})
+        e["codigos"].append(x["codigo"])
+    cartoes = []
+    for e in sorted(empresas.values(), key=lambda v: (v["cad"].get("fantasia") or "").lower()):
+        cad = e["cad"]
+        zap = "".join(ch for ch in (cad.get("whats") or "") if ch.isdigit())
+        if 10 <= len(zap) <= 11:
+            zap = "55" + zap
+        falta = cad.get("faltam") or []
+        chip = (f"<span class='chip amb'>Cadastro {cad.get('n_ok', 0)}/{cad.get('n_total', 7)}</span>"
+                if falta else "<span class='chip ok'>Cadastro completo ✓</span>")
+        linhas = [x for x in (cad.get("razao"), cad.get("doc"),
+                              " · ".join(y for y in (cad.get("cidade"), cad.get("uf")) if y))
+                  if x]
+        botao_zap = (f"<a class='chip ok' target=_blank rel=noopener "
+                     f"href='https://wa.me/{zap}'>WhatsApp</a>" if zap else "")
+        # o cartão é um div: o WhatsApp é um link PRÓPRIO (link dentro de link parte o cartão)
+        cartoes.append(
+            f"<div class=cvd data-nome='{esc((cad.get('fantasia') or '').lower())}'>"
+            f"<a class=abrirv href='{_BASE}/stands?abrir={esc(e['abrir'])}'>"
+            f"<div class=topo><span class=nm>{esc(cad.get('fantasia') or 'Cliente')}</span>"
+            f"<span class=ir>→</span></div>"
+            f"<div class=sub>{esc(' · '.join(e['codigos']))}"
+            f"{('<br>' + esc(' · '.join(linhas))) if linhas else ''}</div></a>"
+            f"<div class=chips>{chip}{botao_zap}</div></div>")
+    vazio = ("<div class=stvazio>Nenhum cliente ainda. Quando alguém comprar pelo seu link, "
+             "a empresa aparece aqui.</div>")
+    busca = ("<div style='padding:.7rem .8rem 0'><input id=stbusca type=search placeholder='Buscar cliente' "
+             "autocomplete=off style='width:100%;box-sizing:border-box;background:var(--surface,#121A16);"
+             "border:1px solid var(--line,#1E2A23);border-radius:10px;color:var(--text,#EAF2ED);"
+             "font-size:16px;padding:10px 12px'></div>") if cartoes else ""
+    js = ("<script>(function(){var b=document.getElementById('stbusca');if(!b)return;"
+          "b.addEventListener('input',function(){var t=b.value.trim().toLowerCase();"
+          "Array.prototype.forEach.call(document.querySelectorAll('.cvd'),function(c){"
+          "c.style.display=(t&&c.getAttribute('data-nome').indexOf(t)<0)?'none':'';});});})();</script>")
+    com_abas = bool(sess) and not gestao and _perfil_stands(conta_id)
+    corpo = (_hdr("Clientes", f"{len(cartoes)} empresa{'s' if len(cartoes) != 1 else ''}",
+                  voltar="" if com_abas else _BASE)
+             + _STANDS_CSS + "<div class=scroll>" + busca + ("".join(cartoes) or vazio) + "</div>"
+             + (_abas_stands("clientes") if com_abas else "") + js)
+    return _page("Clientes", corpo)

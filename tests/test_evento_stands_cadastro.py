@@ -739,7 +739,7 @@ def test_abas_e_inicio_do_app_do_vendedor_so_mudam_no_outlet_chic(pool, monkeypa
         return re.findall(r"<span>([^<]+)</span></a>", html)
 
     assert rotulos(pc._abas_vend("fila", 0, 0, 0, conta_id=outlet)) == \
-        ["Stands", "Minhas vendas", "Perfil"]
+        ["Stands", "Leads", "Vendas", "Clientes", "Perfil"]
     assert rotulos(pc._abas_vend("fila", 0, 0, 0, conta_id=prime)) == \
         ["Fila", "Agenda", "Propostas", "Raio-X", "Perfil"]
     assert rotulos(pc._abas_vend("fila", 0, 0, 0)) == \
@@ -783,3 +783,42 @@ def test_minhas_vendas_mostra_so_as_do_vendedor_agrupadas(pool, conta_id, monkey
     assert "G60 + G61" in html and "Boutique Nova Era" in html
     assert "num contrato só" in html and "Aguardando a gestão confirmar o sinal" in html
     assert "Casa Bela" not in html                         # a venda do colega não aparece
+
+
+def test_leads_do_app_de_estandes_usam_a_fila_numa_rota_propria(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    _aplica_453(pool)
+    outlet = _conta_com_cnpj(pool, "Outlet", "30961685000101")
+    prime = _conta_com_cnpj(pool, "Prime", "77.666.555/0001-44")
+    _aplica_453(pool)
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_ligar_voc", lambda cid: None)
+    chamadas = []
+    monkeypatch.setattr(pc, "_fila", lambda req, cid, mid, **k: chamadas.append(k) or "FILA")
+    monkeypatch.setattr(pc, "_sessao", lambda r: (outlet, 1))
+    assert pc.cockpit_leads(_Req()) == "FILA"
+    assert chamadas[0]["base"].endswith("/cockpit/leads")      # filtros e busca voltam pra ela
+    monkeypatch.setattr(pc, "_sessao", lambda r: (prime, 1))
+    r = pc.cockpit_leads(_Req())                               # a Prime não ganha a rota
+    assert r.status_code == 303 and r.headers["location"] == "/cockpit"
+    assert len(chamadas) == 1
+
+
+def test_vendas_trazem_o_resumo_e_clientes_agrupa_por_empresa(pool, conta_id, monkeypatch):
+    carla = _membro(pool, conta_id, "Carla")
+    _config_evento(pool, conta_id)
+    for cod in ("G60", "G61", "G62"):
+        _criar_stand(pool, conta_id, cod)
+    _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    _dono_da_venda(pool, conta_id, "G60", carla)
+    es.salvar_cadastro_stand(pool, conta_id, "G60", _dados())
+    es.confirmar_pagamento(pool, conta_id, "G60", sinal_centavos=300000)
+    pc, req = _cockpit(pool, conta_id, monkeypatch, carla)
+    vendas = pc.cockpit_stands_vendas(req).body.decode("utf-8")
+    assert "Vendido (sinal confirmado)" in vendas and "R$ 8.400" in vendas   # 2 stands vendidos
+    assert "Já recebido" in vendas and "R$ 3.000" in vendas
+    assert "Saldo a receber" in vendas and "R$ 5.400" in vendas
+    clientes = pc.cockpit_stands_clientes(req).body.decode("utf-8")
+    assert clientes.count("class=cvd") == 1                     # 2 stands, 1 empresa
+    assert "G60 · G61" in clientes and "Boutique Nova Era" in clientes
+    assert "wa.me/5586988887777" in clientes and "Cadastro completo" in clientes

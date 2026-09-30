@@ -121,6 +121,29 @@ def test_quem_e_os_dois_aparece_nos_dois_filtros(pool, dono_id):
     assert "Dos Dois G" in so_fornecedor
 
 
+# ---------------------------------------------------- busca por nome sem dígito
+#
+# Achado em 30/09/2026 investigando por que a busca do card Cliente (no
+# orçamento) devolvia a base inteira em vez de filtrar: `dig = _so_digitos(busca)
+# or ""` virava `termo_dig = "%%"` quando o texto buscado não tinha nenhum
+# número — e "%%" como LIKE bate com QUALQUER string (inclusive as que o
+# coalesce transforma de NULL em ''), então o `or` fazia a condição inteira
+# virar sempre verdadeira, não importa o nome.
+
+def test_busca_por_nome_sem_digito_nao_traz_quem_nao_bate(pool, dono_id):
+    cli.criar_cliente(pool, dono_id, "Crislane K", cpf="10433218100")
+    cli.criar_cliente(pool, dono_id, "Outro Nome Qualquer H", cpf="96001338914")
+    nomes = {c["nome"] for c in cli.listar_clientes(pool, dono_id, busca="Crislane")}
+    assert nomes == {"Crislane K"}
+
+
+def test_busca_por_digito_continua_casando_telefone_e_documento(pool, dono_id):
+    cli.criar_cliente(pool, dono_id, "Telefone Igual I", telefone="86999990000")
+    cli.criar_cliente(pool, dono_id, "Sem Nada A Ver J", telefone="86988887777")
+    nomes = {c["nome"] for c in cli.listar_clientes(pool, dono_id, busca="999990000")}
+    assert nomes == {"Telefone Igual I"}
+
+
 # ---------------------------------------------------- achar por nome respeitando o papel
 #
 # É a trava que fecha o bug original: um título A PAGAR não pode casar com

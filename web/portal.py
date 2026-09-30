@@ -409,8 +409,15 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 <nav class="side">
   <div class="side-logo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span></div>
   {% set _dono = (papel == 'dono') %}
+  {# Clientes/Fornecedores (29/09/2026): liberada pro vendedor em todo nicho —
+     menos Clínica, onde esta mesma aba é só Fornecedores (paciente de verdade
+     mora em Pacientes) e fornecedor é decisão de compra, não de atendimento;
+     ali continua só dono/gestor (caps.financeiro). #}
+  {% set _clinica_nicho = raio_x_perfil and raio_x_perfil.chave == 'clinica' %}
+  {% set _clientes_ok = caps.vendas and (caps.financeiro or not _clinica_nicho) %}
   {% if _dono and (vende_produto or _tem_app) %}<div class="side-grp">Principal</div>{% endif %}
-  {% if _dono and vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
+  {% if _dono and vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{% endif %}
+  {% if tem_pj and vende_produto and _clientes_ok %}{% if _clinica_nicho %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if _dono and _tem_app %}{{ navi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
   {% if caps.vendas or (tem_pj and caps.financeiro) or caps.gerir or (_dono and (vende_produto or _forn)) %}<div class="side-grp">{{ 'Loja' if _dono else 'Minha área' }}</div>{% endif %}
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
@@ -451,7 +458,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
-  {% if _dono and tem_pj and not vende_produto %}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
+  {% if tem_pj and not vende_produto and _clientes_ok %}{% if _clinica_nicho %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{{ navi('respostas','/painel/respostas','caixa','Respostas rápidas') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -466,7 +473,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {{ navi('','/sair','sair','Sair') }}
 </nav>
 <nav class="btmnav">
-  {% if _dono and vende_produto %}{{ tabi('caixa','/painel/pdv','caixa','Caixa') }}{{ tabi('produtos','/painel/produtos','produtos','Produtos') }}{{ tabi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
+  {% if _dono and vende_produto %}{{ tabi('caixa','/painel/pdv','caixa','Caixa') }}{{ tabi('produtos','/painel/produtos','produtos','Produtos') }}{% endif %}
+  {% if tem_pj and vende_produto and _clientes_ok %}{{ tabi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if _dono and _tem_app %}{{ tabi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
   {% if _dono and not vende_produto and _tem_app %}{{ tabi('painel','/painel','painel','Painel') }}{% endif %}
   {% if not _dono and vende_servico and caps.vendas %}{{ tabi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
@@ -516,7 +524,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
-  {% if _dono and tem_pj and not vende_produto %}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
+  {% if tem_pj and not vende_produto and _clientes_ok %}{% if _clinica_nicho %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{{ navi('respostas','/painel/respostas','caixa','Respostas rápidas') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -3437,12 +3445,14 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
               </div>
               <div class="pfoot">
                 <button class="btn-primary" type="submit">Salvar alterações</button>
+                {% if papel in ('dono','gestor') %}
                 <span onclick="event.stopPropagation()">
                   <button type="button" class="btn-danger" onclick="if(confirm('Arquivar este {{ voc.cliente }}?')){this.closest('.pane').querySelector('.arq').submit()}">Arquivar</button>
                 </span>
+                {% endif %}
               </div>
             </form>
-            <form class="arq" method="post" action="/painel/clientes/{{ c.id }}/arquivar" style="display:none"></form>
+            {% if papel in ('dono','gestor') %}<form class="arq" method="post" action="/painel/clientes/{{ c.id }}/arquivar" style="display:none"></form>{% endif %}
           </div>
           <div class="pane" id="hi-{{ c.id }}"><div class="mut" style="padding:.6rem 0">carregando…</div></div>
         </div>
@@ -3791,7 +3801,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
       <div style="font-size:.82rem;color:#cfcfcf">{{ rotulo_receber or 'A receber' }} #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:var(--txt)">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
       <div style="display:flex;gap:.4rem;align-items:center">
         {% if f.link %}<a href="{{ f.link }}" target="_blank" style="color:#c99536;font-size:.76rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/cobrar" style="display:inline"><button style="background:none;border:1px solid #c99536;color:#c99536;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">cobrar Pix</button></form>{% endif %}
-        <form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento?')"><button style="background:none;border:1px solid var(--verde);color:var(--verde-claro);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>
+        {% if papel in ('dono','gestor') %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento?')"><button style="background:none;border:1px solid var(--verde);color:var(--verde-claro);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>{% endif %}
       </div>
     </div>
     {% endfor %}
@@ -3810,9 +3820,11 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
   {% else %}
   <p class="mut">Sem compras registradas ainda.</p>
   {% endif %}
+  {% if papel in ('dono','gestor') %}
   <form method="post" action="/painel/clientes/{{ cliente.id }}/arquivar" style="margin-top:1.2rem" onsubmit="return confirm('Arquivar este {{ voc.cliente }}?')">
     <button style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;padding:.4rem .8rem;border-radius:6px;cursor:pointer;font-size:.85rem;width:auto">Arquivar {{ voc.cliente }}</button>
   </form>
+  {% endif %}
 </div>
 <script>
 (function(){
@@ -11215,13 +11227,11 @@ async def painel_produtos_vender(request: Request):
 
 @router.get("/painel/clientes", response_class=HTMLResponse)
 def painel_clientes(request: Request, busca: str = "", papel: str = ""):
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     papel_filtro = papel if papel in ("cliente", "fornecedor") else ""
     lista = cli.listar_clientes(pool, conta[0], busca=busca or None, papel=papel_filtro or None)
     total = cli.contar_clientes(pool, conta[0])
@@ -11268,13 +11278,11 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
                          cep: str = Form(""),
                          razao_social: str = Form(""), representante: str = Form(""),
                          eh_cliente: str = Form(""), eh_fornecedor: str = Form("")):
-    from finance import empresa as emp, clientes as cli, validadoc
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli, validadoc
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     tipo, d = validadoc.classificar(documento or cpf)
     kw = {"razao_social": (razao_social or None), "representante": (representante or None)}
     if tipo == "pf":
@@ -11303,13 +11311,11 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
 
 @router.get("/painel/clientes/buscar")
 def painel_clientes_buscar(request: Request, q: str = ""):
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return JSONResponse({"clientes": []}, status_code=401)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request)
+    if not g:
         return JSONResponse({"clientes": []}, status_code=403)
+    conta, pool = g
     q = (q or "").strip()
     if len(q) < 2:
         return JSONResponse({"clientes": []})
@@ -11324,13 +11330,11 @@ def painel_clientes_buscar(request: Request, q: str = ""):
 @router.get("/painel/clientes/consulta-cnpj")
 def painel_clientes_consulta_cnpj(request: Request, doc: str = ""):
     """Consulta um CNPJ na Receita (BrasilAPI) pra preencher o cadastro."""
-    from finance import empresa as emp, validadoc, cnpj_info
-    conta = conta_logada(request)
-    if conta is None:
-        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import validadoc, cnpj_info
+    g = _guard_clientes(request)
+    if not g:
         return JSONResponse({"ok": False, "erro": "sem acesso"}, status_code=403)
+    conta, pool = g
     ok, tipo, d = validadoc.valida(doc)
     if tipo != "pj" or not ok:
         return JSONResponse({"ok": False, "erro": "CNPJ invalido"})
@@ -11453,13 +11457,11 @@ def painel_clientes_dup_desfazer(request: Request, fusao_id: int = Form(...)):
 
 @router.get("/painel/clientes/{cliente_id}", response_class=HTMLResponse)
 def painel_cliente_detalhe(request: Request, cliente_id: int):
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     cl = cli.obter_cliente(pool, conta[0], cliente_id)
     if cl is None:
         request.session["erro"] = "Cliente nao encontrado."
@@ -11518,13 +11520,11 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
                           razao_social: str | None = Form(None),
                           representante: str | None = Form(None),
                           eh_cliente: str = Form(""), eh_fornecedor: str = Form("")):
-    from finance import empresa as emp, clientes as cli, validadoc
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli, validadoc
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     campos = {"telefone": telefone, "email": email,
               "aniversario": aniversario, "obs": obs,
               "cidade": cidade, "uf": uf, "endereco": endereco, "cep": cep,
@@ -11553,13 +11553,11 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
 @router.get("/painel/clientes/{cliente_id}/historico")
 def painel_cliente_historico(request: Request, cliente_id: int):
     """Vendas e servicos do cliente (JSON) — carregado ao expandir a linha."""
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return JSONResponse({"itens": []}, status_code=401)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request)
+    if not g:
         return JSONResponse({"itens": []}, status_code=403)
+    conta, pool = g
     hist = cli.historico_cliente(pool, conta[0], cliente_id)
     itens = [{"descricao": h["descricao"] or "Venda",
               "data": str(h["data"]) if h["data"] else "",
@@ -11573,13 +11571,11 @@ def painel_cliente_historico(request: Request, cliente_id: int):
 async def painel_cliente_whatsapp(request: Request, cliente_id: int):
     """Envia uma saudacao pelo WhatsApp do sistema (canais_config, provedor cloud).
     Se nao houver WhatsApp conectado, orienta usar o 'Abrir no WhatsApp'."""
-    from finance import empresa as emp, clientes as cli, whatsapp_cloud as wac
-    conta = conta_logada(request)
-    if conta is None:
-        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli, whatsapp_cloud as wac
+    g = _guard_clientes(request)
+    if not g:
         return JSONResponse({"ok": False, "erro": "sem acesso"}, status_code=403)
+    conta, pool = g
     cl = cli.obter_cliente(pool, conta[0], cliente_id)
     if not cl or not cl.get("telefone"):
         return JSONResponse({"ok": False, "erro": "cliente sem telefone"})
@@ -11614,13 +11610,11 @@ async def painel_cliente_whatsapp(request: Request, cliente_id: int):
 
 @router.post("/painel/clientes/{cliente_id}/arquivar")
 def painel_cliente_arquivar(request: Request, cliente_id: int):
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request, so_dono_gestor=True)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     cli.arquivar_cliente(pool, conta[0], cliente_id)
     request.session["aviso"] = "Cliente arquivado."
     return RedirectResponse("/painel/clientes", status_code=303)
@@ -11692,12 +11686,10 @@ def painel_pdv(request: Request, add: int = 0):
 @router.post("/painel/clientes/{cliente_id}/fiado/{titulo_id}/baixar")
 def painel_cliente_fiado_baixar(request: Request, cliente_id: int, titulo_id: int):
     from finance import empresa as emp
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    g = _guard_clientes(request, so_dono_gestor=True)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     try:
         emp.dar_baixa_titulo(pool, conta[0], titulo_id)
         request.session["aviso"] = "Fiado recebido — lancado no caixa."
@@ -11709,12 +11701,10 @@ def painel_cliente_fiado_baixar(request: Request, cliente_id: int, titulo_id: in
 @router.post("/painel/clientes/{cliente_id}/fiado/{titulo_id}/cobrar")
 def painel_cliente_fiado_cobrar(request: Request, cliente_id: int, titulo_id: int):
     from finance import empresa as emp
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     tits = {t["id"]: t for t in emp.listar_titulos(pool, conta[0], status="aberto")}
     t = tits.get(titulo_id)
     if t and t["tipo"] == "receber":
@@ -12572,6 +12562,37 @@ def _guard_pj(request: Request):
     pool = get_pool()
     if not emp.modulo_pj_ativo(pool, conta[0]):
         return None
+    return conta, pool
+
+
+def _guard_clientes(request: Request, so_dono_gestor: bool = False):
+    """Clientes/Fornecedores: liberada pro vendedor (29/09/2026, pedido do dono),
+    igual em todo nicho — MENOS Clínica, onde esta mesma aba vira só
+    Fornecedores (paciente de verdade mora em Pacientes) e fornecedor é decisão
+    de compra, não de atendimento: ali continua só dono/gestor.
+
+    `so_dono_gestor=True` é pra ação mais sensível (arquivar, duplicados, dar
+    baixa no fiado — lança no caixa) — essas seguem a régua de sempre deste
+    app: financeiro é de quem manda na conta, vendedor não abre.
+
+    Retorna (conta, pool) ou None (sem acesso — o caller manda pra /painel)."""
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return None
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return None
+    papel = request.session.get("papel", "dono")
+    if papel not in ("dono", "gestor"):
+        from contas import equipe as _eq
+        if not _eq.caps_do_papel(papel)["vendas"]:
+            return None
+        if so_dono_gestor:
+            return None
+        from finance import raio_x_perfil as rxp
+        if rxp.perfil_por_nicho(nicho_da_conta(conta)) == "clinica":
+            return None
     return conta, pool
 
 

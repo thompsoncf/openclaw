@@ -134,6 +134,12 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     permitido = ["/trocar", "/sair", "/painel/versao", "/painel/erro-cliente"]
     if caps["vendas"]:
         permitido += ["/painel/servicos", "/painel/prospeccao"]
+        # Clientes/Fornecedores (29/09/2026): liberada pro vendedor em todo
+        # nicho. Quem barra a Clínica (ali a aba é só Fornecedores, decisão de
+        # compra — fica só com dono/gestor) é a PRÓPRIA rota
+        # (web/portal.py:_guard_clientes), não esta whitelist, que não conhece
+        # o nicho — mesma divisão do Follow-up/Renovações/Clínica logo abaixo.
+        permitido += ["/painel/clientes"]
     if caps["financeiro"]:
         permitido += ["/painel/empresa", "/painel/relatorios"]
     # A agenda é da CONTA (finance/agenda.py não filtra por membro) e é compartilhada

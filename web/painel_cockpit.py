@@ -2740,7 +2740,11 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     # que o vendedor talvez nem olhe agora. A tela sai sem ele e o número chega
     # por `/raio-x/selo` depois do `load` (ver `_selo_js`). Zero aqui não é "não
     # tem": é "ainda não sei", e a aba nasce sem selo em vez de com um errado.
-    abas = _abas_vend("fila", total_pend, novas, 0, conta_id=conta_id)
+    # a lista que mora em /cockpit/leads é a do app de estandes (quem chega lá já foi
+    # checado pela rota): abas dele, sem nova ida ao banco. A raiz segue como era — a
+    # Fila da Prime não paga nenhuma consulta a mais (há um teste do orçamento delas).
+    abas = (_abas_stands("leads") if base != _BASE
+            else _abas_vend("fila", total_pend, novas, 0))
 
     # As PARTES QUE MUDAM sozinhas: o topo (busca, ordem, pílulas), a lista, o
     # subtítulo e as abas com os selos. É o que a tela troca quando chega mensagem,

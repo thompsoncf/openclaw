@@ -515,6 +515,7 @@ def test_a_reserva_de_2_estandes_trava_os_dois_num_contrato_so(pool, conta_id, m
     assert [p["valor_centavos"] for p in parcelas] == [300000, 540000]
     assert parcelas[1]["venc"] == "2026-11-13"            # saldo até o dia do evento
     assert evento["horario"].startswith("13 e 14/11")
+    assert evento["tipo"] == "Outlet Chic — 32ª edição"   # a marca é a do slug, não a da assessoria
 
 
 def test_reserva_tudo_ou_nada(pool, conta_id, monkeypatch):

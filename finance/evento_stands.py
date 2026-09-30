@@ -622,14 +622,10 @@ def _periodo(ini, fim) -> str:
 
 def _evento_da_config(pool, conta_id: int, cfg: dict) -> dict:
     """O jsonb `orcamentos.evento` do estande: tipo, data, período e local."""
-    nome = ""
-    try:
-        from . import empresa as _emp
-        d = _emp.obter_dados_empresa(pool, conta_id) or {}
-        nome = (d.get("nome_fantasia") or "").strip()
-    except Exception:  # noqa: BLE001 — sem o nome fantasia, cai no slug
-        nome = ""
-    marca = nome or (cfg.get("slug") or "").replace("-", " ").title()
+    # A MARCA do evento vem do SLUG ("outlet-chic" -> "Outlet Chic"), como na página
+    # pública: o nome fantasia da conta é da empresa organizadora (a assessoria), não
+    # do evento — saía "ROBERTA ROCHA ASSESSORIA… — 32ª edição" no contrato.
+    marca = (cfg.get("slug") or "").replace("-", " ").title()
     tipo = " — ".join(x for x in (marca, cfg.get("edicao_label")) if x)
     return {"tipo": tipo, "data": cfg["evento_inicio"].isoformat(),
             "periodo": _periodo(cfg["evento_inicio"], cfg.get("evento_fim")),

@@ -159,6 +159,9 @@ from web.contrato_publico import router as contrato_pub_router
 from web.aditivo_publico import router as aditivo_pub_router
 # o recibo de conta a receber (/recibo/<token>), sem login — ver finance/recibo.py
 from web.recibo_publico import router as recibo_pub_router
+# a venda de estandes numerados (/e/<slug>), sem login — ver finance/evento_stands.py
+from web.loja_stands import router as loja_stands_router
+from web.painel_eventos_stands import router as painel_eventos_stands_router
 @app.middleware("http")
 async def _marca_conta_da_requisicao(request: Request, call_next):
     """PASSO A do plano de RLS: anuncia de quem é a requisição (ver db/tenant.py).
@@ -354,6 +357,8 @@ app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)
 app.include_router(recibo_pub_router)
+app.include_router(loja_stands_router)
+app.include_router(painel_eventos_stands_router)
 
 
 @app.on_event("startup")
@@ -512,6 +517,23 @@ def _iniciar_poller_email() -> None:
                 _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — lembretes falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
+                # A pré-reserva de ESTANDE (feira/evento, migração 448) — clone da
+                # pré-reserva de DATA (160) por estande em vez de por dia. Modo
+                # 'pagamento' (Outlet Chic): rede de segurança se o dono esquecer de
+                # conferir o comprovante. Modo 'pedido': prazo que o cliente tem pra
+                # pagar. Sem lock próprio: o UPDATE em expirar_pre_reservas já é
+                # atômico por linha, e rodar em dois workers ao mesmo tempo só faz o
+                # segundo não achar nada pra expirar (idempotente).
+                from finance import agenda as _ag2
+                from finance import evento_stands as _es
+                _expirados = _es.expirar_pre_reservas(pool, _ag2.agora_brt())
+                if _expirados:
+                    log.info("poller: ciclo #%d — %d estande(s) voltaram a livre "
+                             "(prazo da pré-reserva vencido)", ciclo, len(_expirados))
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — evento_stands expirar falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
             try:
                 # A régua do funil: move o card quando o fato acontece (gatilho) ou
                 # anota o que TERIA movido (modo observação). Inerte por padrão —

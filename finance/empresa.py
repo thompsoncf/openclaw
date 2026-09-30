@@ -2651,10 +2651,85 @@ def dre_por_centro(pool, conta_id: int, ano: int, mes: int) -> dict:
             "disponivel": True}
 
 
+def _brl(centavos: int) -> str:
+    return f"R$ {centavos/100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def dre_pdf(pool, conta_id: int, ano: int, mes: int, empresa_nome: str) -> bytes | None:
+    """PDF do DRE do mês, mesma estrutura da tela (dre_mes acima). Pedido da
+    Iris (cliente da Manoel Soares) via WhatsApp em 29/09/2026: "No caso da DRE
+    pode configurar pra imprimir em PDF na mesma estrutura?" — reaproveita o
+    motor de PDF que já existe pra clínica (clinica_documentos.render_pdf), sem
+    nada novo. None quando pymupdf não está disponível."""
+    from .clinica_documentos import render_pdf
+    import html as _html
+    e = _html.escape
+    dre = dre_mes(pool, conta_id, ano, mes)
+    estrutura = dre.get("estrutura") or {}
+    linhas_html = []
+    if estrutura.get("linhas"):
+        for l in estrutura["linhas"]:
+            valor = l["valor_centavos"]
+            texto = _brl(valor)
+            if "margem_pct" in l:
+                texto += f" · {l['margem_pct']}%"
+            cor = "color:#b23b2e" if valor < 0 else "color:#1a1a1a"
+            if l["tipo"] == "subtotal":
+                estilo_tr, peso = "border-top:1px solid #999", "font-weight:600"
+            elif l["tipo"] == "total":
+                estilo_tr, peso = "border-top:2px solid #333", "font-weight:700"
+            else:
+                estilo_tr, peso = "", "font-weight:400"
+            nome = e(l["nome"])
+            if l.get("n"):
+                nome += f" — {l['n']} lanç."
+            linhas_html.append(
+                f'<tr style="{estilo_tr}"><td style="padding:5px 4px;{peso}">{nome}</td>'
+                f'<td style="padding:5px 4px;text-align:right;{peso};{cor}">{texto}</td></tr>')
+    else:
+        cor_r = "#2f7d32" if dre["resultado_centavos"] >= 0 else "#b23b2e"
+        linhas_html = [
+            f'<tr><td style="padding:5px 4px">Receitas</td>'
+            f'<td style="padding:5px 4px;text-align:right;color:#2f7d32">{_brl(dre["receitas_centavos"])}</td></tr>',
+            f'<tr><td style="padding:5px 4px">(–) Despesas</td>'
+            f'<td style="padding:5px 4px;text-align:right">{_brl(dre["despesas_centavos"])}</td></tr>',
+            f'<tr style="border-top:2px solid #333"><td style="padding:5px 4px;font-weight:700">= Resultado</td>'
+            f'<td style="padding:5px 4px;text-align:right;font-weight:700;color:{cor_r}">'
+            f'{_brl(dre["resultado_centavos"])} · {dre["margem_pct"]}%</td></tr>',
+        ]
+    conteudo = (
+        f'<h2 style="margin-bottom:2px">{e(empresa_nome)}</h2>'
+        f'<p style="color:#666;font-size:9pt;margin-top:0">DRE do mês &middot; {mes:02d}/{ano}</p>'
+        f'<table style="width:100%;border-collapse:collapse;margin-top:14px;font-size:11pt">'
+        + "".join(linhas_html) + "</table>")
+    if dre.get("a_definir_n"):
+        conteudo += (
+            f'<p style="color:#a67c00;font-size:9pt;margin-top:16px">'
+            f'{_brl(dre["a_definir_centavos"])} em {dre["a_definir_n"]} lançamento(s) '
+            "ainda a classificar não entraram neste DRE.</p>")
+    conteudo += '<p style="color:#999;font-size:8pt;margin-top:26px">Gerado pelo Zaq</p>'
+    return render_pdf([conteudo])
+
+
+def _cnpj_fmt(doc: str) -> str:
+    d = "".join(ch for ch in (doc or "") if ch.isdigit())
+    if len(d) == 14:
+        return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+    if len(d) == 11:
+        return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}"
+    return doc or ""
+
+
 def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
     """Relatório do mês pro contador: todos os lançamentos + títulos abertos.
 
-    CSV separado por ';' (Excel BR), valores em reais com vírgula.
+    CSV separado por ';' (Excel BR), valores em reais com vírgula. Pedido do
+    dono em 29/09/2026 (depois da Iris perguntar pelo formato): um cabeçalho
+    com empresa/CNPJ/período, no topo do arquivo, e o CÓDIGO do plano de
+    contas ao lado da categoria livre — é o que o contador de verdade bate
+    contra o plano de contas dele, a categoria é só o rótulo que o app usa.
+    Tolerante: banco sem a migração 132 (plano de contas) devolve o código em
+    branco em vez de quebrar.
     """
     def brl(cent: int) -> str:
         return f"{cent/100:.2f}".replace(".", ",")
@@ -2662,19 +2737,45 @@ def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
     ini = date(ano, mes, 1)
     fim = _mes_seguinte(ini)
     with pool.connection() as c:
-        lanc = c.execute(
-            """select data, tipo, categoria, descricao, valor_centavos, origem,
-                      natureza
-                 from lancamentos
-                where conta_id=%s and data >= %s and data < %s
-                order by data, id""",
-            (conta_id, ini, fim),
-        ).fetchall()
-    linhas = ["data;tipo;categoria;descricao;valor;origem;natureza"]
-    for d, t, cat, desc, v, orig, nat in lanc:
+        r = c.execute(
+            """select coalesce(nullif(nome_fantasia,''), nullif(razao_social,''), nome, ''),
+                      coalesce(documento,'')
+                 from contas where id=%s""",
+            (conta_id,)).fetchone()
+        empresa_nome, empresa_doc = (r[0] or "", r[1] or "") if r else ("", "")
+        tem_plano = c.execute(
+            "select to_regclass('public.plano_contas')").fetchone()[0] is not None
+        if tem_plano:
+            lanc = c.execute(
+                """select l.data, l.tipo, l.categoria, l.descricao, l.valor_centavos,
+                          l.origem, l.natureza, coalesce(p.codigo, '')
+                     from lancamentos l
+                     left join plano_contas p on p.id = l.plano_conta_id
+                    where l.conta_id=%s and l.data >= %s and l.data < %s
+                    order by l.data, l.id""",
+                (conta_id, ini, fim),
+            ).fetchall()
+        else:
+            lanc = [
+                (*row, "") for row in c.execute(
+                    """select data, tipo, categoria, descricao, valor_centavos,
+                              origem, natureza
+                         from lancamentos
+                        where conta_id=%s and data >= %s and data < %s
+                        order by data, id""",
+                    (conta_id, ini, fim),
+                ).fetchall()]
+
+    linhas = [f"Empresa;{empresa_nome}"]
+    if empresa_doc:
+        linhas.append(f"CNPJ;{_cnpj_fmt(empresa_doc)}")
+    linhas.append(f"Periodo;{mes:02d}/{ano}")
+    linhas.append("")
+    linhas.append("data;tipo;categoria;plano_conta_codigo;descricao;valor;origem;natureza")
+    for d, t, cat, desc, v, orig, nat, cod in lanc:
         desc = (desc or "").replace(";", ",").replace("\n", " ")
         linhas.append(
-            f"{d};{t};{cat};{desc};{brl(int(v or 0))};{orig};{nat or 'a definir'}")
+            f"{d};{t};{cat};{cod};{desc};{brl(int(v or 0))};{orig};{nat or 'a definir'}")
 
     abertos = listar_titulos(pool, conta_id, status="aberto")
     linhas.append("")
@@ -2685,7 +2786,10 @@ def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
         linhas.append(
             f"{t['vencimento']};{t['tipo']};{desc};{t['contraparte']};"
             f"{brl(t['valor_centavos'])};{'sim' if t['atrasado'] else 'nao'}")
-    return "\n".join(linhas) + "\n"
+    # BOM: sem ele, o Excel abre o UTF-8 como se fosse ANSI/Latin-1 e todo
+    # acento vira "ServiÃ§os" — relatado em produção em 29/09/2026. O BOM é o
+    # sinal que faz o Excel (inclusive versões PT-BR) detectar UTF-8 sozinho.
+    return "﻿" + "\n".join(linhas) + "\n"
 
 
 # ---------------------------------------------------------------------------

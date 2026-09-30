@@ -61,7 +61,8 @@ PAGINAS = {
               "custo_real_total_centavos": 0},
         carteira={}, rotulo_receber="Fiado", dre=_DRE, plano_arvore=[], centros=[],
         dre_centro={"centros": [], "linhas": []}, a_classificar=[], plano_opcoes=[],
-        centros_ativos=[], empresa_nome="X", empresa_doc=""),
+        centros_ativos=[], empresa_nome="X", empresa_doc="",
+        mes_dre_sel="2026-08", meses_dre=[("2026-08", "ago/2026")]),
 }
 
 

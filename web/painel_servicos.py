@@ -2088,13 +2088,15 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
         # números da casa em branco. É justo o que a ZAQ vai ver no primeiro dia.
         diag["ajustes"] = ctr.pendencias_pra_ligar(modelo["clausulas"], modelo["regras"],
                                                    empresa)
+    from finance import evento_stands as _es_mod
     return JSONResponse({
         "modo": modo,
         # a chave do recorrente (311). No de eventos o contrato é do nicho e
         # esta chave não existe na tela.
         "pedir_assinatura": bool(salvo.get("pedir_assinatura")) if modo == ctr.MODO_SERVICO else None,
         "clausulas": modelo["clausulas"], "regras": modelo["regras"],
-        "novo": modelo["novo"], "campos": ctr.campos_disponiveis(catalogo, modo),
+        "novo": modelo["novo"], "campos": ctr.campos_disponiveis(
+            catalogo, modo, com_estande=_es_mod.app_de_stands(pool, conta[0])),
         # `padrao=1` é o botão "restaurar", e ele mexe só nas CLÁUSULAS — a ordem
         # que a empresa escolheu não é texto de contrato e não se restaura junto.
         "assinar_antes_do_sinal": ctr.assina_antes_do_sinal(pool, conta[0]),

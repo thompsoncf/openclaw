@@ -134,6 +134,12 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     permitido = ["/trocar", "/sair", "/painel/versao", "/painel/erro-cliente"]
     if caps["vendas"]:
         permitido += ["/painel/servicos", "/painel/prospeccao"]
+        # Clientes/Fornecedores (29/09/2026): liberada pro vendedor em todo
+        # nicho. Quem barra a Clínica (ali a aba é só Fornecedores, decisão de
+        # compra — fica só com dono/gestor) é a PRÓPRIA rota
+        # (web/portal.py:_guard_clientes), não esta whitelist, que não conhece
+        # o nicho — mesma divisão do Follow-up/Renovações/Clínica logo abaixo.
+        permitido += ["/painel/clientes"]
     if caps["financeiro"]:
         permitido += ["/painel/empresa", "/painel/relatorios"]
     # A agenda é da CONTA (finance/agenda.py não filtra por membro) e é compartilhada
@@ -152,6 +158,12 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # só em 'eventos'), não a whitelist, que não conhece o nicho da conta.
     if caps["vendas"]:
         permitido += ["/painel/follow-up"]
+    # O mapa de estandes (eventos): o vendedor precisa ver o que está livre pra
+    # oferecer na conversa; o gestor confirma pagamento por lá. Quem barra conta
+    # de outro nicho é a própria rota (gate nicho+config em
+    # web/painel_eventos_stands._acesso), não a whitelist.
+    if caps["vendas"] or caps["financeiro"]:
+        permitido += ["/painel/eventos/estandes"]
     # Renovações (a carteira de apólices da corretora): o corretor vê a fila dele,
     # o dono e o gestor veem a carteira inteira — o recorte é da própria rota. Quem
     # barra conta de outro nicho também é a rota (só o perfil `seguros` abre), não a

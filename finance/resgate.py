@@ -774,12 +774,30 @@ def supervisor(pool, conta_id: int, texto: str, *, tipo: str = "supervisor", lea
             if not num:
                 return False
             if tipo == "previa":
-                pegou = c.execute(
-                    """insert into resgate_envios (conta_id, prospeccao_id, tipo, ref_em, ok, erro)
-                         values (%s,%s,'previa',%s,false,'em andamento')
-                         on conflict (conta_id, prospeccao_id, ref_em) where tipo='previa'
-                         do nothing returning id""",
-                    (conta_id, lead, ref_em)).fetchone()
+                try:
+                    pegou = c.execute(
+                        """insert into resgate_envios (conta_id, prospeccao_id, tipo, ref_em, ok, erro)
+                             values (%s,%s,'previa',%s,false,'em andamento')
+                             on conflict (conta_id, prospeccao_id, ref_em) where tipo='previa'
+                             do nothing returning id""",
+                        (conta_id, lead, ref_em)).fetchone()
+                except Exception as e:  # noqa: BLE001
+                    # NUNCA é "perdi a corrida" — isso o DO NOTHING já resolve sem
+                    # levantar (pegou vira None, tratado embaixo). Cair aqui é erro de
+                    # verdade: achado em produção em 28/09/2026, o índice da migração
+                    # 445 não existia de verdade (bug à parte no runner de migrações) —
+                    # "there is no unique or exclusion constraint" repetiu por 3h,
+                    # calado, e nenhuma prévia saiu, sem ninguém saber. Registra como
+                    # 'erro_previa' — tipo separado de 'previa', pra não ocupar a vaga
+                    # do índice único e travar uma tentativa boa depois — pro `_freio`
+                    # contar e avisar em vez de ficar mudo.
+                    c.rollback()
+                    _log.warning("resgate.supervisor: reivindicar a prévia deu erro "
+                                 "de verdade (conta=%s): %s", conta_id, e)
+                    _registrar(c, conta_id, "erro_previa", lead=lead, ref_em=ref_em,
+                              ok=False, erro=str(e)[:200])
+                    c.commit()
+                    return False
                 if not pegou:
                     c.commit()
                     return False
@@ -1069,17 +1087,27 @@ def _acompanhar(pool, conta_id: int, cfg: dict, agora: datetime) -> dict:
 
 def _freio(pool, conta_id: int, cfg: dict, agora: datetime) -> bool:
     """Pausa o resgate se hoje já teve pedidos de parar ou falhas demais. Devolve se
-    está pausado (agora ou antes)."""
+    está pausado (agora ou antes).
+
+    Roda nos DOIS modos (revisão de 29/09/2026: achado em produção, ~90 tentativas de
+    prévia falharam caladas em 3h, sem pausar nem avisar ninguém — o freio só rodava
+    `if ligado`, e o Ensaio não tinha proteção nenhuma). No Ligado, falha é envio de
+    verdade que não saiu (retomada/toque); no Ensaio, "parou" não existe (ninguém foi
+    chamado de verdade) e a falha é a prévia dando erro técnico ao reivindicar a vaga
+    (`erro_previa` — nunca é só perder a corrida, isso o DO NOTHING resolve calado)."""
     if cfg.get("pausado_em"):
         return True
+    ligado = cfg.get("modo") == "ligado"
     with pool.connection() as c:
-        parou = _contagem_hoje(c, conta_id, ("parou",), agora)
-        falhas = _contagem_hoje(c, conta_id, ("retomada", "toque"), agora, ok=False)
+        parou = _contagem_hoje(c, conta_id, ("parou",), agora) if ligado else 0
+        tipos_falha = ("retomada", "toque") if ligado else ("erro_previa",)
+        falhas = _contagem_hoje(c, conta_id, tipos_falha, agora, ok=False)
         motivo = None
         if parou >= FREIO_PARAR:
             motivo = f"{parou} clientes pediram pra parar hoje"
         elif falhas >= FREIO_FALHAS:
-            motivo = f"{falhas} envios falharam hoje"
+            motivo = (f"{falhas} envios falharam hoje" if ligado
+                      else f"{falhas} tentativas de prévia falharam por erro técnico hoje")
         if not motivo:
             return False
         c.execute("update resgate_config set pausado_em=now(), pausado_motivo=%s where conta_id=%s",
@@ -1244,7 +1272,7 @@ def _uma_conta(pool, conta_id: int, agora: datetime) -> dict:
     if ligado:
         out.update(_acompanhar(pool, conta_id, cfg, agora))
         out["perdidos"] = _perder_sem_resposta(pool, conta_id, agora)
-    pausado = ligado and _freio(pool, conta_id, cfg, agora)
+    pausado = _freio(pool, conta_id, cfg, agora)
     dentro = pode_rodar_agora(cfg, agora)
     todos, regra = [], None
     if dentro and not pausado:

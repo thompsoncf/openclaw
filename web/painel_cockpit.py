@@ -1970,7 +1970,11 @@ def _data(dt) -> str:
     from finance import agenda as ag
     try:
         return dt.astimezone(ag.BRT).strftime("%d/%m/%Y")
-    except (ValueError, TypeError):
+    # `date` (sem hora) não tem `astimezone` — é o caso do sinal confirmado antes
+    # de existir título (finance/vendas.pagamentos_do_orcamento devolve
+    # `sinal_pago_em.date()`), e é onde `/cockpit/orcamentos/{id}/pagamentos`
+    # quebrava com 500 (AttributeError) pra quem tinha o sinal pago assim.
+    except (ValueError, TypeError, AttributeError):
         return dt.strftime("%d/%m/%Y")
 
 
@@ -2026,7 +2030,30 @@ def _abas(itens, ativo: str, selos: dict | None = None, verdes: tuple = ("perfil
     return (f"<div class='tabs {barra}'>" if barra else "<div class=tabs>") + "".join(out) + "</div>"
 
 
-def _abas_vend(ativo: str, pend: int = 0, novas: int = 0, raiox: int = 0) -> str:
+def _abas_stands(ativo: str) -> str:
+    """As abas do app de VENDA DE ESTANDES (Outlet Chic): mapa, as vendas do vendedor
+    e o perfil. Nada de Fila, Agenda, Propostas ou Raio-X: aquilo é o app de festa."""
+    return _abas([("stands", "mapa", "Stands", f"{_BASE}/stands"),
+                  ("vendas", "orc", "Minhas vendas", f"{_BASE}/stands/vendas"),
+                  ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
+
+
+def _perfil_stands(conta_id) -> bool:
+    if not conta_id:
+        return False
+    try:
+        from finance import evento_stands as _es
+        return _es.app_de_stands(get_pool(), conta_id)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _abas_vend(ativo: str, pend: int = 0, novas: int = 0, raiox: int = 0,
+               conta_id: int | None = None) -> str:
+    # conta com o app de estandes (Outlet Chic): outra barra. Sem `conta_id`, ou
+    # conta sem o perfil, a barra de sempre (a Prime não muda).
+    if conta_id and _perfil_stands(conta_id):
+        return _abas_stands(ativo)
     # "resultado" continua sendo a CHAVE da aba (os testes e as telas a chamam
     # assim); o que mudou é o rótulo e o destino: a aba é o Raio-X, e o resultado
     # (comissão, recebido) é o último bloco dele.
@@ -2245,6 +2272,9 @@ def cockpit_inicio(request: Request, meus: str = "", entrou: str = "", fora: str
     sess = _sessao(request)
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
+    # o vendedor do Outlet Chic abre no MAPA DE STANDS, não na fila de leads de festa
+    if not g and _perfil_stands(sess[0]):
+        return RedirectResponse(f"{_BASE}/stands", status_code=303)
     return _fila(request, sess[0], sess[1], gestor=bool(g), entrou=entrou, fora=fora,
                  q=q, ordem=ordem)
 
@@ -2452,6 +2482,29 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     cont, sig = ck.contagens_e_sinal(pool, conta_id, membro_id)
     nome_vend = ck.nome_do_vendedor(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if l["sua_vez"])
+
+    # O MAPA DE STANDS no app do vendedor (pedido do dono, 29/09/2026): quem
+    # vende estande numerado (evento_stands_config) ganha o atalho pro mapa —
+    # é ali que ele vê o que está livre ANTES de prometer na conversa. Cartão
+    # com estilo inline de propósito: o app.css é folha versionada no service
+    # worker, e uma classe nova pra um atalho opcional não paga o redeploy.
+    stands_atalho = ""
+    try:
+        from finance import evento_stands as _es
+        if _es.obter_config(pool, conta_id):
+            _livres = sum(1 for s in _es.listar(pool, conta_id)
+                          if s["status"] == "livre")
+            stands_atalho = (
+                f"<a href='{_BASE}/stands' style=\"display:flex;align-items:center;"
+                "gap:.6rem;margin:.6rem .8rem 0;padding:.6rem .8rem;border:1px solid "
+                "var(--line,#1E2A23);border-radius:12px;background:var(--surface,#121A16);"
+                "text-decoration:none;color:inherit\">🗺️<span style='flex:1;min-width:0'>"
+                "<b style='display:block;font-size:.9rem'>Mapa de stands</b>"
+                f"<span style='font-size:.76rem;color:var(--text-dim,#8FA197)'>{_livres} "
+                "livres agora — toca pra ver a planta e copiar seu link de vendas</span></span>"
+                "<span style='color:var(--neon,#25D366);font-weight:700'>→</span></a>")
+    except Exception:  # noqa: BLE001 — atalho é enfeite; a fila abre sem ele
+        pass
 
     # a fila já tem os leads em mão: soma daqui, sem uma consulta a mais só pra aba.
     # É a carteira INTEIRA: o de fora do mês some da lista, nunca do número.
@@ -2698,6 +2751,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              # o repasse vem DEPOIS da novidade e antes do foco: é sobre um lead
              # que já é dele agora, então pertence ao trabalho, não ao noticiário.
              + ("" if gestor else _faixa_recebidos(conta_id, membro_id))
+             + stands_atalho
              + f"<div id=filabusca>{caixa}</div>"
              + f"<div id=filafoco>{foco}</div>"
              + f"<div class=scroll id=filalista>{pushcard}{lista}{dica}{volta}</div>"
@@ -5534,7 +5588,8 @@ def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLRes
                "href='/painel'>Abrir o painel completo</a>"
              + f"<a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
              + "</div>" + _abas_vend("perfil", _pend_vend(conta_id, membro_id),
-                                     sum(1 for n in novidades if not n["lida"])))
+                                     sum(1 for n in novidades if not n["lida"]),
+                                     conta_id=conta_id))
     return _page("Meu perfil", corpo)
 
 
@@ -8684,7 +8739,7 @@ def cockpit_novidades_semana(request: Request, chave: str):
                "O ✕ da Fila só para de mostrar o aviso da semana — não marca nada "
                "como lido.</div>"
              + "</div></div>"
-             + _abas_vend("perfil", _pend_vend(conta_id, membro_id)))
+             + _abas_vend("perfil", _pend_vend(conta_id, membro_id), conta_id=conta_id))
     return _page(f"Novidades — {grupo['rotulo']}", corpo)
 
 
@@ -8721,7 +8776,7 @@ def cockpit_novidade(request: Request, nid: int):
     if not n:
         return _page("Aviso", _hdr("Aviso", voltar=f"{_BASE}/perfil")
                      + "<div class=aviso>Esse aviso não é seu, ou não existe mais.</div>"
-                     + _abas_vend("perfil", _pend_vend(conta_id, membro_id)))
+                     + _abas_vend("perfil", _pend_vend(conta_id, membro_id), conta_id=conta_id))
     if n["tipo"] == "novidade" and not n["lida"]:
         try:
             from finance import novidades as nv
@@ -8742,7 +8797,7 @@ def cockpit_novidade(request: Request, nid: int):
              + f"<div class=card><div class=nvcorpo>{esc(n['corpo'])}</div></div>"
              + f"<div style='margin-top:.6rem'>{botoes}</div>"
              + "</div></div>"
-             + _abas_vend("perfil", _pend_vend(conta_id, membro_id)))
+             + _abas_vend("perfil", _pend_vend(conta_id, membro_id), conta_id=conta_id))
     return _page(n["titulo"], corpo)
 
 
@@ -9375,3 +9430,602 @@ def painel_equipe_cockpit_link(request: Request, membro_id: int = Form(...)):
         if enviado else
         "Link do app gerado abaixo — mande pra pessoa (vale 15 min).")
     return RedirectResponse("/painel/equipe", status_code=303)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# O MAPA DE STANDS (pedido do dono, 29/09/2026): a MESMA planta da página
+# pública (web/loja_stands.PLANTA_DEFS_JS — uma fonte só de posições), do jeito
+# do celular: encolhida pra caber na tela, cor por status, toque abre o detalhe
+# com o interessado e o botão de copiar o link público já com o stand
+# selecionado (/e/<slug>?stand=CODIGO). LEITURA apenas — confirmar pagamento e
+# liberar continuam no painel do dono/gestor; o vendedor usa isto pra saber o
+# que pode prometer na conversa. CSS inline na página (não no app.css): folha
+# versionada no service worker não paga redeploy por uma tela opcional.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STANDS_CSS = """<style>
+.stmeu{display:flex;align-items:center;gap:.7rem;margin:.7rem .8rem 0;padding:.7rem .8rem;
+  border:1px solid var(--neon,#25D366);border-radius:12px;background:rgba(37,211,102,.08)}
+.stmeu-t{flex:1;min-width:0}
+.stmeu-t b{display:block;font-size:.88rem}
+.stmeu-t span{display:block;font-size:.74rem;color:var(--text-dim,#8FA197);line-height:1.4;margin-top:2px}
+.stmeu button{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem;
+  padding:9px 14px;border-radius:9px;border:1px solid var(--neon,#25D366);width:auto;min-height:0;margin:0;
+  background:var(--neon,#25D366);color:#04150C;flex:0 0 auto}
+.stpav{display:flex;gap:8px;flex-wrap:wrap;padding:.7rem .8rem 0}
+.stpav button{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem;
+  padding:8px 12px;border-radius:999px;border:1px solid var(--line,#1E2A23);
+  background:var(--surface,#121A16);color:var(--text-dim,#8FA197);width:auto;min-height:0;margin:0}
+.stpav button.on{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
+.stleg{display:flex;gap:14px;flex-wrap:wrap;padding:.6rem .9rem;font-size:.74rem;color:var(--text-dim,#8FA197)}
+.stleg i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+.stleg b{color:var(--text,#EAF2ED);font-family:var(--mono,monospace)}
+.stouter{overflow:hidden;padding:.2rem .4rem 0}
+.ststage{display:flex;justify-content:flex-start}
+.stzoom{transform-origin:0 0}
+.stgrid{position:relative;display:grid;gap:4px;width:max-content;padding:14px;border-radius:14px;
+  background:#0D120F;box-shadow:inset 0 0 0 1px var(--line,#1E2A23)}
+.stgrid .blk{display:flex;flex-direction:column;gap:3px}
+.stgrid .lbl{font-size:7.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;
+  color:var(--text-dim,#8FA197);background:var(--surface,#121A16);border:1px solid var(--line,#1E2A23);
+  border-radius:4px;padding:2px 5px;white-space:nowrap;width:fit-content}
+.stgrid .cel{display:flex;flex-wrap:wrap;align-content:flex-start;gap:3px}
+.stgrid .std{appearance:none;cursor:pointer;border:1px solid var(--line,#1E2A23);border-radius:5px;
+  width:auto;min-height:0;margin:0;font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;
+  line-height:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;flex:0 0 auto}
+.stgrid .std.livre{background:rgba(37,211,102,.22);color:var(--text,#EAF2ED)}
+.stgrid .std.reservado{background:rgba(224,163,46,.3);color:var(--text,#EAF2ED)}
+.stgrid .std.vendido{background:rgba(224,87,79,.3);color:var(--text-dim,#8FA197)}
+.stgrid .std.sel{outline:2px solid var(--neon,#25D366)}
+.stgrid .dec{display:flex;align-items:center;justify-content:center;text-align:center;border-radius:8px;
+  font-size:8px;font-weight:700;color:var(--text-dim,#8FA197);border:1.5px dashed var(--line,#1E2A23);padding:4px}
+.stgrid .dec.corridor,.stgrid .dec.avenue{writing-mode:vertical-rl;text-orientation:mixed;
+  font-size:7.5px;letter-spacing:.06em;text-transform:uppercase;padding:6px 2px}
+.stgrid .dec.avenue{border:none;opacity:.6;justify-content:flex-start;padding-top:6px}
+.stgrid .dec.gate{border-style:solid}
+.stgrid .dec.wc{border-style:dotted}
+.stgrid .dec.avenueh{border:none;font-size:7.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.6}
+.stgrid .dec.faixa{border:none;background:#CFC8B8;color:#3A362C;font-weight:800;letter-spacing:.06em;font-size:8.5px}
+.stdet{margin:.7rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);
+  border-radius:12px;background:var(--surface,#121A16)}
+.stdet .cod{font-family:var(--mono,monospace);font-weight:800;font-size:1.05rem;margin-right:.5rem}
+.stdet .bdg{font-size:.68rem;font-weight:700;padding:3px 9px;border-radius:999px;vertical-align:2px}
+.stdet .bdg.livre{background:var(--neon,#25D366);color:#04150C}
+.stdet .bdg.reservado{background:#E0A32E;color:#2B1D00}
+.stdet .bdg.vendido{background:#E0574F;color:#fff}
+.stdet .inf{font-size:.78rem;color:var(--text-dim,#8FA197);margin-top:.35rem;line-height:1.5}
+.stdet .inf b{color:var(--text,#EAF2ED)}
+.stdet .ac{display:flex;gap:8px;flex-wrap:wrap;margin-top:.6rem}
+.stdet .ac a,.stdet .ac button{appearance:none;cursor:pointer;text-decoration:none;font-family:inherit;
+  font-weight:700;font-size:.78rem;padding:8px 13px;border-radius:8px;border:1px solid var(--line,#1E2A23);
+  background:var(--surface-2,#16201B);color:var(--text,#EAF2ED);width:auto;min-height:0;margin:0;display:inline-flex}
+.stdet .ac .prim{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
+.stcad{margin-top:.75rem;padding-top:.7rem;border-top:1px solid var(--line,#1E2A23)}
+.stcad .stbar{height:7px;border-radius:4px;background:var(--surface-2,#16201B);overflow:hidden}
+.stcad .stbar span{display:block;height:100%;background:var(--neon,#25D366)}
+.stcad.inc .stbar span{background:#E0A32E}
+.stcad .stcadt{font-size:.74rem;color:var(--text-dim,#8FA197);margin:.4rem 0 .6rem;line-height:1.45}
+.stcad .stcadt b{color:var(--text,#EAF2ED);font-family:var(--mono,monospace)}
+.stcad .stbtn,.stcad .stsalvar,.stcad .strec{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;
+  font-size:.8rem;padding:10px 14px;border-radius:9px;border:1px solid var(--line,#1E2A23);
+  background:var(--surface-2,#16201B);color:var(--text,#EAF2ED);width:auto;min-height:0;margin:0}
+.stcad .stsalvar{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
+.stcad .stfld{display:block;margin-top:.55rem}
+.stcad .stfld>span{display:block;font-size:.66rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.03em;color:var(--text-dim,#8FA197);margin-bottom:3px}
+.stcad .stfld>span i{font-style:normal;color:#E0A32E}
+.stcad .stfld input{width:100%;box-sizing:border-box;background:var(--surface-2,#16201B);
+  border:1px solid var(--line,#1E2A23);border-radius:8px;color:var(--text,#EAF2ED);font-family:inherit;
+  font-size:16px;padding:10px 11px;margin:0;min-height:0}
+.stcad .stfld.falta input{border-color:#E0A32E}
+.stcad .stlin{display:flex;gap:8px;align-items:flex-end}
+.stcad .stlin .stfld{flex:1;min-width:0}
+.stcad .stac{display:flex;gap:8px;flex-wrap:wrap;margin-top:.8rem}
+.stcad .stnota{font-size:.7rem;color:var(--text-dim,#8FA197);margin-top:.5rem;line-height:1.45}
+.stcad .stok{font-size:.76rem;color:var(--neon,#25D366);font-weight:700;margin-top:.5rem}
+.stcad .sterr{font-size:.76rem;color:#E0574F;font-weight:700;margin-top:.5rem}
+.stmin{margin:.7rem .8rem 0;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);border-radius:12px;
+  background:var(--surface,#121A16)}
+.stmin>b{display:block;font-size:.88rem;margin-bottom:.15rem}
+.stmin>span{display:block;font-size:.72rem;color:var(--text-dim,#8FA197);margin-bottom:.5rem}
+.stmin .lin{appearance:none;cursor:pointer;font-family:inherit;text-align:left;width:100%;min-height:0;margin:0;
+  display:flex;align-items:center;gap:.6rem;padding:.55rem 0;border:0;border-top:1px solid var(--line,#1E2A23);
+  background:none;color:var(--text,#EAF2ED)}
+.stmin .lin .cod{font-family:var(--mono,monospace);font-weight:800;font-size:.85rem;min-width:2.6rem}
+.stmin .lin .nm{flex:1;min-width:0;font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stmin .lin .nm small{display:block;font-size:.68rem;font-weight:500;color:var(--text-dim,#8FA197)}
+.stmin .chip{font-size:.66rem;font-weight:800;padding:3px 8px;border-radius:999px;white-space:nowrap}
+.stmin .chip.amb{background:rgba(224,163,46,.22);color:#E0A32E}
+.stmin .chip.ok{background:rgba(37,211,102,.2);color:var(--neon,#25D366)}
+.cvd{display:block;margin:.7rem .8rem 0;padding:.75rem .85rem;border:1px solid var(--line,#1E2A23);
+  border-radius:12px;background:var(--surface,#121A16);color:inherit;text-decoration:none}
+.cvd .topo{display:flex;align-items:center;gap:.6rem}
+.cvd .cod{font-family:var(--mono,monospace);font-weight:800;font-size:.95rem}
+.cvd .nm{flex:1;min-width:0;font-weight:700;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cvd .sub{font-size:.76rem;color:var(--text-dim,#8FA197);margin-top:.35rem;line-height:1.45}
+.cvd .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:.5rem}
+.cvd .chip{font-size:.66rem;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.cvd .chip.amb{background:rgba(224,163,46,.22);color:#E0A32E}
+.cvd .chip.ok{background:rgba(37,211,102,.2);color:var(--neon,#25D366)}
+.cvd .chip.az{background:rgba(91,157,255,.2);color:#9DBFFF}
+.cvd .ir{color:var(--neon,#25D366);font-weight:700}
+.stvazio{margin:1.2rem .8rem;padding:1rem;border:1px dashed var(--line,#1E2A23);border-radius:12px;
+  color:var(--text-dim,#8FA197);font-size:.85rem;line-height:1.5}
+</style>"""
+
+_STANDS_JS = r"""
+  var tamLabel={'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
+  // pegada proporcional (largura=frente, altura=fundo) escalada pra grid de 30px
+  var sizeBase={'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
+  var ESCALA=30/34;
+  var pav='inferior', sel=null, editando=false;
+  // o que o contrato precisa do cliente (mesma lista do painel do gestor)
+  var REQ=[['fantasia','Nome fantasia'],['whats','WhatsApp'],['razao','Razão social'],['doc','CNPJ/CPF'],
+           ['rep','Representante legal'],['end','Endereço'],['cidade','Cidade']];
+  function faltando(c){return REQ.filter(function(r){return !String(c[r[0]]||'').trim();}).map(function(r){return r[1];});}
+  function esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+  var pavsEl=document.getElementById('stpav');
+  pavilions.forEach(function(p){
+    var b=document.createElement('button');
+    b.textContent=p.label; b.id='stpav-'+p.key;
+    if(p.key===pav)b.classList.add('on');
+    b.onclick=function(){pav=p.key;sel=null;
+      pavilions.forEach(function(q){var e=document.getElementById('stpav-'+q.key);if(e)e.classList.toggle('on',q.key===pav);});
+      render();legenda();detalhe();};
+    pavsEl.appendChild(b);
+  });
+
+  function tile(code, def){
+    var s=STANDS[code]; if(!s)return null;
+    var b=document.createElement('button');
+    b.className='std '+s.status+(code===sel?' sel':'');
+    var base=sizeBase[s.tamanho]||{w:29,h:23};
+    b.style.width=Math.round(((def&&def.w)||base.w)*ESCALA)+'px';
+    b.style.height=Math.round(((def&&def.h)||base.h)*ESCALA)+'px';
+    b.textContent=code;
+    b.onclick=function(){sel=code;editando=false;render();detalhe();
+      document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});};
+    return b;
+  }
+
+  function render(){
+    var grid=document.getElementById('stgrid');
+    var p=pavilions.filter(function(x){return x.key===pav;})[0];
+    grid.style.gridTemplateColumns='repeat(24, 30px)';
+    grid.style.gridTemplateRows='repeat('+p.rows+', 26px)';
+    grid.innerHTML='';
+    p.decor.forEach(function(d){
+      var e=document.createElement('div');
+      e.className='dec'+(d.kind?' '+d.kind:'');
+      e.style.gridColumn=d.col+' / span '+d.cspan;
+      e.style.gridRow=d.row+' / span '+d.rspan;
+      e.textContent=d.label; grid.appendChild(e);
+    });
+    p.defs.forEach(function(d){
+      var blk=document.createElement('div'); blk.className='blk';
+      blk.style.gridColumn=d.col+' / span '+d.cspan;
+      blk.style.gridRow=d.row+' / span '+d.rspan;
+      if(d.label){var l=document.createElement('div');l.className='lbl';l.textContent=d.label;blk.appendChild(l);}
+      var cel=document.createElement('div'); cel.className='cel';
+      for(var n=d.from;n<=d.to;n++){
+        var num=d.prefix==='i'?String(n).padStart(2,'0'):String(n);
+        var t=tile(d.prefix+num, d); if(t)cel.appendChild(t);
+      }
+      blk.appendChild(cel); grid.appendChild(blk);
+    });
+    escala();
+  }
+
+  // celular: a planta (24 col) encolhe pra caber na tela — mesma regra da
+  // página pública
+  function escala(){
+    var outer=document.getElementById('stouter'), stage=document.getElementById('ststage'),
+        zoom=document.getElementById('stzoom'), grid=document.getElementById('stgrid');
+    var w=grid.offsetWidth||1, avail=outer.clientWidth-8;
+    var k=Math.min(1,avail/w);
+    zoom.style.transform='scale('+k+')';
+    stage.style.height=Math.ceil(grid.offsetHeight*k+6)+'px';
+  }
+  window.addEventListener('resize',escala);
+
+  function legenda(){
+    var t={livre:0,reservado:0,vendido:0};
+    Object.keys(STANDS).forEach(function(c){ if(STANDS[c].pavilhao!==pav)return;
+      t[STANDS[c].status]=(t[STANDS[c].status]||0)+1; });
+    document.getElementById('stleg').innerHTML=
+      '<span><i style="background:#25D366"></i>Livre <b>'+(t.livre||0)+'</b></span>'+
+      '<span><i style="background:#E0A32E"></i>Reservado <b>'+(t.reservado||0)+'</b></span>'+
+      '<span><i style="background:#E0574F"></i>Vendido <b>'+(t.vendido||0)+'</b></span>';
+  }
+
+  function detalhe(){
+    var box=document.getElementById('stdet');
+    if(!sel){box.hidden=true;box.innerHTML='';return;}
+    var s=STANDS[sel];
+    var st={livre:'Livre',reservado:'Reservado',vendido:'Vendido'}[s.status];
+    var h='<span class=cod>'+esc(sel)+'</span><span class="bdg '+s.status+'">'+st+'</span>';
+    h+='<div class=inf>'+(s.zona?esc(s.zona)+' · ':'')+esc((s.pavilhao||'').replace(/_/g,' '))+
+       ' · '+esc(tamLabel[s.tamanho]||s.tamanho)+(s.preco?' · <b>'+esc(s.preco)+'</b>':'')+
+       (s.cliente?'<br>Interessado: <b>'+esc(s.cliente)+'</b>':'')+'</div>';
+    h+='<div class=ac>';
+    if(s.status==='livre'){
+      h+='<button class=prim type=button onclick="stCopiar(this,\''+esc(sel)+'\')">Copiar link pro cliente</button>';
+      h+='<a href="'+PUB+'?stand='+encodeURIComponent(sel)+'" target=_blank rel=noopener>Ver na página →</a>';
+    } else {
+      h+='<span class=inf style="margin:0">'+(s.status==='reservado'?
+        (s.pode?'Aguardando a equipe confirmar o pagamento — o stand já está segurado pra ele.':'Comprovante em conferência — não prometa este.')
+        :'Já vendido.')+'</span>';
+    }
+    h+='</div>';
+    if(s.status!=='livre'&&s.cad)h+=cadHTML(s);
+    box.innerHTML=h; box.hidden=false;
+  }
+
+  // O CADASTRO DO CLIENTE DO STAND (30/09/2026): o vendedor completa os dados
+  // do contrato do cliente DELE pelo celular. Só aparece nas vendas dele (a
+  // gestão vê todas) — `s.cad` nem chega no aparelho das dos outros. O servidor
+  // revalida a posse no POST. Confirmar pagamento continua sendo da gestão.
+  function cadHTML(s){
+    var c=s.cad, f=faltando(c), n=REQ.length-f.length;
+    var h='<div class="stcad'+(f.length?' inc':'')+'" id=stcad>';
+    h+='<div class=stbar><span style="width:'+Math.round(n/REQ.length*100)+'%"></span></div>';
+    h+='<div class=stcadt><b id=stn>'+n+'/'+REQ.length+'</b> <span id=stfalta>'+
+       (f.length?'faltam pro contrato: '+esc(f.join(', ')):'cadastro completo — o contrato sai com todos os dados')+'</span></div>';
+    if(!editando){
+      h+='<button class=stbtn type=button onclick="stEditar()">'+(f.length?'Completar dados do cliente':'Ver / editar dados do cliente')+'</button>';
+    } else {
+      h+=formHTML(c);
+    }
+    return h+'</div>';
+  }
+  function campo(k,rot,c,req,extra){
+    var falta=req&&!String(c[k]||'').trim();
+    return '<label class="stfld'+(falta?' falta':'')+'"><span>'+rot+(req?' <i>*</i>':'')+'</span>'+
+      '<input name='+k+' value="'+esc(c[k]||'')+'" '+(extra||'')+(req?' data-req=1':'')+' maxlength=300></label>';
+  }
+  function formHTML(c){
+    var h='<form id=stform onsubmit="return stSalvar(this)" oninput="stProg()">';
+    h+=campo('fantasia','Nome fantasia',c,1,'autocomplete=organization');
+    h+=campo('razao','Razão social',c,1,'placeholder="Como sai no contrato"');
+    h+='<div class=stlin>'+campo('doc','CNPJ / CPF',c,1,'inputmode=numeric placeholder="00.000.000/0000-00"')+
+       '<button class=strec type=button onclick="stReceita(this)">Receita</button></div>';
+    h+=campo('rep','Representante legal',c,1,'placeholder="Quem assina pelo lojista"');
+    h+=campo('whats','WhatsApp',c,1,'inputmode=tel autocomplete=tel');
+    h+=campo('email','E-mail',c,0,'inputmode=email');
+    h+=campo('end','Endereço',c,1,'placeholder="Rua, número, bairro"');
+    h+='<div class=stlin>'+campo('cep','CEP',c,0,'inputmode=numeric')+campo('cidade','Cidade',c,1,'')+
+       campo('uf','UF',c,0,'style="text-transform:uppercase"')+'</div>';
+    h+='<div class=stnota id=strecmsg hidden></div>';
+    h+='<div class=stac><button class=stsalvar type=submit>Salvar cadastro</button>'+
+       '<button class=stbtn type=button onclick="stFechar()">Fechar</button></div>';
+    h+='<div class=stnota>Salvar já cria o cliente no cadastro (sem duplicar) e leva os dados pro contrato.</div>';
+    h+='<div id=stmsg></div></form>';
+    return h;
+  }
+  function dadosDoForm(form){
+    var o={}; Array.prototype.forEach.call(form.elements,function(e){if(e.name)o[e.name]=e.value;}); return o;
+  }
+  window.stEditar=function(){editando=true;detalhe();};
+  window.stFechar=function(){editando=false;detalhe();};
+  window.stProg=function(){
+    var form=document.getElementById('stform'); if(!form)return;
+    var d=dadosDoForm(form), f=faltando(d), n=REQ.length-f.length;
+    Array.prototype.forEach.call(form.querySelectorAll('.stfld'),function(l){
+      var i=l.querySelector('input'); if(i.hasAttribute('data-req'))l.classList.toggle('falta',!i.value.trim());});
+    var box=document.getElementById('stcad');
+    box.classList.toggle('inc',f.length>0);
+    box.querySelector('.stbar span').style.width=Math.round(n/REQ.length*100)+'%';
+    document.getElementById('stn').textContent=n+'/'+REQ.length;
+    document.getElementById('stfalta').textContent=f.length?'faltam pro contrato: '+f.join(', '):'cadastro completo — o contrato sai com todos os dados';
+  };
+  window.stReceita=function(btn){
+    var form=document.getElementById('stform'), msg=document.getElementById('strecmsg');
+    var doc=form.elements['doc'].value.trim(); msg.hidden=false;
+    if(!doc){msg.textContent='Digite o CNPJ antes.';return;}
+    msg.textContent='Consultando a Receita…';
+    zapFetch(BASE_STANDS+'/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+      if(!j){msg.textContent='Não consegui consultar agora — digite os dados.';return;}
+      if(!j.ok){msg.textContent=j.erro||'Não consegui consultar agora.';return;}
+      if(j.nome)form.elements['razao'].value=j.nome;
+      if(j.email&&!form.elements['email'].value.trim())form.elements['email'].value=j.email;
+      if(j.cidade)form.elements['cidade'].value=j.cidade;
+      if(j.uf)form.elements['uf'].value=j.uf;
+      msg.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      stProg();
+    });
+  };
+  window.stSalvar=function(form){
+    var code=sel, msg=document.getElementById('stmsg'), fd=new FormData(form);
+    msg.className=''; msg.textContent='Salvando…';
+    zapFetch(BASE_STANDS+'/'+encodeURIComponent(code)+'/cliente',{method:'POST',headers:{'x-cockpit':'1'},body:fd}).then(function(j){
+      if(!j)return;
+      if(!j.ok){msg.className='sterr';msg.textContent=j.erro||'Não consegui salvar.';return;}
+      STANDS[code].cad=j.cad; STANDS[code].cliente=j.cad.fantasia||STANDS[code].cliente;
+      editando=false; detalhe(); minhas();
+      var ok=document.getElementById('stcad');
+      if(ok){var m=document.createElement('div');m.className='stok';
+        m.textContent='✓ Salvo em Clientes'+(j.cad.faltam.length?' — ainda falta '+j.cad.faltam.length+' pro contrato.':' — contrato com todos os dados.');
+        ok.appendChild(m);}
+    });
+    return false;
+  };
+
+  // MINHAS VENDAS: as reservas/vendas que caíram no link dele, com o cadastro de cada
+  function minhas(){
+    var box=document.getElementById('stmin'); if(!box)return;
+    var lin=Object.keys(STANDS).filter(function(c){return STANDS[c].minha&&STANDS[c].status!=='livre';});
+    if(!lin.length){box.hidden=true;box.innerHTML='';return;}
+    var h='<b>Minhas vendas</b><span>Toque numa pra completar os dados do cliente pro contrato.</span>';
+    lin.forEach(function(c){
+      var s=STANDS[c], f=s.cad?faltando(s.cad):[];
+      h+='<button type=button class=lin onclick="stIr(\''+esc(c)+'\')"><span class=cod>'+esc(c)+'</span>'+
+         '<span class=nm>'+esc(s.cliente||'Cliente')+'<small>'+(s.status==='vendido'?'Vendido':'Aguardando confirmação')+'</small></span>'+
+         (f.length?'<span class="chip amb">Cadastro '+(REQ.length-f.length)+'/'+REQ.length+'</span>':'<span class="chip ok">Completo ✓</span>')+'</button>';
+    });
+    box.innerHTML=h; box.hidden=false;
+  }
+  window.stIr=function(code){
+    sel=code; editando=false; pav=STANDS[code].pavilhao;
+    pavilions.forEach(function(q){var e=document.getElementById('stpav-'+q.key);if(e)e.classList.toggle('on',q.key===pav);});
+    render();legenda();detalhe();
+    document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});
+  };
+
+  // O LINK DE VENDAS: o vendedor manda pro CLIENTE DELE; o cliente abre a
+  // página pública, escolhe qualquer stand e compra — a venda cai na conta do
+  // vendedor. `MEU_COD` é o código ASSINADO (o servidor revalida no POST).
+  // Sem MEU_COD (dono sem membro) vai o link neutro.
+  function linkVendas(code){
+    var url=location.origin+PUB;
+    var q=[];
+    if(code)q.push('stand='+encodeURIComponent(code));
+    if(typeof MEU_COD!=='undefined'&&MEU_COD)q.push('v='+encodeURIComponent(MEU_COD));
+    return q.length?url+'?'+q.join('&'):url;
+  }
+  function copiar(btn,url){
+    var ok=function(){var t=btn.textContent;btn.textContent='Copiado ✓';setTimeout(function(){btn.textContent=t;},1600);};
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(ok);}
+    else{window.prompt('Copia o link:',url);}
+  }
+  window.stCopiar=function(btn,code){copiar(btn,linkVendas(code));};
+  window.stCopiarMeuLink=function(btn){copiar(btn,linkVendas(null));};
+
+  render();legenda();minhas();
+  // vindo de "Minhas vendas": abre a venda e já o formulário do cliente
+  if(typeof ABRIR!=='undefined'&&ABRIR&&STANDS[ABRIR]){
+    window.stIr(ABRIR);
+    if(STANDS[ABRIR].cad)window.stEditar();
+  }
+"""
+
+
+@router.get("/cockpit/stands", response_class=HTMLResponse)
+def cockpit_stands(request: Request, abrir: str = ""):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    pool = get_pool()
+    from finance import evento_stands as _es
+    cfg = _es.obter_config(pool, conta_id)
+    if not cfg:
+        return RedirectResponse(_BASE, status_code=303)
+    stands = _es.listar(pool, conta_id)
+
+    # o nome de quem reservou/comprou — o vendedor responde "esse já foi?" na hora —
+    # e de QUEM É a venda (o vendedor do link), pra abrir o cadastro só das dele
+    nomes, donos = {}, {}
+    ids = [s["prospeccao_id"] for s in stands if s["prospeccao_id"]]
+    if ids:
+        try:
+            with pool.connection() as c:
+                for pid, emp, vid in c.execute(
+                        "select id, empresa, vendedor_id from prospeccao "
+                        "where conta_id=%s and id=any(%s)", (conta_id, ids)).fetchall():
+                    nomes[pid], donos[pid] = emp, vid
+        except Exception:  # noqa: BLE001 — sem nome a planta continua servindo
+            nomes, donos = {}, {}
+    gestao = _eh_gestao(request, g)
+    try:
+        cads = _es.cadastros_dos_stands(pool, conta_id, stands)
+    except Exception:  # noqa: BLE001 — sem o cadastro a planta continua servindo
+        cads = {}
+
+    tot = {"livre": 0, "pre_reservado": 0, "vendido": 0}
+    dados = {}
+    for s in stands:
+        tot[s["status"]] = tot.get(s["status"], 0) + 1
+        dados[s["codigo"]] = {
+            "pavilhao": s["pavilhao"], "zona": s["zona"] or "",
+            "tamanho": s["tamanho"],
+            "status": "reservado" if s["status"] == "pre_reservado" else s["status"],
+            "preco": _brl(s["preco_centavos"]) if s["preco_centavos"] else None,
+            "cliente": (nomes.get(s["prospeccao_id"]) if s["status"] != "livre" else None),
+        }
+        # o cadastro completo (CNPJ, endereço…) só vai pro aparelho de quem pode
+        # mexer nele: a gestão, ou o vendedor dono da venda. Os outros veem só o nome.
+        cad = cads.get(s["codigo"])
+        minha = bool(meu_id) and donos.get(s["prospeccao_id"]) == meu_id
+        if cad and (gestao or minha):
+            dados[s["codigo"]]["pode"] = True
+            dados[s["codigo"]]["cad"] = cad
+            dados[s["codigo"]]["cliente"] = cad["fantasia"] or dados[s["codigo"]]["cliente"]
+        if minha and s["status"] != "livre":
+            dados[s["codigo"]]["minha"] = True
+
+    # o código ASSINADO do link de vendas de quem está logado (dono sem
+    # membro_id não tem: vai o link neutro)
+    meu_cod = _es.codigo_vendedor(meu_id) if meu_id else None
+    meu_link_html = (
+        "<div class=stmeu><div class=stmeu-t><b>Seu link de vendas</b>"
+        "<span>Manda pro seu cliente: ele escolhe qualquer stand, compra, e a venda "
+        "cai na sua conta.</span></div>"
+        "<button class=prim type=button onclick=\"stCopiarMeuLink(this)\">"
+        "Copiar meu link</button></div>") if meu_cod else ""
+
+    from web.loja_stands import PLANTA_DEFS_JS
+    sub = (f"{tot['livre']} livres · {tot['pre_reservado']} reservados · "
+           f"{tot['vendido']} vendidos")
+    # o app de ESTANDES (Outlet Chic): o mapa é a tela inicial — sem seta de voltar e
+    # com as abas Stands / Minhas vendas / Perfil. Gestão e as demais contas: como era.
+    com_abas = bool(sess) and not gestao and _perfil_stands(conta_id)
+    corpo = (
+        _hdr("Mapa de stands", sub, voltar="" if com_abas else _BASE)
+        + _STANDS_CSS
+        + "<div class=scroll>"
+        + meu_link_html
+        + "<div class=stpav id=stpav></div>"
+        + "<div class=stleg id=stleg></div>"
+        + "<div class=stouter id=stouter><div class=ststage id=ststage>"
+        + "<div class=stzoom id=stzoom><div class=stgrid id=stgrid></div></div></div></div>"
+        + "<div class=stdet id=stdet hidden></div>"
+        + "<div class=stmin id=stmin hidden></div>"
+        + "</div>"
+        + (_abas_stands("stands") if com_abas else "")
+        + f"<script>var STANDS={_json_mod.dumps(dados)};"
+        + f"var PUB='/e/{cfg['slug']}';var MEU_COD={_json_mod.dumps(meu_cod)};"
+        + f"var ABRIR={_json_mod.dumps((abrir or '')[:20] or None)};"
+        + f"var BASE_STANDS='{_BASE}/stands';</script>"
+        + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS + "})();</script>"
+    )
+    return _page("Mapa de stands", corpo)
+
+
+
+@router.get("/cockpit/stands/consulta-cnpj")
+def cockpit_stands_consulta_cnpj(request: Request, doc: str = ""):
+    """"Receita" do formulário do cliente do stand: razão social, e-mail, cidade e
+    UF pelo CNPJ (a mesma consulta da aba Clientes). Endereço e CEP o vendedor digita."""
+    if not (_sessao(request) or _gerencia(request)):
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import cnpj_info, validadoc
+    ok, tipo, d = validadoc.valida(doc)
+    if tipo != "pj" or not ok:
+        return JSONResponse({"ok": False, "erro": "CNPJ inválido"})
+    info = cnpj_info.consultar_cnpj(d)
+    if not info:
+        return JSONResponse({"ok": False, "erro": "CNPJ não encontrado na Receita"})
+    return JSONResponse({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
+                         "cidade": info.get("cidade"), "uf": info.get("uf")})
+
+
+@router.post("/cockpit/stands/{codigo}/cliente")
+def cockpit_stand_salvar_cliente(request: Request, codigo: str,
+                                 fantasia: str = Form(""), whats: str = Form(""),
+                                 razao: str = Form(""), doc: str = Form(""),
+                                 rep: str = Form(""), email: str = Form(""),
+                                 end: str = Form(""), cep: str = Form(""),
+                                 cidade: str = Form(""), uf: str = Form("")):
+    """Salva os dados do cliente do stand pelo celular do vendedor.
+
+    O vendedor só mexe nas vendas DELE (a prospecção do stand foi criada pelo link
+    dele: `prospeccao.vendedor_id`); dono e gestor, em todas. A posse é conferida
+    aqui, no servidor — o app só esconde o formulário. Confirmar pagamento não
+    passa por aqui: continua sendo do painel da gestão."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not (sess or g):
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    conta_id, meu_id = sess if sess else g
+    from finance import evento_stands as _es
+    pool = get_pool()
+    stand = _es.buscar(pool, conta_id, codigo)
+    if not stand:
+        return JSONResponse({"ok": False, "erro": "Stand não encontrado."}, status_code=404)
+    if not _eh_gestao(request, g):
+        dono = None
+        if stand.get("prospeccao_id"):
+            with pool.connection() as c:
+                r = c.execute("select vendedor_id from prospeccao where conta_id=%s and id=%s",
+                              (conta_id, stand["prospeccao_id"])).fetchone()
+            dono = r[0] if r else None
+        if not meu_id or dono != meu_id:
+            return JSONResponse({"ok": False, "erro": "Este stand não é de uma venda sua."},
+                                status_code=403)
+    r = _es.salvar_cadastro_stand(pool, conta_id, codigo, {
+        "fantasia": fantasia, "whats": whats, "razao": razao, "doc": doc, "rep": rep,
+        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf})
+    if not r["ok"]:
+        return JSONResponse({"ok": False, "erro": r["erro"]})
+    cad = _es.cadastros_dos_stands(pool, conta_id, [_es.buscar(pool, conta_id, codigo)])[codigo]
+    return JSONResponse({"ok": True, "acao": r["acao"], "congelado": r["congelado"], "cad": cad})
+
+
+@router.get("/cockpit/stands/vendas", response_class=HTMLResponse)
+def cockpit_stands_vendas(request: Request):
+    """MINHAS VENDAS (app de estandes): as reservas que caíram no link do vendedor,
+    uma por cartão (2 stands da mesma empresa = 1 cartão), com o que falta: a
+    confirmação do sinal, os dados do cliente pro contrato, o saldo. Tocar abre a
+    venda no mapa, já com o formulário do cliente. A gestão vê todas."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    pool = get_pool()
+    from finance import evento_stands as _es
+    cfg = _es.obter_config(pool, conta_id)
+    if not cfg:
+        return RedirectResponse(_BASE, status_code=303)
+    gestao = _eh_gestao(request, g)
+    stands = [s for s in _es.listar(pool, conta_id) if s["status"] != "livre"]
+    donos = {}
+    pids = [s["prospeccao_id"] for s in stands if s["prospeccao_id"]]
+    if pids:
+        with pool.connection() as c:
+            donos = dict(c.execute(
+                "select id, vendedor_id from prospeccao where conta_id=%s and id=any(%s)",
+                (conta_id, pids)).fetchall())
+    meus = [s for s in stands if gestao or (meu_id and donos.get(s["prospeccao_id"]) == meu_id)]
+    cads = _es.cadastros_dos_stands(pool, conta_id, meus)
+    fin = _es.situacao_financeira(pool, conta_id, [s["orcamento_id"] for s in meus])
+    reg = _es.regras_de_pagamento(cfg)
+    saldo_ate = reg["saldo_ate"].strftime("%d/%m") if reg["saldo_ate"] else ""
+
+    cartoes, vistos = [], set()
+    for s in meus:
+        chave = s.get("grupo_id") or s["codigo"]
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        grupo = [x for x in meus if (x.get("grupo_id") or x["codigo"]) == chave]
+        cad = cads.get(s["codigo"]) or {}
+        f = fin.get(s["orcamento_id"]) or {}
+        total = sum(int(x["preco_centavos"] or 0) for x in grupo)
+        if s["status"] == "pre_reservado":
+            situacao = "<span class='chip amb'>Aguardando a gestão confirmar o sinal</span>"
+            linha = "Comprovante recebido · o stand está segurado pra ele."
+        elif f.get("aberto", 0) > 0:
+            situacao = "<span class='chip az'>Saldo em aberto</span>"
+            linha = (f"Sinal confirmado · falta {_brl(f['aberto'])}"
+                     + (f" até {saldo_ate}" if saldo_ate else "") + " — lembre o cliente.")
+        elif f.get("pago", 0) > 0:
+            situacao = "<span class='chip ok'>Quitado ✓</span>"
+            linha = "Sinal e saldo pagos — venda concluída."
+        else:
+            situacao = "<span class='chip ok'>Vendido</span>"
+            linha = "Pagamento confirmado."
+        falta = cad.get("faltam") or []
+        cadastro = (f"<span class='chip amb'>Cadastro {cad.get('n_ok', 0)}/{cad.get('n_total', 7)}</span>"
+                    if falta else "<span class='chip ok'>Cadastro completo ✓</span>")
+        codigos = " + ".join(x["codigo"] for x in grupo)
+        cartoes.append(
+            f"<a class=cvd href='{_BASE}/stands?abrir={esc(s['codigo'])}'>"
+            f"<div class=topo><span class=cod>{esc(codigos)}</span>"
+            f"<span class=nm>{esc(cad.get('fantasia') or 'Cliente')}</span><span class=ir>→</span></div>"
+            f"<div class=sub>{len(grupo)} stand{'s' if len(grupo) > 1 else ''} · {_brl(total)}"
+            f"{' · num contrato só' if len(grupo) > 1 else ''}<br>{esc(linha)}</div>"
+            f"<div class=chips>{situacao}{cadastro}</div></a>")
+    vazio = ("<div class=stvazio>Você ainda não tem vendas pelo seu link. Copie o link na aba "
+             "<b>Stands</b> e mande pro seu cliente: quando ele reservar, a venda aparece aqui.</div>")
+    sub = (f"{len(cartoes)} venda{'s' if len(cartoes) != 1 else ''}" if cartoes
+           else "nenhuma ainda")
+    com_abas = bool(sess) and not gestao and _perfil_stands(conta_id)
+    corpo = (_hdr("Minhas vendas", sub, voltar="" if com_abas else _BASE)
+             + _STANDS_CSS + "<div class=scroll>" + ("".join(cartoes) or vazio) + "</div>"
+             + (_abas_stands("vendas") if com_abas else ""))
+    return _page("Minhas vendas", corpo)

@@ -11,7 +11,7 @@ import os
 import secrets
 
 from fastapi import APIRouter, Request, Form, Body, BackgroundTasks, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.concurrency import run_in_threadpool
 from jinja2 import Environment, DictLoader, select_autoescape
 from datetime import date as _date
@@ -409,8 +409,15 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 <nav class="side">
   <div class="side-logo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span></div>
   {% set _dono = (papel == 'dono') %}
+  {# Clientes/Fornecedores (29/09/2026): liberada pro vendedor em todo nicho —
+     menos Clínica, onde esta mesma aba é só Fornecedores (paciente de verdade
+     mora em Pacientes) e fornecedor é decisão de compra, não de atendimento;
+     ali continua só dono/gestor (caps.financeiro). #}
+  {% set _clinica_nicho = raio_x_perfil and raio_x_perfil.chave == 'clinica' %}
+  {% set _clientes_ok = caps.vendas and (caps.financeiro or not _clinica_nicho) %}
   {% if _dono and (vende_produto or _tem_app) %}<div class="side-grp">Principal</div>{% endif %}
-  {% if _dono and vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
+  {% if _dono and vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{% endif %}
+  {% if tem_pj and vende_produto and _clientes_ok %}{% if _clinica_nicho %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if _dono and _tem_app %}{{ navi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
   {% if caps.vendas or (tem_pj and caps.financeiro) or caps.gerir or (_dono and (vende_produto or _forn)) %}<div class="side-grp">{{ 'Loja' if _dono else 'Minha área' }}</div>{% endif %}
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
@@ -443,11 +450,15 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
   {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
+     público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
+     _render(), não é todo mundo do nicho que vende espaço numerado. #}
+  {% if tem_pj and (caps.vendas or caps.financeiro) and tem_estandes|default(true) %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
-  {% if _dono and tem_pj and not vende_produto %}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
+  {% if tem_pj and not vende_produto and _clientes_ok %}{% if _clinica_nicho %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{{ navi('respostas','/painel/respostas','caixa','Respostas rápidas') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -462,7 +473,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {{ navi('','/sair','sair','Sair') }}
 </nav>
 <nav class="btmnav">
-  {% if _dono and vende_produto %}{{ tabi('caixa','/painel/pdv','caixa','Caixa') }}{{ tabi('produtos','/painel/produtos','produtos','Produtos') }}{{ tabi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
+  {% if _dono and vende_produto %}{{ tabi('caixa','/painel/pdv','caixa','Caixa') }}{{ tabi('produtos','/painel/produtos','produtos','Produtos') }}{% endif %}
+  {% if tem_pj and vende_produto and _clientes_ok %}{{ tabi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if _dono and _tem_app %}{{ tabi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
   {% if _dono and not vende_produto and _tem_app %}{{ tabi('painel','/painel','painel','Painel') }}{% endif %}
   {% if not _dono and vende_servico and caps.vendas %}{{ tabi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
@@ -504,11 +516,15 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
   {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
+     público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
+     _render(), não é todo mundo do nicho que vende espaço numerado. #}
+  {% if tem_pj and (caps.vendas or caps.financeiro) and tem_estandes|default(true) %}{{ navi('estandes','/painel/eventos/estandes','empresa','Estandes') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
-  {% if _dono and tem_pj and not vende_produto %}{% if raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
+  {% if tem_pj and not vende_produto and _clientes_ok %}{% if _clinica_nicho %}{{ navi('clientes','/painel/clientes?papel=fornecedor','clientes','Fornecedores') }}{% else %}{{ navi('clientes','/painel/clientes','clientes',voc.clientes|capitalize ~ '/Fornecedores') }}{% endif %}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{{ navi('respostas','/painel/respostas','caixa','Respostas rápidas') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -3344,6 +3360,8 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
           <span id="nc-badge" class="doc-badge"></span>
         </div>
         <div class="col-2"><label>Nome / Razão social *</label><input id="nc-nome" name="nome" required></div>
+        {% if estande %}<div><label>Razão social <span class="mut">(se for diferente do nome)</span></label><input name="razao_social" maxlength="200" placeholder="Como sai no contrato"></div>
+        <div><label>Representante legal</label><input name="representante" maxlength="200" placeholder="Quem assina pela empresa"></div>{% endif %}
         {# nao e' escolha unica: a mesma pessoa/empresa pode comprar de voce E vender
            pra voce ao mesmo tempo — mesmo padrao de vende_produto/vende_servico,
            ja independentes na conta. Cliente vem marcado, e' o caso mais comum. #}
@@ -3403,6 +3421,8 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
             <form method="post" action="/painel/clientes/{{ c.id }}/editar">
               <div class="mini-grid">
                 <div class="col-2"><label>Nome / Razão social</label><input name="nome" value="{{ c.nome or '' }}"></div>
+                {% if estande %}<div><label>Razão social <span class="mut">(contrato)</span></label><input name="razao_social" value="{{ c.razao_social or '' }}" maxlength="200"></div>
+                <div><label>Representante legal</label><input name="representante" value="{{ c.representante or '' }}" maxlength="200"></div>{% endif %}
                 <div class="col-2" style="display:flex;gap:.7rem;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;margin:.15rem 0 .2rem">
                   <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
                     <input type="checkbox" name="eh_cliente" value="1" {% if c.eh_cliente %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
@@ -3425,12 +3445,14 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
               </div>
               <div class="pfoot">
                 <button class="btn-primary" type="submit">Salvar alterações</button>
+                {% if papel in ('dono','gestor') %}
                 <span onclick="event.stopPropagation()">
                   <button type="button" class="btn-danger" onclick="if(confirm('Arquivar este {{ voc.cliente }}?')){this.closest('.pane').querySelector('.arq').submit()}">Arquivar</button>
                 </span>
+                {% endif %}
               </div>
             </form>
-            <form class="arq" method="post" action="/painel/clientes/{{ c.id }}/arquivar" style="display:none"></form>
+            {% if papel in ('dono','gestor') %}<form class="arq" method="post" action="/painel/clientes/{{ c.id }}/arquivar" style="display:none"></form>{% endif %}
           </div>
           <div class="pane" id="hi-{{ c.id }}"><div class="mut" style="padding:.6rem 0">carregando…</div></div>
         </div>
@@ -3753,6 +3775,8 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
     <form method="post" action="/painel/clientes/{{ cliente.id }}/editar" style="margin-top:.7rem">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
         <div><label>Nome</label><input name="nome" value="{{ cliente.nome or '' }}" style="width:100%"></div>
+        {% if estande %}<div><label>Razão social</label><input name="razao_social" value="{{ cliente.razao_social or '' }}" maxlength="200" style="width:100%"></div>
+        <div><label>Representante legal</label><input name="representante" value="{{ cliente.representante or '' }}" maxlength="200" style="width:100%"></div>{% endif %}
         <div><label>Telefone</label><input name="telefone" value="{{ cliente.telefone or '' }}" style="width:100%"></div>
         <div><label>CPF</label><input name="cpf" value="{{ cliente.cpf or '' }}" style="width:100%"></div>
         <div><label>E-mail</label><input name="email" value="{{ cliente.email or '' }}" style="width:100%"></div>
@@ -3777,7 +3801,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
       <div style="font-size:.82rem;color:#cfcfcf">{{ rotulo_receber or 'A receber' }} #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:var(--txt)">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
       <div style="display:flex;gap:.4rem;align-items:center">
         {% if f.link %}<a href="{{ f.link }}" target="_blank" style="color:#c99536;font-size:.76rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/cobrar" style="display:inline"><button style="background:none;border:1px solid #c99536;color:#c99536;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">cobrar Pix</button></form>{% endif %}
-        <form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento?')"><button style="background:none;border:1px solid var(--verde);color:var(--verde-claro);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>
+        {% if papel in ('dono','gestor') %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento?')"><button style="background:none;border:1px solid var(--verde);color:var(--verde-claro);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>{% endif %}
       </div>
     </div>
     {% endfor %}
@@ -3796,9 +3820,11 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
   {% else %}
   <p class="mut">Sem compras registradas ainda.</p>
   {% endif %}
+  {% if papel in ('dono','gestor') %}
   <form method="post" action="/painel/clientes/{{ cliente.id }}/arquivar" style="margin-top:1.2rem" onsubmit="return confirm('Arquivar este {{ voc.cliente }}?')">
     <button style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;padding:.4rem .8rem;border-radius:6px;cursor:pointer;font-size:.85rem;width:auto">Arquivar {{ voc.cliente }}</button>
   </form>
+  {% endif %}
 </div>
 <script>
 (function(){
@@ -4600,7 +4626,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
       seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
       "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}{#- o PORQUÊ de um valor mexido pelo painel da diferença (323): sem isto,
-      "por que outubro é R$ 1.067 e não R$ 1.142?" não teria resposta na tela. -#}{% if t.tipo_despesa %} · <span class="tit-cls" style="color:{{ TIPO_DESPESA_COR[t.tipo_despesa] }}">{{ TIPO_DESPESA_ROTULO[t.tipo_despesa] }}</span>{% endif %}{% set _aj = (ajustes or {}).get(t.id) %}{% if _aj and _aj.tipo == 'abatimento' %} · <span class="selo jur" title="valor combinado: {{ _aj.antes|brl }}">− {{ (_aj.antes - _aj.depois)|brl }} de crédito abatido</span>{% elif _aj and _aj.tipo == 'restante' %} · <span class="selo jur">o que faltou de um recebimento</span>{% endif %}</div>
+      "por que outubro é R$ 1.067 e não R$ 1.142?" não teria resposta na tela. -#}{% if t.tipo_despesa %} · <span class="tit-cls" style="color:{{ TIPO_DESPESA_COR[t.tipo_despesa] }}">{{ TIPO_DESPESA_ROTULO[t.tipo_despesa] }}</span>{% endif %}{% set _aj = (ajustes or {}).get(t.id) %}{% if _aj and _aj.tipo == 'abatimento' %} · <span class="selo jur" title="valor combinado: {{ _aj.antes|brl }}">− {{ (_aj.antes - _aj.depois)|brl }} de crédito abatido</span>{% elif _aj and _aj.tipo == 'restante' %} · <span class="selo jur">o que faltou de um {{ 'pagamento' if t.tipo=='pagar' else 'recebimento' }}</span>{% endif %}</div>
     </div>
     {#- R$ 0,00 seria mentira de dois jeitos: diz que a conta é de graça e some
        na soma da lista. A conta de valor variável (196) nasce sem valor de
@@ -4694,23 +4720,41 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
        campo é editável, inclusive pra zerar quando o fornecedor perdoou. -#}
     {% if t.valor_centavos %}
     <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa" class="tit-baixa"
-          style="display:none" data-base="{{ t.valor_centavos }}"
+          style="display:none" data-base="{{ t.valor_centavos }}" data-tipo="{{ t.tipo }}"
           data-venc="{{ t.vencimento.isoformat() if t.vencimento else '' }}"
           data-multa="{{ MULTA_ATRASO_PCT }}" data-juros="{{ JUROS_MORA_PCT_MES }}"
       {%- if t.tipo=='pagar' and t.aprovacao!='autorizado' %} onsubmit="return confirm('Esta conta {{ 'foi RECUSADA' if t.aprovacao=='recusado' else 'ainda não foi liberada' }} pelo dono. Dar baixa mesmo assim? Fica registrado que ela foi paga sem autorização.')"{% endif %}>
       <label class="tit-bx">{{ 'Paguei em' if t.tipo=='pagar' else 'Recebi em' }}
         <input type="date" name="pago_em" value="{{ hoje_iso }}" oninput="titBaixaConta(this)"></label>
+      {#- QUANTO de fato entrou ou saiu (pedido 9, 23/09/2026 — e a extensão pra
+         pagar, 29/09/2026). Igual à parcela, é a baixa de sempre. Diferente,
+         abre o painel e o gestor escolhe — "sempre pergunta pro gestor": nenhuma
+         opção vem marcada, e sem escolha o servidor recusa (ver
+         finance/recebido_diferente.py). -#}
       {% if t.tipo=='pagar' %}
-      <label class="tit-bx">Multa e juros
-        <input name="acrescimo" inputmode="decimal" placeholder="0,00" oninput="titBaixaConta(this)"
-               title="negativo é desconto: quem pagou adiantado escreve -20,00"></label>
+      {#- PAGAR: sem "abater" (não foi pedido — ver o módulo) e a data da conta
+         que falta é OBRIGATÓRIA e vem em branco: quem sabe quando o resto sai é
+         a combinação com o fornecedor, não uma regra da casa. O valor já nasce
+         preenchido com a sugestão de multa/juros do atraso (cláusula 3.4),
+         recalculada por `titBaixaConta` quando a data muda — mockup
+         docs/mockups/contas_pagar_baixa_parcial.html, aprovado 29/09/2026. -#}
+      <label class="tit-bx">Valor pago
+        <input name="recebido" inputmode="decimal" value="{{ (t.valor_centavos/100)|n2 }}" oninput="titBaixaConta(this)"
+               title="pagou menos que o título? o resto vira uma conta nova, com a data que você escolher"></label>
       <span class="tit-bx-dica"></span>
-      <span class="tit-bx-tot"></span>
+      <div class="tit-dif" style="display:none">
+        <p class="tit-dif-txt"></p>
+        <div class="tit-dif-menos">
+          <label><input type="radio" name="destino" value="restante"><span>ainda falta pagar — nasce uma conta de <b class="tit-dif-val"></b>. Vencimento da sobra:</span></label>
+          <input type="date" name="vencimento_sobra">
+          <span class="mut tit-dif-nota" style="margin-left:1.4rem">em branco de propósito — é você quem combina com o fornecedor quando o resto sai</span>
+          <label><input type="radio" name="destino" value="desconto"><span>foi desconto combinado com o fornecedor</span></label>
+        </div>
+        <div class="tit-dif-mais">
+          <label><input type="radio" name="destino" value="juros"><span>foi multa e juros do atraso</span></label>
+        </div>
+      </div>
       {% else %}
-      {#- CONTA A RECEBER: pergunta QUANTO ENTROU (pedido 9, 23/09/2026). Igual à
-         parcela, é a baixa de sempre. Diferente, abre o painel e o gestor escolhe
-         — "sempre pergunta pro gestor": nenhuma opção vem marcada, e sem escolha
-         o servidor recusa (ver finance/recebido_diferente.py). -#}
       {% set _alv = (alvos_credito or {}).get(t.id) or [] %}
       <label class="tit-bx">Valor recebido
         <input name="recebido" inputmode="decimal" value="{{ (t.valor_centavos/100)|n2 }}" oninput="titRecebido(this)"></label>
@@ -4909,16 +4953,20 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     var aberto = f.style.display === 'flex';
     f.style.display = aberto ? 'none' : 'flex';
     if(!aberto){
-      if(f.querySelector('input[name=acrescimo]')) titBaixaConta(f.querySelector('input[name=pago_em]'));
+      if(f.dataset.tipo === 'pagar') titBaixaConta(f.querySelector('input[name=pago_em]'));
       else titRecebido(f.querySelector('input[name=recebido]'));
     }
   }
-  // O PAINEL DA DIFERENÇA (pedido 9). Só abre quando o que entrou não é a
-  // parcela, e mostra só o lado que vale: a menos (restante ou desconto) ou a
-  // mais (abater ou juros). A escolha que ficou do outro lado é desmarcada —
-  // senão um "abater" esquecido iria junto com um valor a menos.
+  // O PAINEL DA DIFERENÇA (pedido 9, e a extensão pra pagar em 29/09/2026). Só
+  // abre quando o que entrou/saiu não é a parcela, e mostra só o lado que vale:
+  // a menos (restante ou desconto) ou a mais (abater — só receber — ou juros).
+  // A escolha que ficou do outro lado é desmarcada — senão um "abater"
+  // esquecido iria junto com um valor a menos. Serve as DUAS telas (receber
+  // chama direto no oninput; pagar chama no fim de `titBaixaConta`, depois de
+  // preencher a sugestão de multa/juros).
   function titRecebido(el){
     var f = el && el.closest('.tit-baixa'); if(!f) return;
+    var pagar = f.dataset.tipo === 'pagar';
     var base = parseInt(f.dataset.base, 10) || 0;
     var rec = Math.round(parseFloat((el.value || '0').replace(/\\./g,'').replace(',','.')) * 100) || 0;
     var dif = rec - base, box = f.querySelector('.tit-dif');
@@ -4927,7 +4975,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     if(!rec || !dif){
       box.style.display = 'none';
       f.querySelectorAll('input[name=destino]').forEach(function(r){ r.checked = false; });
-      dica.textContent = rec ? '' : 'Diga quanto entrou.';
+      dica.textContent = rec ? '' : (pagar ? 'Diga quanto você pagou.' : 'Diga quanto entrou.');
       return;
     }
     box.style.display = 'flex';
@@ -4936,8 +4984,11 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     f.querySelector('.tit-dif-mais').style.display = menos ? 'none' : 'flex';
     f.querySelectorAll('.tit-dif-' + (menos ? 'mais' : 'menos') + ' input[name=destino]')
      .forEach(function(r){ r.checked = false; });
-    f.querySelector('.tit-dif-txt').innerHTML = 'Entraram <b>' + titBrl(Math.abs(dif))
-      + (menos ? ' a menos' : ' a mais') + '</b> que a parcela. O que faço com a diferença?';
+    f.querySelector('.tit-dif-txt').innerHTML = (pagar
+        ? (menos ? 'Faltaram <b>' + titBrl(Math.abs(dif)) + '</b>'
+                 : 'Você pagou <b>' + titBrl(Math.abs(dif)) + ' a mais</b>')
+        : 'Entraram <b>' + titBrl(Math.abs(dif)) + (menos ? ' a menos' : ' a mais') + '</b> que a parcela')
+      + '. O que faço com a diferença?';
     f.querySelector('.tit-dif-val').textContent = titBrl(Math.abs(dif));
     dica.textContent = '';
   }
@@ -4954,10 +5005,11 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   // o boleto atualizado manda, a sugestão é só o primeiro palpite.
   function titBaixaConta(el){
     var f = el && el.closest('.tit-baixa'); if(!f) return;
+    if(f.dataset.tipo !== 'pagar') return;   // a sugestão de multa/juros é só de pagar
     var base = parseInt(f.dataset.base, 10) || 0;
     var venc = f.dataset.venc;
-    var campo = f.querySelector('input[name=acrescimo]');
-    if(!campo) return;   // conta a receber: quem fala é o "valor recebido"
+    var campo = f.querySelector('input[name=recebido]');
+    if(!campo) return;
     var quando = f.querySelector('input[name=pago_em]').value;
     var dias = 0;
     if(venc && quando){
@@ -4970,16 +5022,16 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     }
     if(el === campo) campo.dataset.tocado = '1';
     if(!campo.dataset.tocado){
-      campo.value = (multa + juros) ? ((multa + juros)/100).toFixed(2).replace('.', ',') : '';
+      campo.value = ((base + multa + juros)/100).toFixed(2).replace('.', ',');
     }
-    var acr = Math.round(parseFloat((campo.value || '0').replace(/\\./g,'').replace(',','.')) * 100) || 0;
     f.querySelector('.tit-bx-dica').textContent = dias > 0
       ? ('Sugerido pela regra da casa: ' + dias + ' dia(s) de atraso — multa '
-         + titBrl(multa) + ' + juros ' + titBrl(juros) + '. Troque pelo que o boleto cobrou.')
+         + titBrl(multa) + ' + juros ' + titBrl(juros) + '. Editável: o boleto atualizado manda.')
       : (dias < 0
-         ? ('Pagando ' + (-dias) + ' dia(s) antes do vencimento. Boleto com desconto? Escreva negativo: -20,00')
+         ? ('Pagando ' + (-dias) + ' dia(s) antes do vencimento. Boleto com desconto? Edite o valor pago.')
          : 'No prazo — sem multa nem juros.');
-    f.querySelector('.tit-bx-tot').textContent = 'Total ' + titBrl(base + acr);
+    // reaplica o painel de diferença com o valor (sugerido ou digitado)
+    titRecebido(campo);
   }
   // Pergunta antes de gravar, pra quem usa `data-confirmar`. Delegado no
   // documento porque os formulários nascem linha a linha.
@@ -5150,8 +5202,10 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
 <div class="emp-par{% if not (quadro_tipo and quadro_tipo|selectattr('total')|list) %} so-um{% endif %}">
 <div class="emp-col">
 <div class="card larga" id="dre">
-  <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
-    <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem"><strong>DRE do mês</strong>
+    <select onchange="location.href='/painel/empresa?mes='+this.value+'#dre'" style="font-size:.78rem;padding:.25rem .5rem;border-radius:6px;background:var(--card-2);color:var(--txt);border:1px solid var(--borda)">
+      {% for v, rotulo in meses_dre %}<option value="{{ v }}" {% if v==mes_dre_sel %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+    </select></div>
   {% if dre.estrutura and dre.estrutura.linhas %}
   <table class="dre-tbl" style="width:100%;margin-top:.6rem;font-size:.86rem">
     {% for l in dre.estrutura.linhas %}
@@ -5192,7 +5246,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   </div>
   {% endif %}
 
-  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
+  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a> · <a href="/painel/empresa/dre.pdf?ano={{ dre.ano }}&mes={{ dre.mes }}" target="_blank" style="color:var(--verde-claro)">baixar PDF ↓</a></div>
 </div>
 
 {% if a_classificar %}
@@ -8509,6 +8563,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("hoje", "/painel/hoje"),
                  ("clinica", "/painel/clinica"),
                  ("obras", "/painel/obras"),
+                 ("estandes", "/painel/eventos/estandes"),
                  ("follow_up", "/painel/follow-up"),
                  ("novidades", "/painel/novidades"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
@@ -8576,6 +8631,21 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             from finance import follow_up as _fu
             ctx["tem_follow_up"] = bool(
                 ctx.get("raio_x_perfil") and ctx["raio_x_perfil"]["chave"] in _fu.PERFIS_COM_TELA)
+        # Estandes de feira (finance/evento_stands, migração 448) é opt-in DENTRO
+        # do nicho 'eventos' — Prime Eventos (conta 34) não vende estande, só a
+        # Outlet Chic (conta 40) por enquanto. Por isso o gate não é
+        # `raio_x_perfil.chave == 'eventos'` (apareceria pra quem não usa a
+        # feature, como Obras faria pra quem não é construção) — é a config
+        # existir de verdade. Sem este item o painel existia mas não tinha como
+        # chegar nele sem colar a URL (achado do dono, 29/09/2026).
+        if "tem_estandes" not in ctx:
+            ctx["tem_estandes"] = False
+            if ctx.get("raio_x_perfil") and ctx["raio_x_perfil"]["chave"] == "eventos":
+                try:
+                    from finance import evento_stands as _es
+                    ctx["tem_estandes"] = bool(_es.obter_config(get_pool(), _c[0]))
+                except Exception:
+                    pass
     if "beta_gratis" not in ctx:
         try:
             from finance import config_app as _cfg
@@ -11157,13 +11227,11 @@ async def painel_produtos_vender(request: Request):
 
 @router.get("/painel/clientes", response_class=HTMLResponse)
 def painel_clientes(request: Request, busca: str = "", papel: str = ""):
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     papel_filtro = papel if papel in ("cliente", "fornecedor") else ""
     lista = cli.listar_clientes(pool, conta[0], busca=busca or None, papel=papel_filtro or None)
     total = cli.contar_clientes(pool, conta[0])
@@ -11182,8 +11250,10 @@ def painel_clientes(request: Request, busca: str = "", papel: str = ""):
     # papel do OPERADOR logado (ver comentario no template, na aba Clientes) —
     # setar `papel=` aqui via ctx pisaria nele e o menu sumiria pra quem entrar
     # com filtro na URL.
+    from finance import evento_stands as _es
     return _render("clientes", request, conta=conta, clientes=lista, total=total,
                    busca=busca or "", papel_filtro=papel_filtro, dup_n=dup_n,
+                   estande=_es.app_de_stands(pool, conta[0]),
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -11208,16 +11278,15 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
                          obs: str = Form(""), cidade: str = Form(""),
                          uf: str = Form(""), endereco: str = Form(""),
                          cep: str = Form(""),
+                         razao_social: str = Form(""), representante: str = Form(""),
                          eh_cliente: str = Form(""), eh_fornecedor: str = Form("")):
-    from finance import empresa as emp, clientes as cli, validadoc
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli, validadoc
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     tipo, d = validadoc.classificar(documento or cpf)
-    kw = {}
+    kw = {"razao_social": (razao_social or None), "representante": (representante or None)}
     if tipo == "pf":
         kw["cpf"] = d
     elif tipo == "pj":
@@ -11244,13 +11313,11 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
 
 @router.get("/painel/clientes/buscar")
 def painel_clientes_buscar(request: Request, q: str = ""):
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return JSONResponse({"clientes": []}, status_code=401)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request)
+    if not g:
         return JSONResponse({"clientes": []}, status_code=403)
+    conta, pool = g
     q = (q or "").strip()
     if len(q) < 2:
         return JSONResponse({"clientes": []})
@@ -11265,13 +11332,11 @@ def painel_clientes_buscar(request: Request, q: str = ""):
 @router.get("/painel/clientes/consulta-cnpj")
 def painel_clientes_consulta_cnpj(request: Request, doc: str = ""):
     """Consulta um CNPJ na Receita (BrasilAPI) pra preencher o cadastro."""
-    from finance import empresa as emp, validadoc, cnpj_info
-    conta = conta_logada(request)
-    if conta is None:
-        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import validadoc, cnpj_info
+    g = _guard_clientes(request)
+    if not g:
         return JSONResponse({"ok": False, "erro": "sem acesso"}, status_code=403)
+    conta, pool = g
     ok, tipo, d = validadoc.valida(doc)
     if tipo != "pj" or not ok:
         return JSONResponse({"ok": False, "erro": "CNPJ invalido"})
@@ -11394,13 +11459,11 @@ def painel_clientes_dup_desfazer(request: Request, fusao_id: int = Form(...)):
 
 @router.get("/painel/clientes/{cliente_id}", response_class=HTMLResponse)
 def painel_cliente_detalhe(request: Request, cliente_id: int):
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     cl = cli.obter_cliente(pool, conta[0], cliente_id)
     if cl is None:
         request.session["erro"] = "Cliente nao encontrado."
@@ -11441,7 +11504,9 @@ def painel_cliente_detalhe(request: Request, cliente_id: int):
                            "left join nichos n on n.id=ct.nicho_id where ct.id=%s",
                            (conta[0],)).fetchone()
     rotulo_receber = _nichos.rotulo_receber(_ns[0] if _ns else "")
+    from finance import evento_stands as _es
     return _render("cliente_detalhe", request, conta=conta, cliente=cl,
+                   estande=_es.app_de_stands(pool, conta[0]),
                    compras=compras, resumo=resumo, fiados=fiados, fiado_total=fiado_total,
                    rotulo_receber=rotulo_receber,
                    erro=request.session.pop("erro", None),
@@ -11456,20 +11521,26 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
                           obs: str = Form(""), cidade: str = Form(""),
                           uf: str = Form(""), endereco: str = Form(""),
                           cep: str = Form(""),
+                          razao_social: str | None = Form(None),
+                          representante: str | None = Form(None),
                           eh_cliente: str = Form(""), eh_fornecedor: str = Form("")):
-    from finance import empresa as emp, clientes as cli, validadoc
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli, validadoc
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     campos = {"telefone": telefone, "email": email,
               "aniversario": aniversario, "obs": obs,
               "cidade": cidade, "uf": uf, "endereco": endereco, "cep": cep,
               "eh_cliente": bool(eh_cliente), "eh_fornecedor": bool(eh_fornecedor)}
     if (nome or "").strip():
         campos["nome"] = nome
+    # só quando o formulário trouxe o campo: outros formulários que postam aqui
+    # (ficha do cliente de serviço) não podem apagar o que não mostram
+    if razao_social is not None:
+        campos["razao_social"] = razao_social
+    if representante is not None:
+        campos["representante"] = representante
     tipo, d = validadoc.classificar(documento or cpf)
     if tipo == "pf":
         campos["cpf"] = d
@@ -11486,13 +11557,11 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
 @router.get("/painel/clientes/{cliente_id}/historico")
 def painel_cliente_historico(request: Request, cliente_id: int):
     """Vendas e servicos do cliente (JSON) — carregado ao expandir a linha."""
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return JSONResponse({"itens": []}, status_code=401)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request)
+    if not g:
         return JSONResponse({"itens": []}, status_code=403)
+    conta, pool = g
     hist = cli.historico_cliente(pool, conta[0], cliente_id)
     itens = [{"descricao": h["descricao"] or "Venda",
               "data": str(h["data"]) if h["data"] else "",
@@ -11506,13 +11575,11 @@ def painel_cliente_historico(request: Request, cliente_id: int):
 async def painel_cliente_whatsapp(request: Request, cliente_id: int):
     """Envia uma saudacao pelo WhatsApp do sistema (canais_config, provedor cloud).
     Se nao houver WhatsApp conectado, orienta usar o 'Abrir no WhatsApp'."""
-    from finance import empresa as emp, clientes as cli, whatsapp_cloud as wac
-    conta = conta_logada(request)
-    if conta is None:
-        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli, whatsapp_cloud as wac
+    g = _guard_clientes(request)
+    if not g:
         return JSONResponse({"ok": False, "erro": "sem acesso"}, status_code=403)
+    conta, pool = g
     cl = cli.obter_cliente(pool, conta[0], cliente_id)
     if not cl or not cl.get("telefone"):
         return JSONResponse({"ok": False, "erro": "cliente sem telefone"})
@@ -11547,13 +11614,11 @@ async def painel_cliente_whatsapp(request: Request, cliente_id: int):
 
 @router.post("/painel/clientes/{cliente_id}/arquivar")
 def painel_cliente_arquivar(request: Request, cliente_id: int):
-    from finance import empresa as emp, clientes as cli
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    from finance import clientes as cli
+    g = _guard_clientes(request, so_dono_gestor=True)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     cli.arquivar_cliente(pool, conta[0], cliente_id)
     request.session["aviso"] = "Cliente arquivado."
     return RedirectResponse("/painel/clientes", status_code=303)
@@ -11625,12 +11690,10 @@ def painel_pdv(request: Request, add: int = 0):
 @router.post("/painel/clientes/{cliente_id}/fiado/{titulo_id}/baixar")
 def painel_cliente_fiado_baixar(request: Request, cliente_id: int, titulo_id: int):
     from finance import empresa as emp
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    g = _guard_clientes(request, so_dono_gestor=True)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     try:
         emp.dar_baixa_titulo(pool, conta[0], titulo_id)
         request.session["aviso"] = "Fiado recebido — lancado no caixa."
@@ -11642,12 +11705,10 @@ def painel_cliente_fiado_baixar(request: Request, cliente_id: int, titulo_id: in
 @router.post("/painel/clientes/{cliente_id}/fiado/{titulo_id}/cobrar")
 def painel_cliente_fiado_cobrar(request: Request, cliente_id: int, titulo_id: int):
     from finance import empresa as emp
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    pool = get_pool()
-    if not emp.acesso_pj(pool, conta[0]):
+    g = _guard_clientes(request)
+    if not g:
         return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
     tits = {t["id"]: t for t in emp.listar_titulos(pool, conta[0], status="aberto")}
     t = tits.get(titulo_id)
     if t and t["tipo"] == "receber":
@@ -11806,7 +11867,7 @@ def _empresa_resumo(titulos: list[dict], planej: dict | None, dre: dict,
 
 
 @router.get("/painel/empresa", response_class=HTMLResponse)
-def painel_empresa(request: Request):
+def painel_empresa(request: Request, mes: str = ""):
     """Visão geral do módulo Empresa (PJ). Só pra conta com o módulo ativo."""
     from finance import empresa as emp
     conta = conta_logada(request)
@@ -11823,12 +11884,33 @@ def painel_empresa(request: Request):
                        nichos_lista=_nichos.lista_nichos(), eh_fornecedor=bool(conta[8]),
                        identidade=emp.obter_identidade(pool, conta[0]), margem_alvo=60.0)
     hoje = _date.today()
+    # O SELETOR DE MÊS DO DRE (pedido do dono em 29/09/2026, depois da Iris
+    # reparar que só dava pra ver o mês atual): só o card do DRE (e o "ver por
+    # centro de custo" dentro dele) olha pro mês escolhido — o resto da aba
+    # (títulos, folha, planejamento, "a classificar"...) é trabalho do MÊS
+    # ATUAL de verdade, e continua em `hoje`. Mesmo padrão de `?mes=AAAA-MM`
+    # que a aba Financeiro já usa.
+    try:
+        ano_dre, mes_dre = (int(x) for x in mes.split("-")) if mes else (hoje.year, hoje.month)
+    except ValueError:
+        ano_dre, mes_dre = hoje.year, hoje.month
+    mes_dre_sel = f"{ano_dre:04d}-{mes_dre:02d}"
+    _nomes_mes = ["jan", "fev", "mar", "abr", "mai", "jun",
+                 "jul", "ago", "set", "out", "nov", "dez"]
+    meses_dre = []
+    _y, _m = hoje.year, hoje.month
+    for _ in range(6):
+        meses_dre.append((f"{_y:04d}-{_m:02d}", f"{_nomes_mes[_m-1]}/{_y}"))
+        _m -= 1
+        if _m == 0:
+            _m = 12
+            _y -= 1
     # Só o DRE, não o dashboard inteiro. Esta tela já mostrou o bloco "Visão do negócio"
     # do /painel no topo — duplicata da mesma tela — e junto vinha o custo do
     # _painel_dashboard completo (resumo de títulos, fluxo de 4 semanas, MRR e a query do
     # funil de orçamentos) só pra aproveitar o `dre` de dentro dele. Sem o bloco, o resto
     # não tem consumidor: o único que a Empresa usa é este.
-    dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
+    dre = emp.dre_mes(pool, conta[0], ano_dre, mes_dre)
     # Plano de contas (árvore + liga/desliga), centros de custo e DRE por centro.
     # Tolerante: se a migração 132 ainda não rodou, as seções ficam vazias.
     from finance import plano_contas as _pc
@@ -11836,7 +11918,7 @@ def painel_empresa(request: Request):
     try:
         plano_arvore = _pc.arvore_habilitada(pool, conta[0])
         centros = _pc.listar_centros(pool, conta[0], incluir_inativos=True)
-        dre_centro = emp.dre_por_centro(pool, conta[0], hoje.year, hoje.month)
+        dre_centro = emp.dre_por_centro(pool, conta[0], ano_dre, mes_dre)
         # Painel "A classificar": lançamentos de empresa do mês sem conta contábil,
         # com as opções (contas habilitadas + centros ativos) pra resolver ali.
         a_classificar = LivroCaixa(pool, conta[0]).lancamentos_a_classificar(
@@ -12011,7 +12093,8 @@ def painel_empresa(request: Request):
                    # divide espaço com "aguardando você" e o nome do fornecedor.
                    RITMO_SELO={"quinzenal": "quinzenal", "mensal": "mensal",
                                "anual": "anual"},
-                   dre=dre, titulos=titulos, tit_blocos=tit_blocos,
+                   dre=dre, mes_dre_sel=mes_dre_sel, meses_dre=meses_dre,
+                   titulos=titulos, tit_blocos=tit_blocos,
                    tit_atrasadas=tit_atrasadas, planej=planej,
                    CAT_TITULO={"pagar": emp.categorias_titulo("pagar"),
                                "receber": emp.categorias_titulo("receber")},
@@ -12486,6 +12569,37 @@ def _guard_pj(request: Request):
     return conta, pool
 
 
+def _guard_clientes(request: Request, so_dono_gestor: bool = False):
+    """Clientes/Fornecedores: liberada pro vendedor (29/09/2026, pedido do dono),
+    igual em todo nicho — MENOS Clínica, onde esta mesma aba vira só
+    Fornecedores (paciente de verdade mora em Pacientes) e fornecedor é decisão
+    de compra, não de atendimento: ali continua só dono/gestor.
+
+    `so_dono_gestor=True` é pra ação mais sensível (arquivar, duplicados, dar
+    baixa no fiado — lança no caixa) — essas seguem a régua de sempre deste
+    app: financeiro é de quem manda na conta, vendedor não abre.
+
+    Retorna (conta, pool) ou None (sem acesso — o caller manda pra /painel)."""
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return None
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return None
+    papel = request.session.get("papel", "dono")
+    if papel not in ("dono", "gestor"):
+        from contas import equipe as _eq
+        if not _eq.caps_do_papel(papel)["vendas"]:
+            return None
+        if so_dono_gestor:
+            return None
+        from finance import raio_x_perfil as rxp
+        if rxp.perfil_por_nicho(nicho_da_conta(conta)) == "clinica":
+            return None
+    return conta, pool
+
+
 @router.post("/painel/empresa/titulo")
 def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                          descricao: str = Form(""), valor: str = Form(""),
@@ -12701,7 +12815,7 @@ def empresa_centro_desativar(request: Request, centro_id: int, ativo: str = Form
 def empresa_titulo_baixa(request: Request, titulo_id: int,
                          pago_em: str = Form(""), acrescimo: str = Form(""),
                          recebido: str = Form(""), destino: str = Form(""),
-                         alvo_id: str = Form("")):
+                         alvo_id: str = Form(""), vencimento_sobra: str = Form("")):
     """Fecha a conta e lança no caixa. Agora com a DATA e o ACRÉSCIMO (197).
 
     Os dois são opcionais de propósito: formulário antigo, link salvo ou chamada
@@ -12709,6 +12823,10 @@ def empresa_titulo_baixa(request: Request, titulo_id: int,
 
     `acrescimo` aceita NEGATIVO (desconto por antecipação), e é por isso que ele
     não passa por `_reais_para_centavos`, que descarta o sinal.
+
+    `vencimento_sobra` só é lida quando sobra valor num título a PAGAR — a tela
+    manda em branco de propósito (ver finance/recebido_diferente.py), e sem ela
+    `rd.baixar` recusa.
     """
     from finance import empresa as emp
     g = _guard_pj(request)
@@ -12724,17 +12842,24 @@ def empresa_titulo_baixa(request: Request, titulo_id: int,
                                  membro_id=request.session.get("membro_id"),
                                  acrescimo_centavos=_acrescimo_para_centavos(acrescimo))
     else:
-        # CONTA A RECEBER: o formulário diz quanto ENTROU, e a diferença (se
-        # houver) vai pra onde o gestor escolheu — pedido 9, 23/09/2026. Sem
-        # escolha, `baixar` recusa e nada muda.
+        # O formulário diz quanto DE FATO entrou (receber) ou foi pago (pagar), e
+        # a diferença (se houver) vai pra onde o gestor escolheu — pedido 9,
+        # 23/09/2026, estendido pra pagar em 29/09/2026. Sem escolha, `baixar`
+        # recusa e nada muda.
         from finance import recebido_diferente as rd
+        try:
+            venc_sobra = _date.fromisoformat(vencimento_sobra) if vencimento_sobra.strip() else None
+        except ValueError:
+            venc_sobra = None
         r = rd.baixar(pool, conta[0], titulo_id, _reais_para_centavos(recebido),
                       destino=(destino or "").strip(),
                       alvo_id=int(alvo_id) if alvo_id.strip().isdigit() else None,
-                      data_pagto=quando, membro_id=request.session.get("membro_id"))
+                      data_pagto=quando, membro_id=request.session.get("membro_id"),
+                      vencimento_sobra=venc_sobra)
         if r.get("ok") and r.get("restante_id"):
-            request.session["emp_aviso"] = ("Baixa feita. O que faltou virou uma conta "
-                                            "nova, no mesmo vencimento — está na lista.")
+            request.session["emp_aviso"] = ("Baixa feita. O que faltou virou uma conta nova, "
+                "com o vencimento que você escolheu — está na lista." if r.get("tipo") == "pagar"
+                else "Baixa feita. O que faltou virou uma conta nova, no mesmo vencimento — está na lista.")
     if not r.get("ok"):
         request.session["emp_aviso"] = r.get("erro") or "Não consegui dar baixa."
         return RedirectResponse("/painel/empresa#titulos", status_code=303)
@@ -13253,6 +13378,24 @@ def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
     csv = emp.csv_contador(pool, conta[0], ano, mes)
     return HTMLResponse(csv, media_type="text/csv; charset=utf-8", headers={
         "Content-Disposition": f'attachment; filename="empresa_{ano}_{mes:02d}.csv"'})
+
+
+@router.get("/painel/empresa/dre.pdf")
+def empresa_dre_pdf(request: Request, ano: int = 0, mes: int = 0):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    hoje = _date.today()
+    ano = ano or hoje.year
+    mes = mes if 1 <= mes <= 12 else hoje.month
+    pdf = emp.dre_pdf(pool, conta[0], ano, mes, conta[2])
+    if pdf is None:
+        return RedirectResponse("/painel/empresa", status_code=303)
+    return Response(pdf, media_type="application/pdf", headers={
+        "Cache-Control": "no-store, max-age=0", "Content-Security-Policy": "sandbox",
+        "Content-Disposition": f'inline; filename="dre_{ano}_{mes:02d}.pdf"'})
 
 
 

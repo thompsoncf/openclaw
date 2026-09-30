@@ -571,7 +571,15 @@ _CAMPOS_SERVICO = [
 _ROTULO = {**dict(_CAMPOS_SERVICO), **dict(_CAMPOS_FIXOS)}
 
 
-def campos_disponiveis(catalogo=None, modo: str = MODO_LOCACAO) -> list[dict]:
+#: campos que só o contrato de ESTANDE usa (Outlet Chic): a paleta dos outros donos
+#: não os mostra
+CAMPOS_SO_ESTANDE = frozenset({
+    "evento.periodo", "evento.horario", "cliente.representante",
+    "objeto.descricao", "valor.saldo_ate"})
+
+
+def campos_disponiveis(catalogo=None, modo: str = MODO_LOCACAO,
+                       com_estande: bool = False) -> list[dict]:
     """A paleta de campos que a tela do dono mostra, na ordem em que ele pensa.
 
     Os {preco.*} são gerados a partir do catálogo REAL da conta — é assim que ele
@@ -582,7 +590,8 @@ def campos_disponiveis(catalogo=None, modo: str = MODO_LOCACAO) -> list[dict]:
     ({valor.itens}, {valor.setup}, {valor.mensal}), que é o que o cliente aprovou."""
     if modo == MODO_SERVICO:
         return [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in _CAMPOS_SERVICO]
-    saida = [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in _CAMPOS_FIXOS]
+    saida = [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in _CAMPOS_FIXOS
+             if com_estande or c not in CAMPOS_SO_ESTANDE]
     for s in (catalogo or []):
         if s.get("slug"):
             saida.append({"campo": f"preco.{s['slug']}",

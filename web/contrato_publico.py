@@ -535,6 +535,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         <div class="parte">
           <div class="p">{{ 'Contratada (prestadora)' if d.servico else 'Contratada (locadora)' }}</div>
           <b>{{ d.contratada.nome }}</b>
+          {% if d.espaco and d.contratada.fantasia and d.contratada.fantasia != d.contratada.nome %}<small>{{ d.contratada.fantasia }}</small>{% endif %}
           {% if d.contratada.doc %}<small>CNPJ {{ d.contratada.doc }}</small>{% endif %}
           {% if d.contratada.endereco %}<small>{{ d.contratada.endereco }}</small>{% endif %}
           {% if d.contratada.contato %}<small>{{ d.contratada.contato }}</small>{% endif %}

@@ -169,7 +169,7 @@ def test_o_contrato_recebe_o_objeto_o_periodo_e_o_representante():
     assert ctr.contexto(orcamento={"evento": {"data": "2026-11-13"}})["evento"]["periodo"] \
         == "13/11/2026"
     # e os campos aparecem na paleta que o dono vê
-    campos = {c["campo"] for c in ctr.campos_disponiveis()}
+    campos = {c["campo"] for c in ctr.campos_disponiveis(com_estande=True)}
     assert {"objeto.descricao", "evento.periodo", "cliente.representante"} <= campos
 
 
@@ -690,3 +690,96 @@ def test_a_pagina_publica_recusa_sinal_baixo_e_aceita_2_estandes(pool, conta_id,
                                          "86988887777", "", pdf, "application/pdf", "",
                                          "1500")
     assert "msg=erro_empresa" in r.headers["location"]
+
+
+# ------------------------- o app do Outlet Chic é separado do app da Prime
+
+def _aplica_453(pool):
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    with pool.connection() as c:
+        c.execute("alter table contas add column if not exists nome_fantasia text")
+        c.execute("alter table contas add column if not exists documento text")
+        c.execute((base / "453_conta_app_perfil.sql").read_text(encoding="utf-8"))
+        c.commit()
+
+
+def _conta_com_cnpj(pool, nome, cnpj):
+    with pool.connection() as c:
+        cid = c.execute("insert into contas (tipo, nome, documento) values ('pj',%s,%s) "
+                        "returning id", (nome, cnpj)).fetchone()[0]
+        c.commit()
+    return cid
+
+
+def test_so_a_conta_do_cnpj_do_outlet_chic_ganha_o_perfil_de_estandes(pool):
+    _aplica_453(pool)
+    outlet = _conta_com_cnpj(pool, "M.R. Rocha Aurélio", "30.961.685/0001-01")
+    prime = _conta_com_cnpj(pool, "Prime Eventos", "11.222.333/0001-81")
+    # a migração roda de novo no deploy seguinte: não muda quem já tem o perfil
+    _aplica_453(pool)
+    assert es.app_de_stands(pool, outlet) is True
+    assert es.app_de_stands(pool, prime) is False
+    with pool.connection() as c:
+        fant = dict(c.execute("select id, nome_fantasia from contas where id = any(%s)",
+                              ([outlet, prime],)).fetchall())
+    assert fant[outlet] == "OUTLET CHIC" and fant[prime] is None
+
+
+def test_abas_e_inicio_do_app_do_vendedor_so_mudam_no_outlet_chic(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    _aplica_453(pool)
+    outlet = _conta_com_cnpj(pool, "Outlet", "30961685000101")
+    prime = _conta_com_cnpj(pool, "Prime", "99.888.777/0001-66")
+    _aplica_453(pool)                                      # o deploy marca quem já existe
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_ligar_voc", lambda cid: None)
+
+    def rotulos(html):
+        import re
+        return re.findall(r"<span>([^<]+)</span></a>", html)
+
+    assert rotulos(pc._abas_vend("fila", 0, 0, 0, conta_id=outlet)) == \
+        ["Stands", "Minhas vendas", "Perfil"]
+    assert rotulos(pc._abas_vend("fila", 0, 0, 0, conta_id=prime)) == \
+        ["Fila", "Agenda", "Propostas", "Raio-X", "Perfil"]
+    assert rotulos(pc._abas_vend("fila", 0, 0, 0)) == \
+        ["Fila", "Agenda", "Propostas", "Raio-X", "Perfil"]
+
+    # o início: o vendedor do Outlet Chic cai no mapa; o da Prime, na fila de sempre
+    monkeypatch.setattr(pc, "_gerencia", lambda r: None)
+    chamou = []
+    monkeypatch.setattr(pc, "_fila", lambda *a, **k: chamou.append(a[1]) or "FILA")
+    monkeypatch.setattr(pc, "_sessao", lambda r: (outlet, 1))
+    r = pc.cockpit_inicio(_Req())
+    assert r.status_code == 303 and r.headers["location"].endswith("/cockpit/stands")
+    assert chamou == []
+    monkeypatch.setattr(pc, "_sessao", lambda r: (prime, 1))
+    assert pc.cockpit_inicio(_Req()) == "FILA" and chamou == [prime]
+
+
+def test_os_campos_do_contrato_de_estande_so_aparecem_pra_quem_tem_o_perfil():
+    from finance import contrato as ctr
+    de_estande = {"objeto.descricao", "evento.horario", "valor.saldo_ate",
+                  "cliente.representante", "evento.periodo"}
+    normal = {c["campo"] for c in ctr.campos_disponiveis()}
+    assert not (de_estande & normal)                       # a paleta da Prime não muda
+    assert de_estande <= {c["campo"] for c in ctr.campos_disponiveis(com_estande=True)}
+
+
+def test_minhas_vendas_mostra_so_as_do_vendedor_agrupadas(pool, conta_id, monkeypatch):
+    import re
+    carla, rui = _membro(pool, conta_id, "Carla"), _membro(pool, conta_id, "Rui")
+    _config_evento(pool, conta_id)
+    for cod in ("G60", "G61", "G62"):
+        _criar_stand(pool, conta_id, cod)
+    _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    _dono_da_venda(pool, conta_id, "G60", carla)
+    _reservar(pool, conta_id, monkeypatch, ["G62"], sinal=150000, zap="86977776666",
+              nome="Casa Bela")
+    _dono_da_venda(pool, conta_id, "G62", rui)
+    pc, req = _cockpit(pool, conta_id, monkeypatch, carla)
+    html = pc.cockpit_stands_vendas(req).body.decode("utf-8")
+    assert html.count("class=cvd") == 1                    # os 2 stands dela = 1 cartão
+    assert "G60 + G61" in html and "Boutique Nova Era" in html
+    assert "num contrato só" in html and "Aguardando a gestão confirmar o sinal" in html
+    assert "Casa Bela" not in html                         # a venda do colega não aparece

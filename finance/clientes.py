@@ -367,13 +367,23 @@ def listar_clientes(pool, dono_id: int, busca: str | None = None,
         sql += " and c.eh_fornecedor"
     if busca and busca.strip():
         termo = f"%{busca.strip()}%"
-        dig = _so_digitos(busca) or ""
-        termo_dig = f"%{dig}%"
-        sql += (" and (coalesce(p.nome,c.nome) ilike %s"
-                " or coalesce(p.celular,c.telefone,'') like %s"
-                " or coalesce(p.cpf,'') like %s"
-                " or coalesce(p.cnpj,'') like %s)")
-        params += [termo, termo_dig, termo_dig, termo_dig]
+        dig = _so_digitos(busca)
+        # SÓ ENTRA NO OR quem tem dígito de verdade pra casar. Com `dig=""` (nome
+        # sem nenhum número) o padrão virava "%%" — que bate com QUALQUER coisa,
+        # inclusive telefone/cpf/cnpj nulos (coalesce vira '', e '' like '%%' é
+        # verdadeiro) — e a busca por nome devolvia a base inteira, sem filtrar
+        # nada. Relatado em produção em 30/09/2026 (a Crislane não aparecia numa
+        # busca *diferente*, mas foi testando o conserto que este saiu).
+        condicoes = ["coalesce(p.nome,c.nome) ilike %s"]
+        valores = [termo]
+        if dig:
+            termo_dig = f"%{dig}%"
+            condicoes += ["coalesce(p.celular,c.telefone,'') like %s",
+                         "coalesce(p.cpf,'') like %s",
+                         "coalesce(p.cnpj,'') like %s"]
+            valores += [termo_dig, termo_dig, termo_dig]
+        sql += " and (" + " or ".join(condicoes) + ")"
+        params += valores
     sql += " order by coalesce(p.nome, c.nome) limit %s"
     params.append(limite)
     with pool.connection() as c:

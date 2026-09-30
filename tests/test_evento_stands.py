@@ -314,3 +314,70 @@ def test_nao_mexe_em_livre_nem_vendido(pool, conta_id):
     _criar_stand(pool, conta_id, "G58", status="livre")
     _criar_stand(pool, conta_id, "S103", status="vendido")
     assert es.expirar_pre_reservas(pool, agora) == []
+
+
+# ------------------------------------------- link de vendas do vendedor (?v=)
+# O cliente do vendedor abre a página pública com o código dele; a venda que
+# sair dali cai na conta do vendedor. A URL é entrada não confiável: o código
+# é ASSINADO e só vale pra membro ATIVO da MESMA conta.
+
+def _membro(pool, conta_id, nome, papel="vendedor", ativo=True):
+    with pool.connection() as c:
+        # a base mínima do teste limita `papel` a dono/membro; produção já
+        # ganhou 'vendedor'/'gestor' por migração — relaxa aqui como lá
+        c.execute("alter table membros drop constraint if exists membros_papel_check")
+        mid = c.execute(
+            "insert into membros (conta_id, nome, papel, ativo) values (%s,%s,%s,%s) "
+            "returning id", (conta_id, nome, papel, ativo)).fetchone()[0]
+        c.commit()
+    return mid
+
+
+def test_codigo_do_vendedor_resolve_o_membro(pool, conta_id):
+    mid = _membro(pool, conta_id, "Fátima")
+    v = es.vendedor_do_codigo(pool, conta_id, es.codigo_vendedor(mid))
+    assert v == {"id": mid, "nome": "Fátima"}
+
+
+def test_gestor_tambem_tem_link_de_vendas(pool, conta_id):
+    mid = _membro(pool, conta_id, "Marister", papel="gestor")
+    assert es.vendedor_do_codigo(pool, conta_id, es.codigo_vendedor(mid))["id"] == mid
+
+
+def test_codigo_forjado_ou_adulterado_nao_vale(pool, conta_id):
+    mid = _membro(pool, conta_id, "Fátima")
+    outro = _membro(pool, conta_id, "Rival")
+    # o id CRU (o que a versão anterior aceitava) não passa mais
+    assert es.vendedor_do_codigo(pool, conta_id, str(mid)) is None
+    # trocar o id mantendo a assinatura do outro
+    assinatura = es.codigo_vendedor(mid).split("-", 1)[1]
+    assert es.vendedor_do_codigo(pool, conta_id, f"{outro}-{assinatura}") is None
+    # lixo
+    for lixo in ("", "abc", "-", f"{mid}-", f"{mid}-0000000000", None):
+        assert es.vendedor_do_codigo(pool, conta_id, lixo) is None
+
+
+def test_codigo_de_outra_conta_nao_atribui(pool, conta_id):
+    mid = _membro(pool, conta_id, "Fátima")
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo, nome) values ('pj','Outra') "
+                          "returning id").fetchone()[0]
+        c.commit()
+    assert es.vendedor_do_codigo(pool, outra, es.codigo_vendedor(mid)) is None
+
+
+def test_vendedor_desativado_para_de_atribuir(pool, conta_id):
+    mid = _membro(pool, conta_id, "Zé", ativo=False)
+    assert es.vendedor_do_codigo(pool, conta_id, es.codigo_vendedor(mid)) is None
+
+
+def test_quem_nao_vende_nao_tem_link(pool, conta_id):
+    mid = _membro(pool, conta_id, "Financeiro", papel="financeiro")
+    assert es.vendedor_do_codigo(pool, conta_id, es.codigo_vendedor(mid)) is None
+
+
+def test_codigo_muda_com_o_segredo(monkeypatch):
+    monkeypatch.setenv("PORTAL_SECRET", "segredo-A")
+    a = es.codigo_vendedor(7)
+    monkeypatch.setenv("PORTAL_SECRET", "segredo-B")
+    assert es.codigo_vendedor(7) != a

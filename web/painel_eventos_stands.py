@@ -224,6 +224,21 @@ def painel_eventos_stands(request: Request):
     vendedores = _vendedores(pool, conta[0])
     vend_nomes = {v["id"]: v["nome"] for v in vendedores}
 
+    # O LINK DE VENDAS de cada vendedor (pedido do dono, 30/09/2026): o
+    # vendedor manda pro CLIENTE DELE, o cliente escolhe qualquer stand na
+    # página pública e a venda cai na conta do vendedor. NÃO é login no app.
+    # URL absoluta (é pra colar no WhatsApp); o código é assinado.
+    from finance.email_sender import _app_url
+    base = f"{_app_url().rstrip('/')}/e/{cfg['slug']}"
+    links_vendas = [{"nome": v["nome"], "link": f"{base}?v={es.codigo_vendedor(v['id'])}"}
+                    for v in vendedores]
+    # quem está logado como MEMBRO que vende (gestor que também vende): os
+    # "Copiar link" do mapa já levam a marca dele
+    membro_logado = request.session.get("membro_id")
+    meu_cod = (es.codigo_vendedor(membro_logado)
+               if membro_logado and any(v["id"] == membro_logado for v in vendedores)
+               else None)
+
     # VALORES POR TAMANHO (achado do dono, 29/09/2026: "onde eu cadastro o
     # valor?? por tamanho, alterável"): o valor mais comum de cada tamanho
     # pré-preenche o formulário; misturado = aviso, salvar iguala os livres.
@@ -248,8 +263,7 @@ def painel_eventos_stands(request: Request):
         mapa_json=mapa_json, pode_gerir=pode_gerir, stands=stands,
         vinculos=vinculos, precos_tam=precos_tam,
         vendedores=vendedores, vend_nomes=vend_nomes,
-        es_link=request.session.pop("es_link", None),
-        es_link_quem=request.session.pop("es_link_quem", None),
+        links_vendas=links_vendas, meu_cod=meu_cod,
         sem_storage=not comprov.configurado(),
         erro=(request.query_params.get("erro") or "").strip(),
         ok=(request.query_params.get("ok") or "").strip())
@@ -343,36 +357,6 @@ def trocar_vendedor(request: Request, codigo: str, vendedor_id: str = Form("")):
         c.commit()
     msg = f"Venda do {codigo} sem vendedor." if vid is None else f"Venda do {codigo} atribuída."
     return RedirectResponse(f"/painel/eventos/estandes?ok={msg}", status_code=303)
-
-
-@router.post("/painel/eventos/estandes/link-vendedor")
-def link_vendedor(request: Request, membro_id: str = Form("")):
-    """Gera o link do app (Cockpit) pra um vendedor, DIRETO do painel de
-    estandes — pra o dono/gestor liberar o acesso sem passar pela tela de
-    Equipe (pedido do dono, 29/09/2026). O link vale 15 min e já leva a marca
-    do vendedor: o que ele vender fica na conta dele.
-
-    Rota própria (não a de Equipe) de propósito: o gestor já alcança estandes,
-    mas não a gestão de pessoas — abrir /painel/equipe pra ele seria demais."""
-    conta, cfg_ou_redir = _acesso(request)
-    if conta is None:
-        return cfg_ou_redir
-    from finance import cockpit as _ck
-    pool = get_pool()
-    with pool.connection() as c:
-        m = c.execute(
-            "select coalesce(nullif(nome,''), email) from membros "
-            "where id=%s and conta_id=%s and ativo and papel in ('vendedor','gestor')",
-            ((membro_id or "").strip() or "0", conta[0])).fetchone()
-    if not m:
-        return RedirectResponse(
-            "/painel/eventos/estandes?erro=Escolha um vendedor ativo.", status_code=303)
-    token = _ck.gerar_token(pool, conta[0], int(membro_id))
-    request.session["es_link"] = _ck.link_acesso(token)
-    request.session["es_link_quem"] = m[0]
-    return RedirectResponse(
-        f"/painel/eventos/estandes?ok=Link do app gerado pra {m[0]} (vale 15 min) — "
-        "copia abaixo e manda pra pessoa.", status_code=303)
 
 
 @router.post("/painel/eventos/estandes/{codigo}/liberar")
@@ -855,29 +839,21 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   </form>
 </div>
 
-{% if pode_gerir %}
 <div class="preco-card">
-  <h3>App do vendedor</h3>
-  <p class="preco-obs">O vendedor entra pelo link, vê o mapa e o que está livre — e o que ele vender pelo link dele fica na conta dele. O link vale 15 minutos.</p>
-  {% if es_link %}
-  <div class="oc-comprovante-item" style="margin-bottom:12px">
+  <h3>Links de vendas dos vendedores</h3>
+  <p class="preco-obs">Cada vendedor manda o link dele pro <b>cliente dele</b>: o cliente abre a página, escolhe <b>qualquer stand</b> e compra — a venda cai na conta do vendedor. (Não é acesso ao sistema.){% if not pode_gerir %} Seu link fica no app do vendedor.{% endif %}</p>
+  {% if pode_gerir %}
+  {% for l in links_vendas %}
+  <div class="oc-comprovante-item" style="margin-bottom:8px">
     <div class="ic">🔗</div>
-    <div class="txt"><b>Link pra {{ es_link_quem }}</b><span id="es-link-txt" style="word-break:break-all">{{ es_link }}</span></div>
-    <button class="oc-ghost-btn prim" type="button" onclick="esCopiarLink(this)">Copiar</button>
+    <div class="txt"><b>{{ l.nome }}</b><span style="word-break:break-all">{{ l.link }}</span></div>
+    <button class="oc-ghost-btn prim" type="button" data-link="{{ l.link }}" onclick="esCopiarLink(this)">Copiar</button>
   </div>
-  {% endif %}
-  {% if vendedores %}
-  <form method="post" action="/painel/eventos/estandes/link-vendedor" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-    <select name="membro_id" style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--fg);font-family:inherit;font-size:12.5px;padding:8px 10px">
-      {% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}
-    </select>
-    <button class="oc-ghost-btn prim" type="submit">📱 Gerar link do app</button>
-  </form>
   {% else %}
   <p class="oc-vazio" style="margin:0">Nenhum vendedor cadastrado ainda — adicione a equipe em <a href="/painel/equipe" style="color:var(--mint)">Pessoas</a>.</p>
+  {% endfor %}
   {% endif %}
 </div>
-{% endif %}
 
 <h3 class="es-sec">Todos os stands</h3>
 <p class="es-sec-sub">O cadastro completo, na MESMA planta da página pública — toca num stand pra ver a situação{% if pode_gerir %} e agir{% endif %}. Livre? Copia o link e manda pro interessado.</p>
@@ -922,6 +898,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 var MAPA = {{ mapa_json|safe }};
 var PUB_URL = '/e/{{ cfg.slug }}';
 var PODE_GERIR = {{ 'true' if pode_gerir else 'false' }};
+var MEU_COD = {{ meu_cod|tojson }};
 </script>
 <script>
 (function(){
@@ -1076,6 +1053,7 @@ var PODE_GERIR = {{ 'true' if pode_gerir else 'false' }};
 
   window.mapaCopiarLink = function(btn, code){
     var url = location.origin + PUB_URL + '?stand=' + encodeURIComponent(code);
+    if (MEU_COD) url += '&v=' + encodeURIComponent(MEU_COD);
     var done = function(){ var t = btn.textContent; btn.textContent = 'Copiado ✓'; setTimeout(function(){ btn.textContent = t; }, 1600); };
     if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done); }
     else { window.prompt('Copia o link:', url); }
@@ -1125,9 +1103,8 @@ function ocTab(btn, tab){
   detail.querySelectorAll('.oc-detail-body').forEach(function(el){ el.hidden = el.dataset.tab !== tab; });
 }
 function esCopiarLink(btn){
-  var el = document.getElementById('es-link-txt');
-  if (!el) return;
-  var txt = el.textContent.trim();
+  var txt = btn.dataset.link;
+  if (!txt) return;
   var done = function(){ var t = btn.textContent; btn.textContent = 'Copiado ✓'; setTimeout(function(){ btn.textContent = t; }, 1600); };
   if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done); }
   else { window.prompt('Copia o link:', txt); }

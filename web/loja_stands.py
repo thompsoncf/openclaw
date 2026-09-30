@@ -63,20 +63,6 @@ def _dias_restantes(ate) -> int | None:
         return None
 
 
-def _vendedor_valido(c, conta_id: int, vendedor_raw: str):
-    """O `v` do link (`?stand=G58&v=5`) só vira dono da venda se for um MEMBRO
-    ATIVO desta conta e vendedor/gestor — nunca um id qualquer da URL, que
-    permitiria plantar comissão em nome de outra pessoa. Devolve o id ou None."""
-    try:
-        vid = int((vendedor_raw or "").strip())
-    except (TypeError, ValueError):
-        return None
-    r = c.execute(
-        "select 1 from membros where id=%s and conta_id=%s and ativo "
-        "and papel in ('vendedor','gestor')", (vid, conta_id)).fetchone()
-    return vid if r else None
-
-
 def _criar_prospeccao_simples(pool, conta_id: int, nome: str, whatsapp: str,
                               vendedor: str = ""):
     """Registro MÍNIMO do interessado (nome/whatsapp) na tabela de CRM
@@ -85,9 +71,10 @@ def _criar_prospeccao_simples(pool, conta_id: int, nome: str, whatsapp: str,
     inbound completo (aquele trata mensagem dentro de uma conversa que já
     existe); aqui o visitante da página ainda não conversou com ninguém.
 
-    `vendedor` (o `v` do link do app) vincula a venda a quem mandou o link —
-    validado contra os membros da conta antes de gravar (ver _vendedor_valido),
-    pra o `vendedor_id` da URL não virar porta de fraude de comissão.
+    `vendedor` (o `v` do link de vendas) vincula a venda a quem mandou o link —
+    é o código ASSINADO (es.codigo_vendedor), validado contra os membros da
+    conta antes de gravar (es.vendedor_do_codigo), pra o `v` da URL não virar
+    porta de fraude de comissão.
 
     Best-effort e SILENCIOSO: o upload do comprovante — a parte que importa —
     não pode falhar por causa de um cadastro de lead que é só um bônus."""
@@ -95,8 +82,9 @@ def _criar_prospeccao_simples(pool, conta_id: int, nome: str, whatsapp: str,
     if not nome:
         return None
     try:
+        vend = es.vendedor_do_codigo(pool, conta_id, vendedor)
+        vid = vend["id"] if vend else None
         with pool.connection() as c:
-            vid = _vendedor_valido(c, conta_id, vendedor)
             pid = c.execute(
                 """insert into prospeccao (conta_id, empresa, whatsapp, status,
                                            origem, vendedor_id)
@@ -144,13 +132,20 @@ def loja_stands(request: Request, slug: str):
     ct = (request.query_params.get("ct") or "")[:64] if msg == "ok" else ""
     # ?stand=G58 abre a página já com o stand selecionado — é o link que o
     # vendedor manda pro interessado a partir do mapa do painel/cockpit.
-    # ?v=5 é o VENDEDOR do link: a venda que sair por aqui fica na conta dele
-    # (validado no POST — a URL não é confiável). Só dígitos entram no form.
+    # ?v=<código> é o LINK DE VENDAS de um vendedor: o cliente escolhe qualquer
+    # stand e a venda que sair por aqui fica na conta dele. O código é
+    # assinado (es.codigo_vendedor); só um código VÁLIDO chega ao form, e o
+    # POST revalida — a URL sozinha não é confiável.
     stand_link = (request.query_params.get("stand") or "")[:20]
-    vendedor_link = "".join(ch for ch in (request.query_params.get("v") or "")[:12] if ch.isdigit())
+    v_raw = "".join(ch for ch in (request.query_params.get("v") or "")[:40]
+                    if ch.isalnum() or ch == "-")
+    vend = es.vendedor_do_codigo(pool, conta_id, v_raw) if v_raw else None
+    vendedor_link = v_raw if vend else ""
+    vendedor_nome = (vend or {}).get("nome") or ""
     html = _env.get_template(_TPL_NOME).render(
         cfg=cfg, marca=marca, n_total=len(stands), stands_json=stands_json,
-        data_br=_data_br, msg=msg, msg_codigo=msg_codigo, ct=ct, vendedor_link=vendedor_link,
+        data_br=_data_br, msg=msg, msg_codigo=msg_codigo, ct=ct,
+        vendedor_link=vendedor_link, vendedor_nome=vendedor_nome,
         ct_json=json.dumps(ct or None), stand_link_json=json.dumps(stand_link or None),
         # injeção segura no JS: sempre via json.dumps, nunca string crua
         pix_json=json.dumps({"chave": cfg["pix_chave"], "titular": cfg["pix_titular"]}),
@@ -567,6 +562,7 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
       {% if cfg.evento_local %}<span>{{ cfg.evento_local }}</span>{% endif %}
     </div>
     <p class="hero-pitch">Escolha seu stand direto no mapa da planta oficial do evento: toque em um stand livre, veja tamanho e valor, pague o sinal no Pix e envie o comprovante — a reserva é sua enquanto a equipe confirma.</p>
+    {% if vendedor_link %}<div class="info-strip">Atendimento de <b>{{ vendedor_nome or 'seu vendedor' }}</b> — escolha o stand que quiser; a reserva feita aqui fica registrada neste atendimento.</div>{% endif %}
     {% if cfg.whatsapp_numero %}<div class="info-strip">Cotas de patrocínio (Ouro, Prata e Bronze) são negociadas direto com a equipe — chama no WhatsApp.</div>{% endif %}
   </div>
 </div>

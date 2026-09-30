@@ -57,6 +57,7 @@ def pool():
             c.execute((base / m).read_text(encoding="utf-8"))
         c.execute((base / "448_evento_stands.sql").read_text(encoding="utf-8"))
         c.execute((base / "451_evento_stands_cadastro_cliente.sql").read_text(encoding="utf-8"))
+        c.execute((base / "452_evento_stands_sinal_saldo_grupo.sql").read_text(encoding="utf-8"))
         c.commit()
     cli._garantir_cols(p)
     yield p
@@ -74,6 +75,9 @@ def _isola(pool):
     with pool.connection() as c:
         c.execute("truncate table evento_stands, evento_stands_config, orcamentos, "
                   "titulos, clientes, pessoas restart identity cascade")
+        # orcamentos recomeça no id 1: contrato órfão (deste ou de outro módulo) colidiria
+        c.execute("do $$ begin if to_regclass('contratos') is not null then "
+                  "delete from contratos; end if; end $$")
         c.commit()
     yield
 
@@ -457,3 +461,227 @@ def test_o_nome_da_empresa_so_aparece_com_pagamento_confirmado_e_contrato_assina
     with pool.connection() as c:            # não deixa lixo pro banco compartilhado
         c.execute("delete from contratos where conta_id=%s", (conta_id,))
         c.commit()
+
+
+# ------------------------------------- até 2 estandes por empresa + sinal e saldo
+
+def _reservar(pool, conta_id, monkeypatch, codigos, sinal=None, zap="86988887777",
+              nome="Boutique Nova Era"):
+    """Reserva pelo mesmo cano da página pública, sem storage e sem contrato real."""
+    from finance import contrato as ctr
+    from finance import vendas
+    monkeypatch.setattr(vendas, "modo_do_orcamento", lambda p, c: "evento")
+    monkeypatch.setattr(ctr, "criar_para_orcamento",
+                        lambda *a, **k: {"id": 1, "token": "tok-contrato"})
+    with pool.connection() as c:
+        pid = c.execute(
+            "insert into prospeccao (conta_id, empresa, whatsapp, status, origem) "
+            "values (%s,%s,%s,'novo','pagina_stands') returning id",
+            (conta_id, nome, zap)).fetchone()[0]
+        c.commit()
+    return es.subir_e_registrar_comprovante(
+        pool, conta_id, codigos[0], b"%PDF-1.4 x", "application/pdf",
+        prospeccao_id=pid, subir=lambda *a, **k: None,
+        junto_com=codigos[1:], sinal_centavos=sinal)
+
+
+def _config_evento(pool, conta_id):
+    with pool.connection() as c:
+        c.execute("""insert into evento_stands_config
+                       (conta_id, slug, evento_inicio, evento_fim, evento_local,
+                        edicao_label, evento_horario)
+                     values (%s,'outlet-chic','2026-11-13','2026-11-15',
+                             'Centro de Convenções','32ª edição',
+                             '13 e 14/11: 10h às 22h; 15/11: 10h às 16h')""", (conta_id,))
+        c.commit()
+
+
+def test_a_reserva_de_2_estandes_trava_os_dois_num_contrato_so(pool, conta_id, monkeypatch):
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    r = _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    assert r["ok"] and r["contrato_token"] == "tok-contrato"
+    a, b = es.buscar(pool, conta_id, "G60"), es.buscar(pool, conta_id, "G61")
+    assert a["status"] == b["status"] == "pre_reservado"
+    assert a["grupo_id"] and a["grupo_id"] == b["grupo_id"]
+    assert a["orcamento_id"] == b["orcamento_id"] and a["cliente_id"] == b["cliente_id"]
+    with pool.connection() as c:
+        itens, total, parcelas, sinal, evento = c.execute(
+            "select itens, setup_centavos, parcelas, sinal_centavos, evento "
+            "from orcamentos where id=%s", (a["orcamento_id"],)).fetchone()
+    assert [i["nome"][:9] for i in itens] == ["Stand G60", "Stand G61"]
+    assert total == 840000 and sinal == 300000            # sem desconto
+    assert [p["valor_centavos"] for p in parcelas] == [300000, 540000]
+    assert parcelas[1]["venc"] == "2026-11-13"            # saldo até o dia do evento
+    assert evento["horario"].startswith("13 e 14/11")
+
+
+def test_reserva_tudo_ou_nada(pool, conta_id, monkeypatch):
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61", status="vendido")
+    r = _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    assert not r["ok"]
+    assert es.buscar(pool, conta_id, "G60")["status"] == "livre"
+
+
+def test_regras_da_reserva(pool, conta_id):
+    _config_evento(pool, conta_id)
+    for cod in ("G60", "G61", "G62"):
+        _criar_stand(pool, conta_id, cod)
+    v = es.validar_reserva
+    assert v(pool, conta_id, ["G60"], "86988887777", 150000)["ok"]
+    assert not v(pool, conta_id, ["G60"], "86988887777", 149999)["ok"]        # abaixo do mínimo
+    assert not v(pool, conta_id, ["G60", "G61"], "86988887777", 200000)["ok"]  # 1.500 por estande
+    assert v(pool, conta_id, ["G60", "G61"], "86988887777", 300000)["ok"]
+    assert "máximo" in v(pool, conta_id, ["G60", "G61", "G62"], "86988887777")["erro"]
+    assert not v(pool, conta_id, ["G60", "G60"], "86988887777")["ok"]
+    assert not v(pool, conta_id, ["G60"], "86988887777", 99999999)["ok"]       # passa do total
+
+
+def test_a_mesma_empresa_nao_reserva_de_novo_por_outra_reserva(pool, conta_id, monkeypatch):
+    _config_evento(pool, conta_id)
+    for cod in ("G60", "G61"):
+        _criar_stand(pool, conta_id, cod)
+    assert _reservar(pool, conta_id, monkeypatch, ["G60"], sinal=150000)["ok"]
+    r = es.validar_reserva(pool, conta_id, ["G61"], "(86) 9 8888-7777", 150000)
+    assert not r["ok"] and "G60" in r["erro"] and "um contrato só" in r["erro"]
+    assert es.validar_reserva(pool, conta_id, ["G61"], "86977776666", 150000)["ok"]
+
+
+def test_confirmar_o_sinal_baixa_o_sinal_e_deixa_o_saldo_em_aberto(pool, conta_id, monkeypatch):
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    # abaixo do mínimo: recusa e nada muda
+    r = es.confirmar_pagamento(pool, conta_id, "G60", sinal_centavos=200000)
+    assert not r["ok"] and es.buscar(pool, conta_id, "G61")["status"] == "pre_reservado"
+    # o gestor conferiu R$ 3.500 no comprovante (mais que o informado)
+    r = es.confirmar_pagamento(pool, conta_id, "G61", sinal_centavos=350000)
+    assert r["ok"] and set(r["codigos"]) == {"G60", "G61"}
+    assert es.buscar(pool, conta_id, "G60")["status"] == "vendido"
+    oid = es.buscar(pool, conta_id, "G60")["orcamento_id"]
+    with pool.connection() as c:
+        tits = c.execute("select valor_centavos, status, vencimento from titulos "
+                         "where orcamento_id=%s order by parcela_idx", (oid,)).fetchall()
+    assert [(t[0], t[1]) for t in tits] == [(350000, "pago"), (490000, "aberto")]
+    assert str(tits[1][2]) == "2026-11-13"
+    sit = es.situacao_financeira(pool, conta_id, [oid])[oid]
+    assert sit["pago"] == 350000 and sit["aberto"] == 490000
+    # confirmar de novo não duplica
+    assert es.confirmar_pagamento(pool, conta_id, "G60")["ja_confirmado"]
+
+
+def test_saldo_em_mais_de_uma_vez_ate_quitar(pool, conta_id, monkeypatch):
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _reservar(pool, conta_id, monkeypatch, ["G60"], sinal=150000)
+    es.confirmar_pagamento(pool, conta_id, "G60")
+    oid = es.buscar(pool, conta_id, "G60")["orcamento_id"]
+    assert es.situacao_financeira(pool, conta_id, [oid])[oid]["aberto"] == 270000
+    r = es.registrar_pagamento_saldo(pool, conta_id, "G60", 100000)
+    assert r["ok"] and r["aberto"] == 170000 and not r["quitado"]
+    assert not es.registrar_pagamento_saldo(pool, conta_id, "G60", 999999999)["ok"]
+    r = es.registrar_pagamento_saldo(pool, conta_id, "G60", 170000)
+    assert r["ok"] and r["quitado"]
+    sit = es.situacao_financeira(pool, conta_id, [oid])[oid]
+    assert sit["pago"] == 420000 and sit["aberto"] == 0
+    assert not es.registrar_pagamento_saldo(pool, conta_id, "G60", 100)["ok"]
+
+
+def test_liberar_um_estande_da_reserva_libera_os_dois(pool, conta_id, monkeypatch):
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    assert es.liberar(pool, conta_id, "G61")
+    for cod in ("G60", "G61"):
+        st = es.buscar(pool, conta_id, cod)
+        assert st["status"] == "livre" and st["grupo_id"] is None
+
+
+def test_o_contrato_publico_da_reserva_mostra_espaco_horario_sinal_e_saldo(
+        pool, conta_id, monkeypatch):
+    """O quadro do contrato do estande: espaço(s) locado(s), horário do evento,
+    sinal e saldo com data — e as cláusulas leem os mesmos campos."""
+    from finance import contrato as ctr
+    from finance import vendas
+    from web import contrato_publico as cp
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    with pool.connection() as c:
+        for m in ("160_contrato_modelo.sql", "164_contratos.sql", "165_contrato_token.sql",
+                  "189_contrato_enviado_em.sql", "194_assinar_antes_do_sinal.sql",
+                  "201_contrato_aditivos.sql", "311_contrato_servico.sql"):
+            c.execute((base / m).read_text(encoding="utf-8"))
+        c.commit()
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    monkeypatch.setattr(vendas, "modo_do_orcamento", lambda p, c: "evento")
+    monkeypatch.setattr(ctr, "conta_tem_contrato", lambda p, c: True)
+    monkeypatch.setattr(cp.scat, "listar", lambda *a, **k: [])
+    with pool.connection() as c:
+        # orcamentos volta ao id 1 a cada teste: contrato órfão de outro módulo colidiria
+        c.execute("delete from contratos")
+        c.execute("delete from contrato_modelo where conta_id=%s", (conta_id,))
+        c.execute(
+            "insert into contrato_modelo (conta_id, clausulas) values (%s, %s::jsonb)",
+            (conta_id, '[{"titulo":"II","corpo":"Horário: {evento.horario}. Espaços: '
+                       '{objeto.descricao}. Sinal {valor.entrada}, saldo {valor.saldo} '
+                       'até {valor.saldo_ate}."}]'))
+        pid = c.execute(
+            "insert into prospeccao (conta_id, empresa, whatsapp, status, origem) "
+            "values (%s,'Boutique Nova Era','86988887777','novo','pagina_stands') "
+            "returning id", (conta_id,)).fetchone()[0]
+        c.commit()
+    r = es.subir_e_registrar_comprovante(
+        pool, conta_id, "G60", b"%PDF-1.4 x", "application/pdf", prospeccao_id=pid,
+        subir=lambda *a, **k: None, junto_com=["G61"], sinal_centavos=300000)
+    d = cp.carregar(r["contrato_token"], pool=pool)
+    assert d["espaco"] is True and "G60" in d["objeto"] and "G61" in d["objeto"]
+    assert d["evento"]["horario"].startswith("13 e 14/11")
+    assert d["pagamento"] == {"sinal": "R$ 3.000,00", "saldo": "R$ 5.400,00",
+                              "saldo_ate": "13/11/2026"}
+    corpo = d["clausulas"][0]["corpo"]
+    assert "13 e 14/11: 10h às 22h" in corpo and "Sinal R$ 3.000,00" in corpo
+    assert "saldo R$ 5.400,00 até 13/11/2026" in corpo
+    with pool.connection() as c:
+        c.execute("delete from contratos where conta_id=%s", (conta_id,))
+        c.commit()
+
+
+def test_a_pagina_publica_recusa_sinal_baixo_e_aceita_2_estandes(pool, conta_id, monkeypatch):
+    from web import loja_stands as ls
+    from finance import comprovantes as comprov
+    from finance import contrato as ctr
+    from finance import vendas
+    monkeypatch.setattr(ls, "get_pool", lambda: pool)
+    monkeypatch.setattr(comprov, "subir_em", lambda *a, **k: None)
+    monkeypatch.setattr(vendas, "modo_do_orcamento", lambda p, c: "evento")
+    monkeypatch.setattr(ctr, "criar_para_orcamento",
+                        lambda *a, **k: {"id": 1, "token": "tok-contrato"})
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    pdf = b"%PDF-1.4 x"
+
+    def enviar(sinal, cod2="G61"):
+        return ls._loja_stands_comprovante_sync(
+            "outlet-chic", "G60", "Boutique Nova Era", "(86) 9 8888-7777", "", pdf,
+            "application/pdf", cod2, sinal)
+
+    r = enviar("2.000,00")                        # 1.500 por stand = 3.000 no mínimo
+    assert r.status_code == 303 and "msg=erro_sinal" in r.headers["location"]
+    assert es.buscar(pool, conta_id, "G60")["status"] == "livre"
+    r = enviar("3.000,00")
+    assert r.status_code == 303 and "msg=ok" in r.headers["location"]
+    assert "c2=G61" in r.headers["location"] and "ct=tok-contrato" in r.headers["location"]
+    assert es.buscar(pool, conta_id, "G61")["status"] == "pre_reservado"
+    # a mesma empresa não reserva de novo por fora do contrato
+    _criar_stand(pool, conta_id, "G62")
+    r = ls._loja_stands_comprovante_sync("outlet-chic", "G62", "Boutique Nova Era",
+                                         "86988887777", "", pdf, "application/pdf", "",
+                                         "1500")
+    assert "msg=erro_empresa" in r.headers["location"]

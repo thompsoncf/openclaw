@@ -247,6 +247,10 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None,
     # entrada/saldo são do contrato de locação; o de serviço não tem sinal
     entrada = (round(total * float(reg["sinal_pct"]) / 100)
                if reg.get("sinal_pct") not in (None, "") else 0)
+    # a venda de ESTANDE tem o sinal que o cliente pagou (mínimo por estande), não
+    # um percentual: o orçamento traz `sinal_centavos` só nesse canal
+    if o.get("sinal_centavos"):
+        entrada = int(o["sinal_centavos"])
 
     return {
         # preço vem por SLUG: a cláusula cita o item, não uma cópia do número
@@ -263,6 +267,9 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None,
             "tipo": ev.get("tipo") or "",
             "convidados": str(ev.get("convidados") or ""),
             "local": ev.get("local") or "",
+            # horário de funcionamento (feira): "13 e 14/11: 10h às 22h; …" —
+            # vem da configuração do evento; o cabeçalho e a cláusula leem o mesmo
+            "horario": ev.get("horario") or "",
         },
         # o CLIENTE inteiro, não só o nome. O orçamento já guarda endereço, cidade,
         # e-mail e telefone — um contrato que qualifica as partes precisa disso, e
@@ -297,6 +304,8 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None,
             "total": reais(total),
             "entrada": reais(entrada),
             "saldo": reais(total - entrada),
+            # a data-limite do saldo; contrato antigo, sem plano, cai no dia do evento
+            "saldo_ate": data_br(o.get("saldo_ate") or ev.get("data")),
             "numero": str(o.get("numero") or ""),
             **(_valor_servico(o.get("recorrente") or {}) if modo == MODO_SERVICO else {}),
         },
@@ -518,6 +527,8 @@ _CAMPOS_FIXOS = [
     ("evento.fim", "horário de término"), ("evento.tipo", "tipo de evento"),
     ("evento.convidados", "nº de convidados"), ("evento.periodo", "período do evento"),
     ("cliente.representante", "representante legal do cliente"),
+    ("evento.horario", "horário de funcionamento"),
+    ("valor.saldo_ate", "data-limite do saldo"),
     ("objeto.descricao", "o que foi contratado (ex.: o estande)"),
     ("valor.total", "valor total"), ("valor.entrada", "valor da entrada"),
     ("valor.saldo", "saldo a pagar"), ("valor.numero", "nº do orçamento"),

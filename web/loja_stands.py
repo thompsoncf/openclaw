@@ -130,6 +130,7 @@ def loja_stands(request: Request, slug: str):
             "preco": brl(s["preco_centavos"]) if s["preco_centavos"] else None,
             "dias": _dias_restantes(s["pre_reserva_ate"]) if s["status"] == "pre_reservado" else None,
             "expositor": expositores.get(s["codigo"]),
+            "preco_centavos": s["preco_centavos"],
         }
         for s in stands
     })
@@ -149,7 +150,15 @@ def loja_stands(request: Request, slug: str):
     vend = es.vendedor_do_codigo(pool, conta_id, v_raw) if v_raw else None
     vendedor_link = v_raw if vend else ""
     vendedor_nome = (vend or {}).get("nome") or ""
+    reg = es.regras_de_pagamento(cfg)
+    regras_json = json.dumps({
+        "minimo": reg["sinal_minimo_centavos"], "max": reg["max_por_empresa"],
+        "saldoAte": reg["saldo_ate"].strftime("%d/%m") if reg["saldo_ate"] else ""})
+    c2_raw = (request.query_params.get("c2") or "")[:20] if msg == "ok" else ""
     html = _env.get_template(_TPL_NOME).render(
+        regras_json=regras_json,
+        just_sent_codes_json=json.dumps([x for x in (msg_codigo, c2_raw) if x]
+                                        if msg == "ok" else []),
         cfg=cfg, marca=marca, n_total=len(stands), stands_json=stands_json,
         data_br=_data_br, msg=msg, msg_codigo=msg_codigo, ct=ct,
         vendedor_link=vendedor_link, vendedor_nome=vendedor_nome,
@@ -167,6 +176,7 @@ def loja_stands(request: Request, slug: str):
 async def loja_stands_comprovante(request: Request, slug: str,
                                   codigo: str = Form(...), nome: str = Form(""),
                                   whatsapp: str = Form(""), vendedor: str = Form(""),
+                                  codigo2: str = Form(""), sinal: str = Form(""),
                                   arquivo: UploadFile = File(...)):
     """Recebe o comprovante do sinal — é ESTE POST que, no modo 'pagamento',
     trava o estande (livre -> pre_reservado). Sem login: qualquer visitante da
@@ -182,11 +192,24 @@ async def loja_stands_comprovante(request: Request, slug: str,
     conteudo = await arquivo.read()
     return await run_in_threadpool(
         _loja_stands_comprovante_sync, slug, codigo, nome, whatsapp, vendedor,
-        conteudo, arquivo.content_type or "")
+        conteudo, arquivo.content_type or "", codigo2, sinal)
+
+
+def _centavos(txt: str) -> int | None:
+    """'3000', '3.000,00', '1500,50' -> centavos; ilegível -> None."""
+    t = (txt or "").strip().replace("R$", "").replace(" ", "")
+    if not t:
+        return None
+    t = t.replace(".", "").replace(",", ".")
+    try:
+        return round(float(t) * 100)
+    except ValueError:
+        return None
 
 
 def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: str,
-                                  vendedor: str, conteudo: bytes, content_type: str):
+                                  vendedor: str, conteudo: bytes, content_type: str,
+                                  codigo2: str = "", sinal: str = ""):
     pool = get_pool()
     cfg = es.buscar_config_por_slug(pool, slug)
     if cfg is None:
@@ -202,14 +225,28 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
     if not (nome or "").strip() or len("".join(ch for ch in (whatsapp or "") if ch.isdigit())) < 10:
         return RedirectResponse(f"/e/{slug}?msg=erro_dados&codigo={codigo}", status_code=303)
 
+    # 1 ou 2 estandes da mesma empresa, com o sinal mínimo por estande. A checagem
+    # vem ANTES de criar a prospecção e de subir o arquivo: reserva recusada não
+    # deixa lead órfão nem comprovante solto no bucket.
+    codigos = [codigo] + ([codigo2.strip()] if (codigo2 or "").strip() else [])
+    sinal_c = _centavos(sinal)
+    v = es.validar_reserva(pool, conta_id, codigos, whatsapp,
+                           sinal_c if sinal_c is not None else None)
+    if not v["ok"]:
+        return RedirectResponse(
+            f"/e/{slug}?msg=erro_{v.get('cod') or 'reserva'}&codigo={codigo}", status_code=303)
+
     prospeccao_id = _criar_prospeccao_simples(pool, conta_id, nome, whatsapp, vendedor)
     r = es.subir_e_registrar_comprovante(pool, conta_id, codigo, conteudo, content_type,
-                                         prospeccao_id=prospeccao_id)
+                                         prospeccao_id=prospeccao_id,
+                                         junto_com=codigos[1:], sinal_centavos=v["sinal"])
     if not r["ok"]:
         _log.info("loja_stands: comprovante recusado (%s/%s): %s", conta_id, codigo,
                   r.get("erro"))
         return RedirectResponse(f"/e/{slug}?msg=erro&codigo={codigo}", status_code=303)
     destino = f"/e/{slug}?msg=ok&codigo={codigo}"
+    if len(codigos) > 1:
+        destino += f"&c2={codigos[1]}"
     # o contrato nasceu junto com o comprovante (evento_stands.garantir_orcamento_
     # e_contrato) — o token vai na URL pra página oferecer "assinar agora".
     if r.get("contrato_token"):
@@ -549,6 +586,21 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   .fld .up-input{margin-top:0;}
   .fld.falta .up-input{border-color:var(--gold);}
   .fld-erro{color:var(--gold-strong);font-size:11px;margin-top:6px;}
+  .reserva-box,.sinal-box{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:14px;}
+  .reserva-tit,.sinal-tit{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-dim);margin-bottom:6px;}
+  .reserva-lin{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:13px;}
+  .reserva-lin:first-of-type{border-top:none;}
+  .reserva-lin b{font-family:var(--mono,monospace);font-size:15px;min-width:42px;}
+  .reserva-lin span{flex:1;color:var(--fg-dim);font-size:12px;}
+  .reserva-lin em{font-style:normal;font-weight:700;}
+  .reserva-x{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--fg-dim);border-radius:6px;width:24px;height:24px;line-height:1;cursor:pointer;font-size:14px;padding:0;}
+  .reserva-add{display:block;width:100%;margin-top:8px;appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:13px;padding:10px;border-radius:9px;border:1.5px dashed var(--mint);background:transparent;color:var(--mint);}
+  .reserva-add small{display:block;font-weight:500;font-size:10.5px;color:var(--fg-dim);margin-top:2px;}
+  .reserva-dica{margin-top:8px;font-size:12px;color:var(--gold-strong);line-height:1.5;}
+  .reserva-dica button{appearance:none;cursor:pointer;font-family:inherit;font-size:11.5px;margin-left:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:6px;padding:3px 9px;}
+  .reserva-tot{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:13px;}
+  .reserva-tot b{font-size:18px;}
+  .sinal-box .panel-row{padding:6px 0;}
   .upload-box{
     display:block;margin-top:10px;border:1.5px dashed var(--line);border-radius:10px;padding:14px;text-align:center;
     cursor:pointer;background:var(--surface);
@@ -591,6 +643,10 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 
 {% if msg == 'ok' %}<div class="msg ok">✓ Comprovante recebido{% if msg_codigo %} — o stand {{ msg_codigo }} está reservado pra você{% endif %}! A equipe confere o pagamento e confirma em breve.{% if ct %} <a class="msg-link" href="/contrato/{{ ct }}">Assinar o contrato agora →</a>{% endif %}</div>{% endif %}
 {% if msg == 'erro' %}<div class="msg erro">Não deu pra registrar o comprovante{% if msg_codigo %} do stand {{ msg_codigo }}{% endif %}. Ele pode já ter sido vendido — dá uma olhada no mapa e tenta outro{% if cfg.whatsapp_numero %}, ou chama no WhatsApp{% endif %}.</div>{% endif %}
+{% if msg == 'erro_sinal' %}<div class="msg erro">O sinal mínimo é de R$ 1.500 por stand e não pode passar do valor total. Confira o valor do sinal e envie de novo.</div>{% endif %}
+{% if msg == 'erro_empresa' %}<div class="msg erro">Esta empresa já tem um stand reservado. Cada empresa fecha um contrato só, com no máximo 2 stands — fale com a organização pelo WhatsApp para incluir mais um.</div>{% endif %}
+{% if msg == 'erro_indisponivel' %}<div class="msg erro">Um dos stands escolhidos acabou de ser reservado por outra pessoa. Dê uma olhada no mapa e escolha de novo.</div>{% endif %}
+{% if msg == 'erro_max' %}<div class="msg erro">O máximo é 2 stands por empresa.</div>{% endif %}
 {% if msg == 'erro_dados' %}<div class="msg erro">Faltou o nome fantasia ou o WhatsApp (com DDD). Preencha os dois e envie o comprovante de novo.</div>{% endif %}
 {% if msg == 'erro_generico' %}<div class="msg erro">Não deu pra processar. Tenta de novo.</div>{% endif %}
 {% if sem_storage %}<div class="msg erro">⚠ Envio de comprovante temporariamente indisponível{% if cfg.whatsapp_numero %} — manda pelo WhatsApp{% endif %}.</div>{% endif %}
@@ -662,6 +718,8 @@ var JUST_SENT = {{ just_sent_json|safe }};
 var ERRO_CODIGO = {{ erro_codigo_json|safe }};
 var CT = {{ ct_json|safe }};
 var STAND_LINK = {{ stand_link_json|safe }};
+var REGRAS = {{ regras_json|safe }};   // sinal mínimo por stand (centavos), máximo por empresa, data do saldo
+var JUST_SENT_CODES = {{ just_sent_codes_json|safe }};
 var VENDEDOR_LINK = "{{ vendedor_link }}";  // o `v` do link — vai no form do comprovante
 var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
 </script>
@@ -688,7 +746,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         if (!sv) continue;
         usados[code] = true;
         stands.push({ code:code, zone:sv.zona, pavilion:p.key, size:sv.tamanho,
-                      preco:sv.preco, status:sv.status, dias:sv.dias, expositor:sv.expositor });
+                      preco:sv.preco, precoC:sv.preco_centavos || 0, status:sv.status, dias:sv.dias, expositor:sv.expositor });
       }
     });
   });
@@ -702,7 +760,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     var pk = sv.pavilhao || 'outros';
     (extras[pk] = extras[pk] || []).push(code);
     stands.push({ code:code, zone:sv.zona, pavilion:pk, size:sv.tamanho,
-                  preco:sv.preco, status:sv.status, dias:sv.dias, expositor:sv.expositor });
+                  preco:sv.preco, precoC:sv.preco_centavos || 0, status:sv.status, dias:sv.dias, expositor:sv.expositor });
   });
   Object.keys(extras).forEach(function(pk){
     var pav = pavilions.filter(function(p){ return p.key === pk; })[0];
@@ -718,6 +776,29 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
 
   var currentPavilion = pavilions[0] ? pavilions[0].key : 'inferior';
   var selectedCode = null;
+  // A RESERVA (até 2 stands da mesma empresa, um contrato só): `cart` são os stands
+  // juntados; `draft` guarda o que a pessoa já digitou, porque a caixa é refeita a
+  // cada stand adicionado.
+  var cart = [], adicionando = false, draft = {nome:'', whatsapp:'', sinal:null};
+  function stOf(code){ return stands.filter(function(x){ return x.code === code; })[0]; }
+  function reservaCodes(){ if (cart.length) return cart.slice(); return selectedCode ? [selectedCode] : []; }
+  function totalC(codes){ return codes.reduce(function(a, c){ return a + ((stOf(c) || {}).precoC || 0); }, 0); }
+  function reais(centavos){ return (centavos / 100).toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); }
+  function numBR(txt){ var v = parseFloat(String(txt || '').replace(/[^0-9,.]/g, '').replace(/[.]/g, '').replace(',', '.')); return isNaN(v) ? 0 : v; }
+  function adicionarStand(){ cart = reservaCodes(); adicionando = true; renderPanel(); }
+  function cancelarAdd(){ adicionando = false; renderPanel(); }
+  function tirarDaReserva(code){
+    cart = cart.filter(function(c){ return c !== code; });
+    selectedCode = cart[0] || code; adicionando = false; draft.sinal = null; renderFloor(); renderPanel();
+  }
+  function draftCampo(k, v){ draft[k] = v; }
+  function atualizaSaldo(v){
+    draft.sinal = v;
+    var el = document.getElementById('v-saldo');
+    if (el) el.textContent = reais(Math.max(0, totalC(reservaCodes()) - Math.round(numBR(v) * 100)));
+  }
+  window.adicionarStand = adicionarStand; window.cancelarAdd = cancelarAdd;
+  window.tirarDaReserva = tirarDaReserva; window.draftCampo = draftCampo; window.atualizaSaldo = atualizaSaldo;
   var floorView = '3d';
   var colorMode = 'status';
   var zoomLevel = 1;
@@ -807,7 +888,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
 
   function standButton(s, d){
     var btn = document.createElement('button');
-    btn.className = 'stand st-' + s.status + ' sz-' + s.size + (s.code === selectedCode ? ' is-selected' : '');
+    btn.className = 'stand st-' + s.status + ' sz-' + s.size + (s.code === selectedCode || cart.indexOf(s.code) >= 0 ? ' is-selected' : '');
     // o def (d) pode sobrescrever a pegada padrão do tamanho — é o que deixa
     // o stand "em pé" ou "deitado" fiel à planta oficial
     var base = sizeDims[s.size] || {w:32,h:22};
@@ -817,7 +898,13 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     btn.textContent = s.code;
     btn.title = s.code + ' · ' + (sizeLabel[s.size] || s.size);
     btn.onclick = function(){
-      selectedCode = s.code; renderFloor(); renderPanel();
+      if (adicionando && s.status === 'livre' && cart.length && cart.indexOf(s.code) < 0 && cart.length < REGRAS.max){
+        cart.push(s.code); adicionando = false; selectedCode = s.code; draft.sinal = null;
+      } else {
+        selectedCode = s.code;
+        if (cart.indexOf(s.code) < 0){ cart = []; adicionando = false; draft.sinal = null; }
+      }
+      renderFloor(); renderPanel();
       // no celular o painel fica ABAIXO do mapa (o grid vira 1 coluna) — sem
       // este scroll o toque parecia não fazer nada.
       if (window.innerWidth < 860) document.getElementById('panel').scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -964,6 +1051,14 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
       if (erro){ erro.hidden = false; erro.textContent = 'Preencha o nome fantasia e o WhatsApp (com DDD) pra reservar.'; }
       return false;
     }
+    var codes = reservaCodes(), minimo = REGRAS.minimo * codes.length;
+    var sinalC = Math.round(numBR(form.elements['sinal'].value) * 100);
+    if (sinalC < minimo || sinalC > totalC(codes)){
+      if (erro){ erro.hidden = false; erro.textContent = sinalC < minimo
+        ? 'O sinal mínimo é ' + reais(minimo) + (codes.length > 1 ? ' (R$ 1.500 por stand).' : '.')
+        : 'O sinal não pode passar do valor total da reserva.'; }
+      return false;
+    }
     if (erro) erro.hidden = true;
     var arq = form.querySelector('input[type=file]');
     if (!arq || !arq.files || !arq.files.length){
@@ -1001,29 +1096,54 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     html += '<div class="panel-row"><span>Valor</span><b class="panel-price">' + esc(s.preco || 'Consultar') + '</b></div>';
 
     if (s.status === 'livre'){
+      var codes = reservaCodes(), n = codes.length, totalR = totalC(codes), minimo = REGRAS.minimo * n;
+      var sinalV = draft.sinal != null ? draft.sinal : String(minimo / 100);
+      html += '<div class="reserva-box"><div class="reserva-tit">Sua reserva</div>';
+      codes.forEach(function(c){
+        var x = stOf(c);
+        html += '<div class="reserva-lin"><b>' + esc(c) + '</b><span>' + esc(sizeLabel[x.size] || x.size) + ' · ' + esc(x.zone || '') + '</span><em>' + esc(x.preco || '') + '</em>' +
+                (n > 1 ? '<button type="button" class="reserva-x" title="Tirar da reserva" data-c="' + esc(c) + '" onclick="tirarDaReserva(this.dataset.c)">×</button>' : '') + '</div>';
+      });
+      if (n < REGRAS.max){
+        if (adicionando){
+          html += '<div class="reserva-dica">Toque num stand <b>livre</b> no mapa pra juntar a esta reserva.<button type="button" onclick="cancelarAdd()">Cancelar</button></div>';
+        } else {
+          html += '<button type="button" class="reserva-add" onclick="adicionarStand()">+ Adicionar mais 1 stand<small>máximo ' + REGRAS.max + ' por empresa · os dois entram num contrato só</small></button>';
+        }
+      } else {
+        html += '<div class="reserva-dica">Máximo de ' + REGRAS.max + ' stands por empresa. Os dois entram no mesmo contrato.</div>';
+      }
+      html += '<div class="reserva-tot"><span>Total' + (n > 1 ? ' (sem desconto)' : '') + '</span><b>' + reais(totalR) + '</b></div></div>';
       if (PIX.chave){
         html += '<div class="pix-box">';
-        html += '  <div class="pix-label">Pagar com Pix e garantir o stand</div>';
+        html += '  <div class="pix-label">Pagar o sinal com Pix e garantir ' + (n > 1 ? 'os stands' : 'o stand') + '</div>';
         html += '  <div class="pix-key-row"><span class="pix-key" id="pix-key-text">' + esc(PIX.chave) + '</span><button class="pix-copy" onclick="copyPix()">Copiar</button></div>';
         if (PIX.titular) html += '  <div class="pix-titular">Titular: ' + esc(PIX.titular) + '</div>';
         html += '</div>';
       }
       if (!SEM_STORAGE){
         html += '<form method="post" action="' + ACTION + '" enctype="multipart/form-data" onsubmit="return validarEnvio(this)">';
-        html += '  <input type="hidden" name="codigo" value="' + esc(s.code) + '">';
+        html += '  <input type="hidden" name="codigo" value="' + esc(codes[0]) + '">';
+        if (codes[1]) html += '  <input type="hidden" name="codigo2" value="' + esc(codes[1]) + '">';
         if (VENDEDOR_LINK) html += '  <input type="hidden" name="vendedor" value="' + esc(VENDEDOR_LINK) + '">';
-        html += '  <label class="fld"><span>Nome fantasia</span><input class="up-input" type="text" name="nome" placeholder="Ex.: Boutique Nova Era" required maxlength="200" autocomplete="organization"></label>';
-        html += '  <label class="fld"><span>WhatsApp <i>*</i></span><input class="up-input" type="tel" name="whatsapp" placeholder="(86) 9 9999-9999" required maxlength="40" autocomplete="tel"></label>';
+        html += '<div class="sinal-box"><div class="sinal-tit">Sinal e saldo</div>';
+        html += '<div class="panel-row"><span>Sinal mínimo</span><b>R$ 1.500 por stand' + (n > 1 ? ' · ' + reais(minimo) : '') + '</b></div>';
+        html += '<label class="fld"><span>Valor do sinal enviado <i>*</i></span><input class="up-input" type="text" name="sinal" inputmode="decimal" value="' + esc(sinalV) + '" oninput="atualizaSaldo(this.value)"></label>';
+        html += '<div class="panel-row"><span>Saldo</span><b id="v-saldo">' + reais(Math.max(0, totalR - Math.round(numBR(sinalV) * 100))) + '</b></div>';
+        if (REGRAS.saldoAte) html += '<div class="panel-row"><span>Saldo até</span><b>' + esc(REGRAS.saldoAte) + ' (dia do evento)</b></div>';
+        html += '<p class="upload-sub" style="margin-top:6px;text-align:left">Pode mandar mais que o mínimo agora. O saldo é pago em uma ou mais vezes, por Pix ou cartão' + (REGRAS.saldoAte ? ', até ' + esc(REGRAS.saldoAte) : '') + ' — a organização registra cada pagamento.</p></div>';
+        html += '  <label class="fld"><span>Nome fantasia</span><input class="up-input" type="text" name="nome" placeholder="Ex.: Boutique Nova Era" required maxlength="200" autocomplete="organization" value="' + esc(draft.nome) + '" oninput="draftCampo(this.name, this.value)"></label>';
+        html += '  <label class="fld"><span>WhatsApp <i>*</i></span><input class="up-input" type="tel" name="whatsapp" placeholder="(86) 9 9999-9999" required maxlength="40" autocomplete="tel" value="' + esc(draft.whatsapp) + '" oninput="draftCampo(this.name, this.value)"></label>';
         html += '  <div class="fld-erro" data-erro hidden></div>';
         html += '  <label class="upload-box">';
-        html += '    <div class="upload-label">Comprovante do Pix</div>';
+        html += '    <div class="upload-label">Comprovante do sinal (Pix)</div>';
         html += '    <div class="upload-sub">Toque para escolher a foto ou o PDF do comprovante</div>';
         html += '    <input type="file" name="arquivo" accept="image/*,application/pdf" onchange="mostrarArquivo(this)">';
         html += '    <div class="upload-file" hidden></div>';
         html += '  </label>';
         html += '  <button class="btn btn-primary" type="submit">Enviar comprovante e reservar</button>';
         html += '</form>';
-        html += '<p class="upload-sub" style="text-align:center;margin-top:8px;">Assim que o comprovante chegar, o stand fica reservado pra você enquanto a equipe confirma</p>';
+        html += '<p class="upload-sub" style="text-align:center;margin-top:8px;">Assim que o comprovante chegar, ' + (n > 1 ? 'os stands ficam reservados' : 'o stand fica reservado') + ' pra você enquanto a equipe confirma</p>';
       } else {
         html += '<div class="sent-state"><b>Envio temporariamente indisponível</b>' + (WA ? 'Manda o comprovante pelo WhatsApp que a equipe registra pra você.' : 'Tenta de novo daqui a pouco.') + '</div>';
       }
@@ -1032,8 +1152,10 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         html += '<a class="whatsapp-secondary" href="' + waLink(msg) + '" target="_blank" rel="noopener">Prefere tirar dúvida no WhatsApp?</a>';
       }
     } else if (s.status === 'reservado'){
-      if (JUST_SENT === s.code){
-        html += '<div class="sent-state"><b>Comprovante recebido</b>Assim que a equipe confirmar o pagamento, ele é seu — normalmente em algumas horas. Seu cadastro já foi criado; a equipe vai pedir os dados do contrato.</div>';
+      if (JUST_SENT_CODES.indexOf(s.code) >= 0){
+        html += '<div class="sent-state"><b>Comprovante do sinal recebido</b>' +
+          (JUST_SENT_CODES.length > 1 ? 'Reserva dos stands <b style="display:inline">' + esc(JUST_SENT_CODES.join(' + ')) + '</b> num contrato só. ' : '') +
+          'Assim que a equipe confirmar o sinal, ' + (JUST_SENT_CODES.length > 1 ? 'eles são seus' : 'ele é seu') + ' — normalmente em algumas horas. O saldo' + (REGRAS.saldoAte ? ' vence em ' + esc(REGRAS.saldoAte) : '') + ' e fica no contrato. Seu cadastro já foi criado; a equipe vai pedir os dados do contrato.</div>';
         if (CT){
           html += '<a class="btn btn-primary" style="text-decoration:none" href="/contrato/' + encodeURIComponent(CT) + '">Assinar o contrato agora</a>';
           html += '<p class="upload-sub" style="text-align:center;margin-top:6px;">O contrato de locação do stand já está pronto com seus dados — assina online em 1 minuto</p>';

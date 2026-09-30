@@ -540,9 +540,9 @@ def expositores_publicos(pool, conta_id: int, stands: list[dict]) -> dict[str, s
         return {}
     with pool.connection() as c:
         assinados = {r[0] for r in c.execute(
-            "select orcamento_id from contratos where orcamento_id = any(%s) "
+            "select orcamento_id from contratos where conta_id=%s and orcamento_id = any(%s) "
             "and assinado_em is not null and substitui_id is null",
-            ([s["orcamento_id"] for s in vend],)).fetchall()}
+            (conta_id, [s["orcamento_id"] for s in vend])).fetchall()}
     vend = [s for s in vend if s["orcamento_id"] in assinados]
     if not vend:
         return {}

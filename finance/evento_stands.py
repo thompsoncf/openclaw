@@ -34,7 +34,10 @@ qual orçamento é o dono da venda; este módulo nunca grava sinal/parcela.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import os
 from datetime import datetime, timedelta
 
 from . import agenda as _ag
@@ -107,6 +110,52 @@ def obter_config(pool, conta_id: int) -> dict | None:
         r = c.execute(f"select {_CFG_COLS} from evento_stands_config where conta_id=%s",
                       (conta_id,)).fetchone()
     return _fmt_cfg(r) if r else None
+
+
+# ---------------------------------------------------------------------------
+# LINK DE VENDAS DO VENDEDOR
+#
+# O vendedor manda pro CLIENTE DELE um link da página pública; o cliente
+# escolhe qualquer stand, compra, e a venda cai na conta do vendedor (pedido
+# do dono, 30/09/2026 — o link NÃO é login no app, é a vitrine com a marca do
+# vendedor). A marca vai na URL (`?v=`), e URL é entrada não confiável: um
+# `v=2` cru seria adivinhável e qualquer um poderia mandar comissão pra
+# qualquer colega. Por isso o código leva uma ASSINATURA (HMAC do id com o
+# segredo do servidor): só quem o servidor gerou é aceito, e nenhum
+# vendedor forja o código do outro.
+# ---------------------------------------------------------------------------
+
+def _segredo_vendedor() -> bytes:
+    # mesma fonte do segredo de sessão (web/app._segredo_sessao); em produção
+    # ele é obrigatório e forte — o default só existe no ambiente local/testes
+    return (os.environ.get("PORTAL_SECRET") or "troque-isto-em-producao").encode()
+
+
+def codigo_vendedor(membro_id: int) -> str:
+    """O código do link de vendas do vendedor: '<id>-<assinatura>'."""
+    assinatura = hmac.new(_segredo_vendedor(), f"stand-v:{int(membro_id)}".encode(),
+                          hashlib.sha256).hexdigest()[:10]
+    return f"{int(membro_id)}-{assinatura}"
+
+
+def vendedor_do_codigo(pool, conta_id: int, codigo: str) -> dict | None:
+    """Resolve o `v` da URL em {'id', 'nome'} — ou None se não vale.
+
+    Vale quando (1) a assinatura confere, (2) o membro é DESTA conta, está
+    ATIVO e é vendedor/gestor. Desativou o vendedor na Equipe? O link dele
+    para de atribuir na hora (a venda cai sem dono, e o gestor atribui)."""
+    try:
+        id_txt, _, assinatura = (codigo or "").strip().partition("-")
+        membro_id = int(id_txt)
+    except (TypeError, ValueError):
+        return None
+    if not hmac.compare_digest(codigo_vendedor(membro_id), f"{membro_id}-{assinatura}"):
+        return None
+    with pool.connection() as c:
+        r = c.execute(
+            "select id, nullif(nome,'') from membros where id=%s and conta_id=%s "
+            "and ativo and papel in ('vendedor','gestor')", (membro_id, conta_id)).fetchone()
+    return {"id": r[0], "nome": r[1]} if r else None
 
 
 def buscar_config_por_slug(pool, slug: str) -> dict | None:

@@ -2475,7 +2475,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
                 "text-decoration:none;color:inherit\">🗺️<span style='flex:1;min-width:0'>"
                 "<b style='display:block;font-size:.9rem'>Mapa de stands</b>"
                 f"<span style='font-size:.76rem;color:var(--text-dim,#8FA197)'>{_livres} "
-                "livres agora — toca pra ver a planta e mandar o link</span></span>"
+                "livres agora — toca pra ver a planta e copiar seu link de vendas</span></span>"
                 "<span style='color:var(--neon,#25D366);font-weight:700'>→</span></a>")
     except Exception:  # noqa: BLE001 — atalho é enfeite; a fila abre sem ele
         pass
@@ -9382,9 +9382,7 @@ def painel_equipe_cockpit_link(request: Request, membro_id: int = Form(...)):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
-    # dono E gestor geram o link do app (pedido do dono, 29/09/2026: liberar
-    # pro gestor também) — quem administra a venda administra o acesso.
-    if request.session.get("papel", "dono") not in ("dono", "gestor"):
+    if request.session.get("papel", "dono") != "dono":
         return RedirectResponse("/painel", status_code=303)
     pool = get_pool()
     with pool.connection() as c:
@@ -9419,6 +9417,14 @@ def painel_equipe_cockpit_link(request: Request, membro_id: int = Form(...)):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _STANDS_CSS = """<style>
+.stmeu{display:flex;align-items:center;gap:.7rem;margin:.7rem .8rem 0;padding:.7rem .8rem;
+  border:1px solid var(--neon,#25D366);border-radius:12px;background:rgba(37,211,102,.08)}
+.stmeu-t{flex:1;min-width:0}
+.stmeu-t b{display:block;font-size:.88rem}
+.stmeu-t span{display:block;font-size:.74rem;color:var(--text-dim,#8FA197);line-height:1.4;margin-top:2px}
+.stmeu button{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem;
+  padding:9px 14px;border-radius:9px;border:1px solid var(--neon,#25D366);width:auto;min-height:0;margin:0;
+  background:var(--neon,#25D366);color:#04150C;flex:0 0 auto}
 .stpav{display:flex;gap:8px;flex-wrap:wrap;padding:.7rem .8rem 0}
 .stpav button{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem;
   padding:8px 12px;border-radius:999px;border:1px solid var(--line,#1E2A23);
@@ -9571,15 +9577,24 @@ _STANDS_JS = r"""
     box.innerHTML=h; box.hidden=false;
   }
 
-  window.stCopiar=function(btn,code){
-    var url=location.origin+PUB+'?stand='+encodeURIComponent(code);
-    // o link já leva a marca do vendedor logado: quem comprar por ele fica na
-    // conta dele (validado no servidor). Sem MEU_ID (dono), vai o link neutro.
-    if(typeof MEU_ID!=='undefined'&&MEU_ID)url+='&v='+encodeURIComponent(MEU_ID);
+  // O LINK DE VENDAS: o vendedor manda pro CLIENTE DELE; o cliente abre a
+  // página pública, escolhe qualquer stand e compra — a venda cai na conta do
+  // vendedor. `MEU_COD` é o código ASSINADO (o servidor revalida no POST).
+  // Sem MEU_COD (dono sem membro) vai o link neutro.
+  function linkVendas(code){
+    var url=location.origin+PUB;
+    var q=[];
+    if(code)q.push('stand='+encodeURIComponent(code));
+    if(typeof MEU_COD!=='undefined'&&MEU_COD)q.push('v='+encodeURIComponent(MEU_COD));
+    return q.length?url+'?'+q.join('&'):url;
+  }
+  function copiar(btn,url){
     var ok=function(){var t=btn.textContent;btn.textContent='Copiado ✓';setTimeout(function(){btn.textContent=t;},1600);};
     if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(ok);}
     else{window.prompt('Copia o link:',url);}
-  };
+  }
+  window.stCopiar=function(btn,code){copiar(btn,linkVendas(code));};
+  window.stCopiarMeuLink=function(btn){copiar(btn,linkVendas(null));};
 
   render();legenda();
 """
@@ -9624,6 +9639,16 @@ def cockpit_stands(request: Request):
             "cliente": (nomes.get(s["prospeccao_id"]) if s["status"] != "livre" else None),
         }
 
+    # o código ASSINADO do link de vendas de quem está logado (dono sem
+    # membro_id não tem: vai o link neutro)
+    meu_cod = _es.codigo_vendedor(meu_id) if meu_id else None
+    meu_link_html = (
+        "<div class=stmeu><div class=stmeu-t><b>Seu link de vendas</b>"
+        "<span>Manda pro seu cliente: ele escolhe qualquer stand, compra, e a venda "
+        "cai na sua conta.</span></div>"
+        "<button class=prim type=button onclick=\"stCopiarMeuLink(this)\">"
+        "Copiar meu link</button></div>") if meu_cod else ""
+
     from web.loja_stands import PLANTA_DEFS_JS
     sub = (f"{tot['livre']} livres · {tot['pre_reservado']} reservados · "
            f"{tot['vendido']} vendidos")
@@ -9631,6 +9656,7 @@ def cockpit_stands(request: Request):
         _hdr("Mapa de stands", sub, voltar=_BASE)
         + _STANDS_CSS
         + "<div class=scroll>"
+        + meu_link_html
         + "<div class=stpav id=stpav></div>"
         + "<div class=stleg id=stleg></div>"
         + "<div class=stouter id=stouter><div class=ststage id=ststage>"
@@ -9638,7 +9664,7 @@ def cockpit_stands(request: Request):
         + "<div class=stdet id=stdet hidden></div>"
         + "</div>"
         + f"<script>var STANDS={_json_mod.dumps(dados)};"
-        + f"var PUB='/e/{cfg['slug']}';var MEU_ID={_json_mod.dumps(meu_id)};</script>"
+        + f"var PUB='/e/{cfg['slug']}';var MEU_COD={_json_mod.dumps(meu_cod)};</script>"
         + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS + "})();</script>"
     )
     return _page("Mapa de stands", corpo)

@@ -615,6 +615,10 @@ def test_o_contrato_publico_da_reserva_mostra_espaco_horario_sinal_e_saldo(
                   "189_contrato_enviado_em.sql", "194_assinar_antes_do_sinal.sql",
                   "201_contrato_aditivos.sql", "311_contrato_servico.sql"):
             c.execute((base / m).read_text(encoding="utf-8"))
+        # o cabeçalho lê a empresa (contas): num banco novo essas colunas vêm de outras migrações
+        for col in ("razao_social", "nome_fantasia", "endereco", "bairro", "cep", "cidade",
+                    "uf", "telefone", "email_empresa", "logo_url"):
+            c.execute(f"alter table contas add column if not exists {col} text")
         c.commit()
     _config_evento(pool, conta_id)
     _criar_stand(pool, conta_id, "G60")

@@ -53,7 +53,7 @@ PRE_RESERVA_DIAS_PADRAO = 3
 
 _COLS = ("id, conta_id, codigo, pavilhao, zona, tamanho, preco_centavos, status, "
         "pre_reserva_ate, comprovante_url, comprovante_em, prospeccao_id, "
-        "orcamento_id, ordem, criado_em, atualizado_em, cliente_id")
+        "orcamento_id, ordem, criado_em, atualizado_em, cliente_id, grupo_id")
 
 
 def _fmt(row) -> dict:
@@ -62,18 +62,22 @@ def _fmt(row) -> dict:
             "pre_reserva_ate": row[8], "comprovante_url": row[9], "comprovante_em": row[10],
             "prospeccao_id": row[11], "orcamento_id": row[12], "ordem": row[13],
             "criado_em": row[14], "atualizado_em": row[15],
-            "cliente_id": row[16] if len(row) > 16 else None}
+            "cliente_id": row[16] if len(row) > 16 else None,
+            "grupo_id": row[17] if len(row) > 17 else None}
 
 
 _CFG_COLS = ("conta_id, slug, bloqueia_em, pre_reserva_dias, whatsapp_numero, pix_chave, "
-            "pix_titular, edicao_label, evento_inicio, evento_fim, evento_local")
+            "pix_titular, edicao_label, evento_inicio, evento_fim, evento_local, "
+            "sinal_minimo_centavos, max_por_empresa, saldo_ate, evento_horario")
 
 
 def _fmt_cfg(row) -> dict:
     return {"conta_id": row[0], "slug": row[1], "bloqueia_em": row[2],
             "pre_reserva_dias": row[3], "whatsapp_numero": row[4], "pix_chave": row[5],
             "pix_titular": row[6], "edicao_label": row[7], "evento_inicio": row[8],
-            "evento_fim": row[9], "evento_local": row[10]}
+            "evento_fim": row[9], "evento_local": row[10],
+            "sinal_minimo_centavos": row[11], "max_por_empresa": row[12],
+            "saldo_ate": row[13], "evento_horario": row[14]}
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +212,7 @@ def registrar_comprovante(pool, conta_id: int, codigo: str, comprovante_url: str
                        comprovante_url = %s,
                        comprovante_em = %s,
                        prospeccao_id = coalesce(%s, prospeccao_id),
+                       grupo_id = case when status='livre' then null else grupo_id end,
                        atualizado_em = now()
                  where conta_id=%s and codigo=%s and status in ('livre','pre_reservado')
                  returning {_COLS}""",
@@ -237,7 +242,8 @@ _EXT_COMPROVANTE = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/jpg": 
 
 def subir_e_registrar_comprovante(pool, conta_id: int, codigo: str, conteudo: bytes,
                                   content_type: str, *, prospeccao_id: int | None = None,
-                                  subir=None) -> dict:
+                                  subir=None, junto_com: list[str] | None = None,
+                                  sinal_centavos: int | None = None) -> dict:
     """Sobe o arquivo pro bucket PRIVADO dos comprovantes e, se subiu, chama
     `registrar_comprovante`. É o CANO ÚNICO dos dois canais que recebem arquivo
     direto do cliente — a página pública (web/loja_stands.py) e a ferramenta do
@@ -248,6 +254,11 @@ def subir_e_registrar_comprovante(pool, conta_id: int, codigo: str, conteudo: by
     `subir` é injetável (testes) — por padrão `finance.comprovantes.subir_em`,
     o MESMO bucket privado que o comprovante de sinal de orçamento já usa (só
     muda o prefixo do caminho: 'stands/' em vez de 'comprovantes/').
+
+    `junto_com`: os OUTROS estandes da mesma reserva (no máximo 1: são 2 por
+    empresa, num contrato só). Travam juntos, tudo ou nada, com o mesmo
+    comprovante. `sinal_centavos`: o valor do sinal que o cliente disse ter
+    pago — o painel confere no comprovante na hora de confirmar.
 
     Devolve {"ok": False, "erro": "..."} tanto pra upload inválido (arquivo
     vazio, tipo não aceito) quanto pra estande indisponível — quem chama não
@@ -266,13 +277,18 @@ def subir_e_registrar_comprovante(pool, conta_id: int, codigo: str, conteudo: by
         subir(caminho, conteudo, ct)
     except ValueError as e:
         return {"ok": False, "erro": str(e)}
-    r = registrar_comprovante(pool, conta_id, codigo, caminho, prospeccao_id=prospeccao_id)
+    if junto_com:
+        r = registrar_comprovante_grupo(pool, conta_id, [codigo] + list(junto_com), caminho,
+                                        prospeccao_id=prospeccao_id)
+    else:
+        r = registrar_comprovante(pool, conta_id, codigo, caminho, prospeccao_id=prospeccao_id)
     if r.get("ok"):
         # o sinal "pagou" (comprovante na mão): nasce a proposta + o contrato
         # pra assinatura — best-effort, o estande já está travado de qualquer
         # jeito e o contrato é consequência, não condição.
         try:
-            extra = garantir_orcamento_e_contrato(pool, conta_id, r["stand"])
+            extra = garantir_orcamento_e_contrato(pool, conta_id, r["stand"],
+                                                  sinal_centavos=sinal_centavos)
             if extra:
                 r.update(extra)
                 r["stand"]["orcamento_id"] = extra["orcamento_id"]
@@ -282,7 +298,160 @@ def subir_e_registrar_comprovante(pool, conta_id: int, codigo: str, conteudo: by
     return r
 
 
-def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict) -> dict | None:
+# ---------------------------------------------------------------------------
+# ATÉ 2 ESTANDES POR EMPRESA, SINAL MÍNIMO E SALDO (aprovado em 30/09/2026)
+#
+# Uma reserva = 1 ou 2 estandes da mesma empresa, com UM comprovante, UM cadastro,
+# UMA proposta e UM contrato. O sinal é no mínimo R$ 1.500 POR ESTANDE; o saldo
+# vence na data-limite da config (padrão: o dia do evento). O estande fica
+# 'vendido' quando o gestor confirma o sinal; a quitação é uma marca a mais.
+# ---------------------------------------------------------------------------
+
+SINAL_MINIMO_PADRAO = 150000
+MAX_POR_EMPRESA_PADRAO = 2
+OBS_SINAL_ESTANDE = "Sinal — reserva do estande"
+
+
+def regras_de_pagamento(cfg: dict | None) -> dict:
+    """As regras desta conta, com piso quando a config não trouxe o campo."""
+    cfg = cfg or {}
+    saldo_ate = cfg.get("saldo_ate") or cfg.get("evento_inicio")
+    return {"sinal_minimo_centavos": int(cfg.get("sinal_minimo_centavos")
+                                         or SINAL_MINIMO_PADRAO),
+            "max_por_empresa": int(cfg.get("max_por_empresa") or MAX_POR_EMPRESA_PADRAO),
+            "saldo_ate": saldo_ate}
+
+
+def _digitos(txt) -> str:
+    return "".join(ch for ch in str(txt or "") if ch.isdigit())
+
+
+def stands_da_empresa(pool, conta_id: int, whatsapp) -> list[dict]:
+    """Os estandes que já NÃO estão livres e pertencem à mesma empresa — mesmo
+    WhatsApp (últimos 11 dígitos) na prospecção ou no cadastro do cliente. É como
+    o limite de 2 por empresa não é burlado abrindo duas reservas separadas."""
+    d = _digitos(whatsapp)[-11:]
+    if len(d) < 10:
+        return []
+    with pool.connection() as c:
+        rows = c.execute(
+            f"""select {', '.join('s.' + x.strip() for x in _COLS.split(','))}
+                  from evento_stands s
+                  left join prospeccao p on p.id = s.prospeccao_id and p.conta_id = s.conta_id
+                  left join clientes cl on cl.id = s.cliente_id and cl.dono_id = s.conta_id
+                  left join pessoas pe on pe.id = cl.pessoa_id
+                 where s.conta_id=%s and s.status <> 'livre'
+                   and (right(regexp_replace(coalesce(p.whatsapp,''), '\\D', '', 'g'), 11) = %s
+                     or right(regexp_replace(coalesce(pe.celular,''), '\\D', '', 'g'), 11) = %s)
+                 order by s.codigo""",
+            (conta_id, d, d)).fetchall()
+    return [_fmt(r) for r in rows]
+
+
+def grupo_do_stand(pool, conta_id: int, stand: dict) -> list[dict]:
+    """Os estandes da mesma reserva (inclui o próprio); sozinho, só ele."""
+    if not stand.get("grupo_id"):
+        return [stand]
+    with pool.connection() as c:
+        rows = c.execute(
+            f"select {_COLS} from evento_stands where conta_id=%s and grupo_id=%s "
+            "order by codigo", (conta_id, stand["grupo_id"])).fetchall()
+    return [_fmt(r) for r in rows] or [stand]
+
+
+def validar_reserva(pool, conta_id: int, codigos: list[str], whatsapp,
+                    sinal_centavos: int | None = None) -> dict:
+    """Confere a reserva ANTES de criar prospecção ou subir arquivo. Devolve
+    {"ok": True, "stands", "total", "sinal_minimo", "sinal"} ou {"ok": False,
+    "erro": "..."} com a frase que a página mostra."""
+    cfg = obter_config(pool, conta_id)
+    reg = regras_de_pagamento(cfg)
+    codigos = [c.strip() for c in codigos if (c or "").strip()]
+    if len(set(codigos)) != len(codigos) or not codigos:
+        return {"ok": False, "cod": "generico", "erro": "Escolha 1 ou 2 estandes diferentes."}
+    if len(codigos) > reg["max_por_empresa"]:
+        return {"ok": False, "cod": "max",
+                "erro": f"O máximo é {reg['max_por_empresa']} estandes por empresa."}
+    stands = []
+    for cod in codigos:
+        st = buscar(pool, conta_id, cod)
+        if st is None:
+            return {"ok": False, "cod": "generico", "erro": "Estande não encontrado."}
+        if st["status"] != "livre":
+            return {"ok": False, "cod": "indisponivel",
+                    "erro": f"O estande {cod} não está mais livre."}
+        stands.append(st)
+    ja = stands_da_empresa(pool, conta_id, whatsapp)
+    if ja:
+        return {"ok": False, "cod": "empresa", "erro": (
+            "Esta empresa já tem o estande " + ", ".join(x["codigo"] for x in ja)
+            + " reservado. Cada empresa fecha um contrato só, com no máximo "
+            f"{reg['max_por_empresa']} estandes — fale com a organização pelo WhatsApp "
+            "para incluir mais um.")}
+    total = sum(int(x["preco_centavos"] or 0) for x in stands)
+    minimo = reg["sinal_minimo_centavos"] * len(stands)
+    sinal = minimo if sinal_centavos is None else int(sinal_centavos)
+    if sinal < minimo:
+        return {"ok": False, "cod": "sinal", "erro": "O sinal mínimo é " + _reais(minimo)
+                + (" (R$ 1.500,00 por estande)." if len(stands) > 1 else ".")}
+    if total and sinal > total:
+        return {"ok": False, "cod": "sinal",
+                "erro": "O sinal não pode passar do valor total da reserva."}
+    return {"ok": True, "stands": stands, "total": total, "sinal_minimo": minimo,
+            "sinal": sinal}
+
+
+def registrar_comprovante_grupo(pool, conta_id: int, codigos: list[str],
+                                comprovante_url: str,
+                                prospeccao_id: int | None = None) -> dict:
+    """Trava 2 (ou mais) estandes juntos: TUDO OU NADA, numa transação. Se um deles
+    foi reservado por outra pessoa no meio tempo, nenhum trava e o cliente escolhe
+    de novo. Devolve {"ok", "stand" (o primeiro), "stands"}."""
+    import uuid
+    cfg = obter_config(pool, conta_id)
+    dias = int((cfg or {}).get("pre_reserva_dias") or PRE_RESERVA_DIAS_PADRAO)
+    agora = _ag.agora_brt()
+    prazo = agora + timedelta(days=dias)
+    grupo = uuid.uuid4().hex[:12]
+    with pool.connection() as c:
+        rows = c.execute(
+            f"""update evento_stands
+                   set status='pre_reservado', pre_reserva_ate=%s, comprovante_url=%s,
+                       comprovante_em=%s, prospeccao_id=%s, grupo_id=%s,
+                       atualizado_em=now()
+                 where conta_id=%s and codigo = any(%s) and status='livre'
+                 returning {_COLS}""",
+            (prazo, comprovante_url, agora, prospeccao_id, grupo, conta_id,
+             list(codigos))).fetchall()
+        if len(rows) != len(set(codigos)):
+            c.rollback()
+            return {"ok": False, "erro": "Um dos estandes acabou de ser reservado por "
+                                         "outra pessoa. Escolha de novo."}
+        c.commit()
+    stands = sorted((_fmt(r) for r in rows), key=lambda x: codigos.index(x["codigo"]))
+    _log.info("evento_stands: comprovante do grupo %s — conta %s, estandes %s",
+              grupo, conta_id, ",".join(codigos))
+    return {"ok": True, "stand": stands[0], "stands": stands}
+
+
+def plano_de_pagamento(total_centavos: int, sinal_centavos: int, saldo_ate,
+                       hoje) -> list[dict]:
+    """As parcelas do orçamento do estande: o sinal (paga agora) e o saldo, que
+    vence na data-limite. É o formato que `vendas.fechar_orcamento` transforma em
+    títulos a receber (o sinal recebe baixa quando o gestor confirma)."""
+    total, sinal = int(total_centavos), int(sinal_centavos)
+    plano = [{"valor_centavos": sinal, "venc": hoje.isoformat(), "forma": "Pix",
+              "obs": OBS_SINAL_ESTANDE}]
+    if total - sinal > 0:
+        quando = saldo_ate.strftime("%d/%m") if saldo_ate else ""
+        plano.append({"valor_centavos": total - sinal,
+                      "venc": saldo_ate.isoformat() if saldo_ate else hoje.isoformat(),
+                      "forma": "", "obs": "Saldo" + (f" — até {quando}" if quando else "")})
+    return plano
+
+
+def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict, *,
+                                  sinal_centavos: int | None = None) -> dict | None:
     """Quando o comprovante do SINAL chega, nascem a PROPOSTA e o CONTRATO do
     estande (pedido do dono, 29/09/2026: "colocar o contrato quando pagar o
     sinal") — reaproveitando o motor que a Prime Eventos já usa: a linha vai
@@ -319,11 +488,15 @@ def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict) -> dict | No
 
     import json as _json
     import secrets as _secrets
-    preco = int(stand.get("preco_centavos") or 0)
+    # 1 OU 2 ESTANDES na mesma reserva: um item por estande, o total é a soma
+    # (sem desconto) e o contrato é um só.
+    grupo = grupo_do_stand(pool, conta_id, stand)
+    preco = sum(int(x.get("preco_centavos") or 0) for x in grupo)
     # O OBJETO do contrato: vira o nome do item da proposta, e é dele que o
     # contrato tira "Espaço locado" e o campo {objeto.descricao} das cláusulas.
     # mesmo shape de item do cockpit/painel: nome + setup em REAIS (total da linha)
-    itens = [{"nome": descricao_objeto(stand), "setup": preco / 100, "mensal": 0}]
+    itens = [{"nome": descricao_objeto(x), "setup": int(x.get("preco_centavos") or 0) / 100,
+              "mensal": 0} for x in grupo]
     # o EVENTO completo pro quadro "Objeto": tipo (marca + edição), período de
     # vários dias e local (mesmo jsonb da proposta de evento do painel). `data`
     # segue ISO (a data de início) porque é o que o resto do sistema lê.
@@ -331,6 +504,12 @@ def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict) -> dict | No
     evento = _json.dumps(_evento_da_config(pool, conta_id, cfg)) if cfg.get("evento_inicio") else None
     modo = vendas.modo_do_orcamento(pool, conta_id)
     token = _secrets.token_urlsafe(16)
+    # O PLANO: sinal (o que o cliente disse ter pago; o gestor confere no
+    # comprovante) + saldo até a data-limite
+    reg = regras_de_pagamento(cfg)
+    sinal = int(sinal_centavos) if sinal_centavos else reg["sinal_minimo_centavos"] * len(grupo)
+    sinal = min(max(sinal, 0), preco) if preco else sinal
+    plano = plano_de_pagamento(preco, sinal, reg["saldo_ate"], _ag.agora_brt().date())
     with pool.connection() as c:
         # mesmas colunas que o cockpit garante antes de inserir (espelho das
         # migrações de orcamentos) — base velha não derruba o comprovante
@@ -354,21 +533,21 @@ def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict) -> dict | No
                  (conta_id, cliente, empresa, whatsapp, itens, evento,
                   setup_centavos, mensal_centavos, primeiro_ano_centavos,
                   status, aprovada_por, aprovada_em,
-                  criado_por, canal, token, modo, numero)
+                  criado_por, canal, token, modo, parcelas, sinal_centavos, numero)
                values (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,0,%s,
                        'aprovada',%s,now(),
-                       'pagina_stands','pagina_stands',%s,%s,
+                       'pagina_stands','pagina_stands',%s,%s,%s::jsonb,%s,
                        {vendas.NUMERO_SQL})
                returning id""",
             (conta_id, nome[:200], nome[:200], (zap or None),
              _json.dumps(itens), evento, preco, preco, nome[:120], token, modo,
-             conta_id)).fetchone())
+             _json.dumps(plano), sinal, conta_id)).fetchone())
         if not r:
             return None
         oid = int(r[0])
         c.execute("update evento_stands set orcamento_id=%s, atualizado_em=now() "
-                  "where conta_id=%s and codigo=%s",
-                  (oid, conta_id, stand["codigo"]))
+                  "where conta_id=%s and codigo = any(%s)",
+                  (oid, conta_id, [x["codigo"] for x in grupo]))
         c.execute("update prospeccao set orcamento_id=%s where id=%s and conta_id=%s",
                   (oid, pid, conta_id))
         c.commit()
@@ -376,7 +555,8 @@ def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict) -> dict | No
     # fantasia + WhatsApp entram em `clientes` agora, sem esperar o gestor. O
     # Zaq junta por WhatsApp — o mesmo lojista comprando um segundo stand não
     # vira dois clientes. O gestor completa o resto em "Dados do cliente".
-    _garantir_cliente_do_stand(pool, conta_id, stand["codigo"], oid, nome, zap)
+    for x in grupo:
+        _garantir_cliente_do_stand(pool, conta_id, x["codigo"], oid, nome, zap)
     ct = ctr.criar_para_orcamento(pool, conta_id, oid, valor_centavos=preco,
                                   criado_por="pagina_stands")
     _log.info("evento_stands: proposta %s + contrato %s nasceram do comprovante do "
@@ -453,7 +633,8 @@ def _evento_da_config(pool, conta_id: int, cfg: dict) -> dict:
     tipo = " — ".join(x for x in (marca, cfg.get("edicao_label")) if x)
     return {"tipo": tipo, "data": cfg["evento_inicio"].isoformat(),
             "periodo": _periodo(cfg["evento_inicio"], cfg.get("evento_fim")),
-            "local": cfg.get("evento_local") or ""}
+            "local": cfg.get("evento_local") or "",
+            "horario": cfg.get("evento_horario") or ""}
 
 
 def _garantir_cliente_do_stand(pool, conta_id: int, codigo: str, orcamento_id,
@@ -662,12 +843,52 @@ def _espelhar_no_orcamento(pool, conta_id: int, orcamento_id: int, cliente_id: i
         c.commit()
 
 
+def _orcamento_da_pagina(pool, conta_id: int, orcamento_id) -> dict | None:
+    if not orcamento_id:
+        return None
+    with pool.connection() as c:
+        r = c.execute(
+            """select to_jsonb(o)->>'canal', coalesce(o.setup_centavos,0),
+                      o.sinal_centavos, o.sinal_pago_em, o.status
+                 from orcamentos o where o.id=%s and o.conta_id=%s""",
+            (orcamento_id, conta_id)).fetchone()
+    if not r:
+        return None
+    return {"canal": r[0] or "", "total": int(r[1] or 0), "sinal_centavos": r[2],
+            "sinal_pago_em": r[3], "status": r[4]}
+
+
+def _gravar_sinal_no_orcamento(pool, conta_id: int, orcamento_id: int, sinal: int,
+                               total: int, saldo_ate) -> None:
+    """O gestor conferiu o comprovante: o sinal é o valor que CAIU. Refaz o plano
+    (sinal + saldo) e carimba o recebimento — é o carimbo que faz o
+    `fechar_orcamento` dar baixa no título do sinal, na data em que ele caiu."""
+    import json as _json
+    plano = plano_de_pagamento(total, sinal, saldo_ate, _ag.agora_brt().date())
+    with pool.connection() as c:
+        c.execute(
+            """update orcamentos
+                  set parcelas=%s::jsonb, sinal_centavos=%s,
+                      sinal_pago_em=coalesce(sinal_pago_em, now())
+                where id=%s and conta_id=%s and status <> 'fechado'""",
+            (_json.dumps(plano), int(sinal), orcamento_id, conta_id))
+        c.commit()
+
+
 def confirmar_pagamento(pool, conta_id: int, codigo: str,
-                        membro_id: int | None = None) -> dict:
+                        membro_id: int | None = None, *,
+                        sinal_centavos: int | None = None) -> dict:
     """O dono OLHOU o comprovante e confirma: pre_reservado -> vendido.
 
     Não existe gateway automático nessa ponta (pedido explícito da Outlet
     Chic) — é sempre um clique humano vendo o arquivo primeiro.
+
+    RESERVA DE 2 ESTANDES: confirma os dois de uma vez (um comprovante, um
+    contrato). `sinal_centavos` é o valor que o gestor conferiu no comprovante:
+    nunca abaixo do mínimo (R$ 1.500 por estande) e nunca acima do total. Ele
+    refaz o plano (sinal + saldo) do orçamento e carimba o recebimento, e o
+    `fechar_orcamento` dá a baixa no título do sinal e deixa o saldo em aberto,
+    com o vencimento da data-limite.
 
     Se o estande já tem `orcamento_id` (o orçamento nasceu por fora, no fluxo
     de proposta normal), reaproveita `finance.vendas.fechar_orcamento` pra
@@ -678,8 +899,7 @@ def confirmar_pagamento(pool, conta_id: int, codigo: str,
     `por_assinatura=True` ao chamar fechar_orcamento: naquele módulo a trava
     normal é "só fecha quem assinou o contrato", e não existe fluxo de
     contrato pro estande — a confirmação do dono vendo o comprovante É a
-    evidência de venda aqui. Suposição de produto (não técnica): se um dia a
-    Outlet Chic quiser assinatura de contrato pro estande, revisar este ponto.
+    evidência de venda aqui.
 
     Idempotente: chamar de novo num estande já 'vendido' não duplica nada,
     só confirma o que já era.
@@ -688,21 +908,40 @@ def confirmar_pagamento(pool, conta_id: int, codigo: str,
         atual = c.execute(
             f"select {_COLS} from evento_stands where conta_id=%s and codigo=%s",
             (conta_id, codigo)).fetchone()
-        if atual is None:
-            return {"ok": False, "erro": "Estande não encontrado."}
-        atual = _fmt(atual)
-        if atual["status"] == "vendido":
-            return {"ok": True, "stand": atual, "ja_confirmado": True}
-        if atual["status"] != "pre_reservado":
-            return {"ok": False, "erro": f"Estande está '{atual['status']}', "
-                                         "não dá pra confirmar pagamento."}
-        r = c.execute(
+    if atual is None:
+        return {"ok": False, "erro": "Estande não encontrado."}
+    atual = _fmt(atual)
+    if atual["status"] == "vendido":
+        return {"ok": True, "stand": atual, "ja_confirmado": True}
+    if atual["status"] != "pre_reservado":
+        return {"ok": False, "erro": f"Estande está '{atual['status']}', "
+                                     "não dá pra confirmar pagamento."}
+
+    grupo = grupo_do_stand(pool, conta_id, atual)
+    reg = regras_de_pagamento(obter_config(pool, conta_id))
+    orc = _orcamento_da_pagina(pool, conta_id, atual["orcamento_id"])
+    sinal_final = None
+    if orc and orc["canal"] == "pagina_stands":
+        minimo = reg["sinal_minimo_centavos"] * len(grupo)
+        sinal_final = (int(sinal_centavos) if sinal_centavos is not None
+                       else int(orc["sinal_centavos"] or minimo))
+        if sinal_final < minimo:
+            return {"ok": False, "erro": "O sinal mínimo é " + _reais(minimo)
+                    + (" (R$ 1.500,00 por estande)" if len(grupo) > 1 else "")
+                    + " — o valor conferido está abaixo."}
+        if orc["total"] and sinal_final > orc["total"]:
+            return {"ok": False, "erro": "O sinal não pode passar do total ("
+                    + _reais(orc["total"]) + ")."}
+
+    with pool.connection() as c:
+        rows = c.execute(
             f"""update evento_stands set status='vendido', pre_reserva_ate=null,
                        atualizado_em=now()
-                 where conta_id=%s and codigo=%s and status='pre_reservado'
+                 where conta_id=%s and codigo = any(%s) and status='pre_reservado'
                  returning {_COLS}""",
-            (conta_id, codigo)).fetchone()
+            (conta_id, [x["codigo"] for x in grupo])).fetchall()
         c.commit()
+    r = next((x for x in rows if x[2] == codigo), None)
     if r is None:
         # concorrência: alguém mexeu no estande entre o select e o update
         # (outro clique de confirmar, ou expirou no meio) — falha fechada.
@@ -713,14 +952,121 @@ def confirmar_pagamento(pool, conta_id: int, codigo: str,
     if stand["orcamento_id"]:
         try:
             from . import vendas
+            if sinal_final is not None:
+                _gravar_sinal_no_orcamento(pool, conta_id, stand["orcamento_id"],
+                                           sinal_final, orc["total"], reg["saldo_ate"])
             financeiro = vendas.fechar_orcamento(pool, conta_id, stand["orcamento_id"],
                                                  criado_por=membro_id, por_assinatura=True)
         except Exception as e:  # noqa: BLE001 — o estande JÁ VENDEU; o título é bônus
             _log.warning("evento_stands: confirmar_pagamento vendeu %s/%s mas o "
                         "lançamento financeiro falhou: %s: %s", conta_id, codigo,
                         type(e).__name__, e)
-    _log.info("evento_stands: pagamento confirmado — conta %s, estande %s", conta_id, codigo)
-    return {"ok": True, "stand": stand, "financeiro": financeiro}
+    _log.info("evento_stands: pagamento confirmado — conta %s, estande(s) %s", conta_id,
+              ",".join(x["codigo"] for x in grupo))
+    return {"ok": True, "stand": stand, "financeiro": financeiro,
+            "codigos": [x["codigo"] for x in grupo]}
+
+
+def _reais(centavos: int) -> str:
+    return "R$ " + f"{int(centavos) / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def orcamentos_do_estande(pool, conta_id: int, orcamento_ids: list[int]) -> dict[int, dict]:
+    """{id: {"total", "sinal_centavos"}} das propostas dos estandes, em lote."""
+    ids = [int(x) for x in orcamento_ids if x]
+    if not ids:
+        return {}
+    with pool.connection() as c:
+        rows = c.execute(
+            "select id, coalesce(setup_centavos,0), sinal_centavos from orcamentos "
+            "where conta_id=%s and id = any(%s)", (conta_id, ids)).fetchall()
+    return {int(r[0]): {"total": int(r[1] or 0), "sinal_centavos": r[2]} for r in rows}
+
+
+def situacao_financeira(pool, conta_id: int, orcamento_ids: list[int]) -> dict[int, dict]:
+    """Quanto já entrou e quanto falta, por orçamento, lido dos TÍTULOS (a fonte da
+    verdade do financeiro): {oid: {"pago", "aberto", "venc_aberto"}}. Orçamento sem
+    título ainda (sinal não confirmado) fica de fora."""
+    ids = [int(x) for x in orcamento_ids if x]
+    if not ids:
+        return {}
+    with pool.connection() as c:
+        rows = c.execute(
+            """select orcamento_id, status, sum(valor_centavos)::bigint,
+                      min(vencimento) filter (where status='aberto')
+                 from titulos
+                where conta_id=%s and orcamento_id = any(%s) and tipo='receber'
+                  and status in ('pago','aberto')
+                group by orcamento_id, status""", (conta_id, ids)).fetchall()
+    out: dict[int, dict] = {}
+    for oid, st, soma, venc in rows:
+        d = out.setdefault(int(oid), {"pago": 0, "aberto": 0, "venc_aberto": None})
+        d["pago" if st == "pago" else "aberto"] = int(soma or 0)
+        if st == "aberto":
+            d["venc_aberto"] = venc
+    return out
+
+
+def registrar_pagamento_saldo(pool, conta_id: int, codigo: str, valor_centavos: int,
+                              membro_id: int | None = None) -> dict:
+    """O cliente pagou (parte do) saldo: dá baixa nos títulos em aberto da reserva,
+    do vencimento mais antigo ao mais novo. Pode ser em mais de uma vez — o que
+    sobrar de uma baixa parcial continua aberto, com o mesmo vencimento. Só depois
+    de o sinal estar confirmado (é ele que cria os títulos)."""
+    from . import empresa as _emp
+    stand = buscar(pool, conta_id, codigo)
+    if stand is None or not stand.get("orcamento_id"):
+        return {"ok": False, "erro": "Estande sem proposta — não há saldo pra baixar."}
+    if stand["status"] != "vendido":
+        return {"ok": False, "erro": "Confirme o sinal antes de registrar o saldo."}
+    valor = int(valor_centavos or 0)
+    if valor <= 0:
+        return {"ok": False, "erro": "Informe o valor recebido."}
+    with pool.connection() as c:
+        abertos = c.execute(
+            """select id, valor_centavos from titulos
+                where conta_id=%s and orcamento_id=%s and tipo='receber'
+                  and status='aberto'
+                order by vencimento, parcela_idx nulls last, id""",
+            (conta_id, stand["orcamento_id"])).fetchall()
+    total_aberto = sum(int(v) for _, v in abertos)
+    if not abertos:
+        return {"ok": False, "erro": "Não há saldo em aberto — já está quitado."}
+    if valor > total_aberto:
+        return {"ok": False, "erro": "O valor passa do saldo em aberto ("
+                + _reais(total_aberto) + ")."}
+    restante = valor
+    for tid, vt in abertos:
+        if restante <= 0:
+            break
+        vt = int(vt)
+        if restante < vt:
+            # baixa PARCIAL: o pedaço pago vira título quitado, o resto segue
+            # aberto com o mesmo vencimento (título novo, sem parcela_idx)
+            with pool.connection() as c:
+                c.execute(
+                    """insert into titulos
+                         (conta_id, tipo, descricao, contraparte, valor_centavos,
+                          vencimento, categoria, recorrente, criado_por,
+                          orcamento_id, parcela_idx)
+                       select conta_id, tipo, left(descricao || ' · restante', 200),
+                              contraparte, %s, vencimento, categoria, recorrente,
+                              criado_por, orcamento_id, null
+                         from titulos where id=%s and conta_id=%s""",
+                    (vt - restante, tid, conta_id))
+                c.execute("update titulos set valor_centavos=%s where id=%s "
+                          "and conta_id=%s and status='aberto'", (restante, tid, conta_id))
+                c.commit()
+            pago = restante
+        else:
+            pago = vt
+        res = _emp.dar_baixa_titulo(pool, conta_id, tid, membro_id=membro_id)
+        if not res.get("ok"):
+            return {"ok": False, "erro": res.get("erro") or "Não consegui dar a baixa."}
+        restante -= pago
+    sit = situacao_financeira(pool, conta_id, [stand["orcamento_id"]]).get(
+        stand["orcamento_id"], {})
+    return {"ok": True, "aberto": sit.get("aberto", 0), "quitado": sit.get("aberto", 0) == 0}
 
 
 def liberar(pool, conta_id: int, codigo: str) -> bool:
@@ -733,9 +1079,11 @@ def liberar(pool, conta_id: int, codigo: str) -> bool:
         cur = c.execute(
             """update evento_stands
                   set status='livre', pre_reserva_ate=null, comprovante_url=null,
-                      comprovante_em=null, atualizado_em=now()
-                where conta_id=%s and codigo=%s and status <> 'livre'""",
-            (conta_id, codigo))
+                      comprovante_em=null, grupo_id=null, atualizado_em=now()
+                where conta_id=%s and status <> 'livre'
+                  and (codigo=%s or (grupo_id is not null and grupo_id = (
+                        select grupo_id from evento_stands where conta_id=%s and codigo=%s)))""",
+            (conta_id, codigo, conta_id, codigo))
         c.commit()
         return cur.rowcount > 0
 
@@ -755,7 +1103,8 @@ def expirar_pre_reservas(pool, agora: datetime) -> list[dict]:
     with pool.connection() as c:
         rows = c.execute(
             """update evento_stands
-                  set status='livre', pre_reserva_ate=null, atualizado_em=now()
+                  set status='livre', pre_reserva_ate=null, grupo_id=null,
+                      atualizado_em=now()
                 where status='pre_reservado' and pre_reserva_ate is not null
                   and pre_reserva_ate <= %s
                 returning id, conta_id, codigo, pavilhao, zona""",

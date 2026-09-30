@@ -198,6 +198,18 @@ def painel_eventos_stands(request: Request):
     #   resto do plano — parcelas, contrato — mora na proposta)
     # - fechada: vendido sem pendência de proposta (venda direta pela página)
     funil = {"precisa_de_mim": [], "com_o_cliente": [], "fechada": []}
+    # RESERVA DE 2 ESTANDES (um contrato só): a lista completa mostra uma linha por
+    # estande, e o funil UM cartão por reserva (o primeiro do grupo)
+    grupos: dict = {}
+    for s in stands:
+        if s.get("grupo_id") and s["status"] != "livre":
+            grupos.setdefault(s["grupo_id"], []).append(s)
+    orc_ids = [s["orcamento_id"] for s in stands if s["orcamento_id"]]
+    orcs = es.orcamentos_do_estande(pool, conta[0], orc_ids)
+    fin = es.situacao_financeira(pool, conta[0], orc_ids)
+    reg = es.regras_de_pagamento(cfg)
+    saldo_ate_txt = reg["saldo_ate"].strftime("%d/%m") if reg["saldo_ate"] else ""
+    todos_itens: dict = {}
     for s in stands:
         if s["status"] == "livre":
             continue
@@ -206,7 +218,18 @@ def painel_eventos_stands(request: Request):
         item["cliente"] = cli
         cad = cadastros.get(s["codigo"])
         item["cad"] = cad
-        item["objeto"] = es.descricao_objeto(s)
+        g = grupos.get(s.get("grupo_id")) or [s]
+        item["g_codigos"] = [x["codigo"] for x in g]
+        item["g_n"] = len(g)
+        item["g_total"] = sum(int(x["preco_centavos"] or 0) for x in g)
+        item["objeto"] = " + ".join(es.descricao_objeto(x) for x in g)
+        o = orcs.get(s["orcamento_id"]) or {}
+        f = fin.get(s["orcamento_id"]) or {}
+        item["minimo"] = reg["sinal_minimo_centavos"] * len(g)
+        item["sinal_inf"] = int(o.get("sinal_centavos") or item["minimo"])
+        item["pago"], item["aberto"] = int(f.get("pago", 0)), int(f.get("aberto", 0))
+        item["confirmado_fin"] = bool(f)
+        item["saldo_ate"] = saldo_ate_txt
         # selo "Cadastro 2/7" enquanto faltar dado do contrato
         cad_badge = ([(f"Cadastro {cad['n_ok']}/{cad['n_total']}", "ambar")]
                      if cad and cad["faltam"] else [])
@@ -215,25 +238,40 @@ def painel_eventos_stands(request: Request):
         # sem a migração 164, a aba abre sem contrato.
         item["contrato"] = (ctr.por_orcamento(pool, conta[0], s["orcamento_id"])
                             if s["orcamento_id"] else None)
+        lider = s["codigo"] == g[0]["codigo"]
+        destino = None
         if s["status"] == "pre_reservado":
-            item["resumo"] = "Comprovante recebido · sinal aguardando confirmação"
+            item["resumo"] = ("Comprovante recebido · sinal de " + brl(item["sinal_inf"])
+                              + " aguardando confirmação")
             item["pend"] = [("Confirmar sinal", "coral")] + cad_badge
             if item["contrato"] and not item["contrato"]["assinado_em"]:
                 item["pend"].append(("Contrato na mão do lojista", "azul"))
-            funil["precisa_de_mim"].append(item)
+            destino = "precisa_de_mim"
+        elif s["orcamento_id"] and item["aberto"] > 0:
+            item["resumo"] = ("Sinal confirmado · saldo de " + brl(item["aberto"])
+                              + (f" até {saldo_ate_txt}" if saldo_ate_txt else ""))
+            item["pend"] = [("Saldo em aberto", "azul")] + cad_badge
+            destino = "com_o_cliente"
+        elif s["orcamento_id"] and item["pago"] > 0:
+            item["resumo"] = "Sinal e saldo pagos · quitado"
+            item["pend"] = list(cad_badge)
+            destino = "fechada"
         elif s["orcamento_id"]:
             item["resumo"] = "Sinal confirmado · parcelas e contrato na proposta"
             item["pend"] = [("Acompanhar proposta", "azul")] + cad_badge
-            funil["com_o_cliente"].append(item)
+            destino = "com_o_cliente"
         else:
             item["resumo"] = "Pagamento confirmado · stand vendido"
             item["pend"] = list(cad_badge)
-            funil["fechada"].append(item)
+            destino = "fechada"
+        todos_itens[s["codigo"]] = item
+        if lider:
+            funil[destino].append(item)
     funil["precisa_de_mim"].sort(key=lambda s: s["pre_reserva_ate"] or "")
 
     # o vínculo (interessado/proposta/contrato) POR CÓDIGO, pra lista completa
     # não repetir as consultas do funil
-    vinculos = {d["codigo"]: d for grupo in funil.values() for d in grupo}
+    vinculos = todos_itens
 
     # vendedores da conta (pro seletor de atribuição) + nome por id (pra mostrar
     # o vendedor atual de cada venda)
@@ -329,15 +367,44 @@ def salvar_precos(request: Request,
 
 
 @router.post("/painel/eventos/estandes/{codigo}/confirmar")
-def confirmar(request: Request, codigo: str):
+def confirmar(request: Request, codigo: str, sinal: str = Form("")):
+    """Confirma o SINAL depois de conferir o comprovante. `sinal` é o valor que
+    caiu (o mínimo é R$ 1.500 por estande); vazio = o que o cliente informou.
+    Numa reserva de 2 estandes confirma os dois."""
+    from web.loja_stands import _centavos
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
         return cfg_ou_redir
     membro_id = request.session.get("membro_id")
-    r = es.confirmar_pagamento(get_pool(), conta[0], codigo, membro_id=membro_id)
+    r = es.confirmar_pagamento(get_pool(), conta[0], codigo, membro_id=membro_id,
+                               sinal_centavos=_centavos(sinal))
     if not r["ok"]:
-        return RedirectResponse(f"/painel/eventos/estandes?erro={r['erro']}", status_code=303)
-    return RedirectResponse(f"/painel/eventos/estandes?ok=Estande {codigo} confirmado.",
+        return RedirectResponse(
+            f"/painel/eventos/estandes?erro={r['erro']}&abrir={codigo}&aba=comprovante",
+            status_code=303)
+    cods = " + ".join(r.get("codigos") or [codigo])
+    return RedirectResponse(
+        f"/painel/eventos/estandes?ok=Sinal confirmado: {cods}. O saldo ficou em aberto no Financeiro.&abrir={codigo}&aba=comprovante",
+        status_code=303)
+
+
+@router.post("/painel/eventos/estandes/{codigo}/saldo")
+def registrar_saldo(request: Request, codigo: str, valor: str = Form("")):
+    """O cliente pagou (parte do) saldo: baixa nos títulos em aberto da reserva —
+    pode ser em mais de uma vez. Só dono/gestor."""
+    from web.loja_stands import _centavos
+    conta, cfg_ou_redir = _acesso(request)
+    if conta is None:
+        return cfg_ou_redir
+    r = es.registrar_pagamento_saldo(get_pool(), conta[0], codigo, _centavos(valor) or 0,
+                                     membro_id=request.session.get("membro_id"))
+    if not r["ok"]:
+        return RedirectResponse(
+            f"/painel/eventos/estandes?erro={r['erro']}&abrir={codigo}&aba=comprovante",
+            status_code=303)
+    msg = ("Saldo quitado — o Financeiro já recebeu tudo." if r["quitado"]
+           else "Pagamento registrado. Ainda falta receber parte do saldo.")
+    return RedirectResponse(f"/painel/eventos/estandes?ok={msg}&abrir={codigo}&aba=comprovante",
                             status_code=303)
 
 
@@ -629,6 +696,22 @@ _CSS = r"""<style>
 .es-pag .es-tbl .mini:hover{border-color:var(--mint);color:var(--mint)}
 .es-pag .es-tbl .dim{color:var(--fg-dim)}
 
+/* ---- 2 stands por empresa + sinal e saldo (aprovado na maquete, 30/09/2026) ---- */
+.es-pag .sinal-conf{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-top:12px}
+.es-pag .sinal-conf b{display:block;font-size:12.5px}
+.es-pag .sinal-conf small{display:block;color:var(--fg-dim);font-size:11px;margin:2px 0 4px}
+.es-pag .plano{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:12px}
+.es-pag .plano-tit{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-dim);margin-bottom:6px}
+.es-pag .plano-lin{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+.es-pag .plano-lin:first-of-type{border-top:none}
+.es-pag .plano-lin > span:first-child{flex:1;min-width:140px}
+.es-pag .plano-lin small{display:block;color:var(--fg-dim);font-size:11px}
+.es-pag .plano .chip{font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.es-pag .plano .chip.ok{background:color-mix(in srgb, var(--mint) 22%, var(--surface));color:var(--mint)}
+.es-pag .plano .chip.aberto{background:color-mix(in srgb, #4C8DFF 25%, var(--surface));color:#9DBFFF}
+.es-pag .plano .rec{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px}
+.es-pag .plano .rec .fld{margin:0;flex:1;min-width:140px}
+
 /* ---- cadastro do cliente (aprovado na maquete, 30/09/2026) ---- */
 .es-pag .oc-badge.ambar{background:color-mix(in srgb, var(--gold) 28%, var(--surface-2));color:var(--gold-strong)}
 .es-pag .cad-tit{font-size:11.5px;color:var(--fg-dim);margin-bottom:10px}
@@ -767,10 +850,10 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 <div class="oc-hist"{% if grupo %} data-grupo="{{ grupo }}"{% endif %} data-st="{{ d.status }}" data-cod="{{ d.codigo|lower }}"{% if escondido %} hidden{% endif %}>
   <div class="oc-hist-top">
     <div class="oc-open" title="{% if d.status == 'livre' %}Abrir opções{% else %}Ver comprovante, contrato e cliente{% endif %}" onclick="ocToggle(this)">
-      <div class="oc-stand-badge" style="background:{{ cor[0] }};color:{{ cor[1] }}"><div class="c">{{ d.codigo }}</div><div class="z">{{ tam_label.get(d.tamanho, d.tamanho) }}</div></div>
+      <div class="oc-stand-badge" style="background:{{ cor[0] }};color:{{ cor[1] }}"><div class="c">{{ d.codigo }}</div><div class="z">{% if d.get('g_n', 1) > 1 %}{{ d.g_n }} stands{% else %}{{ tam_label.get(d.tamanho, d.tamanho) }}{% endif %}</div></div>
       <div class="oc-body"><b>{% if d.status == 'livre' %}Livre{% else %}{{ cad.get('fantasia') or cli.get('empresa') or 'Interessado da página' }}{% endif %}</b>
-        <div class="oc-sub">{% if d.zona and d.zona != pav_label %}{{ d.zona }} · {% endif %}{{ pav_label }}</div>
-        <div class="oc-sub">{% if d.preco_centavos %}{{ brl(d.preco_centavos) }} · {% endif %}{{ d.get('resumo') or ('pronto pra oferecer' if d.status == 'livre' else rotulo) }}</div></div>
+        <div class="oc-sub">{% if d.get('g_n', 1) > 1 %}{{ d.g_codigos|join(' + ') }} · num contrato só{% else %}{% if d.zona and d.zona != pav_label %}{{ d.zona }} · {% endif %}{{ pav_label }}{% endif %}</div>
+        <div class="oc-sub">{% if d.get('g_n', 1) > 1 %}{{ brl(d.g_total) }} · {% elif d.preco_centavos %}{{ brl(d.preco_centavos) }} · {% endif %}{{ d.get('resumo') or ('pronto pra oferecer' if d.status == 'livre' else rotulo) }}</div></div>
     </div>
     {% if d.get('comprovante_em') or cli.get('criado_em') %}
     <div class="oc-criada"><div class="rot">Criada em</div><div class="dt">{{ data_curta(d.get('comprovante_em') or cli.get('criado_em')) }}</div></div>
@@ -800,7 +883,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     </div>
     <div class="oc-detail-body" data-tab="comprovante">
       {% if d.comprovante_url %}
-      <div class="oc-comprovante-item"><div class="ic">✓</div><div class="txt"><b>Comprovante do sinal</b><span>enviado{% if d.comprovante_em %} em {{ data_curta(d.comprovante_em) }}{% endif %}{% if d.preco_centavos %} · {{ brl(d.preco_centavos) }}{% endif %}</span></div></div>
+      <div class="oc-comprovante-item"><div class="ic">✓</div><div class="txt"><b>Comprovante do sinal</b><span>enviado{% if d.comprovante_em %} em {{ data_curta(d.comprovante_em) }}{% endif %}{% if d.get('sinal_inf') %} · sinal informado de {{ brl(d.sinal_inf) }}{% endif %}</span></div></div>
       {% elif d.status != 'livre' %}
       <p class="oc-vazio">Nenhum arquivo anexado a este stand.</p>
       {% endif %}
@@ -811,17 +894,44 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         {% endif %}
         {% if pode_gerir and d.comprovante_url %}<a class="oc-ghost-btn" href="/painel/eventos/estandes/{{ d.codigo }}/comprovante" target="_blank">Ver comprovante →</a>{% endif %}
         {% if pode_gerir and d.status == 'pre_reservado' %}
-        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/confirmar" style="display:inline"
-              data-faltam="{{ cad.faltam|map(attribute='l')|join(', ')|lower|replace('cnpj / cpf','CNPJ/CPF') if cad.get('faltam') else '' }}"
-              onsubmit="return esConfirmar(this)">
-          <button class="oc-ghost-btn prim" type="submit">Confirmar pagamento</button>
-        </form>
-        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/liberar" style="display:inline"
-              onsubmit="return confirm('Liberar o estande {{ d.codigo }} de volta pra livre?')">
-          <button class="oc-ghost-btn" type="submit">Liberar stand</button>
-        </form>
         {% endif %}
       </div>
+      {% if pode_gerir and d.status == 'pre_reservado' %}
+      {#- CONFIRMAR O SINAL: o gestor confere no comprovante o valor que caiu (mínimo
+          de R$ 1.500 por estande); numa reserva de 2 estandes confirma os dois -#}
+      <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/confirmar"
+            data-faltam="{{ cad.faltam|map(attribute='l')|join(', ')|lower|replace('cnpj / cpf','CNPJ/CPF') if cad.get('faltam') else '' }}"
+            onsubmit="return esConfirmar(this)">
+        <div class="sinal-conf"><b>Sinal recebido</b>
+          <small>Confira no comprovante o valor que caiu. Mínimo de {{ brl(d.minimo) }}{% if d.g_n > 1 %} (R$ 1.500 × {{ d.g_n }} stands){% endif %} · o saldo de {{ brl(d.g_total - d.sinal_inf) }} fica em aberto{% if d.saldo_ate %} até {{ d.saldo_ate }}{% endif %}.</small>
+          <label class="fld" style="margin-top:4px"><span>Valor do sinal (R$)</span><input name="sinal" inputmode="decimal" value="{{ '%.2f'|format(d.sinal_inf / 100)|replace('.', ',') }}"></label></div>
+        <div class="oc-acoes-detail" style="margin-top:10px">
+          <button class="oc-ghost-btn prim" type="submit">Confirmar pagamento{% if d.g_n > 1 %} dos {{ d.g_n }} stands{% endif %}</button>
+          <button class="oc-ghost-btn" type="submit" form="lib-{{ d.codigo }}">Liberar {% if d.g_n > 1 %}os {{ d.g_n }} stands{% else %}stand{% endif %}</button>
+        </div>
+      </form>
+      <form id="lib-{{ d.codigo }}" method="post" action="/painel/eventos/estandes/{{ d.codigo }}/liberar"
+            onsubmit="return confirm('Liberar {{ d.g_codigos|join(' + ') }} de volta pra livre?')"></form>
+      {% endif %}
+      {% if pode_gerir and d.status == 'vendido' and d.get('confirmado_fin') %}
+      {#- O PLANO: o que já entrou (sinal + pagamentos do saldo) e o que falta -#}
+      <div class="plano"><div class="plano-tit">Plano de pagamento</div>
+        <div class="plano-lin"><span>Recebido<small>sinal + pagamentos do saldo · já lançado no Financeiro</small></span><b>{{ brl(d.pago) }}</b><span class="chip ok">pago ✓</span></div>
+        <div class="plano-lin"><span>Saldo em aberto<small>{% if d.saldo_ate %}vence em {{ d.saldo_ate }} (dia do evento){% endif %}</small></span><b>{{ brl(d.aberto) }}</b>
+          {% if d.aberto > 0 %}<span class="chip aberto">em aberto</span>{% else %}<span class="chip ok">quitado ✓</span>{% endif %}</div>
+        {% if d.aberto > 0 %}
+        <form class="rec" method="post" action="/painel/eventos/estandes/{{ d.codigo }}/saldo">
+          <label class="fld"><span>Pagamento recebido (R$)</span><input name="valor" inputmode="decimal" value="{{ '%.2f'|format(d.aberto / 100)|replace('.', ',') }}"></label>
+          <button class="oc-ghost-btn prim" type="submit">Registrar pagamento do saldo</button>
+        </form>
+        <p class="fld-nota">Pode ser em mais de uma vez (Pix ou cartão): cada baixa abate o saldo, e vira <b>quitado</b> quando zerar.</p>
+        <div class="fld-nota">Se o saldo não for pago até {{ d.saldo_ate or 'a data-limite' }}: o <b>sinal fica retido</b> (Cláusula VI) e você libera {% if d.g_n > 1 %}os {{ d.g_n }} stands{% else %}o stand{% endif %} na mão — o sistema só avisa.
+          <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/liberar" style="display:inline"
+                onsubmit="return confirm('Liberar {{ d.g_codigos|join(' + ') }}? O sinal recebido fica retido.')">
+            <button class="oc-ghost-btn" type="submit">Liberar {% if d.g_n > 1 %}os {{ d.g_n }} stands{% else %}stand{% endif %} (sinal retido)</button></form></div>
+        {% endif %}
+      </div>
+      {% endif %}
       {% if pode_gerir and d.status != 'vendido' and not sem_storage %}
       {#- a caixa de anexar da maquete, real: venda fechada por fora entra por
           aqui e trava o stand pelo MESMO cano da página pública -#}
@@ -869,7 +979,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
             {% if cad.get('end') %}{{ cad.end }}{% if cad.get('cidade') %} · {{ cad.cidade }}{% if cad.get('uf') %}/{{ cad.uf }}{% endif %}{% endif %}{% else %}<span class="falta">⚠ falta o endereço</span>{% endif %}<br>
             Representante: {% if cad.get('rep') %}{{ cad.rep }}{% else %}<span class="falta">⚠ falta</span>{% endif %}</small></div>
         <div class="parte"><div class="p">Objeto</div><b>{{ d.get('objeto') or ('Stand ' ~ d.codigo) }}</b>
-          <small>{% if d.preco_centavos %}{{ brl(d.preco_centavos) }}{% endif %}<br>Vai no contrato como o espaço locado, com o evento e o período</small></div>
+          <small>{% if d.get('g_n', 1) > 1 %}{{ brl(d.g_total) }} · {{ d.g_n }} stands, sem desconto{% elif d.preco_centavos %}{{ brl(d.preco_centavos) }}{% endif %}<br>Vai no contrato como o espaço locado, com o evento e o período</small></div>
       </div>
       {% if cad.get('faltam') and not ct.assinado_em %}
       <div class="cad-aviso" style="margin-top:0;margin-bottom:12px"><b>Contrato com campos em branco</b>
@@ -1339,8 +1449,9 @@ document.addEventListener('DOMContentLoaded', function(){
   if (!cod || !window.mapaAbrirFunil) return;
   window.mapaAbrirFunil(cod);
   var linha = document.querySelector('#funil-list .oc-hist[data-cod="' + cod + '"]');
+  var aba = {comprovante:0, contrato:1, cliente:2}[new URLSearchParams(location.search).get('aba') || 'cliente'];
   var abas = linha && linha.querySelectorAll('.oc-subtab');
-  if (abas && abas[2]) abas[2].click();
+  if (abas && abas[aba != null ? aba : 2]) abas[aba != null ? aba : 2].click();
 });
 function esCopiarLink(btn){
   var txt = btn.dataset.link;

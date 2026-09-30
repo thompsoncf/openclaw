@@ -312,6 +312,23 @@ MAX_POR_EMPRESA_PADRAO = 2
 OBS_SINAL_ESTANDE = "Sinal — reserva do estande"
 
 
+def app_de_stands(pool, conta_id: int) -> bool:
+    """Esta conta usa o app de VENDA DE ESTANDES (perfil 'stands')? É o portão de tudo
+    que o dono pediu só pro Outlet Chic: o app do vendedor, os campos de cliente e
+    os campos do contrato de estande. Conta sem a marca (a Prime e as demais) segue
+    exatamente como estava. Tolerante: base sem a coluna, ou erro, é 'não'."""
+    def _ler():
+        try:
+            with pool.connection() as c:
+                r = c.execute("select app_perfil from contas where id=%s",
+                              (conta_id,)).fetchone()
+            return bool(r and r[0] == "stands")
+        except Exception:  # noqa: BLE001 — sem a coluna, ninguém tem o perfil
+            return False
+    from db.conexao import memo
+    return memo(("app_perfil", conta_id), _ler)
+
+
 def regras_de_pagamento(cfg: dict | None) -> dict:
     """As regras desta conta, com piso quando a config não trouxe o campo."""
     cfg = cfg or {}

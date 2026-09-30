@@ -3352,8 +3352,8 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
           <span id="nc-badge" class="doc-badge"></span>
         </div>
         <div class="col-2"><label>Nome / Razão social *</label><input id="nc-nome" name="nome" required></div>
-        <div><label>Razão social <span class="mut">(se for diferente do nome)</span></label><input name="razao_social" maxlength="200" placeholder="Como sai no contrato"></div>
-        <div><label>Representante legal</label><input name="representante" maxlength="200" placeholder="Quem assina pela empresa"></div>
+        {% if estande %}<div><label>Razão social <span class="mut">(se for diferente do nome)</span></label><input name="razao_social" maxlength="200" placeholder="Como sai no contrato"></div>
+        <div><label>Representante legal</label><input name="representante" maxlength="200" placeholder="Quem assina pela empresa"></div>{% endif %}
         {# nao e' escolha unica: a mesma pessoa/empresa pode comprar de voce E vender
            pra voce ao mesmo tempo — mesmo padrao de vende_produto/vende_servico,
            ja independentes na conta. Cliente vem marcado, e' o caso mais comum. #}
@@ -3413,8 +3413,8 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
             <form method="post" action="/painel/clientes/{{ c.id }}/editar">
               <div class="mini-grid">
                 <div class="col-2"><label>Nome / Razão social</label><input name="nome" value="{{ c.nome or '' }}"></div>
-                <div><label>Razão social <span class="mut">(contrato)</span></label><input name="razao_social" value="{{ c.razao_social or '' }}" maxlength="200"></div>
-                <div><label>Representante legal</label><input name="representante" value="{{ c.representante or '' }}" maxlength="200"></div>
+                {% if estande %}<div><label>Razão social <span class="mut">(contrato)</span></label><input name="razao_social" value="{{ c.razao_social or '' }}" maxlength="200"></div>
+                <div><label>Representante legal</label><input name="representante" value="{{ c.representante or '' }}" maxlength="200"></div>{% endif %}
                 <div class="col-2" style="display:flex;gap:.7rem;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;margin:.15rem 0 .2rem">
                   <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
                     <input type="checkbox" name="eh_cliente" value="1" {% if c.eh_cliente %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
@@ -3765,8 +3765,8 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
     <form method="post" action="/painel/clientes/{{ cliente.id }}/editar" style="margin-top:.7rem">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
         <div><label>Nome</label><input name="nome" value="{{ cliente.nome or '' }}" style="width:100%"></div>
-        <div><label>Razão social</label><input name="razao_social" value="{{ cliente.razao_social or '' }}" maxlength="200" style="width:100%"></div>
-        <div><label>Representante legal</label><input name="representante" value="{{ cliente.representante or '' }}" maxlength="200" style="width:100%"></div>
+        {% if estande %}<div><label>Razão social</label><input name="razao_social" value="{{ cliente.razao_social or '' }}" maxlength="200" style="width:100%"></div>
+        <div><label>Representante legal</label><input name="representante" value="{{ cliente.representante or '' }}" maxlength="200" style="width:100%"></div>{% endif %}
         <div><label>Telefone</label><input name="telefone" value="{{ cliente.telefone or '' }}" style="width:100%"></div>
         <div><label>CPF</label><input name="cpf" value="{{ cliente.cpf or '' }}" style="width:100%"></div>
         <div><label>E-mail</label><input name="email" value="{{ cliente.email or '' }}" style="width:100%"></div>
@@ -11240,8 +11240,10 @@ def painel_clientes(request: Request, busca: str = "", papel: str = ""):
     # papel do OPERADOR logado (ver comentario no template, na aba Clientes) —
     # setar `papel=` aqui via ctx pisaria nele e o menu sumiria pra quem entrar
     # com filtro na URL.
+    from finance import evento_stands as _es
     return _render("clientes", request, conta=conta, clientes=lista, total=total,
                    busca=busca or "", papel_filtro=papel_filtro, dup_n=dup_n,
+                   estande=_es.app_de_stands(pool, conta[0]),
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -11500,7 +11502,9 @@ def painel_cliente_detalhe(request: Request, cliente_id: int):
                            "left join nichos n on n.id=ct.nicho_id where ct.id=%s",
                            (conta[0],)).fetchone()
     rotulo_receber = _nichos.rotulo_receber(_ns[0] if _ns else "")
+    from finance import evento_stands as _es
     return _render("cliente_detalhe", request, conta=conta, cliente=cl,
+                   estande=_es.app_de_stands(pool, conta[0]),
                    compras=compras, resumo=resumo, fiados=fiados, fiado_total=fiado_total,
                    rotulo_receber=rotulo_receber,
                    erro=request.session.pop("erro", None),

@@ -525,7 +525,20 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
                                      texto_lembrete("retorno", r["paciente"], prof=profs.get(r["profissional_id"], ""),
                                                     vence=r["vence_em"]), agora):
             out["retorno"] += 1
+    # PLANO ACEITO NÃO É PLANO PAGO (funil novo, entrega 1b): o pacote do plano ainda não
+    # pago não chama o paciente pra marcar sessão nem avisa que a validade está acabando
+    a_pagar: set[int] = set()
+    if "tratamento" in ca._chaves_do_funil(c, conta_id):
+        try:
+            with c.transaction():
+                a_pagar = {r[0] for r in c.execute(
+                    "select id from clinica_planos where conta_id=%s and status='aceito' and pago_em is null",
+                    (conta_id,)).fetchall()}
+        except Exception:  # noqa: BLE001 — sem a 474
+            a_pagar = set()
     for k in precisam_marcar(c, conta_id, agora):
+        if k.get("plano_id") in a_pagar:
+            continue
         if k["proxima"] > hoje or k["usadas"] == 0 and k["criado_em"] > agora - timedelta(days=2):
             continue                        # ainda não liberou; o plano acabou de ser aceito
         if _ja_lembrou(c, conta_id, "sessao", k["id"], agora - timedelta(days=RELEMBRAR_DIAS)):
@@ -536,6 +549,8 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
             out["sessao"] += 1
     for k in listar(c, conta_id, hoje):
         if k["estado"] != "ativo" or not k["vence_logo"] or _ja_lembrou(c, conta_id, "validade", k["id"]):
+            continue
+        if k.get("plano_id") in a_pagar:
             continue
         if k["criado_em"] > agora - timedelta(days=2) or _tem_futuro(c, conta_id, k, agora):
             continue                        # acabou de comprar, ou já marcou as próximas

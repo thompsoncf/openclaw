@@ -226,6 +226,18 @@ def test_prontinho_encerra_como_marcou(pool, sem_envio):
     assert {x[1] for x in _toques(pool)} == {"marcou"}
 
 
+def test_card_em_consulta_tambem_e_de_quem_marcou(pool, sem_envio):
+    """O paciente que já VEIO (coluna Consulta, 01/10/2026) não é chamado pra marcar."""
+    _modo(pool, CLINICA, "sugere")
+    lead, _ = _paciente_recebe_preco(pool)
+    vac.rodar(pool, agora=_br(21, 10, 30))
+    with pool.connection() as c:
+        c.execute("update prospeccao set status='consulta' where id=%s", (lead,))
+        c.commit()
+    vac.rodar(pool, agora=_br(21, 10, 35))
+    assert {x[1] for x in _toques(pool)} == {"marcou"}
+
+
 def test_card_em_consulta_agendada_encerra_como_marcou(pool, sem_envio):
     _modo(pool, CLINICA, "sugere")
     lead, _ = _paciente_recebe_preco(pool)

@@ -423,12 +423,19 @@ def enviar(c, conta_id: int, plano_id: int, membro_id: int | None, agora: dateti
         c.rollback()
         return {"ok": False, "erro": "Esse plano já foi enviado."}
     p = plano(c, conta_id, plano_id)
-    _mover(c, conta_id, p["lead"], "proposta", p["total"], membro_id)
     c.commit()                          # enviado ANTES do WhatsApp: nunca sai duas vezes
     res = _mandar(c, conta_id, conv, destino, texto_envio(c, p))
     if res.get("ok"):
         c.execute("update clinica_planos set mensagem_id=%s, ultima_msg_id=%s where id=%s and conta_id=%s",
                   (res.get("mensagem_id"), res.get("mensagem_id"), plano_id, conta_id))
+        try:
+            with c.transaction():
+                # O CARD SÓ VAI PRA "PLANO ENVIADO" QUANDO O PLANO SAIU. Movido antes do
+                # WhatsApp, o envio que falhava deixava o paciente fora de Consulta (onde
+                # ninguém o cobra) sem ter recebido nada (revisão de 01/10/2026)
+                _mover(c, conta_id, p["lead"], "proposta", p["total"], membro_id)
+        except Exception:  # noqa: BLE001 — o plano saiu; o card é consequência
+            _log.warning("planos: card não andou no envio (plano %s)", plano_id, exc_info=True)
     else:
         # NÃO SAIU: o plano volta pra rascunho. Um plano 'enviado' que o paciente nunca
         # recebeu seria aceito pelo "1" de outra coisa e ganharia D+1 "conseguiu ver?"
@@ -453,8 +460,9 @@ def marcar_visto(c, token: str) -> None:
 def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str = "link",
             agora: datetime | None = None) -> bool:
     """Aceita o plano ENVIADO e dentro da validade. Idempotente (o update com o status
-    é a trava). Aceito: títulos a receber, card em Em tratamento (em Fechado, na conta
-    que ainda não tem essa coluna) e aviso à recepção."""
+    é a trava). Aceito: títulos a receber, pacote de sessões, card em Em tratamento (em
+    Fechado, se o plano não tem sessões ou a conta ainda não tem essa coluna) e aviso
+    à recepção."""
     agora = agora or datetime.now(timezone.utc)
     nome = " ".join((nome or "").split())
     if not nome or forma not in FORMA_D:
@@ -475,9 +483,23 @@ def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str =
             return False
         plano_id, conta_id = r
         p = plano(c, conta_id, plano_id)
-        # plano aceito vira pacote de sessões: o card vai pra Em tratamento, que conta
-        # como venda fechada (fase 'pos') e sai de lá quando o saldo acaba
-        destino = "tratamento" if "tratamento" in ca._chaves_do_funil(c, conta_id) else "ganho"
+        # as sessões compradas viram SALDO (fase 6): um pacote por procedimento. Nasce NA
+        # MESMA TRANSAÇÃO do aceite e do card: o card em Em tratamento sem pacote não
+        # tinha quem o tirasse de lá, e o relógio que passasse entre um commit e o outro
+        # via "saldo acabou" num tratamento que nem tinha começado (revisão de 01/10/2026)
+        tem_pacote = False
+        try:
+            with c.transaction():
+                from finance import clinica_pacotes as ckp
+                ckp.criar_do_plano(c, conta_id, p, agora)
+                tem_pacote = c.execute("select 1 from clinica_pacotes where conta_id=%s and plano_id=%s limit 1",
+                                       (conta_id, plano_id)).fetchone() is not None
+        except Exception:  # noqa: BLE001 — sem a 381: o aceite vale; o saldo a recepção cria
+            _log.warning("planos: pacote não criado (plano %s)", plano_id, exc_info=True)
+        # com sessões a fazer, o card vai pra Em tratamento, que conta como venda fechada
+        # (fase 'pos') e sai de lá quando o saldo acaba. Plano só de produto ou item
+        # avulso não tem saldo: é venda concluída
+        destino = "tratamento" if tem_pacote and "tratamento" in ca._chaves_do_funil(c, conta_id) else "ganho"
         _mover(c, conta_id, p["lead"], destino, p["pix"] if forma == "pix" else p["total"], None)
         c.commit()
     ids = _titulos(pool, p, forma, agora)
@@ -485,14 +507,6 @@ def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str =
         c.execute("update clinica_planos set titulos=%s where id=%s and conta_id=%s",
                   (json.dumps(ids), plano_id, conta_id))
         c.commit()
-        # as sessões compradas viram SALDO (fase 6): um pacote por procedimento
-        try:
-            from finance import clinica_pacotes as ckp
-            ckp.criar_do_plano(c, conta_id, p, agora)
-            c.commit()
-        except Exception:  # noqa: BLE001 — sem a 381: o aceite vale; o saldo a recepção cria
-            c.rollback()
-            _log.warning("planos: pacote não criado (plano %s)", plano_id, exc_info=True)
         _avisar(c, conta_id, p, f"✅ Plano aceito: {p['paciente']}",
                 f"{FORMA_D[forma]} · {_brl(p['pix'] if forma == 'pix' else p['total'])}")
     return True

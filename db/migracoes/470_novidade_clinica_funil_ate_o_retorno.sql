@@ -32,8 +32,10 @@ COMO O CARTÃO ANDA
 - Presente na agenda: vai para Consulta. Faltou ou cancelou: vai para Follow-up, como antes.
 - Ao finalizar, se o médico propôs tratamento: o cartão fica em Consulta até a recepção enviar o plano.
 - Ao finalizar, sem tratamento: vai para Retorno, se o médico pediu retorno; senão, Concluído.
-- Plano aceito: Em tratamento. Última sessão do pacote: Retorno, se houver; senão, Concluído.
+- Plano enviado no WhatsApp: Plano ou orçamento enviado. Plano aceito com sessões a fazer: Em tratamento.
+- Última sessão do pacote: Retorno, se houver; senão, Concluído.
 - Sessão de pacote e horário de retorno não tiram o cartão da coluna em que ele está.
+- A coluna Retorno acompanha a fila de retornos: o retorno que o médico pede depois, na evolução, traz o cartão; o retorno tirado da fila ou vencido leva para Concluído.
 
 PARA ATIVAR
 

@@ -45,7 +45,7 @@ def pool():
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
-                  "379_clinica_planos.sql"):
+                  "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("update servicos_catalogo set setup_centavos=80000 where conta_id=39 and nome='Procedimento estético'")
@@ -159,6 +159,8 @@ def test_enviar_manda_a_proposta_e_o_card_anda(pool, zap):
         assert (p["status"], p["validade_ate"]) == ("enviado", date(2026, 10, 2))
         assert c.execute("select status, valor_estimado_centavos from prospeccao where id=%s",
                          (lead,)).fetchone() == ("proposta", 362000)
+        assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
+                         ).fetchone() == ("qualificado", "proposta", "plano")
         assert cp.enviar(c, CLINICA, pid, 51, AGORA)["ok"] is False          # não sai duas vezes
     assert len(zap.saiu) == 1 and zap.saiu[0][0] == conv
     texto = zap.saiu[0][1]
@@ -166,6 +168,32 @@ def test_enviar_manda_a_proposta_e_o_card_anda(pool, zap):
     assert "Procedimento estético · 4 sessões · R$ 3.200" in texto and "Total: R$ 3.620" in texto
     assert "À vista no Pix: R$ 3.330,40 (−8%)" in texto and "4× de R$ 905 no cartão" in texto
     assert f"/plano/{p['token']}" in texto and "responda 1 para o Pix, 2 para o cartão ou 3" in texto
+
+
+@pytest.mark.parametrize("de", ["consulta", "retorno"])
+def test_plano_enviado_tira_o_card_de_consulta_e_de_retorno(pool, zap, de):
+    """Consulta guarda o paciente que espera o plano; Retorno, o que voltou e ganhou
+    proposta nova. É o ENVIO do plano que leva pra Plano ou orçamento enviado."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        c.execute("update prospeccao set status=%s where id=%s", (de, lead))
+        c.commit()
+        assert cp.enviar(c, CLINICA, _plano(c, lead), 51, AGORA)["ok"]
+        assert c.execute("select status, valor_estimado_centavos from prospeccao where id=%s",
+                         (lead,)).fetchone() == ("proposta", 362000)
+
+
+def test_aceite_na_conta_com_o_funil_de_antes_fecha_o_card(pool, zap):
+    with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=%s and chave in ('consulta','tratamento','retorno')",
+                  (CLINICA,))
+        lead, _conv = _paciente(c)
+        pid = _plano(c, lead)
+        cp.enviar(c, CLINICA, pid, 51, AGORA)
+        token = cp.plano(c, CLINICA, pid)["token"]
+    assert cp.aceitar(pool, token, nome="Lúcia Ferreira", forma="cartao", agora=AGORA)
+    with pool.connection() as c:
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "ganho"
 
 
 # ------------------------------------------------------------------ o aceite
@@ -379,9 +407,14 @@ def test_whatsapp_fora_do_ar_volta_pra_rascunho(pool, zap, monkeypatch):
     with pool.connection() as c:
         lead, conv = _paciente(c)
         pid = _plano(c, lead)
+        c.execute("update prospeccao set status='consulta' where id=%s", (lead,))
+        c.commit()
         r = cp.enviar(c, CLINICA, pid, 51, AGORA)
         assert not r["ok"] and "tente enviar de novo" in r["erro"]
         assert cp.plano(c, CLINICA, pid)["status"] == "rascunho"
+        # o plano não saiu: o card continua em Consulta (plano a montar), onde ninguém o cobra
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "consulta"
+        assert c.execute("select count(*) from funil_movimentos where para='proposta'").fetchone()[0] == 0
         _diz(c, conv, "1")
         assert cp.processar(pool, c, CLINICA, AGORA) == 0
 

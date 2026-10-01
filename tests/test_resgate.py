@@ -1797,3 +1797,23 @@ def test_a_regra_nao_tira_o_lead_de_vendedor(pool, equipe):
         # e sem regra com IA no chip, nada
         lid2, cv2 = _lead(c, None, numero="55" + SUPERVISOR)
         assert not cr.adotar_do_supervisor(c, EMPRESA, lid2, cv2, None)
+
+
+def test_quem_esta_em_consulta_so_fica_fora_da_cobranca_na_clinica(pool):
+    """`sql_nao_cobra`: o paciente em Consulta espera a clínica (o plano), e nenhum
+    motor o chama nem o fecha como "não respondeu". Em OUTRO nicho, a etapa "Consulta"
+    criada à mão tem a mesma chave e continua sendo cobrada como sempre."""
+    from finance import funil_regua as fr
+    with pool.connection() as c:
+        n = c.execute("insert into nichos (nome, slug) values ('Clínica','clinica') returning id").fetchone()[0]
+        c.execute("insert into contas (id, nome, chip_de, nicho_id) values (39,'Clínica',null,%s)", (n,))
+        ids = {}
+        for conta, status in ((39, "consulta"), (39, "contatado"), (EMPRESA, "consulta"), (EMPRESA, "lista_espera")):
+            ids[(conta, status)] = c.execute(
+                "insert into prospeccao (conta_id, empresa, status) values (%s,'X',%s) returning id",
+                (conta, status)).fetchone()[0]
+        cobra = {r[0] for r in c.execute(
+            f"select p.id from prospeccao p where p.id = any(%s) and {fr.sql_nao_cobra('p')}",
+            (list(ids.values()),)).fetchall()}
+        c.rollback()
+    assert cobra == {ids[(39, "contatado")], ids[(EMPRESA, "consulta")]}

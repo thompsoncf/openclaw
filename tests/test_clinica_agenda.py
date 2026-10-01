@@ -48,6 +48,11 @@ create table funil_movimentos (id bigserial primary key, conta_id bigint, prospe
 insert into nichos (id, slug) values (1,'clinica'),(2,'eventos');
 insert into contas (id, tipo, nome, nicho_id) values (39,'pj','Clínica',1),(34,'pj','Festa',2);
 insert into membros (id, conta_id, nome, papel) values (51,39,'Recepção','vendedor');
+-- a clínica com o funil de 01/10/2026 aplicado (Consulta, Em tratamento, Retorno)
+insert into funil_etapas (conta_id, chave, fase) values
+  (39,'novo','venda'),(39,'contatado','venda'),(39,'follow_up','venda'),(39,'qualificado','venda'),
+  (39,'consulta','venda'),(39,'proposta','venda'),(39,'ganho','fechamento'),(39,'tratamento','pos'),
+  (39,'retorno','pos'),(39,'perdido','fechamento');
 """
 
 
@@ -72,6 +77,7 @@ def pool():
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         c.execute((BASE / "360_clinica_agenda.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "471_clinica_tratamento_proposto.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -583,6 +589,7 @@ def test_conta_com_o_funil_de_antes_segue_a_regra_de_antes(pool):
     """A conta que ainda não aceitou o modelo novo (sem as colunas Consulta e Retorno)
     não muda de comportamento: Presente não mexe, propôs → plano, sem proposta → fechado."""
     with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=%s", (CLINICA,))
         for ch in ("novo", "contatado", "follow_up", "qualificado", "proposta", "ganho", "perdido"):
             c.execute("insert into funil_etapas (conta_id, chave) values (%s,%s)", (CLINICA, ch))
         eid, _ = _marcar(c)
@@ -594,6 +601,94 @@ def test_conta_com_o_funil_de_antes_segue_a_regra_de_antes(pool):
         _ate_atendimento(c, eid2)
         assert ca.mudar_situacao(c, CLINICA, eid2, "finalizado", tratamento="nao", retorno_dias=30) is None
         assert _status(c, eid2) == ("ganho", 50000)
+
+
+def test_funil_ainda_nao_aberto_segue_a_regra_de_antes(pool):
+    """Sem etapa gravada, as colunas novas não valem: é em funil_etapas que a régua, a
+    varredura dos pacotes e o "venda fechada" as enxergam (revisão de 01/10/2026)."""
+    with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=%s", (CLINICA,))
+        eid, _ = _marcar(c)
+        _ate_atendimento(c, eid)
+        assert _status(c, eid)[0] == "qualificado"
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="sim") is None
+        assert _status(c, eid)[0] == "proposta"
+
+
+def test_coluna_retorno_criada_a_mao_em_fase_de_venda_nao_e_a_do_modelo(pool):
+    """A chave da etapa criada à mão é o nome dela. "Retorno" em fase de venda tem
+    outro sentido: o paciente não vai pra lá, e a venda não sai dos números."""
+    with pool.connection() as c:
+        c.execute("update funil_etapas set fase='venda' where conta_id=%s and chave='retorno'", (CLINICA,))
+        eid, _ = _marcar(c)
+        _ate_atendimento(c, eid)
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="nao", retorno_dias=30) is None
+        assert _status(c, eid)[0] == "ganho"
+
+
+def test_nao_de_outro_atendimento_nao_fecha_o_card_que_espera_o_plano(pool):
+    """A mãe e o filho no mesmo celular são o mesmo card. O médico propôs tratamento à
+    mãe; o "não" do filho não leva o card pra Concluído com o valor PROPOSTO, como se
+    fosse venda. Nem o cancelamento de outro horário o tira de Consulta."""
+    with pool.connection() as c:
+        mae, _ = _marcar(c)
+        filho, _ = _marcar(c, h=9, nome="Filho")
+        depois, _ = _marcar(c, h=10, nome="Filho")
+        assert ca.evento(c, CLINICA, filho)["lead"] == ca.evento(c, CLINICA, mae)["lead"]
+        _ate_atendimento(c, mae)
+        assert ca.mudar_situacao(c, CLINICA, mae, "finalizado", tratamento="sim", valor_centavos=320000) is None
+        _ate_atendimento(c, filho)
+        assert ca.mudar_situacao(c, CLINICA, filho, "finalizado", tratamento="nao") is None
+        assert _status(c, mae) == ("consulta", 320000)
+        assert ca.mudar_situacao(c, CLINICA, depois, "cancelou") is None
+        assert _status(c, mae) == ("consulta", 320000)
+        assert c.execute("select tratamento_proposto from eventos_agenda where id in (%s,%s,%s) order by id",
+                         (mae, filho, depois)).fetchall() == [(True,), (False,), (None,)]
+
+
+def test_nao_de_um_nao_fecha_enquanto_o_outro_do_card_esta_na_clinica(pool):
+    with pool.connection() as c:
+        mae, _ = _marcar(c)
+        filho, _ = _marcar(c, h=9, nome="Filho")
+        _ate_atendimento(c, mae)
+        _ate_atendimento(c, filho)
+        assert ca.mudar_situacao(c, CLINICA, filho, "finalizado", tratamento="nao") is None
+        assert _status(c, mae)[0] == "consulta"                 # a mãe ainda está em atendimento
+        assert ca.mudar_situacao(c, CLINICA, mae, "finalizado", tratamento="nao") is None
+        assert _status(c, mae)[0] == "ganho"                    # o "não" do filho não segura ninguém
+
+
+def test_proposta_de_outra_passagem_nao_segura_o_card(pool):
+    """Só segura a proposta feita DEPOIS de o card entrar em Consulta: a do ano
+    passado, de outra passagem pela clínica, não prende o paciente lá."""
+    with pool.connection() as c:
+        velho, _ = _marcar(c)
+        _ate_atendimento(c, velho)
+        assert ca.mudar_situacao(c, CLINICA, velho, "finalizado", tratamento="sim") is None
+        lead = ca.evento(c, CLINICA, velho)["lead"]
+        c.execute("update eventos_agenda set situacao_em = now() - interval '90 days' where id=%s", (velho,))
+        c.execute("update funil_movimentos set criado_em = now() - interval '91 days' where prospeccao_id=%s", (lead,))
+        c.execute("update prospeccao set status='qualificado' where id=%s", (lead,))
+        novo, _ = _marcar(c, h=9)
+        _ate_atendimento(c, novo)
+        assert _status(c, novo)[0] == "consulta"
+        assert ca.mudar_situacao(c, CLINICA, novo, "finalizado", tratamento="nao") is None
+        assert _status(c, novo)[0] == "ganho"
+
+
+def test_chegou_por_engano_e_cancelado_por_fora_volta_pro_follow_up(pool):
+    """Depois de Presente a agenda da clínica não cancela; a agenda de sempre, sim. O
+    card que só estava em Consulta por causa desse horário não fica preso lá, fora de
+    toda cobrança e sem horário nenhum."""
+    from finance import agenda as ag
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        assert ca.mudar_situacao(c, CLINICA, eid, "presente") is None
+        assert _status(c, eid)[0] == "consulta"
+        c.commit()
+    assert ag.cancelar_evento(pool, CLINICA, eid)
+    with pool.connection() as c:
+        assert _status(c, eid)[0] == "follow_up"
 
 
 def test_finalizado_sem_tratamento_fecha_com_o_valor_da_consulta(pool):
@@ -628,6 +723,20 @@ def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
         c.commit()
     html = cli.get(f"/painel/clinica/agenda/evento/{eid}").text
     assert "O médico propôs tratamento?" in html
+    assert "vai para Retorno, se o médico pediu, ou Concluído" in html and "fica em Consulta" in html
+    # a conta que ainda não aplicou o modelo lê pra onde o card vai NELA
+    with pool.connection() as c:
+        guardadas = c.execute("select chave, fase from funil_etapas where conta_id=%s", (CLINICA,)).fetchall()
+        c.execute("delete from funil_etapas where conta_id=%s and chave in ('consulta','tratamento','retorno')",
+                  (CLINICA,))
+        c.commit()
+    antes = cli.get(f"/painel/clinica/agenda/evento/{eid}").text
+    assert "Não — Fechado" in antes and "Sim — Plano de tratamento" in antes and "Retorno, se" not in antes
+    with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=%s", (CLINICA,))
+        for ch, fase in guardadas:
+            c.execute("insert into funil_etapas (conta_id, chave, fase) values (%s,%s,%s)", (CLINICA, ch, fase))
+        c.commit()
     # valor ilegível não finaliza calado sem o valor: volta pedindo o formato
     cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
              data={"nova": "finalizado", "tratamento": "sim", "valor": "mil e quinhentos"})

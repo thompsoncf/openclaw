@@ -409,14 +409,25 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
     return eid, None
 
 
+#: as colunas do funil de 01/10/2026. Quem ainda não as tem segue a regra de antes
+_DO_FUNIL_NOVO = ("consulta", "tratamento", "retorno")
+
+
 def _chaves_do_funil(c, conta_id: int) -> set[str]:
-    """As colunas que o funil da conta tem. Funil ainda não aberto = o modelo do
-    nicho clínica (é ele que a conta vai receber)."""
-    ch = {r[0] for r in c.execute("select chave from funil_etapas where conta_id=%s", (conta_id,)).fetchall()}
-    if ch:
-        return ch
+    """As colunas que o funil da conta tem.
+
+    Em tratamento e Retorno só valem como as do modelo se são PÓS-VENDA: a coluna
+    "Retorno" que alguém criou à mão em fase de venda tem o mesmo nome e outro
+    sentido, e jogar o paciente nela tiraria a venda dos números.
+
+    Funil ainda não aberto (sem etapa gravada) = as colunas de antes. As novas só
+    passam a valer quando existem em `funil_etapas`: é lá que a régua, a varredura
+    dos pacotes e o "venda fechada" as enxergam."""
+    linhas = c.execute("select chave, fase from funil_etapas where conta_id=%s", (conta_id,)).fetchall()
+    if linhas:
+        return {ch for ch, fase in linhas if ch not in ("tratamento", "retorno") or fase == "pos"}
     from finance import raio_x_perfil as rxp
-    return {e[0] for e in rxp.etapas_padrao("clinica")}
+    return {e[0] for e in rxp.etapas_padrao("clinica")} - set(_DO_FUNIL_NOVO)
 
 
 def _nota(c, lead_id: int, membro_id: int | None, texto: str) -> None:
@@ -467,6 +478,28 @@ def _retorno_pendente(c, conta_id: int, lead_id: int) -> bool:
         return False
 
 
+def _segura_em_consulta(c, conta_id: int, lead_id: int, evento_id: int) -> bool:
+    """O card em Consulta ainda tem por que ficar lá, FORA este agendamento? Dois
+    motivos: outro paciente do mesmo card está na clínica (a mãe e o filho no mesmo
+    celular), ou um atendimento terminou com proposta e o plano ainda não saiu
+    ("plano a montar"). A proposta só vale se veio DEPOIS de o card entrar em
+    Consulta: a de um ano atrás, de outra passagem, não segura ninguém."""
+    try:
+        with c.transaction():
+            return c.execute(
+                """select 1 from eventos_agenda o
+                    where o.conta_id=%s and o.prospeccao_id=%s and o.id<>%s and o.status='ativo'
+                      and (o.situacao in ('presente', 'atendimento')
+                           or (o.situacao = 'finalizado' and o.tratamento_proposto
+                               and o.situacao_em >= coalesce(
+                                   (select max(m.criado_em) from funil_movimentos m
+                                     where m.conta_id = o.conta_id and m.prospeccao_id = o.prospeccao_id
+                                       and m.para = 'consulta'), '-infinity')))
+                    limit 1""", (conta_id, lead_id, evento_id)).fetchone() is not None
+    except Exception:  # noqa: BLE001 — sem a 471
+        return False
+
+
 def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento: str | None = None,
                      valor_centavos: int | None = None, membro_id: int | None = None,
                      retorno_dias: int | None = None) -> str | None:
@@ -475,13 +508,20 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
 
         presente                 antes do dia → Consulta: o paciente veio
         faltou / cancelou        Agendado → Follow-up ("faltou, remarcar").
-                                 Não é Perdido: faltar não é desistir.
+                                 Não é Perdido: faltar não é desistir. Vale também
+                                 pro card que só estava em Consulta por causa deste
+                                 horário (o "Chegou" por engano, cancelado depois)
         reaberto (faltou→agend.) Follow-up → Agendado
         finalizado + propôs      → Consulta, "plano a montar": o card só vai pra Plano
                                  enviado quando o plano é ENVIADO (clinica_planos.enviar)
         finalizado, sem proposta → Retorno, se há retorno pedido e não marcado;
                                  senão Concluído (virou paciente)
         finalizado sem resposta  → fica onde está; em Consulta ou Retorno, vale "não"
+
+    O "NÃO" NÃO FECHA O CARD QUE AINDA TEM O QUE ESPERAR EM CONSULTA (`_segura_em_consulta`):
+    o plano de outro atendimento a montar, ou outro paciente do mesmo card na clínica.
+    Sem isso o segundo Finalizar levava pra Concluído, com o valor PROPOSTO como se
+    fosse venda, um card que ainda ia receber o plano (revisão de 01/10/2026).
 
     "VEIO OU FALTOU" DEPENDE DE ONDE O CARD ESTÁ, e não do botão. A sessão de pacote e
     o horário de retorno de quem está em Em tratamento não mexem no card: quem o tira
@@ -506,7 +546,9 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
     destino, nota, valor = None, None, None
     if nova == "presente" and atual in _ANTES_DO_DIA and tem_consulta:
         destino = "consulta"
-    elif nova in ("faltou", "cancelou") and atual == "qualificado" and "follow_up" in chaves \
+    elif nova in ("faltou", "cancelou") and "follow_up" in chaves \
+            and (atual == "qualificado" or (atual == "consulta" and tem_consulta
+                                            and not _segura_em_consulta(c, conta_id, lead, evento_id))) \
             and not _outra_marcada(c, conta_id, lead, evento_id):
         destino = "follow_up"
         nota = f"{'Faltou à' if nova == 'faltou' else 'Cancelou a'} consulta de {quando}: remarcar."
@@ -522,6 +564,8 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
             nota = "Consulta finalizada: o médico propôs tratamento" + (
                 f" (R$ {valor / 100:,.2f})".replace(",", "X").replace(".", ",").replace("X", ".") if valor else "") + (
                 ": plano a montar." if destino == "consulta" else ".")
+        elif tratamento == "nao" and atual == "consulta" and _segura_em_consulta(c, conta_id, lead, evento_id):
+            pass                        # ainda há plano a montar, ou outro paciente do card na clínica
         elif tratamento == "nao" and atual in de_onde:
             pediu = bool(retorno_dias and 1 <= int(retorno_dias) <= 730)
             if tem_retorno and (pediu or _retorno_pendente(c, conta_id, lead)):
@@ -587,6 +631,55 @@ def card_do_tratamento(c, conta_id: int, lead_id: int | None, membro_id: int | N
     return destino
 
 
+def card_do_retorno(c, conta_id: int, lead_id: int | None, membro_id: int | None = None) -> str | None:
+    """A COLUNA RETORNO ACOMPANHA A FILA DE RETORNOS, também fora do Finalizar:
+
+        Concluído, e nasceu (ou reabriu) um retorno a marcar  → Retorno
+            (o médico assinou a evolução com retorno depois de a recepção finalizar;
+             o horário que tinha dado o retorno por marcado foi cancelado)
+        Retorno, e não sobrou retorno nenhum em aberto        → Concluído
+            (a recepção tirou da fila, ou venceu sem o paciente voltar)
+
+    Só tira de Retorno quem TEVE retorno na fila: o card que o dono arrastou pra lá
+    à mão fica onde ele pôs."""
+    if not lead_id:
+        return None
+    chaves = _chaves_do_funil(c, conta_id)
+    if "retorno" not in chaves or "ganho" not in chaves:
+        return None
+    r = c.execute("select status from prospeccao where id=%s and conta_id=%s for update",
+                  (lead_id, conta_id)).fetchone()
+    if not r or r[0] not in ("ganho", "retorno"):
+        return None
+    atual = r[0]
+    if atual == "ganho":
+        if not _retorno_pendente(c, conta_id, lead_id):
+            return None
+        destino, nota = "retorno", "Retorno pedido pelo médico: a fazer."
+    else:
+        try:
+            with c.transaction():
+                teve, aberto = c.execute(
+                    """select count(*),
+                              count(*) filter (where r.estado = 'aguardando' or (r.estado = 'marcado' and exists (
+                                  select 1 from eventos_agenda e
+                                   where e.id = r.marcado_evento_id and e.conta_id = r.conta_id
+                                     and e.status = 'ativo'
+                                     and e.situacao not in ('finalizado', 'cancelou', 'faltou'))))
+                         from clinica_retornos r where r.conta_id=%s and r.prospeccao_id=%s""",
+                    (conta_id, lead_id)).fetchone()
+        except Exception:  # noqa: BLE001 — sem a 381
+            return None
+        if not teve or aberto:
+            return None
+        destino, nota = "ganho", "Retorno fora da fila (dispensado ou vencido)."
+    c.execute("update prospeccao set status=%s, atualizado_em=now() where id=%s and conta_id=%s",
+              (destino, lead_id, conta_id))
+    fr.registrar_movimento(c, conta_id, lead_id, atual, destino, "retorno", membro_id)
+    _nota(c, lead_id, membro_id, nota)
+    return destino
+
+
 def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: str | None = None,
                    valor_centavos: int | None = None, membro_id: int | None = None,
                    retorno_dias: int | None = None) -> str | None:
@@ -605,6 +698,16 @@ def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: s
     erro = _gravar_situacao(c, conta_id, evento_id, ev, nova)
     if erro:
         return erro
+    if nova == "finalizado" and tratamento in ("sim", "nao"):
+        try:
+            with c.transaction():
+                # a resposta fica no AGENDAMENTO (migração 471): é ela que diz, depois, se
+                # o card em Consulta espera um plano, e quantas consultas viram proposta
+                c.execute("update eventos_agenda set tratamento_proposto=%s where id=%s and conta_id=%s",
+                          (tratamento == "sim", evento_id, conta_id))
+        except Exception:  # noqa: BLE001 — sem a 471
+            _log.info("agenda da clínica: resposta do tratamento não gravada (evento %s)", evento_id,
+                      exc_info=True)
     card_pela_agenda(c, conta_id, evento_id, nova, tratamento=tratamento,
                      valor_centavos=valor_centavos, membro_id=membro_id, retorno_dias=retorno_dias)
     if nova == "finalizado":

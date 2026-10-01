@@ -292,8 +292,13 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
                                and c.assinado_em >= %s and c.assinado_em < %s),
                            (select count(*) from prospeccao p
                              where p.vendedor_id = m.id
-                               -- Em tratamento e Retorno (clínica) já fecharam: não são carteira aberta
-                               and p.status not in ('ganho','perdido','tratamento','retorno'))
+                               and p.status not in ('ganho','perdido')
+                               -- Em tratamento e Retorno já fecharam: não são carteira aberta.
+                               -- Só na clínica: em outro nicho, a etapa "Retorno" criada à
+                               -- mão tem a mesma chave e é venda em aberto
+                               and not (p.status in ('tratamento','retorno') and exists (
+                                    select 1 from contas ct_ join nichos nc_ on nc_.id = ct_.nicho_id
+                                     where ct_.id = p.conta_id and nc_.slug = 'clinica')))
                       from membros m
                      where m.conta_id=%s and coalesce(m.ativo,true) and m.papel='vendedor'
                      order by 2""",

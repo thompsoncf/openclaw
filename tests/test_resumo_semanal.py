@@ -301,6 +301,25 @@ def test_o_contrato_sem_lead_conta_pra_quem_fez_o_orcamento(pool, cena):
     assert "Você fechou 1 contrato" in do_vend
 
 
+def test_em_tratamento_e_retorno_so_saem_da_carteira_aberta_na_clinica(pool, cena):
+    """Na clínica, Em tratamento e Retorno já fecharam. Em outro nicho, a etapa
+    "Retorno" criada à mão tem a mesma chave e é venda em aberto."""
+    def carteira():
+        d = rs.montar(pool, cena["conta"], AGORA)
+        return {v["primeiro"]: v["carteira"] for v in d["extras"]["por_vendedor"]}
+    antes = carteira()["Pedro"]
+    with pool.connection() as c:
+        for st in ("tratamento", "retorno"):
+            c.execute("""insert into prospeccao (conta_id, vendedor_id, empresa, status, criado_em, atualizado_em)
+                         values (%s,%s,'Paciente',%s,%s,%s)""", (cena["conta"], cena["v1"], st, _dt(8), _dt(8)))
+        c.commit()
+    assert carteira()["Pedro"] == antes + 2
+    with pool.connection() as c:
+        c.execute("update nichos set slug='clinica'")
+        c.commit()
+    assert carteira()["Pedro"] == antes
+
+
 def test_o_email_e_claro_e_sem_bloco_style(pool, cena):
     """Cliente de e-mail descarta `<style>` no topo e reescreve fundo no modo
     escuro. Tudo inline, e fundo branco."""

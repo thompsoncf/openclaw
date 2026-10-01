@@ -9900,6 +9900,7 @@ _STANDS_JS = r"""
     return 'Oi! O stand '+code+' está livre no Outlet Chic. Dá pra ver no mapa e reservar com o sinal direto por aqui: '+linkVendas0(code);
   }
   function situacao(s){
+    if(s.status==='reservado'&&s.lista)return s.pode?'Reservado pela lista — aguardando o sinal do cliente. O stand está segurado pra ele.':'Reservado pra outra loja — não prometa este.';
     if(s.status==='reservado')return s.pode?'Aguardando a gestão confirmar o sinal — o stand já está segurado pra ele.':'Comprovante em conferência — não prometa este.';
     if(!s.pode)return 'Já vendido.';
     if(s.aberto>0)return 'Vendido · falta <b>'+reais(s.aberto)+'</b> do saldo'+(SALDO_ATE?' até '+esc(SALDO_ATE):'')+'.';
@@ -10183,6 +10184,9 @@ def _dados_do_mapa(request: Request, pool, conta_id: int, meu_id, g):
             "preco": _brl(s["preco_centavos"]) if s["preco_centavos"] else None,
             "cliente": (nomes.get(s["prospeccao_id"]) if s["status"] != "livre" else None),
         }
+        # reserva lançada pela lista da gestão: sem comprovante, o sinal ainda não veio
+        if s["status"] == "pre_reservado" and not s.get("comprovante_url"):
+            dados[s["codigo"]]["lista"] = True
         # o cadastro completo (CNPJ, endereço…) só vai pro aparelho de quem pode
         # mexer nele: a gestão, ou o vendedor dono da venda. Os outros veem só o nome.
         cad = cads.get(s["codigo"])
@@ -10433,7 +10437,10 @@ def cockpit_stands_vendas(request: Request):
         if s["status"] == "pre_reservado":
             aguardando += total
             situacao = "<span class='chip amb'>Aguardando a gestão confirmar o sinal</span>"
-            linha = "Comprovante recebido · o stand está segurado pra ele."
+            # sem comprovante = reserva lançada pela lista da gestão: o sinal ainda não veio
+            linha = ("Comprovante recebido · o stand está segurado pra ele."
+                     if s.get("comprovante_url") else
+                     "Reservado pela lista · aguardando o sinal do cliente.")
         else:
             vendido += total
             recebido += int(f.get("pago", 0))

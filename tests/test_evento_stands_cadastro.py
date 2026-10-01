@@ -1360,3 +1360,100 @@ def test_o_app_manda_o_contrato_avisando_que_o_cliente_completa_os_dados():
     from web import painel_cockpit as pc
     assert "complete os dados da empresa e assine pelo celular" in pc._STANDS_JS
     assert "o cliente completa esses dados no próprio link" in pc._STANDS_JS
+
+
+# ------- reserva nova nasce limpa; reserva da lista, sem prazo nem comprovante (01/10/2026)
+
+def test_reserva_nova_depois_de_liberar_nasce_com_proposta_propria(pool, conta_id, monkeypatch):
+    """O stand liberado (ou vencido) ainda aponta pra proposta de quem estava lá. A
+    reserva SEGUINTE não pode herdar esse contrato — foi o que aconteceu no G56 em
+    produção ("Maria store" com a proposta do "THOMPSON TESTE")."""
+    _config_evento(pool, conta_id)
+    for cod in ("G57", "G58", "G59"):
+        _criar_stand(pool, conta_id, cod)
+    _reservar(pool, conta_id, monkeypatch, ["G57"], sinal=150000, nome="CAMPANHA TESTE 2",
+              zap="86999250575")
+    antes = es.buscar(pool, conta_id, "G57")
+    assert antes["orcamento_id"] and antes["cliente_id"]
+    # reenvio do comprovante na MESMA reserva: continua a mesma proposta
+    es.registrar_comprovante(pool, conta_id, "G57", "stands/x/outro.pdf",
+                             prospeccao_id=antes["prospeccao_id"])
+    assert es.buscar(pool, conta_id, "G57")["orcamento_id"] == antes["orcamento_id"]
+    assert es.liberar(pool, conta_id, "G57")
+    _reservar(pool, conta_id, monkeypatch, ["G57"], sinal=150000, nome="MOOD FOR MAN",
+              zap="86988880000")
+    depois = es.buscar(pool, conta_id, "G57")
+    assert depois["orcamento_id"] != antes["orcamento_id"]
+    assert depois["cliente_id"] != antes["cliente_id"]
+    with pool.connection() as c:
+        assert c.execute("select empresa from orcamentos where id=%s",
+                         (depois["orcamento_id"],)).fetchone()[0] == "MOOD FOR MAN"
+    # o mesmo vale pra reserva de 2 stands (o cano do grupo)
+    _reservar(pool, conta_id, monkeypatch, ["G58", "G59"], sinal=300000, nome="LOJA A",
+              zap="86911112222")
+    par_antes = es.buscar(pool, conta_id, "G58")["orcamento_id"]
+    assert es.liberar(pool, conta_id, "G58")
+    _reservar(pool, conta_id, monkeypatch, ["G58", "G59"], sinal=300000, nome="LOJA B",
+              zap="86933334444")
+    g58, g59 = es.buscar(pool, conta_id, "G58"), es.buscar(pool, conta_id, "G59")
+    assert g58["orcamento_id"] == g59["orcamento_id"] != par_antes
+
+
+def _reserva_da_lista(pool, conta_id, codigo, loja, vendedor=None):
+    """Como a lista da gestão entra: reservado, sem comprovante e sem prazo."""
+    with pool.connection() as c:
+        pid = c.execute(
+            "insert into prospeccao (conta_id, empresa, status, origem, vendedor_id) "
+            "values (%s,%s,'novo','pagina_stands',%s) returning id",
+            (conta_id, loja, vendedor)).fetchone()[0]
+        c.execute("update evento_stands set status='pre_reservado', pre_reserva_ate=null, "
+                  "comprovante_url=null, prospeccao_id=%s where conta_id=%s and codigo=%s",
+                  (pid, conta_id, codigo))
+        c.commit()
+    return pid
+
+
+def test_o_funil_do_painel_aceita_reserva_sem_prazo_e_diz_que_veio_da_lista(
+        pool, conta_id, monkeypatch):
+    from web import painel_eventos_stands as pes
+    _config_evento(pool, conta_id)
+    for cod in ("G60", "G61", "G62"):
+        _criar_stand(pool, conta_id, cod)
+    _reservar(pool, conta_id, monkeypatch, ["G60"], sinal=150000)        # página: com prazo
+    _reserva_da_lista(pool, conta_id, "G61", "MOOD FOR MAN")             # lista: sem prazo
+    _reservar(pool, conta_id, monkeypatch, ["G62"], sinal=150000, nome="Outra Loja",
+              zap="86977776666")                                          # página de novo
+    monkeypatch.setattr(pes, "get_pool", lambda: pool)
+    monkeypatch.setattr(pes, "conta_logada", lambda r: (
+        conta_id, "pj", "OUTLET CHIC", "x@x.com", "pj_pro", "ativa", None, "Teresina", False,
+        None, False, True, True, False, True, False, "eventos"))
+    monkeypatch.setattr(pes, "nicho_da_conta", lambda conta: "eventos")
+    req = _Req(papel="dono")
+    req.query_params = {}
+    r = pes.painel_eventos_stands(req)
+    html = r.body.decode("utf-8")
+    assert r.status_code == 200                       # antes: TypeError ao ordenar
+    assert "Reservado pela lista · aguardando o sinal de R$ 1.500" in html
+    assert "Comprovante recebido · sinal de" in html
+    # "Precisa de mim": quem vence primeiro vem antes; a da lista (sem prazo) vai pro fim
+    import re
+    ordem = re.findall(r'data-grupo="precisa_de_mim" data-st="[a-z_]+" data-cod="([a-z0-9]+)"',
+                       html)
+    assert ordem == ["g60", "g62", "g61"]
+
+
+def test_o_app_mostra_a_reserva_da_lista_como_aguardando_o_sinal(pool, conta_id, monkeypatch):
+    import json
+    import re
+    roberta = _membro(pool, conta_id, "Roberta")
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "S113")
+    _reserva_da_lista(pool, conta_id, "S113", "SÓ SPORT", vendedor=roberta)
+    pc, req = _cockpit(pool, conta_id, monkeypatch, roberta)
+    html = pc.cockpit_stands(req).body.decode("utf-8")
+    dados = json.loads(re.search(r"var STANDS=(\{.*?\});var PUB", html, re.S).group(1))
+    assert dados["S113"]["status"] == "reservado" and dados["S113"]["lista"] is True
+    assert "Reservado pela lista — aguardando o sinal do cliente" in pc._STANDS_JS
+    vendas = pc.cockpit_stands_vendas(req).body.decode("utf-8")
+    assert "Reservado pela lista · aguardando o sinal do cliente." in vendas
+    assert "Comprovante recebido" not in vendas

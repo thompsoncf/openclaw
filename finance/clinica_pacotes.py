@@ -540,9 +540,38 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
 
 # ------------------------------------------------------------------ o poller
 
+def varrer_tratamento(c) -> int:
+    """O card em Em tratamento cujo saldo acabou FORA do Finalizar (pacote vencido,
+    encerrado pela recepção): vai pra Retorno ou Concluído, como no Finalizar
+    (`clinica_agenda.card_do_tratamento`). Só olha contas que têm a coluna."""
+    n = 0
+    try:
+        with c.transaction():
+            leads = c.execute(
+                """select p.conta_id, p.id from prospeccao p
+                    where p.status = 'tratamento'
+                      and p.conta_id in (select conta_id from funil_etapas where chave = 'tratamento')
+                      and exists (select 1 from clinica_pacotes k
+                                   where k.conta_id = p.conta_id and k.prospeccao_id = p.id)
+                      and not exists (select 1 from clinica_pacotes k
+                                       where k.conta_id = p.conta_id and k.prospeccao_id = p.id
+                                         and k.estado = 'ativo' and k.sessoes_usadas < k.sessoes_total)
+                    limit 200""").fetchall()
+    except Exception:  # noqa: BLE001 — sem a régua ou sem a 381
+        return 0
+    for conta_id, lead in leads:
+        try:
+            with c.transaction():
+                n += 1 if ca.card_do_tratamento(c, conta_id, lead) else 0
+        except Exception:  # noqa: BLE001
+            _log.warning("pacotes: card do tratamento não andou (lead %s)", lead, exc_info=True)
+    c.commit()
+    return n
+
+
 def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
-    total = {"contas": 0, "sessao": 0, "retorno": 0, "validade": 0, "vencidos": 0}
+    total = {"contas": 0, "sessao": 0, "retorno": 0, "validade": 0, "vencidos": 0, "concluidos": 0}
     with pool.connection() as lockc:
         if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
             return total
@@ -564,6 +593,7 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                     except Exception:  # noqa: BLE001
                         c.rollback()
                         _log.warning("pacotes: conta %s falhou", conta_id, exc_info=True)
+                total["concluidos"] = varrer_tratamento(c)
         finally:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
     return total

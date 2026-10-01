@@ -47,7 +47,7 @@ _AVISOS = {
     "falhou": "Não deu para enviar agora. O toque ficou marcado como falho.",
     "dispensado": "Pronto: esse paciente não recebe mais toques deste preço.",
     "nao_paciente": "Pronto: esse número não recebe mais toque nenhum.",
-    "marcou": "Anotado como marcado. O card foi para Consulta agendada.",
+    "marcou": "Anotado como marcado. O card foi para Agendado.",
     "salvo": "Configuração salva.",
     "hoje_ja": "Esse paciente já recebeu uma mensagem hoje. O próximo toque fica para amanhã.",
     "desligado": "Voltar a chamar está desligado: nada sai, nem clicando.",

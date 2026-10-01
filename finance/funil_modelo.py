@@ -49,7 +49,9 @@ ACOES = ("criar", "rotulo", "ordem", "quadro", "agenda")
 #: a FASE das etapas que não são de venda. As tuplas do modelo não a carregam; sem
 #: isto, o Pós-festa do funil novo de eventos nasceria como 'venda' e deixaria de
 #: contar como venda fechada (`funil_regua.chaves_fechadas`).
-FASE = {"ganho": "fechamento", "perdido": "fechamento", "pos_festa": "pos"}
+FASE = {"ganho": "fechamento", "perdido": "fechamento", "pos_festa": "pos",
+        # a clínica: quem está em tratamento ou esperando o retorno já fechou
+        "tratamento": "pos", "retorno": "pos"}
 
 #: o GATILHO das colunas novas do funil de eventos. Coluna que nasce sem gatilho
 #: nunca enche sozinha — e estas três só existem pra andar sozinhas. Quem decide se
@@ -288,6 +290,16 @@ def plano(c, conta_id: int, chave_perfil: str) -> list[dict]:
             nota=(f"{n} lead{'s' if n != 1 else ''} continuam no cadastro, na busca e "
                   f"nos relatórios — some a coluna, não o lead" if n else
                   "nenhum lead aqui hoje")))
+
+    # O NOME QUE VAI SER DE UMA COLUNA NOVA NÃO FICA EM DUAS. A Espaço Pelle chamou a
+    # etapa do plano de "Consulta" à mão; o modelo de 01/10/2026 cria a coluna
+    # "Consulta" de verdade (o paciente veio). Sem isto a troca do nome velho viria
+    # desmarcada ("você já renomeou") e o quadro ficaria com duas colunas iguais.
+    novos = {(it["para"] or "").casefold() for it in itens if it["acao"] == "criar"}
+    for it in itens:
+        if it["acao"] == "rotulo" and (it["de"] or "").casefold() in novos:
+            it["marcado"] = True
+            it["nota"] = f"“{it['de']}” passa a ser o nome de uma coluna nova do ramo"
     return itens
 
 

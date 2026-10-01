@@ -661,8 +661,8 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       {% else %}
       <div class="inteira"><span class="mut">O médico propôs tratamento? (o card do paciente anda no funil com a resposta)</span>
         <div class="ag-ops" style="margin-top:.3rem">
-          <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'Fechado' }}</label>
-          <label><input type="radio" name="tratamento" value="sim" required> Sim — Plano de tratamento</label></div></div>
+          <label><input type="radio" name="tratamento" value="nao" required> Não — vai para Retorno, se o médico pediu, ou Concluído</label>
+          <label><input type="radio" name="tratamento" value="sim" required> Sim — fica em Consulta até o plano ser enviado</label></div></div>
       <label>Valor proposto (se souber)<input name="valor" inputmode="decimal" placeholder="1.500,00"></label>
       {% endif %}
       <label>O médico pediu retorno em quantos dias? (vazio: não pediu)<input name="retorno" inputmode="numeric" value="{{ '' if pacote_vai else volta_padrao }}"></label>

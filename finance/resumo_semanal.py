@@ -291,7 +291,9 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
                                and """ + _cd.SQL_CT_VENDEDOR + """ = m.id
                                and c.assinado_em >= %s and c.assinado_em < %s),
                            (select count(*) from prospeccao p
-                             where p.vendedor_id = m.id and p.status not in ('ganho','perdido'))
+                             where p.vendedor_id = m.id
+                               -- Em tratamento e Retorno (clínica) já fecharam: não são carteira aberta
+                               and p.status not in ('ganho','perdido','tratamento','retorno'))
                       from membros m
                      where m.conta_id=%s and coalesce(m.ativo,true) and m.papel='vendedor'
                      order by 2""",

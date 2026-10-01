@@ -167,6 +167,53 @@ def test_finalizar_baixa_uma_sessao_e_conclui_na_ultima(pool, zap):
         assert ckp.do_evento(c, CLINICA, extra) is None
 
 
+def _card(c, lead):
+    return c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0]
+
+
+def test_o_card_sai_de_em_tratamento_quando_o_saldo_acaba(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        assert _card(c, lead) == "tratamento"
+        for n in range(3):
+            _finalizar(c, _sessao(c, lead, SEG + timedelta(days=n)))
+            assert _card(c, lead) == "tratamento"               # a sessão não tira da coluna
+        _finalizar(c, _sessao(c, lead, SEG + timedelta(days=3)))
+        assert _card(c, lead) == "ganho"                        # acabou o saldo, sem retorno: Concluído
+        assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
+                         ).fetchone() == ("tratamento", "ganho", "pacote")
+
+
+def test_saldo_acabou_com_retorno_pedido_vai_pro_retorno(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        for n in range(3):
+            _finalizar(c, _sessao(c, lead, SEG + timedelta(days=n)))
+        _finalizar(c, _sessao(c, lead, SEG + timedelta(days=3)), retorno_dias=30)
+        assert _card(c, lead) == "retorno"
+
+
+def test_pacote_encerrado_tira_o_card_pelo_relogio(pool, zap):
+    """O saldo também acaba fora do Finalizar (a recepção encerra, o pacote vence)."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        for ch, fase in (("tratamento", "pos"), ("ganho", "fechamento"), ("proposta", "venda"),
+                         ("qualificado", "venda")):
+            c.execute("insert into funil_etapas (conta_id, chave, fase) values (39,%s,%s)", (ch, fase))
+        c.commit()
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        assert ckp.varrer_tratamento(c) == 0                    # com saldo, fica
+        assert ckp.encerrar(c, CLINICA, ckp.listar(c, CLINICA)[0]["id"], "desistiu", 51)
+        c.commit()
+        assert ckp.varrer_tratamento(c) == 1
+        assert _card(c, lead) == "ganho"
+
+
 def test_consulta_que_nao_e_do_pacote_nao_baixa(pool, zap):
     with pool.connection() as c:
         lead, _conv = _paciente(c)

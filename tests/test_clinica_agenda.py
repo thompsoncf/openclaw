@@ -516,12 +516,84 @@ def _ate_atendimento(c, eid):
         assert ca.mudar_situacao(c, CLINICA, eid, s) is None
 
 
-def test_finalizado_com_tratamento_vai_pro_plano_com_o_valor(pool):
+def test_presente_leva_o_card_pra_consulta(pool):
+    """O paciente veio: é a coluna que faltava entre Agendado e o plano."""
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        assert ca.mudar_situacao(c, CLINICA, eid, "confirmado") is None
+        assert _status(c, eid)[0] == "qualificado"
+        assert ca.mudar_situacao(c, CLINICA, eid, "presente") is None
+        assert _status(c, eid)[0] == "consulta"
+        assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
+                         ).fetchone() == ("qualificado", "consulta", "agenda")
+
+
+def test_propos_tratamento_segura_o_card_em_consulta_com_o_plano_a_montar(pool):
+    """O card só vai pra Plano enviado quando o plano é ENVIADO (clinica_planos)."""
     with pool.connection() as c:
         eid, _ = _marcar(c)
         _ate_atendimento(c, eid)
         assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="sim", valor_centavos=320000) is None
+        assert _status(c, eid) == ("consulta", 320000)
+        nota = c.execute("select descricao from prospeccao_atividades order by id desc limit 1").fetchone()[0]
+        assert nota == "Consulta finalizada: o médico propôs tratamento (R$ 3.200,00): plano a montar."
+
+
+def test_sem_proposta_com_retorno_pedido_vai_pro_retorno(pool):
+    """A receita com volta em 30 dias: o retorno existe sem tratamento nenhum."""
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        _ate_atendimento(c, eid)
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="nao", retorno_dias=30) is None
+        assert _status(c, eid) == ("retorno", 50000)
+
+
+def test_quem_esta_em_tratamento_ou_em_retorno_nao_sai_da_coluna_pela_agenda(pool):
+    """"Veio ou faltou" depende de onde o card está: a sessão de pacote e o horário de
+    retorno não jogam um paciente que já fechou de volta na venda."""
+    with pool.connection() as c:
+        sessao, _ = _marcar(c)
+        c.execute("update prospeccao set status='tratamento' where id=%s", (ca.evento(c, CLINICA, sessao)["lead"],))
+        _ate_atendimento(c, sessao)
+        assert _status(c, sessao)[0] == "tratamento"
+        assert ca.mudar_situacao(c, CLINICA, sessao, "finalizado") is None
+        assert _status(c, sessao)[0] == "tratamento"            # sem pacote aqui: quem tira é o saldo
+        volta, _ = _marcar(c, h=9, nome="Outro", fone="99 97777-0093")
+        c.execute("update prospeccao set status='retorno' where id=%s", (ca.evento(c, CLINICA, volta)["lead"],))
+        assert ca.mudar_situacao(c, CLINICA, volta, "faltou") is None
+        assert _status(c, volta)[0] == "retorno"
+
+
+def test_retorno_feito_conclui_ou_volta_pra_consulta(pool):
+    with pool.connection() as c:
+        alta, _ = _marcar(c)
+        c.execute("update prospeccao set status='retorno' where id=%s", (ca.evento(c, CLINICA, alta)["lead"],))
+        _ate_atendimento(c, alta)
+        assert _status(c, alta)[0] == "retorno"                 # Presente não tira do Retorno
+        assert ca.mudar_situacao(c, CLINICA, alta, "finalizado", tratamento="nao") is None
+        assert _status(c, alta)[0] == "ganho"
+        plano, _ = _marcar(c, h=9, nome="Outra", fone="99 97777-0094")
+        c.execute("update prospeccao set status='retorno' where id=%s", (ca.evento(c, CLINICA, plano)["lead"],))
+        _ate_atendimento(c, plano)
+        assert ca.mudar_situacao(c, CLINICA, plano, "finalizado", tratamento="sim") is None
+        assert _status(c, plano)[0] == "consulta"
+
+
+def test_conta_com_o_funil_de_antes_segue_a_regra_de_antes(pool):
+    """A conta que ainda não aceitou o modelo novo (sem as colunas Consulta e Retorno)
+    não muda de comportamento: Presente não mexe, propôs → plano, sem proposta → fechado."""
+    with pool.connection() as c:
+        for ch in ("novo", "contatado", "follow_up", "qualificado", "proposta", "ganho", "perdido"):
+            c.execute("insert into funil_etapas (conta_id, chave) values (%s,%s)", (CLINICA, ch))
+        eid, _ = _marcar(c)
+        _ate_atendimento(c, eid)
+        assert _status(c, eid)[0] == "qualificado"
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="sim", valor_centavos=320000) is None
         assert _status(c, eid) == ("proposta", 320000)
+        eid2, _ = _marcar(c, h=9, nome="Outra", fone="99 97777-0095")
+        _ate_atendimento(c, eid2)
+        assert ca.mudar_situacao(c, CLINICA, eid2, "finalizado", tratamento="nao", retorno_dias=30) is None
+        assert _status(c, eid2) == ("ganho", 50000)
 
 
 def test_finalizado_sem_tratamento_fecha_com_o_valor_da_consulta(pool):
@@ -532,12 +604,13 @@ def test_finalizado_sem_tratamento_fecha_com_o_valor_da_consulta(pool):
         assert _status(c, eid) == ("ganho", 50000)
 
 
-def test_finalizado_sem_resposta_nao_mexe_e_card_adiante_nao_volta(pool):
+def test_finalizado_sem_resposta_nao_prende_em_consulta_e_card_adiante_nao_volta(pool):
     with pool.connection() as c:
         eid, _ = _marcar(c)
         _ate_atendimento(c, eid)
+        assert _status(c, eid)[0] == "consulta"
         assert ca.mudar_situacao(c, CLINICA, eid, "finalizado") is None
-        assert _status(c, eid)[0] == "qualificado"
+        assert _status(c, eid)[0] == "ganho"                    # sem a pergunta, vale "não": conclui
         eid2, _ = _marcar(c, h=9, nome="Outra", fone="99 97777-0091")
         lead = ca.evento(c, CLINICA, eid2)["lead"]
         c.execute("update prospeccao set status='proposta' where id=%s", (lead,))
@@ -566,7 +639,7 @@ def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
     # o médico propôs tratamento: a recepção vai direto montar o plano (fase 5)
     assert r.headers["location"] == f"/painel/clinica/planos/novo?evento={eid}"
     with pool.connection() as c:
-        assert _status(c, eid) == ("proposta", 150000)
+        assert _status(c, eid) == ("consulta", 150000)
 
 
 

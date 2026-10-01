@@ -181,7 +181,8 @@ def test_aceite_pelo_link_gera_titulos_e_fecha_o_card(pool, zap):
     with pool.connection() as c:
         p = cp.plano(c, CLINICA, pid)
         assert (p["status"], p["aceito_forma"], p["aceito_por"], p["titulos"]) == ("aceito", "cartao", "link", [1, 2, 3, 4])
-        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "ganho"
+        # plano aceito vira pacote: o card vai pra Em tratamento (venda fechada, fase 'pos')
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "tratamento"
         assert c.execute("select motivo from funil_movimentos order by id desc limit 1").fetchone()[0] == "plano"
     assert sum(v for _d, v, _venc in zap.titulos) == 362000
     assert [venc for _d, _v, venc in zap.titulos] == [date(2026, 9, 25), date(2026, 10, 25),

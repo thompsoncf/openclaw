@@ -373,7 +373,9 @@ def _mandar(c, conta_id: int, conv: int | None, destino: str, texto: str) -> dic
     return res
 
 
-_ANTES = ("novo", "contatado", "follow_up", "qualificado")
+#: de onde o plano leva o card. `consulta` é o paciente que veio e espera o plano;
+#: `retorno`, o que voltou e ganhou proposta nova (funil de 01/10/2026)
+_ANTES = ("novo", "contatado", "follow_up", "qualificado", "consulta", "retorno")
 
 
 def _mover(c, conta_id: int, lead: int | None, destino: str, valor: int | None, membro_id: int | None) -> None:
@@ -451,7 +453,8 @@ def marcar_visto(c, token: str) -> None:
 def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str = "link",
             agora: datetime | None = None) -> bool:
     """Aceita o plano ENVIADO e dentro da validade. Idempotente (o update com o status
-    é a trava). Aceito: títulos a receber, card em Fechado e aviso à recepção."""
+    é a trava). Aceito: títulos a receber, card em Em tratamento (em Fechado, na conta
+    que ainda não tem essa coluna) e aviso à recepção."""
     agora = agora or datetime.now(timezone.utc)
     nome = " ".join((nome or "").split())
     if not nome or forma not in FORMA_D:
@@ -472,7 +475,10 @@ def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str =
             return False
         plano_id, conta_id = r
         p = plano(c, conta_id, plano_id)
-        _mover(c, conta_id, p["lead"], "ganho", p["pix"] if forma == "pix" else p["total"], None)
+        # plano aceito vira pacote de sessões: o card vai pra Em tratamento, que conta
+        # como venda fechada (fase 'pos') e sai de lá quando o saldo acaba
+        destino = "tratamento" if "tratamento" in ca._chaves_do_funil(c, conta_id) else "ganho"
+        _mover(c, conta_id, p["lead"], destino, p["pix"] if forma == "pix" else p["total"], None)
         c.commit()
     ids = _titulos(pool, p, forma, agora)
     with pool.connection() as c:

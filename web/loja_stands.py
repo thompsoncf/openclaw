@@ -247,6 +247,7 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
         _log.info("loja_stands: comprovante recusado (%s/%s): %s", conta_id, codigo,
                   r.get("erro"))
         return RedirectResponse(f"/e/{slug}?msg=erro&codigo={codigo}", status_code=303)
+    es.avisar_reserva_nova(pool, conta_id, prospeccao_id, codigos, nome, v["sinal"])
     destino = f"/e/{slug}?msg=ok&codigo={codigo}"
     if len(codigos) > 1:
         destino += f"&c2={codigos[1]}"

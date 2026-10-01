@@ -398,11 +398,10 @@ def _nome_util(txt) -> str:
 
 
 def _data_br(iso: str) -> str:
-    """'2026-12-19' -> '19/12/2026'. Devolve como veio se não for uma data ISO."""
-    try:
-        return datetime.strptime((iso or "")[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
-    except (ValueError, TypeError):
-        return (iso or "").strip()
+    """'2026-12-19' (ou '19/12/2026') -> '19/12/2026'. Devolve como veio se não for data."""
+    from finance import agenda as ag
+    d = ag.parse_data((iso or "")[:10])
+    return d.strftime("%d/%m/%Y") if d else (iso or "").strip()
 
 
 def _dias_desde(quando, hoje=None) -> int | None:
@@ -796,12 +795,11 @@ def data_da_linha(evento, *, modo="evento") -> dict | None:
     """
     if (modo or "") != "evento":
         return None
-    iso = ""
-    if isinstance(evento, dict):
-        iso = str(evento.get("data") or "")[:10]
-    try:
-        d = datetime.strptime(iso, "%Y-%m-%d").date()
-    except (ValueError, TypeError):
+    # `parse_data`, e não só ISO: o app gravou "dd/mm/aaaa" até 01/10/2026, e
+    # orçamento com data aparecia aqui como "Sem data marcada".
+    from finance import agenda as ag
+    d = ag.parse_data(str(evento.get("data") or "")[:10]) if isinstance(evento, dict) else None
+    if d is None:
         return {"dia": "—", "mes": "sem data", "titulo": "Sem data marcada",
                 "iso": "", "sem_data": True}
     return {"dia": f"{d.day:02d}",

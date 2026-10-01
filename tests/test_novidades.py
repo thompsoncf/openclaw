@@ -177,6 +177,10 @@ def pool():
         # sai logo: conferido em `test_o_aviso_do_funil_atendimento`
         c.execute((BASE / "411_novidade_funil_atendimento.sql").read_text(encoding="utf-8"))
         c.execute("delete from novidades where chave='funil-atendimento'")
+        # 457 amplia pela 14ª, com `orcamento_evento_app` (evento sem o app de
+        # estandes). O aviso sai logo: conferido em `test_o_aviso_da_forma_de_pagamento`
+        c.execute((BASE / "457_novidade_cockpit_forma_pagamento.sql").read_text(encoding="utf-8"))
+        c.execute("delete from novidades where chave='cockpit-forma-de-pagamento'")
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -1503,3 +1507,26 @@ def test_o_aviso_do_funil_atendimento(pool):
     assert nv.alcanca("funil_atendimento", "eventos") is True
     assert nv.alcanca("funil_atendimento", "consultoria") is True
     assert nv.alcanca("funil_atendimento", "hortifruti") is False
+
+
+def test_o_aviso_da_forma_de_pagamento(pool, monkeypatch):
+    """A 457: a forma de pagamento nas parcelas do orçamento do app. Mira
+    `orcamento_evento_app` — `eventos` sozinho alcançaria o Outlet Chic, cujo app
+    de estandes não tem o botão de Orçamento — e só o vendedor."""
+    with pool.connection() as c:
+        c.execute((BASE / "457_novidade_cockpit_forma_pagamento.sql").read_text(encoding="utf-8"))
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, corpo from novidades
+                          where chave='cockpit-forma-de-pagamento'""").fetchone()
+        c.execute("delete from novidades where chave='cockpit-forma-de-pagamento'")
+        c.commit()
+    assert r[:3] == ("mudanca", "orcamento_evento_app", ["vendedor"])
+    assert r[3] is None, "ajuste interno do app: não vai pro site"
+    assert r[4] == "/cockpit" and "Boleto" in r[5]
+
+    from finance import vendas as _vd, evento_stands as _es
+    perfil = {1: ("evento", False), 2: ("evento", True), 3: ("recorrente", False)}
+    monkeypatch.setattr(_vd, "modo_do_orcamento", lambda p, cid: perfil[cid][0])
+    monkeypatch.setattr(_es, "app_de_stands", lambda p, cid: perfil[cid][1])
+    assert nv.alcanca("orcamento_evento_app", "eventos", pool, 1) is True       # Prime
+    assert nv.alcanca("orcamento_evento_app", "eventos", pool, 2) is False      # Outlet Chic
+    assert nv.alcanca("orcamento_evento_app", "consultoria", pool, 3) is False

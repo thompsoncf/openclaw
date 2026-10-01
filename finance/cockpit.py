@@ -2627,15 +2627,35 @@ def vende_servico(pool, conta_id: int) -> bool:
         return False
 
 
+def _data_iso(texto: str) -> str:
+    """'18/01/2028' -> '2028-01-18'. O que não for data volta como veio."""
+    from finance.agenda import parse_data
+    d = parse_data(texto)
+    return d.isoformat() if d else texto
+
+
+# O que o app sabe editar no evento. O painel grava mais coisa no mesmo jsonb
+# (`contratos`, `desconto`, `periodo` do aditivo); reabrir no app e salvar não pode
+# levar isso junto.
+_CAMPOS_EVENTO_APP = ("data", "inicio", "fim", "tipo", "local", "convidados")
+
+
 def _sanear_evento(ev) -> dict | None:
     """O bloco "O evento" do orçamento, como o painel o grava (web/painel_servicos
     `EventoIn`). Devolve None quando não veio nada — coluna vazia é diferente de
     coluna com um dicionário de campos em branco, e quem lê (`agenda.janela_evento`,
     o contrato) trata os dois de jeitos diferentes.
 
-    Datas e horas ficam como TEXTO, do jeito que a empresa escreve ("2026-11-18",
-    "19:00", "24:00"). Quem transforma em compromisso é `agenda.janela_evento`, que
-    sabe a regra da virada da meia-noite — converter aqui seria a segunda régua.
+    Horas ficam como TEXTO, do jeito que a empresa escreve ("19:00", "24:00"). Quem
+    transforma em compromisso é `agenda.janela_evento`, que sabe a regra da virada
+    da meia-noite — converter aqui seria a segunda régua.
+
+    A DATA, não: sai em ISO, que é como o painel grava (`<input type=date>`). O app
+    pede "dd/mm/aaaa" e até 01/10/2026 gravava assim — e o campo de data do
+    computador, que só aceita ISO, abria em branco (orçamento nº 47 da Prime); o
+    selo do funil marcava "Sem data". Quem lê é a mesma `agenda.parse_data` da
+    agenda, então não é régua nova. O que não for data reconhecível fica como foi
+    digitado: apagar seria perder o que o vendedor escreveu.
 
     Até 01/09/2026 o app não perguntava nada disto e gravava a coluna nula. O
     efeito não era cosmético: sem data não nasce pré-reserva na agenda, e o
@@ -2647,7 +2667,7 @@ def _sanear_evento(ev) -> dict | None:
         convidados = int(ev.get("convidados") or 0) or None
     except (TypeError, ValueError):
         convidados = None
-    saida = {"data": _t("data", 20), "inicio": _t("inicio", 10), "fim": _t("fim", 10),
+    saida = {"data": _data_iso(_t("data", 20)), "inicio": _t("inicio", 10), "fim": _t("fim", 10),
              "tipo": _t("tipo", 60), "local": _t("local", 200),
              "convidados": convidados}
     # nada preenchido: não inventa o dicionário
@@ -2671,7 +2691,7 @@ def _sanear_parcelas(parcelas) -> list[dict]:
             centavos = 0
         if centavos <= 0:
             continue
-        out.append({"venc": (str(p.get("venc") or "")).strip()[:20],
+        out.append({"venc": _data_iso((str(p.get("venc") or "")).strip()[:20]),
                     "valor_centavos": centavos,
                     "forma": (str(p.get("forma") or "")).strip()[:40],
                     "obs": (str(p.get("obs") or "")).strip()[:200]})
@@ -2759,6 +2779,16 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
             _garantir_tabela(c)
         except Exception:  # noqa: BLE001 — colunas já existem em produção
             pass
+        # REABRIR NÃO APAGA O QUE O APP NÃO MOSTRA. O painel grava `contratos` (os
+        # tipos de contrato marcados) e `desconto` no mesmo jsonb; o app só conhece
+        # os seis campos dele, e regravar a coluna inteira jogava o resto fora.
+        if orcamento_id and modo == "evento":
+            ant = c.execute("select evento from orcamentos where id=%s and conta_id=%s",
+                            (int(orcamento_id), conta_id)).fetchone()
+            ant_ev = ant[0] if ant and isinstance(ant[0], dict) else {}
+            extras = {k: v for k, v in ant_ev.items() if k not in _CAMPOS_EVENTO_APP}
+            if extras:
+                ev_json = _json.dumps({**extras, **(ev_dic or {})})
         # `primeiro_ano_centavos` NÃO é enfeite e não estava aqui antes: quem gera
         # os títulos lê `coalesce(primeiro_ano_centavos, setup_centavos, 0)`
         # (finance/vendas.py), então sem ele o financeiro cai na soma BRUTA dos

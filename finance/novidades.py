@@ -295,6 +295,22 @@ PUBLICOS_NICHO = {
     "funil_atendimento": _funil_atendimento,
 }
 
+def _orcamento_evento_app(pool, conta_id: int) -> bool:
+    """O vendedor monta orçamento de EVENTO no app — data, horário e parcelas?
+    `eventos` sozinho não basta: o Outlet Chic é do nicho, mas o app dele é o de
+    estandes, sem o botão de Orçamento (web/painel_cockpit, `_perfil_stands`).
+    Mesmos portões da tela: `vendas.modo_do_orcamento` e `evento_stands.app_de_stands`.
+    Falha fechada."""
+    try:
+        from finance import vendas as _vd, evento_stands as _es
+        return (_vd.modo_do_orcamento(pool, conta_id) == "evento"
+                and not _es.app_de_stands(pool, conta_id))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ver o orçamento do app da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
 PUBLICOS_CONTA = {
     "canal_proprio": _canal_proprio,
     "empresa": _empresa,
@@ -304,6 +320,7 @@ PUBLICOS_CONTA = {
     "resgate_eventos": _resgate_eventos,
     "esteira_ligada": _esteira_ligada,
     "resgate_ativo": _resgate_ativo,
+    "orcamento_evento_app": _orcamento_evento_app,
 }
 
 # A lista completa — é ela que o check da migração espelha.

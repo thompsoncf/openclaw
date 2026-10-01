@@ -47,7 +47,7 @@ import os as _os
 from datetime import timedelta
 from urllib.parse import urlencode as _urlencode
 
-from fastapi import APIRouter, Body, Form, Request
+from fastapi import APIRouter, Body, File, Form, Request, UploadFile
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response,
@@ -1302,6 +1302,11 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
    primeira ganha do `.secao` acima dela. */
 .avulso.ev2{padding-top:.45rem}
 .avulso input.hr{flex:1;font-family:var(--mono)}
+.avulso select,.avl select.fp{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);padding:.55rem .7rem;font-family:inherit;font-size:.85rem}
+.avl select.fp{flex:1 1 100%;padding:.35rem .55rem;font-size:.8rem}
+.avulso input.fpo{display:none}
+.avulso.tem-outro input.fpo{display:block}
 .evaviso{margin:.45rem 1.1rem 0;padding:.45rem .6rem;border-radius:10px;font-size:.78rem;
  line-height:1.45;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:var(--ambar)}
 .evaviso b{display:block}
@@ -2030,9 +2035,15 @@ def _abas(itens, ativo: str, selos: dict | None = None, verdes: tuple = ("perfil
     return (f"<div class='tabs {barra}'>" if barra else "<div class=tabs>") + "".join(out) + "</div>"
 
 
-def _abas_stands(ativo: str) -> str:
-    """As abas do app de VENDA DE ESTANDES (Outlet Chic): mapa, as vendas do vendedor
-    e o perfil. Nada de Fila, Agenda, Propostas ou Raio-X: aquilo é o app de festa."""
+def _abas_stands(ativo: str, gestao: bool = False) -> str:
+    """As abas do app de VENDA DE ESTANDES (Outlet Chic). Nada de Fila, Agenda,
+    Propostas ou Raio-X: aquilo é o app de festa. A GESTÃO (dono/gestor) tem as
+    dela: o mapa, as vendas de todos e o ranking dos vendedores."""
+    if gestao:
+        return _abas([("stands", "mapa", "Stands", f"{_BASE}/stands"),
+                      ("vendas", "orc", "Vendas", f"{_BASE}/stands/vendas"),
+                      ("ranking", "placar", "Ranking", f"{_BASE}/stands/ranking"),
+                      ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
     return _abas([("stands", "mapa", "Stands", f"{_BASE}/stands"),
                   ("leads", "fila", "Leads", f"{_BASE}/leads"),
                   ("vendas", "orc", "Vendas", f"{_BASE}/stands/vendas"),
@@ -2270,6 +2281,9 @@ def cockpit_inicio(request: Request, meus: str = "", entrou: str = "", fora: str
     """
     g = _gerencia(request)
     if g and not (meus and g[1]):
+        # a gestão do Outlet Chic abre no mapa (a visão de equipe é a da festa)
+        if _perfil_stands(g[0]):
+            return RedirectResponse(f"{_BASE}/stands", status_code=303)
         return _dono_visao(request, g[0])
     sess = _sessao(request)
     if not sess:
@@ -4074,24 +4088,55 @@ _ORC_JS = r"""
     $("addnome").value="";$("addval").value="";pintaAvulsos();soma();toast("Item adicionado");
   };
   // ---- o evento e as parcelas (só no nicho de eventos) ----
+  // O servidor grava data e vencimento em ISO (é o que o campo de data do
+  // computador aceita); aqui o vendedor lê e digita dd/mm/aaaa.
+  function brData(v){
+    var s=String(v==null?'':v).trim(), m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m?m[3]+'/'+m[2]+'/'+m[1]:s;
+  }
+  // A MESMA LISTA DO PAINEL (web/painel_servicos, FORMAS_PAGAMENTO). Até
+  // 01/10/2026 o app gravava toda parcela com a forma em branco. Forma que não
+  // está na lista (escrita no painel em "Outro") entra como opção própria e não
+  // se perde ao reabrir.
+  var FORMAS=["Pix","Cartão de crédito","Cartão de débito","Boleto","Dinheiro","Transferência"];
+  function opcoesForma(atual){
+    var lista=FORMAS.slice();if(atual&&lista.indexOf(atual)<0)lista.push(atual);
+    return '<option value="">Forma de pagamento…</option>'+lista.map(function(f){
+      return '<option value="'+esc(f)+'"'+(f===atual?' selected':'')+'>'+esc(f)+'</option>';
+    }).join("");
+  }
   var parcelas=[];
   function pintaParcelas(){
     var box=$("parcelas");if(!box)return;
     box.innerHTML=parcelas.map(function(p,i){
-      return '<div class=avl><b>'+esc(p.venc||"a combinar")+'</b>'
+      return '<div class=avl><b>'+esc(brData(p.venc)||"a combinar")+'</b>'
         +'<span class=vl>'+brl(Math.round(p.valor_centavos/100))+'</span>'
-        +'<button type=button data-px="'+i+'" aria-label="Remover parcela">×</button></div>';
+        +'<button type=button data-px="'+i+'" aria-label="Remover parcela">×</button>'
+        +'<select class=fp data-pf="'+i+'" aria-label="Forma de pagamento">'
+        +opcoesForma(p.forma||"")+'</select></div>';
     }).join("");
   }
   document.addEventListener("click",function(e){
     var x=e.target.closest("[data-px]");if(!x)return;
     parcelas.splice(parseInt(x.getAttribute("data-px"),10),1);pintaParcelas();
   });
+  document.addEventListener("change",function(e){
+    var s=e.target.closest&&e.target.closest("[data-pf]");
+    if(s){var p=parcelas[parseInt(s.getAttribute("data-pf"),10)];if(p)p.forma=s.value;return;}
+    if(e.target.id==="pcforma")
+      e.target.parentNode.classList.toggle("tem-outro",e.target.value==="Outro");
+  });
+  var pf=$("pcforma");
+  if(pf)pf.innerHTML=opcoesForma("")+'<option value="Outro">Outro…</option>';
   var pa=$("pcadd");
   if(pa)pa.onclick=function(){
     var v=parseInt(($("pcval").value||"").replace(/\D/g,''),10);
     if(!v){toast("Informe o valor da parcela");return;}
-    parcelas.push({venc:$("pcvenc").value.trim(),valor_centavos:v*100,forma:"",obs:""});
+    // a forma escolhida FICA no seletor: plano de 10 parcelas no boleto não
+    // obriga a escolher boleto dez vezes.
+    var forma=pf?pf.value:"";
+    if(forma==="Outro")forma=($("pcformaoutro").value||"").trim();
+    parcelas.push({venc:$("pcvenc").value.trim(),valor_centavos:v*100,forma:forma,obs:""});
     $("pcvenc").value="";$("pcval").value="";pintaParcelas();
   };
   // ---- reabrir uma proposta: repõe o que já estava gravado ----
@@ -4114,7 +4159,7 @@ _ORC_JS = r"""
     // `evfim` entra aqui junto com os outros: sem ele, abrir no app um orçamento
     // que o desktop gravou com encerramento e salvar APAGAVA o encerramento — o
     // campo voltava vazio e o coletarEvento mandava vazio por cima.
-    p("evdata",ev.data);p("evini",ev.inicio);p("evfim",ev.fim);p("evtipo",ev.tipo);
+    p("evdata",ev.data==null?null:brData(ev.data));p("evini",ev.inicio);p("evfim",ev.fim);p("evtipo",ev.tipo);
     p("evlocal",ev.local);p("evconv",ev.convidados);
     (d.parcelas||[]).forEach(function(x){parcelas.push(x);});
     var b=$("gerar");if(b)b.textContent="Salvar a proposta";
@@ -4306,9 +4351,11 @@ def cockpit_orcamento_montar(request: Request, lead_id: int, orc: int = 0):
                  "<div class='avulso ev2'><input id=evlocal placeholder='Local' autocomplete=off></div>"
                  "<div class=secao><div class=rot>Parcelas</div></div>"
                  "<div id=parcelas></div>"
-                 "<div class='avulso ev2'><input id=pcvenc placeholder='Vencimento' autocomplete=off>"
+                 "<div class='avulso ev2'><input id=pcvenc placeholder='Vencimento (dd/mm/aaaa)' autocomplete=off>"
                  "<input class=v id=pcval inputmode=numeric placeholder='R$' autocomplete=off>"
-                 "<button type=button id=pcadd aria-label='Adicionar parcela'>+</button></div>")
+                 "<button type=button id=pcadd aria-label='Adicionar parcela'>+</button></div>"
+                 "<div class='avulso ev2'><select id=pcforma aria-label='Forma de pagamento'></select>"
+                 "<input class=fpo id=pcformaoutro placeholder='Especifique' autocomplete=off></div>")
                 if evento_mode else "")
              + "</div>"
              + "<div class=rodape-b id=rodape>"
@@ -5613,6 +5660,11 @@ def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLRes
     return _page("Meu perfil", corpo)
 
 
+def _abas_perfil_dono(conta_id) -> str:
+    return (_abas_stands("perfil", gestao=True) if _perfil_stands(conta_id)
+            else _abas_dono("perfil"))
+
+
 def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
     marca = _marca_conta(conta_id)
     # o dono titular não é membro da equipe, então não tem fila própria — só o
@@ -5636,7 +5688,7 @@ def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
              + f"<a class='btn ghost' style='margin-bottom:.5rem' href='{_BASE}/velocidade'>Velocidade do app</a>"
              + minha_caixa + "</div>"
              + f"<div class=bloco><a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
-             + "</div>" + _abas_dono("perfil"))
+             + "</div>" + _abas_perfil_dono(conta_id))
     return _page("Perfil", corpo)
 
 
@@ -9628,7 +9680,7 @@ _STANDS_JS = r"""
   // pegada proporcional (largura=frente, altura=fundo) escalada pra grid de 30px
   var sizeBase={'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
   var ESCALA=30/34;
-  var pav='inferior', sel=null, editando=false, filtro='';
+  var pav='inferior', sel=null, editando=false, filtro='', vendendo=false;
   // o que o contrato precisa do cliente (mesma lista do painel do gestor)
   var REQ=[['fantasia','Nome fantasia'],['whats','WhatsApp'],['razao','Razão social'],['doc','CNPJ/CPF'],
            ['rep','Representante legal'],['end','Endereço'],['cidade','Cidade']];
@@ -9654,7 +9706,7 @@ _STANDS_JS = r"""
     b.style.width=Math.round(((def&&def.w)||base.w)*ESCALA)+'px';
     b.style.height=Math.round(((def&&def.h)||base.h)*ESCALA)+'px';
     b.textContent=code;
-    b.onclick=function(){sel=code;editando=false;render();detalhe();
+    b.onclick=function(){sel=code;editando=false;vendendo=false;render();detalhe();
       document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});};
     return b;
   }
@@ -9723,11 +9775,13 @@ _STANDS_JS = r"""
       h+='<button class=prim type=button onclick="stCopiar(this,\''+esc(sel)+'\')">Copiar link pro cliente</button>';
       h+='<a class=zap href="https://wa.me/?text='+encodeURIComponent(msgLivre(sel))+'" target=_blank rel=noopener>Mandar no WhatsApp</a>';
       h+='<a href="'+PUB+'?stand='+encodeURIComponent(sel)+'" target=_blank rel=noopener>Ver na página →</a>';
+      if(!vendendo)h+='<button type=button onclick="stVender()">Registrar venda</button>';
     } else if(s.pode){
       h+=acoesVenda(s);
     }
     h+='</div>';
     if(s.status!=='livre')h+='<span class=sts>'+situacao(s)+'</span>';
+    if(s.status==='livre'&&vendendo)h+=formVenda(sel);
     if(s.status!=='livre'&&s.cad)h+=cadHTML(s);
     box.innerHTML=h; box.hidden=false;
   }
@@ -9765,6 +9819,36 @@ _STANDS_JS = r"""
     return h;
   }
   window.stCopiarTxt=function(btn,txt){copiar(btn,txt);};
+
+  // REGISTRAR VENDA (01/10/2026): o cliente mandou o comprovante pelo WhatsApp do
+  // vendedor — ele registra aqui e a reserva fica no nome dele, pelo MESMO cano da
+  // página pública (sinal mínimo, até 2 stands, contrato). A gestão confirma.
+  function formVenda(code){
+    var min=SINAL_MIN/100;
+    var h='<div class=stcad><form class=stvenda method=post enctype="multipart/form-data" action="'+BASE_STANDS+'/'+encodeURIComponent(code)+'/venda" onsubmit="return stVendaOk(this)">';
+    h+='<label class=stfld><span>Nome fantasia <i>*</i></span><input name=nome required maxlength=200 autocomplete=organization></label>';
+    h+='<label class=stfld><span>WhatsApp do cliente <i>*</i></span><input name=whatsapp required inputmode=tel maxlength=40></label>';
+    h+='<div class=stlin><label class=stfld><span>Valor do sinal (R$) <i>*</i></span><input name=sinal inputmode=decimal value="'+min+'"></label>';
+    h+='<label class=stfld><span>2º stand (opcional)</span><input name=codigo2 maxlength=10 placeholder="ex.: G61" autocapitalize=characters></label></div>';
+    h+='<label class=stfld><span>Comprovante do sinal <i>*</i></span><input name=arquivo type=file required accept="image/*,application/pdf"></label>';
+    h+='<div class=sterr id=stvmsg hidden></div>';
+    h+='<div class=stac><button class=stsalvar type=submit>Registrar venda</button><button class=stbtn type=button onclick="stCancelaVenda()">Cancelar</button></div>';
+    h+='<div class=stnota>O stand fica reservado no seu nome, igual à venda pelo seu link. Sinal mínimo de '+reais(SINAL_MIN)+' por stand; a gestão confere o comprovante e confirma.</div>';
+    return h+'</form></div>';
+  }
+  window.stVender=function(){vendendo=true;detalhe();};
+  window.stCancelaVenda=function(){vendendo=false;detalhe();};
+  window.stVendaOk=function(form){
+    var msg=document.getElementById('stvmsg'), n=form.elements['codigo2'].value.trim()?2:1;
+    var zap=form.elements['whatsapp'].value.replace(/[^0-9]/g,'');
+    var v=parseFloat(String(form.elements['sinal'].value).replace(/[^0-9,.]/g,'').replace(/[.]/g,'').replace(',','.'))||0;
+    var erro='';
+    if(zap.length<10)erro='Informe o WhatsApp do cliente com DDD.';
+    else if(Math.round(v*100)<SINAL_MIN*n)erro='O sinal mínimo é '+reais(SINAL_MIN*n)+(n>1?' (2 stands).':'.');
+    if(erro){msg.hidden=false;msg.textContent=erro;return false;}
+    form.querySelector('.stsalvar').disabled=true;
+    return true;
+  };
 
   // BUSCA E FILTRO: "G58" pula pro stand (troca de pavilhão se precisar); o filtro
   // apaga no mapa o que não é do status escolhido
@@ -10028,9 +10112,10 @@ def cockpit_stands(request: Request, abrir: str = ""):
            f"{tot['vendido']} vendidos")
     # o app de ESTANDES (Outlet Chic): o mapa é a tela inicial — sem seta de voltar e
     # com as abas Stands / Minhas vendas / Perfil. Gestão e as demais contas: como era.
-    com_abas = bool(sess) and not gestao and _perfil_stands(conta_id)
+    com_abas = _perfil_stands(conta_id)
     corpo = (
         _hdr("Mapa de stands", sub, voltar="" if com_abas else _BASE)
+        + _flash(request)
         + _STANDS_CSS
         + "<div class=scroll>"
         + meu_link_html
@@ -10049,10 +10134,11 @@ def cockpit_stands(request: Request, abrir: str = ""):
         + "<div class=stdet id=stdet hidden></div>"
         + "<div class=stmin id=stmin hidden></div>"
         + "</div>"
-        + (_abas_stands("stands") if com_abas else "")
+        + (_abas_stands("stands", gestao=gestao) if com_abas else "")
         + f"<script>var STANDS={_json_mod.dumps(dados)};"
         + f"var PUB='/e/{cfg['slug']}';var MEU_COD={_json_mod.dumps(meu_cod)};"
         + f"var ABRIR={_json_mod.dumps((abrir or '')[:20] or None)};"
+        + f"var SINAL_MIN={int(_es.regras_de_pagamento(cfg)['sinal_minimo_centavos'])};"
         + "var PIX=" + _json_mod.dumps({"chave": cfg.get("pix_chave") or "",
                                         "titular": cfg.get("pix_titular") or ""}) + ";"
         + "var SALDO_ATE=" + _json_mod.dumps(
@@ -10183,8 +10269,9 @@ def cockpit_stands_vendas(request: Request):
             f"<div class=topo><span class=cod>{esc(codigos)}</span>"
             f"<span class=nm>{esc(cad.get('fantasia') or 'Cliente')}</span><span class=ir>→</span></div>"
             f"<div class=sub>{len(grupo)} stand{'s' if len(grupo) > 1 else ''} · {_brl(total)}"
-            f"{' · num contrato só' if len(grupo) > 1 else ''}<br>{esc(linha)}</div>"
-            f"<div class=chips>{situacao}{cadastro}</div></a>")
+            f"{' · num contrato só' if len(grupo) > 1 else ''}<br>{esc(linha)}"
+            + (f"<br>Vendedor: <b>{esc(s.get('_vendedor') or 'sem vendedor')}</b>" if gestao else "")
+            + f"</div><div class=chips>{situacao}{cadastro}</div></a>")
     resumo = ""
     if cartoes:
         resumo = (
@@ -10197,10 +10284,10 @@ def cockpit_stands_vendas(request: Request):
              "<b>Stands</b> e mande pro seu cliente: quando ele reservar, a venda aparece aqui.</div>")
     sub = (f"{len(cartoes)} venda{'s' if len(cartoes) != 1 else ''}" if cartoes
            else "nenhuma ainda")
-    com_abas = bool(sess) and not gestao and _perfil_stands(conta_id)
+    com_abas = _perfil_stands(conta_id)
     corpo = (_hdr("Vendas", sub, voltar="" if com_abas else _BASE)
              + _STANDS_CSS + "<div class=scroll>" + resumo + ("".join(cartoes) or vazio) + "</div>"
-             + (_abas_stands("vendas") if com_abas else ""))
+             + (_abas_stands("vendas", gestao=gestao) if com_abas else ""))
     return _page("Vendas", corpo)
 
 
@@ -10236,6 +10323,18 @@ def _minhas_vendas(pool, conta_id: int, meu_id, gestao: bool):
             if gestao or (meu_id and donos.get(x["prospeccao_id"]) == meu_id)]
     cads = _es.cadastros_dos_stands(pool, conta_id, meus)
     fin = _es.situacao_financeira(pool, conta_id, [x["orcamento_id"] for x in meus])
+    # quem vendeu cada stand (pra gestão e pro ranking)
+    nomes = {}
+    vids = sorted({v for v in donos.values() if v})
+    if vids:
+        with pool.connection() as c:
+            nomes = dict(c.execute(
+                "select id, coalesce(nullif(nome,''), email) from membros "
+                "where conta_id=%s and id = any(%s)", (conta_id, vids)).fetchall())
+    for x in meus:
+        vid = donos.get(x["prospeccao_id"])
+        x["_vendedor_id"] = vid
+        x["_vendedor"] = nomes.get(vid) or ""
     return cfg, meus, cads, fin
 
 
@@ -10293,9 +10392,117 @@ def cockpit_stands_clientes(request: Request):
           "b.addEventListener('input',function(){var t=b.value.trim().toLowerCase();"
           "Array.prototype.forEach.call(document.querySelectorAll('.cvd'),function(c){"
           "c.style.display=(t&&c.getAttribute('data-nome').indexOf(t)<0)?'none':'';});});})();</script>")
-    com_abas = bool(sess) and not gestao and _perfil_stands(conta_id)
+    com_abas = _perfil_stands(conta_id)
     corpo = (_hdr("Clientes", f"{len(cartoes)} empresa{'s' if len(cartoes) != 1 else ''}",
                   voltar="" if com_abas else _BASE)
              + _STANDS_CSS + "<div class=scroll>" + busca + ("".join(cartoes) or vazio) + "</div>"
-             + (_abas_stands("clientes") if com_abas else "") + js)
+             + (_abas_stands("clientes", gestao=gestao) if com_abas else "") + js)
     return _page("Clientes", corpo)
+
+
+@router.post("/cockpit/stands/{codigo}/venda")
+async def cockpit_stand_registrar_venda(request: Request, codigo: str,
+                                        nome: str = Form(""), whatsapp: str = Form(""),
+                                        sinal: str = Form(""), codigo2: str = Form(""),
+                                        arquivo: UploadFile = File(...)):
+    """O vendedor registra pelo app a venda que o cliente fechou com ele no WhatsApp
+    (manda o comprovante). Só o read do arquivo fica no event loop; o resto é
+    psycopg síncrono e roda na threadpool (tests/test_event_loop_nao_trava.py)."""
+    conteudo = await arquivo.read()
+    return await run_in_threadpool(_registrar_venda_sync, request, codigo, nome, whatsapp,
+                                   sinal, codigo2, conteudo, arquivo.content_type or "")
+
+
+def _registrar_venda_sync(request: Request, codigo: str, nome: str, whatsapp: str,
+                          sinal: str, codigo2: str, conteudo: bytes, content_type: str):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not (sess or g):
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, meu_id = sess if sess else g
+    pool = get_pool()
+    from finance import evento_stands as _es
+    from web.loja_stands import _centavos, _criar_prospeccao_simples
+    volta = RedirectResponse(f"{_BASE}/stands?abrir={codigo}", status_code=303)
+    if not _es.obter_config(pool, conta_id):
+        return RedirectResponse(_BASE, status_code=303)
+    zap = "".join(ch for ch in (whatsapp or "") if ch.isdigit())
+    if not (nome or "").strip() or len(zap) < 10:
+        request.session["ck_err"] = "Informe o nome fantasia e o WhatsApp do cliente (com DDD)."
+        return volta
+    codigos = [codigo]
+    c2 = (codigo2 or "").strip()
+    if c2:
+        # o código digitado (g61) vira o da planta (G61), sem diferença de maiúscula
+        todos = {x["codigo"].lower(): x["codigo"] for x in _es.listar(pool, conta_id)}
+        codigos.append(todos.get(c2.lower(), c2))
+    v = _es.validar_reserva(pool, conta_id, codigos, whatsapp, _centavos(sinal))
+    if not v["ok"]:
+        request.session["ck_err"] = v["erro"]
+        return volta
+    vcod = _es.codigo_vendedor(meu_id) if meu_id else ""
+    pid = _criar_prospeccao_simples(pool, conta_id, nome, whatsapp, vcod)
+    r = _es.subir_e_registrar_comprovante(pool, conta_id, codigo, conteudo, content_type,
+                                          prospeccao_id=pid, junto_com=codigos[1:],
+                                          sinal_centavos=v["sinal"])
+    if not r.get("ok"):
+        request.session["ck_err"] = r.get("erro") or "Não deu pra registrar a venda."
+        return volta
+    request.session["ck_ok"] = (f"Venda registrada: {' + '.join(codigos)} reservado"
+                                f"{'s' if len(codigos) > 1 else ''} no seu nome. A gestão "
+                                "confere o comprovante e confirma o sinal.")
+    return volta
+
+
+@router.get("/cockpit/stands/ranking", response_class=HTMLResponse)
+def cockpit_stands_ranking(request: Request):
+    """RANKING (gestão do app de estandes): quanto cada vendedor vendeu — vendas,
+    stands, o que já entrou, o que falta e o que espera confirmação."""
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not (g or (sess and _eh_gestao(request, g))):
+        return RedirectResponse(f"{_BASE}/stands", status_code=303)
+    conta_id = g[0] if g else sess[0]
+    pool = get_pool()
+    cfg, meus, cads, fin = _minhas_vendas(pool, conta_id, None, True)
+    if not cfg:
+        return RedirectResponse(_BASE, status_code=303)
+    linhas: dict = {}
+    vistos = set()
+    for x in meus:
+        chave = x.get("grupo_id") or x["codigo"]
+        nome = x.get("_vendedor") or "Sem vendedor"
+        r = linhas.setdefault(nome, {"vendas": 0, "stands": 0, "vendido": 0, "recebido": 0,
+                                     "aberto": 0, "aguardando": 0})
+        r["stands"] += 1
+        preco = int(x["preco_centavos"] or 0)
+        if x["status"] == "pre_reservado":
+            r["aguardando"] += preco
+        else:
+            r["vendido"] += preco
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        r["vendas"] += 1
+        f = fin.get(x["orcamento_id"]) or {}
+        r["recebido"] += int(f.get("pago", 0))
+        r["aberto"] += int(f.get("aberto", 0))
+    ordem = sorted(linhas.items(), key=lambda kv: (-kv[1]["vendido"], -kv[1]["aguardando"], kv[0]))
+    cartoes = []
+    for pos, (nome, r) in enumerate(ordem, 1):
+        cartoes.append(
+            "<div class=cvd>"
+            f"<div class=topo><span class=cod>{pos}º</span><span class=nm>{esc(nome)}</span></div>"
+            f"<div class=sub>{r['vendas']} venda{'s' if r['vendas'] != 1 else ''} · "
+            f"{r['stands']} stand{'s' if r['stands'] != 1 else ''}</div>"
+            "<div class=cvres style='margin:.5rem 0 0'>"
+            f"<div><span>Vendido</span><b>{_brl(r['vendido'])}</b></div>"
+            f"<div><span>Já recebido</span><b>{_brl(r['recebido'])}</b></div>"
+            f"<div><span>Saldo a receber</span><b>{_brl(r['aberto'])}</b></div>"
+            f"<div><span>Aguardando confirmação</span><b>{_brl(r['aguardando'])}</b></div>"
+            "</div></div>")
+    vazio = "<div class=stvazio>Nenhuma venda ainda.</div>"
+    corpo = (_hdr("Ranking", "vendas por vendedor", voltar="")
+             + _STANDS_CSS + "<div class=scroll>" + ("".join(cartoes) or vazio) + "</div>"
+             + _abas_stands("ranking", gestao=True))
+    return _page("Ranking", corpo)

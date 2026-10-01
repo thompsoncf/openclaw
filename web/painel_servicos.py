@@ -3369,7 +3369,7 @@ _JS_CRU = r"""(function(){
     var tipo=document.querySelector('#ev-tipos .ev-tipo.on');
     var cts=[].slice.call(document.querySelectorAll('#ev-contratos .ev-ct[data-on="1"]'))
              .map(function(b){return b.textContent.trim();});
-    return {data:document.getElementById('ev-data').value||'',
+    return {data:lerData(document.getElementById('ev-data')),
             convidados:num(document.getElementById('ev-conv'))||null,
             inicio:document.getElementById('ev-ini').value||'',
             fim:document.getElementById('ev-fim').value||'',
@@ -3402,7 +3402,7 @@ _JS_CRU = r"""(function(){
     if(!el)return;
     var t=document.getElementById('ev-sem-hora-t');
     var d=document.getElementById('ev-sem-hora-d');
-    var temData=!!(document.getElementById('ev-data')||{}).value;
+    var temData=!!lerData(document.getElementById('ev-data'));
     var ini=((document.getElementById('ev-ini')||{}).value||'').trim();
     var fim=((document.getElementById('ev-fim')||{}).value||'').trim();
     var tit='', txt='';
@@ -3431,7 +3431,7 @@ _JS_CRU = r"""(function(){
   function aplicarEvento(ev){
     if(!SERVICO_AVULSO)return;
     ev=ev||{};
-    setv('ev-data',ev.data); setv('ev-conv',ev.convidados?String(ev.convidados):'');
+    poeData(document.getElementById('ev-data'),ev.data); setv('ev-conv',ev.convidados?String(ev.convidados):'');
     setv('ev-ini',ev.inicio); setv('ev-fim',ev.fim);
     pintarSemHora();
     // Local: quase toda festa é no salão da própria empresa, então o endereço
@@ -3516,7 +3516,8 @@ _JS_CRU = r"""(function(){
     var box=document.getElementById('pg-linhas'); if(!box)return;
     p=p||{};
     var d=document.createElement('div'); d.className='pg-row';
-    d.appendChild(pgInp('pg-venc','',p.venc||'','date'));
+    var venc=pgInp('pg-venc','','','date'); poeData(venc,p.venc);
+    d.appendChild(venc);
     d.appendChild(pgInp('pg-valor oc-valor','0,00',p.valor_centavos?fmtc(p.valor_centavos):''));
     d.appendChild(pgFormaCel(p.forma||''));
     d.appendChild(pgInp('pg-obs','Observação (ex.: sinal)',p.obs||''));
@@ -3530,7 +3531,7 @@ _JS_CRU = r"""(function(){
     return pgRows().map(function(r){
       var sel=r.querySelector('.pg-forma');
       var forma=sel.value==='Outro'?(r.querySelector('.pg-forma-outro').value||'').trim():sel.value;
-      return {venc:r.querySelector('.pg-venc').value||'',
+      return {venc:lerData(r.querySelector('.pg-venc')),
               valor_centavos:centavos(r.querySelector('.pg-valor').value),
               forma:forma||'',
               obs:r.querySelector('.pg-obs').value||''};
@@ -4323,6 +4324,33 @@ _JS_CRU = r"""(function(){
 
   function esc(s){var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML;}
   function setv(id,v){var e=document.getElementById(id); if(e){e.value=v||'';}}
+  // A DATA NUM CAMPO type=date. O app gravou "dd/mm/aaaa" até 01/10/2026, e o
+  // navegador recusa tudo que não é AAAA-MM-DD: o campo abria vazio (orçamento
+  // nº 47 da Prime) e salvar mandava vazio por cima. Converte o que dá; o que não
+  // for data fica em data-orig e volta no salvar enquanto ninguém mexer no campo.
+  function isoData(v){
+    var s=String(v==null?'':v).trim();
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+    var m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})$/);
+    if(!m)return '';
+    var a=m[3].length===2?'20'+m[3]:m[3];
+    return a+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2);
+  }
+  function poeData(el,v){
+    if(!el)return;
+    el.value=isoData(v);
+    if(v&&!el.value)el.setAttribute('data-orig',String(v));
+    else el.removeAttribute('data-orig');
+  }
+  function lerData(el){
+    if(!el)return '';
+    return el.value||el.getAttribute('data-orig')||'';
+  }
+  ['input','change'].forEach(function(ev){
+    document.addEventListener(ev,function(e){
+      if(e.target&&e.target.type==='date')e.target.removeAttribute('data-orig');
+    },true);
+  });
   // A MESMA LEITURA QUE `finance.desconto.eh_incluso` FAZ no servidor. Duas
   // leituras diferentes de "esta linha é cobrada?" seriam dois totais — é a
   // mesma razão de `finance/desconto.py` existir. Se um dia elas divergirem, a

@@ -239,6 +239,39 @@ def painel_equipe_renomear(request: Request, membro_id: int = Form(...), nome: s
     return RedirectResponse("/painel/equipe", status_code=303)
 
 
+@router.post("/painel/equipe/email")
+def painel_equipe_email(request: Request, membro_id: int = Form(...), email: str = Form("")):
+    """Corrige o e-mail de um membro (o e-mail é o login dele — ver eq.alterar_email).
+    Quando precisa, o convite novo vai pro e-mail novo e o link aparece na tela."""
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    r = eq.alterar_email(get_pool(), conta[0], membro_id, email)
+    if not r.get("ok"):
+        request.session["equipe_erro"] = r.get("erro") or "Não consegui trocar o e-mail."
+        return RedirectResponse("/painel/equipe", status_code=303)
+    novo = r["email"]
+    if r["acao"] == "login_existente":
+        request.session["equipe_aviso"] = (
+            f"E-mail corrigido para {novo} ✓. Esse e-mail já tem login no Zaq: a pessoa "
+            "entra com a senha que já usa.")
+    elif r["acao"] == "mesma_senha":
+        request.session["equipe_aviso"] = (
+            f"E-mail corrigido para {novo} ✓. A pessoa passa a entrar com o e-mail novo e a "
+            "mesma senha de antes.")
+    else:
+        link = _link(r["token"])
+        request.session["equipe_link"] = link
+        enviado = _enviar_email_convite(conta, r["nome"], novo, r["papel"], link)
+        request.session["equipe_aviso"] = (
+            f"E-mail corrigido para {novo} ✓ e o convite foi enviado pra ele — o link também "
+            "está aqui embaixo. O link mandado pro e-mail antigo não vale mais."
+            if enviado else
+            f"E-mail corrigido para {novo} ✓. Não consegui mandar o convite por e-mail agora: "
+            "copie o link abaixo e mande pra pessoa. O link antigo não vale mais.")
+    return RedirectResponse("/painel/equipe", status_code=303)
+
+
 @router.post("/painel/equipe/comissao")
 def painel_equipe_comissao(request: Request, membro_id: int = Form(...),
                            comissao_pct: str = Form("")):
@@ -398,6 +431,15 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 .mrow button:hover{border-color:var(--verde)}
 .mrow .ebtn{padding:.44rem .6rem}                 /* botão-ícone do nome (✓) */
 .mrow .danger:hover{border-color:var(--coral);color:#f0917f;background:#2a1414}
+.memail summary{cursor:pointer;color:var(--txt-mut);font-size:.74rem;list-style:none}
+.memail summary::-webkit-details-marker{display:none}
+.memail summary:hover{color:var(--verde-claro)}
+.memail[open] summary{color:var(--verde-claro)}
+.memail[open]{flex-basis:100%}
+.memail form{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.35rem}
+.memail input{min-width:200px;max-width:280px;background:var(--bg);border:1px solid var(--borda);
+  border-radius:8px;color:var(--txt);padding:.42rem .55rem;font-size:.84rem;margin:0}
+.memail input:focus{outline:none;border-color:var(--verde)}
 .mtag{padding:.1rem .5rem;border-radius:999px;font-size:.72rem;border:1px solid var(--borda);color:var(--txt-mut)}
 .mtag.on{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
 .mtag.pend{color:#e0b25a;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
@@ -499,6 +541,17 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
           {% set al = (sem_aviso or {}).get(m.id) %}
           {% if al %}<span class="mtag mudo" title="{{ al.detalhe }}">● não recebe aviso</span>{% endif %}
           <span>{{ m.email }} · {{ m.rotulo }}</span>
+          {% if m.papel != 'dono' %}
+          <details class="memail">
+            <summary title="Corrigir o e-mail (é o login da pessoa)">✏ e-mail</summary>
+            <form method="post" action="/painel/equipe/email"
+                  onsubmit="return confirm('Trocar o e-mail de “{{ m.nome or m.email }}” para ' + this.email.value + '?\\n\\nO e-mail é o login dela: a partir de agora ela entra com o e-mail novo.')">
+              <input type="hidden" name="membro_id" value="{{ m.id }}">
+              <input name="email" type="email" required maxlength="200" value="{{ m.email }}" aria-label="E-mail novo">
+              <button class="ebtn">Salvar e-mail</button>
+            </form>
+          </details>
+          {% endif %}
           {% if al %}<span class="mmotivo">{{ al.detalhe }}</span>{% endif %}
         </div>
       </div>

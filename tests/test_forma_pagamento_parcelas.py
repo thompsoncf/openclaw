@@ -10,6 +10,14 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+
+from tests.relogio_fixo import HOJE
+
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. O lançamento nasce no dia de Brasília
+# (finance/relogio.py) e o teste pegava o mês com `date.today()`: no último dia
+# do mês, das 21h à meia-noite, eram meses diferentes (CI do #917, 01/10/2026).
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 from psycopg_pool import ConnectionPool
 
 from db.conexao import init_schema
@@ -92,7 +100,7 @@ def test_compra_parcelada_so_a_primeira_no_saldo(pool, conta_id):
     # R$ 1200 em 12x, hoje
     r = liv.registrar_compra_parcelada(
         valor_total_centavos=120000, parcelas=12, categoria="Compras",
-        descricao="Geladeira", data_compra=date.today(),
+        descricao="Geladeira", data_compra=HOJE,
     )
     # o saldo caiu SO' a 1a parcela (R$100), nao os R$1200
     assert liv.saldo_centavos() == saldo0 - 10000
@@ -111,7 +119,7 @@ def test_parcelas_com_resto_somam_o_total(pool, conta_id):
     # R$ 100,00 em 3x = 33,34 + 33,33 + 33,33 (resto de 1 centavo na 1a)
     r = liv.registrar_compra_parcelada(
         valor_total_centavos=10000, parcelas=3, categoria="Outros",
-        descricao="Curso", data_compra=date.today(),
+        descricao="Curso", data_compra=HOJE,
     )
     assert r["valor_parcela_centavos"] == 3334          # 1a leva o resto
     assert r["valor_parcela_regular_centavos"] == 3333  # regulares
@@ -126,7 +134,7 @@ def test_materializar_promove_parcela_vencida(pool, conta_id):
     saldo0 = liv.saldo_centavos()
     # compra "antiga" (mes passado) em 3x: 1a ja' foi no mes passado; a deste mes
     # esta' vencida (competencia <= mes atual) e deve virar despesa ao materializar
-    compra = _somar_meses(date.today(), -1).replace(day=10)  # ~mes passado, dia 10
+    compra = _somar_meses(HOJE, -1).replace(day=10)  # ~mes passado, dia 10
     liv.registrar_compra_parcelada(
         valor_total_centavos=30000, parcelas=3, categoria="Compras",
         descricao="Sofa", data_compra=compra,
@@ -135,13 +143,13 @@ def test_materializar_promove_parcela_vencida(pool, conta_id):
     # esta' 'previsto'. saldo caiu so' a 1a (R$100).
     assert liv.saldo_centavos() == saldo0 - 10000
 
-    n = liv.materializar_parcelas_devidas(hoje=date.today())
+    n = liv.materializar_parcelas_devidas(hoje=HOJE)
     assert n == 1  # a parcela do mes atual venceu
     # agora o saldo caiu 2 parcelas (mes passado + mes atual)
     assert liv.saldo_centavos() == saldo0 - 20000
 
     # idempotente: rodar de novo nao lanca nada
-    assert liv.materializar_parcelas_devidas(hoje=date.today()) == 0
+    assert liv.materializar_parcelas_devidas(hoje=HOJE) == 0
     assert liv.saldo_centavos() == saldo0 - 20000
 
     # sobra 1 parcela no futuro na previsao

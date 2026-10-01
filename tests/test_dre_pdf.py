@@ -10,10 +10,17 @@ Roda com banco de TESTE separado (ver tests/conftest.py):
     pytest
 """
 import os
-from datetime import date
 from pathlib import Path
 
 import pytest
+
+from tests.relogio_fixo import HOJE
+
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. O lançamento nasce no dia de Brasília
+# (finance/relogio.py) e o teste pegava o mês com `date.today()`: no último dia
+# do mês, das 21h à meia-noite, eram meses diferentes (CI do #917, 01/10/2026).
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 from psycopg_pool import ConnectionPool
 
 from db.conexao import init_schema
@@ -61,7 +68,7 @@ def _pdf_texto(pdf_bytes: bytes) -> str:
 
 
 def test_o_pdf_tem_a_mesma_estrutura_da_tela_grupo_subtotal_e_total(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
     liv = LivroCaixa(pool, conta_id)
     liv.adicionar(Lancamento(tipo=Tipo.RECEITA, valor_centavos=500000, categoria="Vendas",
@@ -86,7 +93,7 @@ def test_o_pdf_tem_a_mesma_estrutura_da_tela_grupo_subtotal_e_total(pool, conta_
 
 
 def test_o_pdf_avisa_o_que_ficou_a_classificar(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     LivroCaixa(pool, conta_id).adicionar(
         Lancamento(tipo=Tipo.DESPESA, valor_centavos=30000, categoria="Outros",
                   descricao="Sem plano"), forcar=True)  # natureza null
@@ -104,7 +111,7 @@ def test_o_pdf_cai_no_resumo_simples_quando_nao_tem_plano_de_contas(monkeypatch,
     assim monta a linha 'A classificar', então o fallback só é visível de fato
     quando a estrutura vem vazia (banco tolerante, migração 132 ausente) — é
     o que este teste força, sem precisar de outro pool."""
-    hoje = date.today()
+    hoje = HOJE
     liv = LivroCaixa(pool, conta_id)
     liv.adicionar(Lancamento(tipo=Tipo.RECEITA, valor_centavos=80000, categoria="Vendas",
                              descricao="Venda", natureza="empresa"), forcar=True)
@@ -125,7 +132,7 @@ def test_o_pdf_cai_no_resumo_simples_quando_nao_tem_plano_de_contas(monkeypatch,
 
 def test_a_rota_devolve_o_pdf_inline_com_o_nome_do_arquivo(pool, conta_id, monkeypatch):
     import web.portal as pt
-    hoje = date.today()
+    hoje = HOJE
     ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
     LivroCaixa(pool, conta_id).adicionar(
         Lancamento(tipo=Tipo.RECEITA, valor_centavos=100000, categoria="Vendas",

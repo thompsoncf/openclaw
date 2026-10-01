@@ -12,10 +12,17 @@ Roda com banco de TESTE separado (ver tests/conftest.py):
     pytest
 """
 import os
-from datetime import date
 from pathlib import Path
 
 import pytest
+
+from tests.relogio_fixo import HOJE
+
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. O lançamento nasce no dia de Brasília
+# (finance/relogio.py) e o teste pegava o mês com `date.today()`: no último dia
+# do mês, das 21h à meia-noite, eram meses diferentes (CI do #917, 01/10/2026).
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 from psycopg_pool import ConnectionPool
 
 from db.conexao import init_schema
@@ -200,7 +207,7 @@ def test_nome_obrigatorio(pool, conta_id):
 
 # ── DRE estruturada + por centro ──────────────────────────────────────────────
 def test_dre_estrutura_reconcilia_e_a_classificar(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     _reais(pool, conta_id, Tipo.RECEITA, 1000, "1.1.01")   # Venda Produtos
     _reais(pool, conta_id, Tipo.RECEITA, 500, "1.1.02")    # Serviços
     _reais(pool, conta_id, Tipo.DESPESA, 100, "2.1.01")    # Impostos (dedução)
@@ -230,7 +237,7 @@ def test_dre_estrutura_reconcilia_e_a_classificar(pool, conta_id):
 
 
 def test_dre_por_centro_colunas_e_valores(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     A = pc.criar_centro(pool, conta_id, "Unidade Centro")["id"]
     B = pc.criar_centro(pool, conta_id, "Delivery")["id"]
     _reais(pool, conta_id, Tipo.RECEITA, 1000, "1.1.01", centro=A)
@@ -255,7 +262,7 @@ def test_dre_por_centro_colunas_e_valores(pool, conta_id):
 
 # ── Retrocompat: sem classificação e sem a migração ───────────────────────────
 def test_setter_grava_limpa_e_multitenant(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     livro = LivroCaixa(pool, conta_id)
     s = livro.adicionar(Lancamento.criar(Tipo.DESPESA, 10, "x", natureza="empresa"),
                         forcar=True)
@@ -275,7 +282,7 @@ def test_setter_grava_limpa_e_multitenant(pool, conta_id):
 def test_lancamento_sem_classificacao_ainda_conta(pool, conta_id):
     """Retrocompat: empresa sem conta contábil segue nos totais e some em
     'A classificar' — nada desaparece."""
-    hoje = date.today()
+    hoje = HOJE
     _reais(pool, conta_id, Tipo.RECEITA, 400, None)   # empresa, sem plano
     dre = emp.dre_mes(pool, conta_id, hoje.year, hoje.month)
     assert dre["receitas_centavos"] == 40000
@@ -304,7 +311,7 @@ def test_id_por_codigo_e_centro_por_nome(pool, conta_id):
 def test_lancamentos_a_classificar(pool, conta_id):
     """Lista só os lançamentos de EMPRESA sem conta contábil (o que alimenta o
     painel 'A classificar' da aba Empresa)."""
-    hoje = date.today()
+    hoje = HOJE
     livro = LivroCaixa(pool, conta_id)
     ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
     # empresa COM conta contábil -> NÃO aparece

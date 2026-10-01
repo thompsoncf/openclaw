@@ -822,3 +822,98 @@ def test_vendas_trazem_o_resumo_e_clientes_agrupa_por_empresa(pool, conta_id, mo
     assert clientes.count("class=cvd") == 1                     # 2 stands, 1 empresa
     assert "G60 · G61" in clientes and "Boutique Nova Era" in clientes
     assert "wa.me/5586988887777" in clientes and "Cadastro completo" in clientes
+
+
+# --------------------- app do Outlet Chic: Leads, página do lead, ações da venda
+
+def test_o_fragmento_da_lista_de_leads_mantem_as_abas_e_os_links_dela(monkeypatch):
+    """O tique de 8 s e a busca pedem o fragmento: na lista de Leads do app de
+    estandes ele tem que voltar com a base /cockpit/leads (abas e links dela). A
+    Fila da Prime não manda `lista` e não paga consulta nenhuma a mais."""
+    from web import painel_cockpit as pc
+    chamadas, perguntou = [], []
+    monkeypatch.setattr(pc, "_sessao", lambda r: (40, 2))
+    monkeypatch.setattr(pc, "_gerencia", lambda r: None)
+    monkeypatch.setattr(pc, "_perfil_stands", lambda cid: perguntou.append(cid) or True)
+    monkeypatch.setattr(pc, "_fila", lambda req, cid, mid, **k: chamadas.append(k) or "OK")
+    pc.cockpit_fila_fragmento(_Req(), lista="leads")
+    assert chamadas[-1]["base"] == "/cockpit/leads" and chamadas[-1]["fragmento"] is True
+    pc.cockpit_fila_fragmento(_Req())
+    assert chamadas[-1]["base"] == "" and perguntou == [40]   # sem `lista`, nem pergunta
+    # os dois scripts pedem o fragmento com o extra e a busca fica na URL da lista
+    assert "window.CKLISTA" in pc._busca_js() and "fq(qs)" in pc._busca_js()
+    assert "fq(location.search)" in pc._sinal_js("x")
+
+
+def test_a_mensagem_do_link_de_stands_leva_o_link_de_vendas_do_vendedor(pool, conta_id, monkeypatch):
+    from urllib.parse import unquote
+    from web import painel_cockpit as pc
+    _config_evento(pool, conta_id)
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    txt = unquote(pc._link_stands_texto(conta_id, 12))
+    assert "/e/outlet-chic?v=" + es.codigo_vendedor(12) in txt
+    assert "R$ 1.500" in txt and "por stand" in txt
+
+
+def test_a_pagina_do_lead_no_app_de_estandes_nao_tem_nada_de_festa(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    for n in ("_bloco_aconteceu", "_bloco_resgate", "_bloco_visita", "_bloco_espera"):
+        monkeypatch.setattr(pc, n, (lambda nome: (lambda *a, **k: f"[{nome}]"))(n))
+    monkeypatch.setattr(pc, "_link_stands_texto", lambda c, m: "MSG")
+    d = {"empresa": "Loja X", "mensagens": [], "evento_fmt": "13/11 EVENTOX",
+         "evento_pista": "PISTAX", "etapas": [], "ia": {}}
+
+    def pagina(em_stands):
+        monkeypatch.setattr(pc, "_perfil_stands", lambda cid: em_stands)
+        req = _Req(conta_id=40, membro_id=2)
+        req.query_params = {}
+        for _ in range(80):                      # o lead fake ganha as chaves que a tela lê
+            try:
+                return pc._lead_vendedor(req, 28, d).body.decode("utf-8")
+            except KeyError as e:
+                d[e.args[0]] = None
+        raise AssertionError("a tela do lead não montou")
+
+    stands, prime = pagina(True), pagina(False)
+    assert "Link de stands" in stands and "?texto=MSG" in stands
+    assert "/orcamento'" not in stands and "[_bloco_visita]" not in stands
+    assert "[_bloco_aconteceu]" not in stands and "[_bloco_espera]" not in stands
+    assert "EVENTOX" not in stands and "PISTAX" not in stands
+    assert "href='/cockpit/leads'" in stands                 # a seta volta pra lista de Leads
+    # a Prime continua exatamente como era
+    assert "/orcamento'" in prime and "[_bloco_visita]" in prime and "EVENTOX" in prime
+    assert "Link de stands" not in prime
+
+
+def test_a_venda_do_vendedor_traz_contrato_e_saldo_pras_acoes(pool, conta_id, monkeypatch):
+    import json
+    import re
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    with pool.connection() as c:
+        for m in ("164_contratos.sql", "165_contrato_token.sql", "201_contrato_aditivos.sql"):
+            c.execute((base / m).read_text(encoding="utf-8"))
+        c.commit()
+    carla = _membro(pool, conta_id, "Carla")
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    _dono_da_venda(pool, conta_id, "G60", carla)
+    es.confirmar_pagamento(pool, conta_id, "G60", sinal_centavos=300000)
+    oid = es.buscar(pool, conta_id, "G60")["orcamento_id"]
+    with pool.connection() as c:
+        c.execute("insert into contratos (conta_id, orcamento_id, numero, token) "
+                  "values (%s,%s,1,'tok-venda')", (conta_id, oid))
+        c.commit()
+    pc, req = _cockpit(pool, conta_id, monkeypatch, carla)
+    html = pc.cockpit_stands(req).body.decode("utf-8")
+    dados = json.loads(re.search(r"var STANDS=(\{.*?\});var PUB", html, re.S).group(1))
+    g60 = dados["G60"]
+    assert g60["ct"] == "tok-venda" and g60["ct_ok"] is False
+    assert g60["aberto"] == 540000 and g60["pago"] == 300000
+    assert g60["gcods"] == ["G60", "G61"]
+    assert "var SALDO_ATE=\"13/11\"" in html and "id=stq" in html   # saldo e a busca
+    with pool.connection() as c:
+        c.execute("delete from contratos where conta_id=%s", (conta_id,))
+        c.commit()

@@ -26,6 +26,8 @@ import logging
 import re
 from datetime import date, datetime, timezone
 
+from finance import relogio
+
 from finance import evento_lead as _evl
 
 _log = logging.getLogger("evento_leitor")
@@ -98,7 +100,7 @@ def ler_texto(texto: str, hoje: date | None = None) -> dict:
     """O que UMA mensagem do cliente diz. Chaves só quando achou:
     data, data_trecho, alternativa ("17 ou 18 de dezembro"), mes_solto ("março"),
     tipo, convidados, trecho (o pedaço em volta do primeiro achado)."""
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     t = " ".join((texto or "").split())
     out: dict = {}
     if not t:
@@ -154,7 +156,7 @@ def ler_mensagens(mensagens, hoje: date | None = None) -> dict:
     recente de cada coisa vale (o cliente corrige a data, muda os convidados).
     `mensagens` é uma lista de (texto, quando). Devolve data, tipo, convidados,
     mes_solto, alternativa, trecho (até 3 pedaços, " · ") e quando (da data)."""
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     out: dict = {}
     trechos: list[str] = []
     for texto, quando in mensagens:

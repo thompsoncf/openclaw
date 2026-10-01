@@ -52,6 +52,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 
+from finance import relogio
+
 #: As escolhas que a tela oferece do lado que falta — igual nos dois tipos.
 MENOS = ("restante", "desconto")
 #: Do lado que sobra: receber ganha "abater" (crédito noutra parcela); pagar só
@@ -219,7 +221,7 @@ def baixar(pool, conta_id: int, titulo_id: int, recebido_centavos: int | None,
     conta do que falta, e `tipo` (do título baixado, pra quem chama montar a
     mensagem certa)."""
     from finance import empresa as emp
-    data_pagto = data_pagto or date.today()
+    data_pagto = data_pagto or relogio.hoje()
     with pool.connection() as c:
         t = _titulo(c, conta_id, titulo_id)
         if not t:

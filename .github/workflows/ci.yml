@@ -55,6 +55,13 @@ jobs:
       - name: Roda a suíte
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/openclaw_test
+          # A suíte roda SEMPRE como se fossem 21h–24h de Brasília: `date.today()`
+          # responde amanhã e o `relogio.hoje()` fica no dia de Brasília (ver
+          # tests/relogio_fixo.py). Era o único horário em que os dois relógios
+          # discordam, e o CI só caía nele por acaso (#878, #917). O código não usa
+          # o dia do servidor (tests/test_fuso_trava.py), então passar aqui cobre o
+          # horário normal também.
+          SIMULA_VIRADA: "1"
         # `tee` pra saída aparecer no log DO PASSO e também virar arquivo. O `-o
         # pipefail` é o que faz o passo continuar falhando quando o pytest falha:
         # sem ele quem decide o código de saída é o `tee`, que sempre dá zero — e

@@ -315,9 +315,10 @@ O combinado tem três partes:
 * **"Hoje", "agora" e "que dia foi" no Python:** `finance.relogio.hoje()`,
   `agora()` e `dia_br(instante)`. Nunca `date.today()`, `datetime.now()` sem fuso
   ou `datetime.utcnow()` em regra de negócio.
-* **No SQL:** o dia de Brasília vai como parâmetro (`%s` com `relogio.hoje()`), ou
-  a coluna é cortada com `(col at time zone 'America/Sao_Paulo')::date`. Nunca
-  `current_date`, `now()::date` ou `col::date` puro.
+* **No SQL:** o "hoje" é `(now() at time zone 'America/Sao_Paulo')::date` (ou
+  `%s` com `relogio.hoje()`), e o instante é cortado com
+  `(col_em at time zone 'America/Sao_Paulo')::date`. Nunca `current_date`,
+  `now()::date` ou `col_em::date` puro.
 * **A conexão fica em UTC**, fixada em `db/conexao.py`. Não mude para Brasília:
   várias consultas já descontam 3h à mão contando com UTC, e o desconto dobraria.
 
@@ -328,3 +329,15 @@ arquivo) sobe o número no mesmo PR, à vista. Teste que depende de "hoje" usa
 `HOJE` e a fixture `servidor_as_23h` de `tests/relogio_fixo.py`, que põe o
 processo às 23h de Brasília (02h UTC do dia seguinte) e pega o erro a qualquer
 hora.
+
+Em 01/10/2026 a limpeza zerou a lista: só sobra o diagnóstico de fuso do
+`web/app.py`, que compara os dois relógios de propósito. Para conferir a suíte
+inteira na virada sem esperar a noite: `SIMULA_VIRADA=1 pytest` — o
+`date.today()` responde amanhã e o `relogio.hoje()` fica no dia de Brasília,
+exatamente como das 21h à meia-noite.
+
+E teste com cenário em data FIXA (`date(2026, 9, 29)`) não pode deixar o código
+carimbar o relógio real (`now()` do banco, `datetime.now()`): no dia em que o
+calendário passa do cenário, o teste quebra sem nada ter mudado (#917:
+`visita_rotinas`, `clinica_numeros`, `resgate`). Função que recebe `agora` usa o
+`agora` até no carimbo.

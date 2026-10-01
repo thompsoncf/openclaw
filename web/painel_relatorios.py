@@ -2176,7 +2176,7 @@ def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str =
     return HTMLResponse(_env.get_template("relatorio_pdf").render(
         dados=dados, tipo=tipo, periodo=periodo,
         periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
-        gerado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
+        gerado_em=_relogio.agora().strftime("%d/%m/%Y %H:%M"),   # a hora de Brasília
         **_letterhead(pool, conta),
     ))
 

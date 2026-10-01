@@ -498,8 +498,8 @@ def _iniciar_poller_email() -> None:
                 # O SINAPI (custo médio do m² por estado, IBGE) das contas de
                 # construção: perto da virada da hora, e cada UF no máximo uma vez
                 # por dia — com o IBGE fora do ar, tenta de novo na hora seguinte.
-                from datetime import datetime as _dt
-                if _dt.now().minute < 2:
+                from datetime import datetime as _dt, timezone as _tz
+                if _dt.now(_tz.utc).minute < 2:
                     from finance import sinapi as _sin
                     _sin.atualizar(pool)
             except Exception as e:  # noqa: BLE001

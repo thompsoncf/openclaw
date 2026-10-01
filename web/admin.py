@@ -569,8 +569,8 @@ def admin_home(request: Request, busca: str = ""):
             """select status, count(*) from contas group by status""").fetchall())
         total = sum(tot.values())
         vencendo = c.execute(
-            """select count(*) from contas where vencimento between current_date
-               and current_date + 7 and status in ('trial','ativa','inadimplente')""").fetchone()[0]
+            """select count(*) from contas where vencimento between (now() at time zone 'America/Sao_Paulo')::date
+               and (now() at time zone 'America/Sao_Paulo')::date + 7 and status in ('trial','ativa','inadimplente')""").fetchone()[0]
         # MRR estimado: soma do preco base dos planos das contas ativas/trial
         mrr = c.execute(
             """select coalesce(sum(p.preco_base_centavos),0)
@@ -582,15 +582,15 @@ def admin_home(request: Request, busca: str = ""):
                         coalesce(ct.interesse_modulos,'') as interesse_modulos,
                         (select count(*) from membros m where m.conta_id = ct.id and m.ativo) as membros,
                         coalesce((select mensagens from uso_diario u
-                                  where u.conta_id = ct.id and u.dia = current_date),0) as msg_hoje,
+                                  where u.conta_id = ct.id and u.dia = (now() at time zone 'America/Sao_Paulo')::date),0) as msg_hoje,
                         coalesce((select cupons from uso_diario u
-                                  where u.conta_id = ct.id and u.dia = current_date),0) as cup_hoje,
+                                  where u.conta_id = ct.id and u.dia = (now() at time zone 'America/Sao_Paulo')::date),0) as cup_hoje,
                         coalesce((select sum(mensagens) from uso_diario u
                                   where u.conta_id = ct.id
-                                    and u.dia >= date_trunc('month', current_date)),0) as msg_mes,
+                                    and u.dia >= date_trunc('month', (now() at time zone 'America/Sao_Paulo')::date)),0) as msg_mes,
                         coalesce((select sum(cupons) from uso_diario u
                                   where u.conta_id = ct.id
-                                    and u.dia >= date_trunc('month', current_date)),0) as cup_mes,
+                                    and u.dia >= date_trunc('month', (now() at time zone 'America/Sao_Paulo')::date)),0) as cup_mes,
                         coalesce((select count(*) from assinaturas a
                                   where a.cliente_id = ct.id
                                     and a.status != 'cancelada'),0) as qtd_cestas,

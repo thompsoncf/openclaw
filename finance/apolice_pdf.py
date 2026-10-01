@@ -31,6 +31,8 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
+
+from finance import relogio
 from decimal import Decimal
 
 #: teto do que se lê. Apólice é texto: 7 páginas da Allianz dão 60 KB. Um PDF de
@@ -569,7 +571,7 @@ def _mapfre(texto: str, L: Leitura) -> None:
     risco = bloco("QUESTIONÁRIO DE AVALIAÇÃO DE RISCO", ("IMPORTANTE:", "DADOS DO"))
     nasc = _rotulo(risco, "Data de nascimento")[0]
     if _data(nasc):
-        c["condutor_idade"] = (date.today() - _data(nasc)).days // 365
+        c["condutor_idade"] = (relogio.hoje() - _data(nasc)).days // 365
         t["condutor_idade"] = f"Data de nascimento: {nasc}"
     pega("condutor_estado_civil", "Estado Civil", risco,
          lambda v: re.sub(r"\s+", " ", v).strip() or None)
@@ -636,7 +638,7 @@ def _porto(texto: str, L: Leitura) -> None:
     pega("email", "E-mail", seg, lambda v: v.strip().lower() or None)
     nasc = _rotulo(seg, "Data de nasc.")[0]
     if _data(nasc):
-        c["condutor_idade"] = (date.today() - _data(nasc)).days // 365
+        c["condutor_idade"] = (relogio.hoje() - _data(nasc)).days // 365
         t["condutor_idade"] = f"Data de nasc.: {nasc}"
 
     _conferir_o_segurado(L, ("nome", "cpf", "telefone", "email", "endereco"))

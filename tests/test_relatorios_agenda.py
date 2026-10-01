@@ -554,13 +554,14 @@ def test_este_mes_vai_ate_o_fim_do_mes_so_com_ate_o_fim():
     assert rel._intervalo("ano", ate_o_fim=True)[1] == date(HOJE.year, 12, 31)
 
 
-def test_so_a_pilula_agenda_oferece_o_periodo_livre(pool, cen):
-    """As outras oito abas chamam `_intervalo(periodo)` sem `de`/`ate`: oferecer
-    "Período específico" nelas devolveria o mês corrente calado."""
-    assert "personalizado" in dict(rel.periodos_da_aba("agenda"))
+def test_o_periodo_livre_em_todas_as_abas_e_o_futuro_so_na_agenda(pool, cen):
+    """Desde 01/10/2026 toda aba repassa `de`/`ate` (pedido do dono) — que elas
+    chegam mesmo na consulta é o tests/test_relatorios_periodo.py que confere.
+    "Próximos 30 dias" continua só da Agenda: histórico não tem futuro."""
     assert "prox30" in dict(rel.periodos_da_aba("agenda"))
+    for aba in ("agenda", "vendas", "orcamentos", "contratos", "comissao"):
+        assert "personalizado" in dict(rel.periodos_da_aba(aba)), aba
     for aba in ("vendas", "orcamentos", "contratos", "comissao"):
-        assert "personalizado" not in dict(rel.periodos_da_aba(aba)), aba
         assert "prox30" not in dict(rel.periodos_da_aba(aba)), aba
 
 

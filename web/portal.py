@@ -7800,7 +7800,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 
   <div class="abas" id="rel-abas">
     {% for k, r in tipos.items() %}<a class="aba{% if k==tipo %} ativa{% endif %}"
-     href="/painel/relatorios?tipo={{ k }}&periodo={{ periodo }}" style="text-decoration:none">{{ r.label }}</a>{% endfor %}
+     href="/painel/relatorios?tipo={{ k }}&periodo={{ periodo }}{% if periodo == 'personalizado' %}{% if de %}&de={{ de|urlencode }}{% endif %}{% if ate %}&ate={{ ate|urlencode }}{% endif %}{% endif %}" style="text-decoration:none">{{ r.label }}</a>{% endfor %}
     {#- o DESAFIO IA × equipe mora no funil, mas é relatório: o único caminho até ele
         era um botão em Comunicação › Agente (27/09/2026). Só pra quem vende festa e
         tem um número com a IA atendendo (`desafio_ia.tem_desafio`). -#}
@@ -7856,6 +7856,9 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     <span class="rel-datas" id="rel-datas" {% if periodo != 'personalizado' %}style="display:none"{% endif %}>
       <span>de</span><input type="date" name="de" value="{{ de|e }}">
       <span>até</span><input type="date" name="ate" value="{{ ate|e }}">
+      {# Abas sem os filtros extras (Vendas, Pagas, Recebidas, Comissão) não têm o
+         botão Filtrar da barra — sem este, as datas não teriam como ir. #}
+      {% if not dados.filtro_extra %}<button type="submit" class="rel-filtrar">Filtrar</button>{% endif %}
     </span>
     {% endif %}
     {% if dados.filtro_extra and dados.filtro_extra.datas_por %}

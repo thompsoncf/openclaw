@@ -1377,6 +1377,11 @@ def painel_servicos_lista(request: Request):
     # é parâmetro da conta, não da linha — dentro daria o mesmo N+1 que já custou
     # caro na Agenda. `assina_antes_do_sinal` falha fechada na ordem de hoje.
     _assina_antes = _ctr.assina_antes_do_sinal(get_pool(), conta[0])
+    # O QUE FALTA PRA MANDAR (regra do dono, 01/10/2026), numa consulta só pra
+    # lista inteira — é o que o "Copiar link" lê antes de copiar.
+    _pend = _ctr.pendencias_em_lote(get_pool(), conta[0], [it["id"] for it in itens])
+    for it in itens:
+        it["pendencias"] = _pend.get(it["id"], [])
     # O QUE A LINHA DIZ — selos de pendência, a ação principal e o resumo do que
     # já foi. Montado aqui, depois de `itens`, porque lê o que acabou de ser
     # calculado (o estado da data, os pagamentos) em vez de recalcular.
@@ -1617,6 +1622,8 @@ def painel_servicos_email(request: Request, orc_id: int, alvo: str = "proposta")
     _msg = pmail.texto_padrao(_quem, d["modo"])
     _link = f"{_base}/proposta/{d['token']}"
     _assinado = False
+    _faltas: list = []
+    from finance import contrato as _ctr_p
     # MESMO CAMINHO, outro documento. O contrato tinha link e não tinha envio: o
     # selo mandava "mande o link pro cliente" e o link ficava escondido no menu de
     # três pontos. Aqui ele reusa a tela de envio, o remetente resolvido e o
@@ -1631,6 +1638,13 @@ def painel_servicos_email(request: Request, orc_id: int, alvo: str = "proposta")
         _assinado = bool(_ct.get("assinado_em"))
         _assunto = pmail.assunto_contrato(_ct.get("numero"), nome_emp)
         _msg = pmail.texto_contrato(_quem, assinado=_assinado)
+        # O QUE FALTA, ANTES DE MANDAR. Até 01/10/2026 quem descobria era o
+        # cliente: o nº 47 da Prime chegou na mão dele com "Campos sem valor:
+        # cliente.doc". A conta é a mesma da página do contrato.
+        if not _assinado:
+            from web.contrato_publico import faltas_do_orcamento
+            _faltas = faltas_do_orcamento(pool, conta[0], int(orc_id))
+    _pend = [] if _assinado else _ctr_p.pendencias_pra_mandar(pool, conta[0], int(orc_id))
     return JSONResponse({
         "para": d["email"],
         "cliente": d["cliente"] or d["empresa_cli"],
@@ -1640,6 +1654,9 @@ def painel_servicos_email(request: Request, orc_id: int, alvo: str = "proposta")
         # o título por conta própria seria a segunda leitura do mesmo fato, e é
         # assim que o título passa a dizer uma coisa e o corpo do e-mail outra.
         "assinado": _assinado,
+        "faltas": _faltas,
+        # o que TRAVA o envio (o servidor recusa sem isto) — `faltas` só avisa
+        "pendencias": _pend,
         "resumo": _resumo_do_envio(d),
         "empresa": nome_emp,
         "remetente": rem,
@@ -1744,6 +1761,16 @@ def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
         link = f"{_base}/proposta/{d['token']}"
         assunto_padrao_ = pmail.assunto_padrao(d["numero"], nome_emp, d["modo"])
         mensagem_padrao_ = pmail.texto_padrao(quem, d["modo"])
+    # OS DADOS PRINCIPAIS (regra do dono, 01/10/2026): sem eles nem a proposta nem
+    # o contrato saem — a tela já avisou, aqui é a trava. A via de um contrato JÁ
+    # assinado sai sempre: o documento está congelado e o cliente tem direito a ela.
+    if not (doc_rotulo == "contrato" and _ct.get("assinado_em")):
+        from finance import contrato as _ctr2
+        falta = _ctr2.pendencias_pra_mandar(pool, conta[0], int(dados.id))
+        if falta:
+            return JSONResponse({"erro": _ctr2.texto_pendencias(
+                falta, "o contrato" if doc_rotulo else "a proposta"), "faltam": falta},
+                status_code=400)
     assunto = (dados.assunto or "").strip() or assunto_padrao_
     mensagem = (dados.mensagem or "").strip() or mensagem_padrao_
     html, texto = pmail.montar(
@@ -4601,7 +4628,7 @@ _JS_CRU = r"""(function(){
   // abre PREENCHIDA — quem só quer mandar abre e aperta Enviar. Por qual caixa vai
   // sair é dito antes, porque o mesmo botão se comporta diferente na empresa que
   // tem caixa configurada e na que não tem (ver finance/proposta_email).
-  var ENV_ID = null, ENV_LINK = '', ENV_ALVO = 'proposta';
+  var ENV_ID = null, ENV_LINK = '', ENV_ALVO = 'proposta', ENV_FALTAS = [], ENV_PEND = [];
   function envMsg(txt, cls){
     var el=document.getElementById('env-msg');
     el.className='env-msg'+(txt?(' on '+(cls||'amb')):'');
@@ -4609,7 +4636,17 @@ _JS_CRU = r"""(function(){
   }
   function envFechar(){
     document.getElementById('env-fundo').classList.remove('on');
-    ENV_ID=null; ENV_LINK=''; ENV_ALVO='proposta';
+    ENV_ID=null; ENV_LINK=''; ENV_ALVO='proposta'; ENV_FALTAS=[]; ENV_PEND=[];
+    document.getElementById('env-enviar').disabled=false;
+  }
+  // COPIAR O LINK É MANDAR: é o caminho de quem cola no WhatsApp. Mesma trava do
+  // envio (regra do dono, 01/10/2026) — `it.pendencias` vem da lista.
+  function _travaEnvio(it,doc){
+    var p=(it&&it.pendencias)||[];
+    if(!p.length)return false;
+    alert('Não dá pra mandar '+doc+' ainda: falta '+p.join(', ')
+      +'.\n\nPreencha no orçamento (ou na aba Clientes) e copie de novo.');
+    return true;
   }
   function abrirEnvio(id,alvo){
     ENV_ID=id; ENV_ALVO=alvo||'proposta';
@@ -4645,8 +4682,26 @@ _JS_CRU = r"""(function(){
         var n=(d.envios||[]).filter(function(e){return e.ok;});
         document.getElementById('env-hist').textContent = n.length
           ? ('enviado '+n.length+'× · último '+n[0].quando) : '';
+        // O CONTRATO INCOMPLETO VEM PRIMEIRO: é o cliente que vai ver o aviso de
+        // "Campos sem valor" e não deveria assinar assim. Avisa, não bloqueia —
+        // o enviar pergunta de novo (mesma régua da hora do evento).
+        ENV_FALTAS=(ENV_ALVO==='contrato'&&d.faltas)?d.faltas:[];
+        ENV_PEND=d.pendencias||[];
+        document.getElementById('env-enviar').disabled=!!ENV_PEND.length;
+        // OS DADOS PRINCIPAIS TRAVAM (regra do dono, 01/10/2026): o botão fica
+        // desligado e o servidor recusa do mesmo jeito.
+        if(ENV_PEND.length){
+          envMsg('<b>Não dá pra mandar ainda: falta '+esc(ENV_PEND.join(', '))+'.</b> '
+                +'<span style="opacity:.9">Preencha no orçamento (card Cliente, O evento e Plano de '
+                +'pagamento) ou na aba Clientes, salve e abra o envio de novo.</span>','cor');
+        } else if(ENV_FALTAS.length){
+          envMsg('<b>Falta no contrato: '+esc(ENV_FALTAS.join(', '))+'.</b> '
+                +'<span style="opacity:.9">O cliente vai ver o aviso “Campos sem valor” e não deveria '
+                +'assinar assim. Preencha no orçamento (card Cliente) ou na aba Clientes e mande '
+                +'depois — o contrato se atualiza sozinho.</span>','cor');
+          if(!d.para) document.getElementById('env-para').focus();
+        } else if(!d.para){
         // sem e-mail do cliente o campo abre focado: é o único que falta preencher
-        if(!d.para){
           envMsg('Este orçamento não tem o e-mail do cliente. <span style="opacity:.85">'
                 +'Escreva aqui e ele fica salvo no orçamento — da próxima vez já vem preenchido.</span>','amb');
           document.getElementById('env-para').focus();
@@ -4654,7 +4709,9 @@ _JS_CRU = r"""(function(){
       });
   }
   function enviarEmail(){
-    if(!ENV_ID) return;
+    if(!ENV_ID || ENV_PEND.length) return;
+    if(ENV_FALTAS.length && !confirm('O contrato está sem: '+ENV_FALTAS.join(', ')
+        +'.\n\nO cliente vai ver o aviso de campo sem valor. Mandar mesmo assim?')) return;
     var b=document.getElementById('env-enviar'), t=b.textContent;
     b.disabled=true; b.textContent='Enviando...';
     zapFetch('/painel/servicos/enviar-email',{comStatus:true,method:'POST',
@@ -4746,6 +4803,7 @@ _JS_CRU = r"""(function(){
       m.appendChild(_mi('Abrir / imprimir','📄','',function(){
         window.open('/proposta/'+it.token,'_blank');}));
       m.appendChild(_mi('Copiar link','🔗','',function(){
+        if(_travaEnvio(it,'a proposta'))return;
         navigator.clipboard.writeText(origem+'/proposta/'+it.token);}));
       m.appendChild(_mi('Mandar por e-mail','✉️',it.enviado_em?('enviada '+it.enviado_em):'',
         function(){abrirEnvio(it.id);}));
@@ -4755,6 +4813,7 @@ _JS_CRU = r"""(function(){
       m.appendChild(_mi('Abrir','📜',it.contrato_assinado?'assinado':'aguardando',function(){
         window.open('/contrato/'+it.contrato_token,'_blank');}));
       m.appendChild(_mi('Copiar link','🔗','',function(){
+        if(!it.contrato_assinado&&_travaEnvio(it,'o contrato'))return;
         navigator.clipboard.writeText(origem+'/contrato/'+it.contrato_token);}));
       // MANDAR O CONTRATO ESTAVA SÓ NO BOTÃO VERDE, e o botão verde é UM só: quando
       // a linha tem pendência de prioridade maior (marcar, resegurar, sinal,

@@ -614,10 +614,18 @@ def painel_servicos_cnpj(request: Request, cnpj: str = ""):
 
 @router.get("/painel/servicos/leads/buscar")
 def painel_servicos_leads_buscar(request: Request, q: str = ""):
-    """Busca clientes já cadastrados na Base (prospeccao) por nome/empresa/e-mail,
-    pra preencher o card Cliente sem digitar tudo de novo. tipo é inferido (tem
+    """Busca clientes já cadastrados na Base por nome/empresa/e-mail, pra
+    preencher o card Cliente sem digitar tudo de novo. tipo é inferido (tem
     CNPJ -> pj, senão pf), igual o backfill que a 131_pessoa_cnpj.sql já fez pra
-    pessoas. Vendedor só busca os próprios leads; dono/gestor busca todos."""
+    pessoas. Vendedor só busca os próprios leads; dono/gestor busca todos.
+
+    DUAS FONTES, não só prospeccao. Relatado em produção em 30/09/2026: a
+    Crislane (conta 34, CPF certo, cadastrada em Clientes) não aparecia aqui —
+    a busca só olhava prospeccao, e quem vira cliente direto (aba Clientes/
+    Fornecedores, sem passar pelo funil) nunca ganha uma linha lá. Cliente vindo
+    da segunda fonte sai com `id: None`: o JS já faz `LEAD_ID=l.id||null`, então
+    ele nunca finge ser lead — o merge por CPF/CNPJ em `_espelhar_cliente`
+    resolve a identidade sozinho quando o orçamento for salvo."""
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
@@ -634,8 +642,9 @@ def painel_servicos_leads_buscar(request: Request, q: str = ""):
     if papel == "vendedor" and membro_id:
         query += " and vendedor_id=%s"
         params.append(membro_id)
-    query += " order by atualizado_em desc nulls last limit 8"
-    with get_pool().connection() as c:
+    query += " order by atualizado_em desc nulls last limit 5"
+    pool = get_pool()
+    with pool.connection() as c:
         rows = c.execute(query, tuple(params)).fetchall()
     itens = [{
         "id": r[0], "empresa": r[1] or "", "contato": r[2] or "", "cargo": r[3] or "",
@@ -643,6 +652,19 @@ def painel_servicos_leads_buscar(request: Request, q: str = ""):
         "cidade": r[8] or "", "uf": r[9] or "", "socio": r[10] or "", "segmento": r[11] or "",
         "site": r[12] or "", "tipo": "pj" if (r[4] or "").strip() else "pf",
     } for r in rows]
+    from finance import clientes as cli
+    ja_no_leads = {it["cnpj"] for it in itens if it["cnpj"]}
+    for cl in cli.listar_clientes(pool, conta[0], busca=q, limite=5, papel="cliente"):
+        doc = cl.get("documento") or ""
+        if doc and doc in ja_no_leads:
+            continue   # mesmo documento já veio como lead — não duplica na lista
+        itens.append({
+            "id": None, "empresa": cl["nome"] or "", "contato": "", "cargo": "",
+            "cnpj": doc, "telefone": cl.get("telefone") or "", "whatsapp": cl.get("telefone") or "",
+            "email": cl.get("email") or "", "cidade": cl.get("cidade") or "",
+            "uf": cl.get("uf") or "", "socio": "", "segmento": "", "site": "",
+            "tipo": cl.get("tipo") or "pf",
+        })
     return JSONResponse({"itens": itens})
 
 

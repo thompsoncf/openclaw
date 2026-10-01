@@ -98,3 +98,49 @@ def test_vendas_mostra_as_datas_e_um_botao_pra_filtrar():
 def test_trocar_de_aba_leva_as_datas_junto():
     html = _tela("vendas")
     assert "tipo=comissao&periodo=personalizado&de=2026-09-01&ate=2026-09-15" in html
+
+
+# ------------------------------------------------ o corte é da TELA, não da conta
+def test_cortar_pra_tela_mostra_300_e_diz_quantas_existem():
+    poucas = rel._cortar_pra_tela({"linhas": [{"x": i} for i in range(10)]})
+    assert len(poucas["linhas"]) == 10 and poucas["linhas_total"] == 10
+    muitas = rel._cortar_pra_tela({"linhas": [{"x": i} for i in range(350)]})
+    assert len(muitas["linhas"]) == 300 and muitas["linhas_total"] == 350
+    assert muitas["linhas"][0] == {"x": 0}, "as primeiras (as mais recentes) ficam"
+
+
+def test_nenhuma_consulta_corta_antes_da_conta():
+    """O teto de 300/500 na consulta foi o que truncava o total. Nenhuma aba volta
+    a ter: quem corta é o `_cortar_pra_tela`, depois da conta feita."""
+    import inspect
+    fonte = inspect.getsource(rel)
+    assert "limit 300" not in fonte and "limit 500" not in fonte
+    assert "limite=300" not in fonte
+
+
+def test_a_tela_avisa_quando_corta():
+    from web.portal import _env
+    dados = {"label": "Vendas", "mock": False, "colunas": [rel._col("descricao", "Descrição")],
+             "linhas": [{"descricao": "x"}] * 300, "linhas_total": 350}
+    html = _env.get_template("relatorios").render(
+        dados=dados, tipo="vendas", periodo="todos", periodo_rotulo="Todo o período",
+        periodos=rel.periodos_da_aba("vendas"), tem_periodo_livre=True, de="", ate="",
+        tipos=rel.TIPOS, conta=(1, "pj", "X"),
+        caps={"financeiro": True, "vendas": True, "gerir": True},
+        tem_pj=True, papel="dono", request=None)
+    assert "Mostrando 300 de 350 registros" in html
+
+
+def test_o_funil_olha_o_mes_inteiro_como_a_agenda(monkeypatch):
+    """Decisão do dono (01/10/2026): a visita marcada pro dia 20 conta como agendada
+    desde que foi marcada, não só quando o dia chega."""
+    vistos = []
+
+    def _falso(periodo, de=None, ate=None, ate_o_fim=False):
+        vistos.append(ate_o_fim)
+        raise _Parou
+
+    monkeypatch.setattr(rel, "_intervalo", _falso)
+    with pytest.raises(_Parou):
+        rel._dados_funil(None, 1, "mes", "", "", "")
+    assert vistos == [True]

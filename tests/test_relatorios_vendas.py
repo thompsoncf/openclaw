@@ -367,3 +367,22 @@ def test_saiu_forma_de_pagamento_e_categoria(pool, conta):
 ])
 def test_a_regua_por_fora(origem, cat, desc, grupo, esperado):
     assert rel._fora_de_vendas(origem, cat, desc, grupo) == esperado
+
+
+# ── o total conta TUDO, a tela mostra as primeiras ───────────────────────────
+def test_o_total_conta_todas_as_vendas_mesmo_passando_do_que_a_tela_mostra(pool, conta):
+    """Até 01/10/2026 a consulta parava em 300 linhas e o total era somado só
+    delas: num "Todo o período" com 350 vendas o total sairia menor, calado.
+    Agora a conta usa todas e só a TABELA corta — e diz quantas existem."""
+    with pool.connection() as c:
+        c.cursor().executemany(
+            """insert into lancamentos (conta_id, tipo, valor_centavos, categoria,
+                 descricao, data, origem, natureza)
+               values (%s,'receita',%s,'Vendas',%s,%s,'foto','empresa')""",
+            [(conta, 10000 + i, f"Venda {i}", HOJE - timedelta(days=i % 200))
+             for i in range(350)])
+        c.commit()
+    d = rel._cortar_pra_tela(rel._dados_vendas(pool, conta, "todos"))
+    assert d["total_centavos"] == sum(10000 + i for i in range(350))
+    assert len(d["linhas"]) == rel.LINHAS_NA_TELA == 300
+    assert d["linhas_total"] == 350 and d["incompleto"] is False

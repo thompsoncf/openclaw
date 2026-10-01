@@ -418,8 +418,11 @@ def test_conversao_sai_da_janela_e_nao_das_linhas_exibidas(pool, cen):
                        from generate_series(1, 310) g""",
                   (cen["conta"], oid, T0))
         c.commit()
-    d = _rel(pool, cen["conta"])
+    # o teto da TABELA mora no `_cortar_pra_tela` desde 01/10/2026 — a aba devolve
+    # todas as linhas e a tela corta depois da conta feita
+    d = rel._cortar_pra_tela(_rel(pool, cen["conta"]))
     assert len(d["linhas"]) == 300, "o teto da tabela continua de pé"
+    assert d["linhas_total"] == 310
     assert _metrica(d, "Leads no período") == "310"
     assert _metrica(d, "Viraram orçamento") == "1 de 310 · 0%"
 

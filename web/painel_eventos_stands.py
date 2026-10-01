@@ -241,8 +241,12 @@ def painel_eventos_stands(request: Request):
         lider = s["codigo"] == g[0]["codigo"]
         destino = None
         if s["status"] == "pre_reservado":
-            item["resumo"] = ("Comprovante recebido · sinal de " + brl(item["sinal_inf"])
-                              + " aguardando confirmação")
+            # sem comprovante = reserva lançada pela lista da gestão (01/10/2026):
+            # o sinal ainda não foi pago, e dizer "comprovante recebido" mentiria
+            item["resumo"] = (("Comprovante recebido · sinal de " + brl(item["sinal_inf"])
+                               + " aguardando confirmação") if s.get("comprovante_url") else
+                              ("Reservado pela lista · aguardando o sinal de "
+                               + brl(item["sinal_inf"])))
             item["pend"] = [("Confirmar sinal", "coral")] + cad_badge
             if item["contrato"] and not item["contrato"]["assinado_em"]:
                 item["pend"].append(("Contrato na mão do lojista", "azul"))
@@ -267,7 +271,10 @@ def painel_eventos_stands(request: Request):
         todos_itens[s["codigo"]] = item
         if lider:
             funil[destino].append(item)
-    funil["precisa_de_mim"].sort(key=lambda s: s["pre_reserva_ate"] or "")
+    # quem vence primeiro, primeiro; reserva SEM prazo (a da lista) vai pro fim.
+    # Antes a chave misturava data e "" e o funil quebrava com as duas ao mesmo tempo.
+    funil["precisa_de_mim"].sort(
+        key=lambda s: (0, s["pre_reserva_ate"]) if s.get("pre_reserva_ate") else (1,))
 
     # o vínculo (interessado/proposta/contrato) POR CÓDIGO, pra lista completa
     # não repetir as consultas do funil

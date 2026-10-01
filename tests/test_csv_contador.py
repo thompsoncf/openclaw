@@ -12,10 +12,17 @@ Roda com banco de TESTE separado (ver tests/conftest.py):
     pytest
 """
 import os
-from datetime import date
 from pathlib import Path
 
 import pytest
+
+from tests.relogio_fixo import HOJE
+
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. O lançamento nasce no dia de Brasília
+# (finance/relogio.py) e o teste pegava o mês com `date.today()`: no último dia
+# do mês, das 21h à meia-noite, eram meses diferentes (CI do #917, 01/10/2026).
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 from psycopg_pool import ConnectionPool
 
 from db.conexao import init_schema
@@ -70,13 +77,13 @@ def conta_id(pool):
 
 
 def test_o_csv_comeca_com_bom_pro_excel_detectar_utf8(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     csv = emp.csv_contador(pool, conta_id, hoje.year, hoje.month)
     assert csv.startswith("﻿")
 
 
 def test_o_csv_preserva_acento_depois_de_decodificar_como_excel_faria(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     LivroCaixa(pool, conta_id).adicionar(
         Lancamento(tipo=Tipo.DESPESA, valor_centavos=15000, categoria="Serviços",
                   descricao="Diárias pedreiro — reforma", natureza="empresa"),
@@ -92,7 +99,7 @@ def test_o_csv_preserva_acento_depois_de_decodificar_como_excel_faria(pool, cont
 
 
 def test_o_csv_tem_a_secao_de_titulos_mesmo_sem_nenhum_aberto(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     csv = emp.csv_contador(pool, conta_id, hoje.year, hoje.month)
     assert "TITULOS EM ABERTO" in csv
     assert "vencimento;tipo;descricao;contraparte;valor;atrasado" in csv
@@ -117,7 +124,7 @@ def test_o_cabecalho_pula_o_cnpj_quando_a_conta_nao_tem_documento(pool):
             "insert into contas (tipo, nome) values ('pj', 'Sem Documento') returning id"
         ).fetchone()[0]
         c.commit()
-    hoje = date.today()
+    hoje = HOJE
     csv = emp.csv_contador(pool, cid, hoje.year, hoje.month)
     linhas = csv.lstrip("﻿").split("\n")
     assert linhas[0] == "Empresa;Sem Documento"
@@ -130,7 +137,7 @@ def test_o_cabecalho_pula_o_cnpj_quando_a_conta_nao_tem_documento(pool):
 def test_o_lancamento_leva_o_codigo_do_plano_de_contas(pool, conta_id):
     from finance import plano_contas as pc
     ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
-    hoje = date.today()
+    hoje = HOJE
     LivroCaixa(pool, conta_id).adicionar(
         Lancamento(tipo=Tipo.RECEITA, valor_centavos=50000, categoria="Vendas",
                   descricao="Venda classificada", natureza="empresa",
@@ -143,7 +150,7 @@ def test_o_lancamento_leva_o_codigo_do_plano_de_contas(pool, conta_id):
 
 
 def test_o_lancamento_sem_plano_de_contas_leva_o_codigo_em_branco(pool, conta_id):
-    hoje = date.today()
+    hoje = HOJE
     LivroCaixa(pool, conta_id).adicionar(
         Lancamento(tipo=Tipo.DESPESA, valor_centavos=8000, categoria="Outros",
                   descricao="Sem plano ainda", natureza="empresa"), forcar=True)

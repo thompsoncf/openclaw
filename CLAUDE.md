@@ -301,3 +301,30 @@ portões que já existiam: `finance.vendas.modo_por_nicho` (evento × recorrente
 um nicho tem, o que ele chama cada coisa, ou se um número faz sentido pra ele, a
 pergunta custa uma linha; a tela errada custou um PR inteiro. Nunca assuma que o
 vocabulário de um nicho serve pro outro.
+
+## 7. O dia é o de Brasília; o banco fala UTC
+
+Regra do dono, dada em 28/09/2026, depois de nove testes (e três bugs de cliente)
+quebrarem todo dia das 21h à meia-noite (#878):
+
+> "estamos no Brasil, pra ficar uma coisa regulada"
+
+O servidor e o banco rodam em UTC, e às 21h de Brasília já é o dia seguinte lá.
+O combinado tem três partes:
+
+* **"Hoje", "agora" e "que dia foi" no Python:** `finance.relogio.hoje()`,
+  `agora()` e `dia_br(instante)`. Nunca `date.today()`, `datetime.now()` sem fuso
+  ou `datetime.utcnow()` em regra de negócio.
+* **No SQL:** o dia de Brasília vai como parâmetro (`%s` com `relogio.hoje()`), ou
+  a coluna é cortada com `(col at time zone 'America/Sao_Paulo')::date`. Nunca
+  `current_date`, `now()::date` ou `col::date` puro.
+* **A conexão fica em UTC**, fixada em `db/conexao.py`. Não mude para Brasília:
+  várias consultas já descontam 3h à mão contando com UTC, e o desconto dobraria.
+
+`tests/test_fuso_trava.py` lê o código e barra uso novo do relógio do servidor;
+`tests/dados/fuso_excecoes.json` é a contagem do que ainda existe e **só
+encolhe**. Ao consertar um, baixe o número; uso técnico de verdade (log, nome de
+arquivo) sobe o número no mesmo PR, à vista. Teste que depende de "hoje" usa
+`HOJE` e a fixture `servidor_as_23h` de `tests/relogio_fixo.py`, que põe o
+processo às 23h de Brasília (02h UTC do dia seguinte) e pega o erro a qualquer
+hora.

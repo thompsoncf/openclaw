@@ -22,7 +22,7 @@ Schema mínimo dos caminhos exercitados; a 388 e a 396 entram inteiras, lidas do
 A IA e o WhatsApp são trocados por dublês — nada sai daqui.
 """
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -1545,9 +1545,14 @@ def test_redigir_devolve_nao_chamar(pool, equipe, monkeypatch):
 def _teste_aberto(pool, equipe, monkeypatch, respostas):
     """Um teste aberto, a regra marcando visita (grade e agenda de mentira) e uma IA
     que devolve, em ordem, os JSONs de `respostas`."""
+    from finance import calendario
     from finance import ia_visita as iv
     BRT = iv.ag.BRT
     livres = [datetime(2026, 9, 29, 9, tzinfo=BRT), datetime(2026, 9, 30, 10, tzinfo=BRT)]
+    # O cenário se passa na segunda 28/09/2026, véspera dos horários livres. Sem isto
+    # o corretor de dia da semana usa o dia REAL: a partir de 30/09 o "29/09" já
+    # passou, ele supõe 2027 (quarta-feira) e "terça 29/09" vira "quarta-feira 29/09".
+    monkeypatch.setattr(calendario, "_hoje", lambda: date(2026, 9, 28))
     monkeypatch.setattr(rg, "_teste_visita", lambda *a, **k: {"grade": {}, "min_h": 3, "max_dias": 14})
     monkeypatch.setattr(iv, "ofertas", lambda *a, **k: list(livres))
     monkeypatch.setattr(iv, "cabe", lambda pool, conta, cfg, ini, agora, **k: (ini in livres, "ocupado"))

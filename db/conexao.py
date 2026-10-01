@@ -157,8 +157,18 @@ def get_pool() -> ConnectionPool:
             # 60 s e folgado pra qualquer tela e curto pra qualquer vazamento.
             # NAO poe statement_timeout aqui: o mesmo `get_pool` serve os crons,
             # e relatorio pesado tem direito de demorar.
+            #
+            # FUSO DA SESSAO: UTC, DE PROPOSITO (28/09/2026). O codigo conta com o
+            # banco devolvendo UTC: ha consultas que descontam 3h a mao
+            # (`(inicio - interval '3 hours')::date`, finance/esteira.py e
+            # funil_agenda.py) e Python que soma -3h ao que chega do banco.
+            # Sessao em Brasilia descontaria DUAS vezes. Fixar aqui torna o
+            # combinado explicito: mudar o fuso do banco por fora nao muda o app.
+            # O dia do Brasil vem de finance/relogio.py ou de
+            # `at time zone 'America/Sao_Paulo'`; tests/test_fuso_trava.py barra
+            # `current_date` e `date.today()` novos.
             kwargs={"prepare_threshold": None,
-                    "options": "-c idle_in_transaction_session_timeout=60s"},
+                    "options": "-c idle_in_transaction_session_timeout=60s -c TimeZone=UTC"},
         )
     return _pool
 

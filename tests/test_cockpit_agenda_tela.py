@@ -276,7 +276,12 @@ def test_nenhum_mes_aparece_em_dois_lugares(cli):
     # do mês: em 31/08/2026, hoje+3 é 03/09 e hoje+32 é 02/10 — meses diferentes,
     # e o teste passava a medir outra coisa (falhava sem nada estar quebrado).
     hoje = datetime.now(ag.BRT)
-    primeiro = (hoje.replace(day=1) + timedelta(days=32)).replace(day=1)
+    # O mês onde cai hoje+30 é o que o corte da tela usa (painel_cockpit: "fim do
+    # mês de hoje+30"). "O mês que vem" quebrava no dia 1º de mês de 31 dias: o dia 1º
+    # seguinte fica a 31 dias, já dobrado numa linha (CI do #917, 01/10/2026).
+    primeiro = (hoje + timedelta(days=30)).replace(day=1)
+    if primeiro.date() <= hoje.date():      # hoje é o dia 1º: o começo do mês é amanhã
+        primeiro = hoje + timedelta(days=1)
     ultimo = (primeiro.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
     perto = _ev(cli, dias=(primeiro.date() - hoje.date()).days,
                 titulo="Festa do começo do mês")

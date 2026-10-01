@@ -50,6 +50,12 @@ def test_consulta_plano_fechado_ticket_e_sessoes(pool, zap):  # noqa: F811
         c.commit()
     _plano_aceito(pool, lead)                                # enviado e aceito em 25/09 (AGORA)
     with pool.connection() as c:
+        # o pacote nasce com o now() do BANCO; o cenário vive em setembro. Sem isto
+        # ele saía da janela "vendidas no período" no dia em que o relógio real
+        # virou outubro (CI do #917, 01/10/2026).
+        c.execute("update clinica_pacotes set criado_em=%s where conta_id=%s", (AGORA, CLINICA))
+        c.commit()
+    with pool.connection() as c:
         _finalizar(c, _sessao(c, lead, date(2026, 9, 30)))   # 1ª sessão do pacote: não é receita nova
         d = cn.numeros(c, CLINICA, *set_, agora=ca.utc(date(2026, 10, 1), time(9)))
     assert (d["consultas"], d["planos_enviados"], d["planos_aceitos"]) == (1, 1, 1)

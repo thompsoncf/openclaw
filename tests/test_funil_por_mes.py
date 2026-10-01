@@ -16,6 +16,8 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+
+from tests.relogio_fixo import AGORA, HOJE
 from psycopg_pool import ConnectionPool
 from starlette.datastructures import QueryParams
 
@@ -40,7 +42,7 @@ CONTA = 11
 # à frente garantem que caem em meses distintos e que nenhum dos dois é o de hoje,
 # em qualquer época do ano.
 def _mes_a_frente(n: int, dia: int = 16) -> date:
-    h = date.today()
+    h = HOJE
     m = h.month - 1 + n
     return date(h.year + m // 12, m % 12 + 1, dia)
 
@@ -56,7 +58,9 @@ ROT_LONGE = _mes_rotulo(MES_LONGE.strftime("%Y-%m"))
 # E a ENTRADA do lead sem data, que é agrupada pelo mês em que ele chegou. Três
 # dias atrás: recente o bastante pra não cair na dobra dos "parados 15+ dias", que
 # é um grupo diferente e mudaria a contagem dos asserts.
-ENTRADA = datetime.now(timezone.utc) - timedelta(days=3)
+# O mês da entrada é o de BRASÍLIA (`AGORA` tem o fuso): o quadro agrupa assim, e
+# com o relógio UTC o rótulo trocava de mês no último dia, das 21h à meia-noite.
+ENTRADA = AGORA - timedelta(days=3)
 ROT_ENTRADA = "Sem data · entrou em " + _MESES_MIN[ENTRADA.month - 1]
 # A CHAVE do mês, que é o que vai na URL (`?mes=2027-01`) e no `data-status` das
 # colunas da vista por mês. Mesmo motivo do rótulo: derivada, nunca escrita.
@@ -576,7 +580,10 @@ def test_esperando_resposta_e_o_primeiro_grupo_da_coluna(monkeypatch, pool, vend
 
 
 def test_com_um_mes_escolhido_os_sem_data_separam_por_semana(monkeypatch, pool, vende_data):
-    hoje = datetime.now(timezone.utc)
+    # 23h de Brasília de hoje: o mês e a semana que o quadro usa são os de Brasília;
+    # com o relógio UTC, no último dia do mês à noite o lead caía no mês seguinte
+    # (CI do #917, 01/10/2026 00h UTC).
+    hoje = AGORA
     _lead(pool, "Desta Semana", criado_em=hoje)
     # outra semana, MESMO mês (pra frente no começo do mês, pra trás no fim)
     outra = hoje + timedelta(days=7) if hoje.day <= 21 else hoje - timedelta(days=7)

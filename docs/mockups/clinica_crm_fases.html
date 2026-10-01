@@ -1,0 +1,335 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CRM Pelle por fases</title>
+<style>
+/* Mesmo papel dos desenhos da clínica (docs/mockups): cream, navy, dourado; tema único, de propósito. Faixa de fases no topo, quadro do funil, roteiros em balões */
+:root{--papel:#EFEBE3;--tinta:#14213D;--tinta-2:#3B4757;--mudo:#8A8475;--ouro:#B8862E;--linha:#DCD5C6;--cartao:#fff;--borda:#E3DDD0;--verde:#1c7a4f;--verde-f:#E8F5EE;--amarelo:#D9932B;--amarelo-f:#FFF6E8;--vermelho:#B4453C;--vermelho-f:#FDECEA;--azul:#2F5D8A;--azul-f:#E9F0F8;
+ --fonte:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--papel);color:var(--tinta);font:14px/1.6 var(--fonte);padding-block:26px;padding-inline:16px}
+.wrap{max-width:940px;margin:0 auto}
+h1{font-size:26px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+.lead{font-size:14.5px;color:var(--tinta-2);margin:0 0 22px;line-height:1.65;max-width:70ch}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ouro);font-weight:700;margin:34px 0 4px;padding-top:18px;border-top:2px solid var(--linha)}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 12px;text-wrap:balance}
+h3{font-size:14.5px;margin:18px 0 6px}
+p{margin:0 0 12px;max-width:74ch}
+ul,ol{margin:0 0 12px;padding-left:20px}li{margin-bottom:5px}
+.nota,.alerta,.perigo,.bom{border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65;border:1px solid var(--borda)}
+.nota{background:#FBFAF7;border-left:3px solid var(--ouro)}
+.alerta{background:var(--amarelo-f);border-color:#F0DDBA;border-left:3px solid var(--amarelo);color:#7A4E0C}.alerta b{color:#5C3A06}
+.perigo{background:var(--vermelho-f);border-color:#F5C6C0;border-left:3px solid var(--vermelho);color:#8C332C}.perigo b{color:#6E241E}
+.bom{background:var(--verde-f);border-color:#BFE3D0;border-left:3px solid var(--verde);color:#155c3b}.bom b{color:#0e3d27}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--cartao);border:1px solid var(--borda);border-radius:10px;overflow:hidden}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--mudo);font-weight:700;border-bottom:1px solid var(--borda)}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid var(--borda);border-radius:4px;padding:1px 5px;font-size:11.5px;font-family:var(--mono);color:var(--tinta)}
+.big{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem;margin-bottom:14px}
+.big div{background:var(--cartao);border:1px solid var(--borda);border-radius:10px;padding:10px 12px;min-width:0}
+.big b{display:block;font-size:1.45rem;line-height:1.2;font-variant-numeric:tabular-nums}
+.big span{font-size:11.5px;color:var(--mudo)}
+.tag{display:inline-block;font-size:10px;letter-spacing:.04em;border-radius:99px;padding:1px 8px;border:1px solid var(--borda);color:var(--tinta-2);white-space:nowrap;font-weight:600}
+.tag.ex{border-color:#BFE3D0;color:var(--verde);background:var(--verde-f)}
+.tag.cf{border-color:#CFDDEC;color:var(--azul);background:var(--azul-f)}
+.tag.co{border-color:#F0DDBA;color:#7A4E0C;background:var(--amarelo-f)}
+.tag.ia{border-color:#D9CCE8;color:#5B3F86;background:#F3EEF9}
+/* faixa das fases */
+.fases{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin:10px 0 8px}
+.fa{background:var(--cartao);border:1px solid var(--borda);border-top:4px solid var(--tinta);border-radius:10px;padding:10px 11px;min-width:0}
+.fa.g{border-top-color:var(--verde)}.fa.a{border-top-color:var(--azul)}.fa.y{border-top-color:var(--amarelo)}.fa.p{border-top-color:#7A5AA6}
+.fa small{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mudo);font-weight:700}
+.fa b{display:block;font-size:14px;line-height:1.3;margin:3px 0 5px}
+.fa span{display:block;font-size:12px;color:var(--tinta-2);line-height:1.5}
+.fa em{display:block;font-style:normal;font-size:11.5px;color:var(--mudo);margin-top:6px;border-top:1px dashed var(--borda);padding-top:5px}
+/* quadro do funil */
+.quadro{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:.45rem;min-width:800px;margin-bottom:.45rem}
+.col.nova{background:#FFF6E8;border-color:#F0DDBA}
+.col.pos{background:#E8F5EE;border-color:#BFE3D0}
+.leg{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mudo);font-weight:700;margin:10px 0 4px}
+.col{background:#F6F3EC;border:1px solid var(--borda);border-radius:10px;padding:8px}
+.col h4{margin:0 0 6px;font-size:12px;line-height:1.3}
+.col h4 small{display:block;font-weight:400;color:var(--mudo);font-size:10.5px}
+.cd{background:var(--cartao);border:1px solid var(--borda);border-radius:7px;padding:5px 7px;font-size:11px;line-height:1.4;margin-bottom:5px}
+.cd b{display:block;font-size:11.5px}
+.cd i{font-style:normal;color:var(--mudo)}
+.trilha{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;font-size:12.5px;margin:4px 0 10px}
+.trilha span{background:var(--cartao);border:1px solid var(--borda);border-radius:6px;padding:2px 8px}
+.trilha i{font-style:normal;color:var(--mudo)}
+/* roteiro */
+.passos{counter-reset:p;list-style:none;padding:0;margin:0 0 14px}
+.passos li{counter-increment:p;position:relative;padding:8px 10px 8px 40px;background:var(--cartao);border:1px solid var(--borda);border-radius:9px;margin-bottom:6px;font-size:13px}
+.passos li::before{content:counter(p);position:absolute;left:10px;top:8px;width:22px;height:22px;border-radius:50%;background:var(--tinta);color:#fff;font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.passos li b{display:block}
+.fala{display:block;background:#D9FDD3;border-radius:8px;padding:6px 9px;margin-top:5px;font-size:12.5px;line-height:1.5;max-width:520px}
+.q{background:var(--cartao);border:1px solid var(--borda);border-left:3px solid var(--tinta);border-radius:8px;padding:12px 16px;margin-bottom:10px}
+.q .qt{font-weight:700;font-size:14px;margin-bottom:3px}
+.q .qo{font-size:13px;color:var(--tinta-2);line-height:1.6}
+a{color:var(--azul)}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid var(--linha);font-size:11.5px;color:var(--mudo);line-height:1.6}
+@media (max-width:700px){.big{grid-template-columns:repeat(2,1fr)}.fases{grid-template-columns:1fr}}
+</style>
+</head><body>
+<div class="wrap">
+
+<div class="alerta"><b>Plano de fases, aprovado com o desenho das telas em 01/10/2026.</b> Números da Espaço Pelle e da Prime lidos direto do Zaq, só totais e configuração: nenhum nome, telefone ou conversa de cliente. Tudo o que está escrito sobre o que o Zaq faz foi conferido no código, com a chave de cada tela.</div>
+
+<div class="bom"><b>Decidido pelo dono em 01/10:</b> a coluna Consulta segura o cartão até o plano ser enviado; retorno e tratamento são independentes; procedimento se vende por avaliação ou direto pelo WhatsApp; e tudo é desenhado antes de ser implementado. O desenho das telas está em <a href="clinica_crm_telas.html">CRM Pelle, tela por tela</a>, e é ele que vale para as regras do funil, do pagamento e das mensagens automáticas: uma revisão em 01/10 mudou pontos desta página.</div>
+
+<h1>CRM da Pelle por fases: primeiro a pessoa, depois o ensaio, por último a IA</h1>
+<p class="lead">A ordem é a que você definiu: <b>a vendedora atende primeiro, com roteiro e funil; depois o follow-up roda em ensaio e vira rotina; depois o resgate ensaia com a IA escrevendo só para o supervisor; e só então a IA fala com paciente.</b> Cada fase passa para a seguinte por número batido, não por data. É o mesmo caminho que a Prime percorreu, com o conteúdo trocado para clínica e com o funil vendendo consulta, procedimento e serviço.</p>
+
+<div class="big">
+  <div><b>1.282</b><span>respostas da clínica em 9 dias, <b>todas pelo celular</b>, nenhuma de dentro do Zaq</span></div>
+  <div><b>2</b><span>logins na conta (dono e mais um). A recepção não tem login</span></div>
+  <div><b>68 de 68</b><span>cartões sem dona. Rodízio desligado</span></div>
+  <div><b>66</b><span>cartões parados em "Novo"</span></div>
+</div>
+<p>Esse é o ponto de partida real: hoje o Zaq só espelha o que a recepção faz no aparelho. Nenhuma resposta tem nome, nenhum cartão tem dona, então nada pode ser cobrado, medido nem acompanhado. Por isso existe uma fase antes da fase 1.</p>
+
+<h2><span class="n">01</span>As cinco fases</h2>
+<p class="sub">Quem fala com o paciente em cada uma, e o número que libera a próxima</p>
+<div class="fases">
+  <div class="fa"><small>Fase 0 · 2 a 3 dias</small><b>Casa arrumada</b><span>Logins da recepção, rodízio, funil novo (com consulta, tratamento e retorno), catálogo com preço, respostas prontas, agenda por cidade.</span><em>Fala com o paciente: a recepção, como hoje.<br>Passa quando: 100% dos cartões com dona e a primeira resposta saindo pelo Zaq.</em></div>
+  <div class="fa g"><small>Fase 1 · ~2 semanas</small><b>Vendedora atende com roteiro</b><span>Roteiro em 6 passos, tela Hoje três vezes ao dia, "voltar a chamar" na mão, cobrança de 5 minutos.</span><em>Fala: só a pessoa.<br>Passa quando: na média da semana, 80% dos novos respondidos em 5 min, e todo cartão com cidade, tipo de atendimento e origem.</em></div>
+  <div class="fa a"><small>Fase 2 · ~2 semanas</small><b>Ensaio do follow-up</b><span>"Voltar a chamar" passa a sair sozinho (texto fixo). Fila de follow-up da equipe em ensaio, depois valendo. Prazo por etapa.</span><em>Fala: a pessoa + toques de texto fixo, sem IA.<br>Passa quando: nenhum cartão aberto sem próxima ação e "nunca chamados de novo" zerado.</em></div>
+  <div class="fa y"><small>Fase 3 · 1 a 2 semanas</small><b>Ensaio do resgate</b><span>A IA lê o lead parado há 7 dias e escreve a retomada. A prévia vai só para o supervisor.</span><em>Fala: a pessoa. A IA só escreve para o supervisor.<br>Passa quando: 90% das prévias aprovadas sem correção, 5 dias seguidos.</em></div>
+  <div class="fa p"><small>Fase 4 · em 3 degraus</small><b>A IA entra</b><span>Primeiro o resgate valendo; depois o agente fora do horário; por último o agente como primeira resposta no pico.</span><em>Fala: IA onde ninguém ia falar; a pessoa assume quando o paciente responde.</em></div>
+</div>
+<div class="nota"><b>O que é "ensaio" no Zaq, sem ambiguidade.</b> No follow-up e na régua, ensaio (a tela chama de "observando") calcula tudo e registra o que faria, mas não avisa nem manda nada. No resgate, ensaio é a IA escrevendo de verdade a mensagem de retomada, uma por vez, e mandando a prévia ao WhatsApp do supervisor com "Eu mandaria: … Nada foi enviado pra cliente". Nenhum lead muda de dona.</div>
+
+<h2><span class="n">02</span>O que dá para aproveitar da Prime</h2>
+<p class="sub">Ela já fez esse caminho: gente primeiro, ensaio com prévia, resgate ligado em 30/09</p>
+<div class="tw"><table>
+<tr><th>O quê</th><th>Na Prime (hoje)</th><th>Na Pelle (hoje)</th><th>O que copiar</th></tr>
+<tr><td>Etapas com gatilho</td><td>9 etapas; o cartão anda sozinho (respondemos, ficha completa, visita marcada, valores, contrato)</td><td>7 etapas, nenhum gatilho; rótulos "Agenda" e "Consulta"</td><td>O modelo de gatilho por etapa, com os gatilhos de clínica (seção 03)</td></tr>
+<tr><td>Prazo na etapa</td><td>7 dias em Contatado e em Proposta, 2 renovações, sempre com justificativa</td><td>sem prazo</td><td>3 dias em "Em conversa", 7 em "Plano enviado", 2 renovações com motivo</td></tr>
+<tr><td>Temperatura</td><td>ligada: quente 24 h, morno 7 dias, frio após 4 tentativas. Em 30 dias: 289 esfriaram para morno, 288 para frio</td><td>todos "quente" por padrão</td><td>Os mesmos cortes; clínica decide mais rápido, pode ser quente 48 h</td></tr>
+<tr><td>Follow-up da equipe</td><td>ligado: toques em 1, 3 e 7 dias; 3 dias depois da proposta; 10 por vendedor por dia</td><td>não existe para clínica (só perfil de eventos)</td><td>O motor inteiro, aberto para clínica (código, fase 2)</td></tr>
+<tr><td>Esteira</td><td>319 cartões passaram: 76 "falou", 11 fecharam, 11 moveram, 6 voltaram sozinhos</td><td>desligada</td><td>Por último. Em "observando" ela já cobra de verdade</td></tr>
+<tr><td>Perdido volta</td><td>63 perdidos voltaram para Contatado em 30 dias ("reabre se voltar a falar")</td><td>não configurado</td><td>Perdido reabre em "Em conversa"; motivo obrigatório</td></tr>
+<tr><td>Resgate</td><td>ensaio de 27 a 30/09 (59 prévias, 13 testes), ligado em 30/09; 7 dias parado, 14 se aquecido, 30 por dia, 8h às 20h</td><td>sem configuração</td><td>Mesmos números, com teto menor (10 por dia) e horário da clínica</td></tr>
+<tr><td>Respostas prontas</td><td>10; a "Abertura do atendimento" foi usada 39 vezes: pede 4 dados de uma vez</td><td>nenhuma</td><td>O formato da abertura: 3 perguntas numeradas na primeira mensagem (seção 04)</td></tr>
+<tr><td>Motivos de perda</td><td>10, do ramo dela</td><td>8 genéricos ("ficou com o fornecedor atual")</td><td>Trocar pelos 9 de clínica (seção 03)</td></tr>
+</table></div>
+
+<h2><span class="n">03</span>O funil da clínica, da primeira mensagem ao retorno</h2>
+<p class="sub">Dez colunas: a venda, a consulta (veio ou não veio), o tratamento e o retorno</p>
+<p>O funil de hoje para em "Agendado": ao finalizar a consulta o cartão pula para o plano ou some do quadro. Faltavam justamente as três coisas que a clínica vive todo dia: <b>o paciente veio ou faltou, está em tratamento, tem retorno a fazer</b>. As colunas em amarelo são novas.</p>
+
+<div class="leg">Antes do dia marcado</div>
+<div class="tw"><div class="quadro">
+  <div class="col"><h4>Novo<small>chegou, ninguém respondeu</small></h4><div class="cd"><b>Entra sozinho</b><i>mensagem nova no WhatsApp</i></div><div class="cd"><b>Prazo</b><i>5 minutos</i></div></div>
+  <div class="col"><h4>Em conversa<small>hoje: "Contatado"</small></h4><div class="cd"><b>Entra sozinho</b><i>na primeira resposta nossa</i></div><div class="cd"><b>Sai com</b><i>cidade, interesse e origem</i></div><div class="cd"><b>Prazo</b><i>3 dias, 2 renovações</i></div></div>
+  <div class="col"><h4>Follow-up<small>precisa ser chamado de novo</small></h4><div class="cd"><b>Entra sozinho</b><i>faltou ou cancelou</i></div><div class="cd"><b>Ou a pessoa põe</b><i>sumiu depois do preço; "me chama mês que vem", com data</i></div><div class="cd"><b>Selo no cartão</b><i>faltou · cancelou · sumiu · chamar em [data]</i></div></div>
+  <div class="col"><h4>Agendado<small>hoje: "Agenda"</small></h4><div class="cd"><b>Entra sozinho</b><i>ao marcar: consulta, avaliação, procedimento ou serviço</i></div><div class="cd"><b>Selo</b><i>"confirmado" quando responde 1 na véspera</i></div></div>
+  <div class="col nova"><h4>Consulta<small>nova · o paciente veio</small></h4><div class="cd"><b>Entra sozinho</b><i>quando a recepção marca "Presente" na agenda</i></div><div class="cd"><b>Não veio</b><i>"Faltou" leva para Follow-up, com o selo</i></div><div class="cd"><b>Sai</b><i>ao finalizar, com o desfecho</i></div></div>
+</div></div>
+<div class="leg">Depois da consulta</div>
+<div class="tw"><div class="quadro">
+  <div class="col"><h4>Plano ou orçamento enviado<small>hoje: "Consulta"</small></h4><div class="cd"><b>Entra sozinho</b><i>quando o plano é enviado ao paciente</i></div><div class="cd"><b>Prazo</b><i>7 dias, 2 renovações</i></div></div>
+  <div class="col nova pos"><h4>Em tratamento<small>nova · já é venda fechada</small></h4><div class="cd"><b>Entra sozinho</b><i>plano aceito vira pacote de sessões</i></div><div class="cd"><b>No cartão</b><i>"3 de 6 sessões", próxima sessão</i></div><div class="cd"><b>Sai</b><i>na última sessão</i></div></div>
+  <div class="col nova pos"><h4>Retorno<small>nova · já é venda fechada</small></h4><div class="cd"><b>Entra sozinho</b><i>o médico pediu retorno em N dias</i></div><div class="cd"><b>No cartão</b><i>a marcar · marcado para [data] · vencido</i></div><div class="cd"><b>Sai</b><i>no retorno feito, com novo desfecho</i></div></div>
+  <div class="col pos"><h4>Concluído<small>hoje: "Fechado" · sai do quadro</small></h4><div class="cd"><b>Entra sozinho</b><i>alta, ou serviço feito sem nada pendente</i></div><div class="cd"><b>Depois</b><i>fica em Pacientes; volta por interesse novo</i></div></div>
+  <div class="col"><h4>Perdido<small>com motivo</small></h4><div class="cd"><b>A pessoa fecha</b><i>motivo obrigatório</i></div><div class="cd"><b>Reabre</b><i>em "Em conversa" se voltar a falar</i></div></div>
+</div></div>
+
+<h3>O que acontece no dia e ao finalizar</h3>
+<p>As linhas de Presente e Faltou valem para a primeira consulta e para a avaliação. Sessão de pacote e retorno não tiram o cartão da coluna em que ele está: faltou à sessão, a sessão volta para "a marcar"; faltou ao retorno, o retorno volta para "a marcar".</p>
+<div class="tw"><table>
+<tr><th>Na agenda</th><th>O cartão vai para</th><th>Como é hoje</th></tr>
+<tr><td>Recepção marca <b>Presente</b> (o paciente chegou)</td><td><b>Consulta</b></td><td>o cartão não se mexe</td></tr>
+<tr><td><b>Faltou</b> ou <b>Cancelou</b></td><td><b>Follow-up</b>, com o selo e a nota "remarcar"</td><td>igual (já funciona)</td></tr>
+<tr><td>Finalizado: <b>o médico propôs tratamento</b></td><td>fica em <b>Consulta</b> com o aviso "plano a montar", e só vai para <b>Plano enviado</b> quando a recepção manda o plano</td><td>pula direto para a coluna do plano, mesmo sem plano enviado; não dá para ver o que está esperando a recepção</td></tr>
+<tr><td>Finalizado: <b>só retorno em N dias</b></td><td><b>Retorno</b></td><td>vai para Fechado e some do quadro</td></tr>
+<tr><td>Finalizado: <b>alta</b>, nada pendente</td><td><b>Concluído</b></td><td>igual</td></tr>
+<tr><td><b>Plano aceito e pago</b> (ou com a entrada)</td><td>conta como venda fechada e vai para <b>Em tratamento</b>. Aceito sem pagar fica em Plano enviado, "aguardando pagamento"</td><td>o aceite leva para Fechado e some</td></tr>
+<tr><td><b>Plano que não fechou</b></td><td>o motivo fica no plano; o cartão vai para <b>Retorno</b> ou <b>Concluído</b></td><td>o cartão fica parado na coluna do plano</td></tr>
+<tr><td><b>Resultado de exame a entregar</b></td><td>o cartão não conclui; ganha o selo com a data prevista</td><td>não existe</td></tr>
+<tr><td><b>Última sessão</b> do pacote feita</td><td><b>Retorno</b>, se o médico pediu; senão <b>Concluído</b></td><td>o cartão não se mexe</td></tr>
+<tr><td><b>Retorno feito</b></td><td>novo desfecho: novo plano, outro retorno ou alta</td><td>o cartão não se mexe</td></tr>
+</table></div>
+
+<div class="nota"><b>Retorno e tratamento são independentes.</b> Ao finalizar, o médico responde duas perguntas separadas: propôs tratamento? retorno em quantos dias? Só retorno (a receita com volta em 30 dias): o cartão vai para Retorno. Só tratamento: Consulta, Plano enviado, Em tratamento, Concluído. Os dois: o cartão segue o tratamento com o selo do retorno e, terminadas as sessões, vai para Retorno. Nenhum: Concluído. O retorno aparece como selo em qualquer cartão que o tenha pendente, e como coluna quando é a única coisa pendente.</div>
+
+<h3>Os três caminhos no mesmo quadro</h3>
+<p><b>Consulta</b> (dermatologia com o Dr. Manoel):</p>
+<div class="trilha"><span>Novo</span><i>›</i><span>Em conversa</span><i>›</i><span>Agendado</span><i>›</i><span>Consulta</span><i>›</i><span>Retorno</span><i>›</i><span>Concluído</span></div>
+<div class="trilha"><i>com tratamento:</i><span>Consulta</span><i>›</i><span>Plano enviado</span><i>›</i><span>Em tratamento</span><i>›</i><span>Retorno</span><i>›</i><span>Concluído</span></div>
+<p><b>Procedimento por avaliação</b> (o que só o profissional indica): a "consulta" aqui é a avaliação.</p>
+<div class="trilha"><span>Novo</span><i>›</i><span>Em conversa</span><i>›</i><span>Agendado (avaliação)</span><i>›</i><span>Consulta</span><i>›</i><span>Plano ou orçamento enviado</span><i>›</i><span>Em tratamento</span><i>›</i><span>Retorno</span></div>
+<p><b>Procedimento vendido direto pelo WhatsApp</b> (o que a clínica liberar no catálogo, como laser por área): o orçamento vai pelo link, o paciente aceita e paga, e o cartão vai para Em tratamento. O que se pula é a Consulta, não a agenda: as sessões são marcadas normalmente.</p>
+<div class="trilha"><span>Novo</span><i>›</i><span>Em conversa</span><i>›</i><span>Orçamento enviado</span><i>›</i><span>Em tratamento</span><i>›</i><span>Retorno ou Concluído</span></div>
+<p><b>Serviço simples</b> (vacina, teste alérgico, coleta): marca, faz e, quando há volta, o retorno já existe no catálogo (a retirada do teste alérgico).</p>
+<div class="trilha"><span>Novo</span><i>›</i><span>Em conversa</span><i>›</i><span>Agendado</span><i>›</i><span>atendido</span><i>›</i><span>Retorno (retirada do teste)</span>, <span>resultado a entregar</span> <i>ou</i> <span>Concluído</span></div>
+
+<div class="bom"><b>O que o quadro passa a responder, por cidade.</b> De cada 10 agendados, quantos vieram (Agendado › Consulta). De cada 10 consultas, quantas viraram plano e em quanto tempo o plano foi enviado. De cada 10 planos, quantos viraram tratamento. Quantos retornos estão vencidos. Hoje nenhum desses números existe.</div>
+
+<div class="tw"><table>
+<tr><th>Peça</th><th>Como fica</th><th>No Zaq</th></tr>
+<tr><td><b>Três etapas novas, andando sozinhas</b></td><td>Consulta, Em tratamento e Retorno, movidas pela agenda (Presente, Finalizado), pelo plano (aceito) e pelo pacote (última sessão)</td><td><span class="tag co">construir</span> O dono até consegue criar colunas na Régua, mas a agenda continuaria jogando o cartão para Fechado ao finalizar. Precisa mudar a regra que liga agenda, plano e pacote ao cartão. É o primeiro item de código.</td></tr>
+<tr><td><b>Tratamento e Retorno contam como venda</b></td><td>As duas colunas ficam na fase "depois da venda", como o Pós-festa da Prime: entram na conversão como fechado e saem da cobrança de vendas</td><td><span class="tag ex">existe</span> O Zaq já trata assim etapa de pós-venda. Quem cuida desses cartões são os lembretes de sessão e de retorno, não a cobrança da vendedora.</td></tr>
+<tr><td><b>Renomear as etapas</b></td><td>Contatado → Em conversa; Agenda → Agendado; Consulta (a de hoje) → Plano ou orçamento enviado; Fechado → Concluído</td><td><span class="tag cf">configurar</span> Funil › Régua. As chaves internas não mudam.</td></tr>
+<tr><td><b>Gatilho de entrada</b></td><td>"Primeira resposta nossa" leva Novo → Em conversa</td><td><span class="tag cf">configurar</span> Régua › etapa › "entra sozinho quando". Primeiro em ensaio, depois ligado.</td></tr>
+<tr><td><b>Interesse do paciente</b></td><td>Consulta · Procedimento estético · Laser · Dermatofuncional · Teste alérgico · Vacina · Outro. Separa os três caminhos no quadro e no relatório.</td><td><span class="tag co">construir</span> O cartão não tem esse campo. A cidade já tem.</td></tr>
+<tr><td><b>Campos para sair de "Em conversa"</b></td><td>Cidade, interesse e origem</td><td><span class="tag co">construir</span> Hoje só existem "exigir motivo" e "saídas permitidas". Até lá, é combinado de equipe e conferência diária.</td></tr>
+<tr><td><b>Motivos de perda</b></td><td>Não respondeu · Preço · Fez em outra clínica · Sumiu depois do plano · Adiou o tratamento · Procedimento não indicado pelo médico · Condição de pagamento · Sem interesse · Outro</td><td><span class="tag cf">configurar</span> Régua › "Por que perdemos". Marcar "exigir motivo" em Perdido.</td></tr>
+<tr><td><b>Paciente que volta a comprar</b></td><td>Concluído mora em Pacientes. Interesse novo reabre o cartão em "Em conversa" com origem "Já é paciente".</td><td><span class="tag cf">configurar</span> para Perdido. <span class="tag co">construir</span> para Concluído.</td></tr>
+<tr><td><b>Origem</b></td><td>Uma lista só: WhatsApp direto, Instagram, Google, Rádio, Indicação, Já é paciente, Outro; mais o código do anúncio</td><td><span class="tag co">construir</span> Hoje há duas listas que não conversam, e "Rádio" não existe.</td></tr>
+</table></div>
+
+<h2><span class="n">04</span>Os fluxos de atendimento da vendedora</h2>
+<p class="sub">Da primeira mensagem ao retorno. O texto verde é a resposta pronta, a um toque no app</p>
+
+<h3>Fluxo A · Consulta</h3>
+<ol class="passos">
+  <li><b>Abrir em até 5 minutos, com 3 perguntas de uma vez</b>Cartão sai de Novo sozinho.<span class="fala">Oi, {nome}! Aqui é a {vendedor}, da Espaço Pelle 😊 Para te ajudar rápido, me diz:<br>1) sua cidade<br>2) o que você procura: consulta com dermatologista, procedimento, teste alérgico ou vacina<br>3) se é para você ou para outra pessoa</span></li>
+  <li><b>Preencher o cartão enquanto ele responde</b>Cidade, interesse e origem ("como ficou sabendo da gente?"). Sem isso o cartão não segue.</li>
+  <li><b>Passar o preço por escrito, na mesma mensagem que fala da consulta</b>É essa mensagem que liga o "voltar a chamar". Se o preço for dito por áudio ou em duas mensagens, o paciente que sumir não é chamado de novo.<span class="fala">A consulta com o Dr. Manoel é R$ 000 e inclui o retorno em até 30 dias. Pagamento em Pix, dinheiro ou cartão.</span></li>
+  <li><b>Oferecer duas opções da cidade dele e marcar na agenda do Zaq</b>Ao marcar, o cartão vai para Agendado e o link da ficha segue junto. Se não marcou: registrar o porquê e a data do próximo contato.<span class="fala">Em [cidade] o Dr. Manoel atende dia [data]. Tenho [hora] e [hora]. Qual fica melhor para você?</span></li>
+  <li><b>Véspera: confirmar</b>O Zaq pergunta "1 confirma, 2 remarcar". Quem respondeu 2 aparece para a recepção remarcar; quem não respondeu, a recepção liga.</li>
+  <li><b>No dia: Presente ou Faltou</b>Chegou: marcar <b>Presente</b>, e o cartão vai para Consulta. Não veio em 15 minutos: marcar <b>Faltou</b>; o cartão vai para Follow-up e a mensagem sai no mesmo dia.<span class="fala">Oi, {nome}! Sentimos sua falta hoje. Quer que eu veja outro horário? A próxima data em [cidade] é [data].</span></li>
+  <li><b>Ao finalizar: o desfecho, sempre</b>O profissional responde duas coisas: propôs tratamento? retorno em quantos dias? Tratamento: a recepção monta e mostra o plano antes de o paciente sair (Plano enviado). Só retorno: cartão em Retorno. Alta: Concluído.</li>
+  <li><b>Retorno marcado antes de o paciente sair</b>Na próxima passagem do Dr. Manoel pela cidade dele. Se não der para marcar na hora, o cartão fica em Retorno como "a marcar" e o Zaq lembra 7 dias antes de vencer.</li>
+</ol>
+
+<h3>Fluxo B · Procedimento por avaliação</h3>
+<p>Para o que a clínica libera vender direto pelo WhatsApp, o roteiro é o da seção 08 do desenho das telas: orçamento pelo link, pagamento, e então as sessões.</p>
+<ol class="passos">
+  <li><b>Mesma abertura</b>Interesse do cartão: o procedimento que ele citou.</li>
+  <li><b>Levar para a avaliação, sem indicar nada</b>A recepção não diz o que o paciente precisa nem promete resultado. Quem indica é o profissional.<span class="fala">Para [procedimento], o primeiro passo é uma avaliação com [profissional]. É nela que se vê o que faz sentido para o seu caso e o valor certinho. A avaliação é R$ 000. Posso ver um horário em [cidade]?</span></li>
+  <li><b>Marcar a avaliação; no dia, Presente ou Faltou</b>Igual ao fluxo A: Agendado, depois Consulta ou Follow-up.</li>
+  <li><b>Na saída da avaliação, plano no balcão</b>O profissional finaliza com "propôs tratamento: sim". A recepção monta o plano (sessões, valor, Pix ou cartão, validade de 7 dias) e mostra na hora. Cartão em Plano enviado.</li>
+  <li><b>Fechar, ou marcar a data da resposta</b>Aceitou: vira pacote e o cartão vai para Em tratamento. Não aceitou: o Zaq cobra em 1 e 3 dias; a recepção liga no 5º.<span class="fala">Oi, {nome}! Ficou alguma dúvida sobre o plano que [profissional] passou? Se quiser, vejo com você a forma de pagamento que fica melhor.</span></li>
+  <li><b>Em tratamento: cada sessão marcada antes de sair</b>O cartão mostra as sessões feitas e a próxima. O Zaq lembra a sessão liberada e não marcada.</li>
+  <li><b>Última sessão: retorno</b>Se o profissional pediu reavaliação, o cartão vai para Retorno; senão, Concluído.</li>
+</ol>
+
+<h3>Fluxo C · Serviço simples (vacina, teste alérgico, coleta)</h3>
+<ol class="passos">
+  <li><b>Abertura e interesse</b></li>
+  <li><b>Preço e preparo, com texto aprovado pelo médico</b>O preparo do teste alérgico é orientação clínica: a recepção só manda o texto que o Dr. Manoel aprovou, sem adaptar.<span class="fala">O teste alérgico é R$ 000 e leva cerca de [tempo]. [Preparo aprovado pelo Dr. Manoel.] Posso marcar para [data] em [cidade]?</span></li>
+  <li><b>Marcar; no dia, Presente ou Faltou</b></li>
+  <li><b>Ao finalizar</b>Teste alérgico: marcar a retirada antes de o paciente sair (cartão em Retorno). Vacina e coleta: Concluído.</li>
+</ol>
+
+<h3>Fluxo D · Follow-up de quem parou</h3>
+<div class="tw"><table>
+<tr><th>Situação</th><th>O que acontece</th><th>Quem faz, por fase</th></tr>
+<tr><td>Recebeu o preço e sumiu</td><td>Dois toques, em +1 dia e +4 dias, com texto pronto e a frase de saída. Para se ele marcar, responder ou pedir para sair. (Hoje o Zaq tem quatro toques; a proposta é reduzir.)</td><td>Fase 1: aparece na tela Hoje e a recepção aperta <b>Mandar</b>. Fase 2: sai sozinho, até 10 por dia, 1 por paciente por dia.</td></tr>
+<tr><td>Mandou uma mensagem só e nunca respondeu</td><td>Fica em "Esperando resposta" na tela Hoje, do mais antigo para o mais novo.</td><td>A recepção, sempre. São 17 hoje.</td></tr>
+<tr><td>Faltou ou cancelou</td><td>Cartão vai para Follow-up com a nota "remarcar".</td><td>A recepção, no mesmo dia:<span class="fala">Oi, {nome}! Sentimos sua falta hoje. Quer que eu veja outro horário? A próxima data em [cidade] é [data].</span></td></tr>
+<tr><td>Plano enviado e parado</td><td>O Zaq cobra em 1 e 3 dias; no 5º a recepção liga; no 7º vence e pede decisão: renovar com motivo, ou encerrar o plano com o motivo dele. O cartão vai para Retorno ou Concluído, não para Perdido.</td><td>Automático + recepção.</td></tr>
+<tr><td>Parado há 7 dias sem ninguém tocar</td><td>É o lead do resgate.</td><td>Fases 1 e 2: aparece para a dona na fila de follow-up. Fase 3: a IA ensaia a retomada. Fase 4: a IA manda.</td></tr>
+<tr><td>Não quer</td><td>Perdido, com motivo.</td><td>A recepção:<span class="fala">Tudo bem, {nome}. Fico à disposição quando quiser. Se preferir que eu não chame mais, é só dizer.</span></td></tr>
+</table></div>
+
+<h3>Fluxo E · Já é paciente</h3>
+<p>Retorno dentro de 30 dias: marcar sem custo, na próxima passagem pela cidade. Sessão de pacote: marcar pela ficha do paciente. Interesse novo: reabrir o cartão em "Em conversa" com origem "Já é paciente" e seguir o fluxo A, B ou C.</p>
+
+<div class="nota"><b>As 12 respostas prontas.</b> Abertura · Preço da consulta · Datas na sua cidade · Confirmação com link da ficha · Endereço e como chegar (uma por cidade) · Formas de pagamento · Avaliação para procedimento · Teste alérgico (preparo aprovado) · Vacinas · Faltou, vamos remarcar · Dúvida sobre o plano · Encerramento. O dono cadastra em Respostas rápidas; cada vendedora vê no app, com o nome do paciente já preenchido. Hoje elas só aparecem no app do celular e sem ordem de roteiro: pôr no painel e em ordem é item de código da fase 0.</div>
+<div class="perigo"><b>Regras que valem para todo texto.</b> Preço e condição de pagamento podem (CFM 2.336/2023). Não pode: prometer resultado, "promoção", sorteio, brinde, "o melhor da região". A recepção não pergunta sintoma em detalhe nem indica tratamento: a queixa completa vai pela pré-consulta do link, que só o profissional lê. Mensagem automática nunca cita o procedimento.</div>
+
+<h2><span class="n">05</span>Fase por fase</h2>
+
+<h3>Fase 0 · Casa arrumada (2 a 3 dias)</h3>
+<div class="tw"><table>
+<tr><th>O que</th><th>Onde</th><th></th></tr>
+<tr><td>Um login para cada pessoa da recepção, papel vendedor; app instalado no celular com aviso ligado</td><td>Equipe; app do vendedor › Perfil</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td>Rodízio ligado com as duas na fila; distribuir os 68 cartões sem dona pela fila</td><td>Comunicação › aba Agente › distribuição; "atribuir em lote"</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td>Responder pelo Zaq (app ou painel), não pelo WhatsApp do aparelho. Só assim a resposta tem nome e entra na medida</td><td>Combinado de equipe</td><td>rotina</td></tr>
+<tr><td>Funil: renomear etapas, trocar motivos de perda, exigir motivo no Perdido, "reabre se voltar a falar"</td><td>Funil › Régua</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td>Funil: as colunas Consulta, Em tratamento e Retorno, com o cartão andando sozinho pela agenda, pelo plano e pelo pacote</td><td>Agenda, Planos, Pacotes</td><td><span class="tag co">construir</span></td></tr>
+<tr><td>Horário real de atendimento (é ele que o prazo e os toques respeitam)</td><td>Régua › Horário de atendimento</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td>Catálogo com preço; 12 respostas prontas; grade do Dr. Manoel por cidade e da Juliana; links de WhatsApp com código por mídia</td><td>Configurar clínica; Respostas rápidas; Origens</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td>Agente desligado. Combinado: ninguém usa "Devolver ao agente" (esse botão liga a IA naquela conversa mesmo com a chave geral desligada)</td><td>Comunicação › Agente</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td>Tela inicial da recepção de clínica: hoje ela cai no app de vendas de festa, sem atalho para a tela Hoje, a agenda e os pacientes; "Visita" e "Orçamento" não marcam consulta nem criam plano</td><td>App do vendedor</td><td><span class="tag co">construir</span></td></tr>
+<tr><td>"Esperando resposta" com minutos de espera, dona do cartão, filtro "os meus" e sem contar "obrigada" como pendência</td><td>Tela Hoje</td><td><span class="tag co">construir</span></td></tr>
+<tr><td>Alerta de urgência sem IA: hoje, com o agente desligado, ninguém é avisado de mensagem de urgência</td><td>Tela Hoje + aviso</td><td><span class="tag co">construir</span></td></tr>
+<tr><td>Campo Interesse no cartão; ficha do cartão sem os campos de festa e CNPJ; respostas prontas no painel e em ordem de roteiro; esconder "Devolver ao agente" antes da fase 4</td><td>Funil, ficha, conversa</td><td><span class="tag co">construir</span></td></tr>
+</table></div>
+
+<h3>Fase 1 · Vendedora atende com roteiro (cerca de 2 semanas)</h3>
+<div class="tw"><table>
+<tr><th>Semana</th><th>O que liga</th><th>O que a equipe faz</th></tr>
+<tr><td><b>1</b></td><td>Cobrança por prazo, gatilhos e temperatura em <b>ensaio</b>: o Zaq registra o que avisaria e para onde moveria, sem avisar nem mover. "Voltar a chamar" continua em "sugere" (já está assim desde 25/09).</td><td>Roteiro de 6 passos com as respostas prontas. Tela Hoje às 8h, 12h e 17h. Apertar <b>Mandar</b> nos toques sugeridos. Dono revê 5 conversas por dia com a lista: respondeu em 5 min? pegou cidade e interesse? preço por escrito? ofereceu duas datas? terminou com próximo passo?</td></tr>
+<tr><td><b>2</b></td><td>Passa para <b>ligado</b>: sem resposta em 5 minutos avisa a dona do cartão (app e e-mail), sobe para o gestor se ninguém agir; "primeira resposta nossa" move para Em conversa; temperatura esfria sozinha. Teto de avisos por pessoa por dia: subir de 5 para 15.</td><td>O mesmo, agora com o aviso valendo. Reunião de segunda, 15 minutos, com os números abaixo.</td></tr>
+</table></div>
+<p><b>Passa para a fase 2 quando, na média da semana:</b> 80% dos contatos novos respondidos em até 5 minutos (os demais em 15); nenhuma conversa sem resposta no fim do dia; 100% dos cartões com dona, cidade, interesse e origem; nenhum cartão em "Novo" de um dia para o outro; agenda inteira dentro do Zaq, com Presente ou Faltou marcado em todo agendamento do dia.</p>
+<div class="nota"><b>Dois avisos do código.</b> A régua aceita 5 minutos (o mínimo é 1), mas avisa só por app e e-mail, não por WhatsApp, e conta "obrigada" do paciente como pendência nossa. E a tela Ritmo tem um botão "usar este" que, ao salvar, apaga o horário de atendimento e desliga temperatura, esteira, perdido e prazo: não usar até ser corrigido.</div>
+
+<h3>Fase 2 · Ensaio do follow-up (cerca de 2 semanas)</h3>
+<div class="tw"><table>
+<tr><th>O que</th><th>Como entra</th><th></th></tr>
+<tr><td><b>"Voltar a chamar" de sugere para ligado</b></td><td>Os dois toques (+1 dia e +4 dias) saem sozinhos, com os textos fixos que a equipe já usou na fase 1 e a frase de saída. Teto de 10 por dia, 1 por paciente por dia (somando vaga, plano, lembretes e resgate). A repescagem de quem recebeu preço antes continua na mão.</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td><b>"Voltar a chamar" também para preço de procedimento</b></td><td>Hoje a sequência só nasce quando o preço vem junto de "consulta" ou "avaliação". Preço de laser ou de pacote não entra.</td><td><span class="tag co">construir</span></td></tr>
+<tr><td><b>Fila de follow-up da equipe</b></td><td>Para cada cartão aberto, o Zaq calcula a próxima ação e a data. Venceu: cobra a dona; +24 h de novo; +48 h dona e gestor; +72 h destaque para o dono. Primeiro em ensaio (calcula e mostra, não cobra), depois ligado. É a tela "Follow-up" que a Prime usa.</td><td><span class="tag co">construir</span> Hoje só roda para o perfil de eventos. Abrir para clínica, com as situações da seção 04 e a palavra "paciente".</td></tr>
+<tr><td><b>Prazo por etapa</b></td><td>3 dias em Em conversa, 7 em Plano enviado, 2 renovações com motivo. Em ensaio, depois ligado.</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td><b>Perdido automático</b></td><td>Só em ensaio nesta fase: conta quem fecharia (prazo vencido, 3 mensagens nossas sem resposta). O dono confere a lista antes de ligar.</td><td><span class="tag cf">configurar</span></td></tr>
+<tr><td><b>Esteira</b></td><td>Fica desligada. No modo "observando" ela já cobra as vendedoras de verdade; para equipe de duas pessoas, a fila de follow-up basta.</td><td>não ligar</td></tr>
+</table></div>
+<p><b>Passa para a fase 3 quando:</b> nenhum cartão aberto sem próxima ação; "nunca chamados de novo" zerado no placar da tela Hoje; a taxa de quem recebeu preço e marcou está medida e estável por 2 semanas; o dono concorda com 9 de cada 10 cartões que o perdido automático fecharia.</p>
+
+<h3>Fase 3 · Ensaio do resgate (1 a 2 semanas)</h3>
+<p>É a primeira vez que a IA escreve, e ela escreve só para o supervisor.</p>
+<ul>
+  <li><b>O que roda:</b> cartão de gente parado há 7 dias sem nada nosso (14 se já teve consulta ou plano) entra na fila. A IA lê a conversa, faz o resumo e escreve a retomada. As prévias ficam numa tela do Zaq, com as iniciais do paciente, até 10 por dia; o WhatsApp do supervisor recebe só o aviso de que há prévias para revisar. Se a IA entende que acabou, ela diz "eu não chamaria" e o motivo. Às 19h, um resumo.</li>
+  <li><b>"Testar comigo":</b> o supervisor recebe a retomada como se fosse o paciente e conversa com a IA, sem nada virar lead.</li>
+  <li><b>O treino:</b> supervisor e Dr. Manoel leem as prévias todo dia. O que estiver ruim se corrige na fonte: instruções da clínica, perguntas frequentes, catálogo com preço. A prévia seguinte já sai diferente.</li>
+  <li><span class="tag co">construir</span> <b>antes de ensaiar:</b> o resgate foi feito para a Prime. Para clínica falta: funcionar com um chip só (hoje exige dois e uma regra por número); filtro de palavras de saúde nos textos da IA (o "voltar a chamar" tem, o resgate não); "obrigada" não contar como paciente esperando; horário da clínica; entrar na regra de 1 mensagem automática por paciente por dia; e o convite ser "marcar na próxima passagem por [cidade]".</li>
+</ul>
+<p><b>Passa para a fase 4 quando:</b> por 5 dias seguidos, 9 de cada 10 prévias são o que o supervisor mandaria sem mudar; nenhuma prévia fala de sintoma, diagnóstico, promessa ou preço fora do catálogo.</p>
+
+<h3>Fase 4 · A IA entra, em três degraus</h3>
+<div class="tw"><table>
+<tr><th>Degrau</th><th>O que a IA faz</th><th>Freios</th><th></th></tr>
+<tr><td><b>4a · Resgate ligado</b></td><td>Fala só com quem está parado há 7 dias e ninguém ia tocar. Uma retomada; sem resposta em 10 dias, Perdido "não respondeu".</td><td>A vendedora é avisada 2 dias antes e pode segurar o lead escrevendo o motivo. Se alguém da equipe escreve, a IA sai. "Parar" bloqueia o número. 3 pedidos de parar no dia pausam tudo.</td><td><span class="tag ia">IA</span></td></tr>
+<tr><td><b>4b · Agente fora do horário</b></td><td>Noite, sábado e domingo: acolhe, pergunta cidade e interesse, diz o preço liberado, oferece data e marca.</td><td>De manhã a recepção vê o que ele passou. Não fala de sintoma, não indica, não promete.</td><td><span class="tag co">construir</span> Hoje o horário do agente é "comercial" ou "24 h"; não existe "só fora do horário". Falta também ele perguntar a cidade.</td></tr>
+<tr><td><b>4c · Agente no pico</b></td><td>Primeira resposta em segundos; a pessoa assume a conversa.</td><td>Só depois de 4b rodar duas semanas sem incidente.</td><td><span class="tag ia">IA</span></td></tr>
+</table></div>
+<p>Um detalhe que precisa de código antes de 4b: o "voltar a chamar" só nasce de preço escrito por gente. Paciente que recebe o preço da IA e some não entra na sequência.</p>
+
+<h2><span class="n">06</span>O treino da equipe antes de valer</h2>
+<p class="sub">O Zaq tem ensaio para as automações, mas não tem para as pessoas. O treino é montado assim</p>
+<p>Quem revê conversa real de paciente é você ou o Dr. Manoel; quem não é profissional de saúde assina termo de sigilo.</p>
+<ol class="passos">
+  <li><b>Dia 1 · Roteiro e respostas prontas (1 hora)</b>Os fluxos A, B, C e D lidos em voz alta, com o app aberto. Cada uma manda as 12 respostas prontas para o próprio celular.</li>
+  <li><b>Dias 2 e 3 · Simulação com número de teste (30 minutos por dia)</b>Uma faz o paciente pelo próprio celular (cadastro "PACIENTE TESTE"), a outra atende no Zaq. Eu preparo 10 casos: consulta em Codó, mãe marcando para o filho, quer laser e pede preço, achou caro, some depois do preço, faltou, pede remarcar, pergunta se "é grave", pede desconto, já é paciente.</li>
+  <li><b>Semana 1 · Revisão diária de 5 conversas reais</b>O dono usa a lista de 5 perguntas da fase 1. Um acerto por dia, não uma lista de erros.</li>
+  <li><b>Toda segunda · 15 minutos</b>Tempo de resposta por pessoa, cartões por etapa, quem recebeu preço e marcou, faltas, perdidos por motivo.</li>
+</ol>
+<p>Se o treino com casos simulados ajudar, dá para construir depois um "paciente de treino" dentro do Zaq, em que a IA faz o paciente e a vendedora pratica. Fica como ideia, fora das fases.</p>
+
+<h2><span class="n">07</span>O que precisa de código, por fase</h2>
+<p>A lista definitiva, em dez entregas, é a da seção 14 do <a href="clinica_crm_telas.html">desenho das telas</a>. A tabela abaixo é o levantamento inicial.</p>
+<div class="tw"><table>
+<tr><th>Fase</th><th>Item</th><th>Tamanho</th></tr>
+<tr><td rowspan="7"><b>0</b></td><td><b>Funil da clínica com Consulta, Em tratamento e Retorno</b>, movidos pela agenda (Presente, Finalizado com desfecho), pelo plano aceito e pela última sessão do pacote</td><td>dias</td></tr>
+<tr><td>Tela inicial da recepção de clínica (Hoje, Agenda, Pacientes) e atalhos "Consulta" e "Plano" no app</td><td>dias</td></tr>
+<tr><td>"Esperando resposta" com minutos, dona, filtro e sem "obrigada"</td><td>dias</td></tr>
+<tr><td>Campo Interesse no cartão, filtro no quadro; ficha do cartão sem campos de festa</td><td>dias</td></tr>
+<tr><td>Respostas prontas no painel e em ordem de roteiro</td><td>dias</td></tr>
+<tr><td>Alerta de urgência sem IA</td><td>dias</td></tr>
+<tr><td>Esconder "Devolver ao agente" enquanto a IA não começou; régua sem contar "obrigada"; lista única de origem com "Rádio"</td><td>dias</td></tr>
+<tr><td rowspan="3"><b>2</b></td><td>Fila de follow-up da equipe aberta para clínica, com ensaio</td><td>1 a 2 semanas</td></tr>
+<tr><td>"Voltar a chamar" para preço de procedimento</td><td>dias</td></tr>
+<tr><td>Trava de campos para sair de "Em conversa"; cartão fechado reabre com interesse novo</td><td>dias</td></tr>
+<tr><td><b>3</b></td><td>Resgate para clínica: um chip, filtro de saúde, "obrigada", horário, 1 por dia, convite por cidade</td><td>1 a 2 semanas</td></tr>
+<tr><td><b>4</b></td><td>Agente "só fora do horário"; agente pergunta cidade e interesse; preço dito pela IA também inicia a sequência</td><td>1 semana</td></tr>
+</table></div>
+
+<h2><span class="n">08</span>Para eu começar a fase 0</h2>
+<div class="q"><div class="qt">A. Quem atende</div><div class="qo">Nome e e-mail ou celular de cada pessoa da recepção, para os logins. Brenda e Cristiane? Mais alguém?</div></div>
+<div class="q"><div class="qt">B. Quantos números de WhatsApp a clínica usa no Zaq</div><div class="qo">Um ou dois. Muda o rodízio agora e o resgate na fase 3.</div></div>
+<div class="q"><div class="qt">C. O funil da seção 03</div><div class="qo">Respondido em 01/10: retorno e tratamento independentes, Consulta segura o cartão, procedimento por avaliação ou direto. Falta só dizer quais procedimentos podem ser vendidos direto pelo WhatsApp.</div></div>
+<div class="q"><div class="qt">D. Preços</div><div class="qo">Consulta, avaliação, e quais serviços a recepção pode passar preço direto (vacina, teste alérgico, laser por área).</div></div>
+<div class="q"><div class="qt">E. Horário e rota</div><div class="qo">Horário real de atendimento da recepção e os dias de cada cidade.</div></div>
+<div class="q"><div class="qt">F. Supervisor do ensaio</div><div class="qo">Quem recebe as prévias do resgate na fase 3 e revê as conversas na fase 1. Sugestão: você, com o Dr. Manoel lendo uma amostra.</div></div>
+<div class="q"><div class="qt">G. Aprovar o desenho antes do código</div><div class="qo">Nada é implementado antes de você aprovar o desenho das telas (<a href="clinica_crm_telas.html">CRM Pelle, tela por tela</a>). Aprovado, cada entrega vira um PR pequeno, com teste, como nas fases do prontuário.</div></div>
+
+<div class="ftr">CRM da Pelle por fases, desenho da parte 6 da clínica no Zaq, 01/10/2026. Complementa o Método ROTA Pelle (o porquê e as fontes). Dados: produção do Zaq, contas da Espaço Pelle e da Prime, só totais e configuração. Código: leitura da versão em produção, com 12 motores e 11 telas inventariados. Nada foi ligado nem alterado por este desenho.</div>
+</div>
+</body></html>

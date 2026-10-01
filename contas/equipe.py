@@ -496,6 +496,72 @@ def renomear_membro(pool, conta_id: int, membro_id: int, nome: str, whatsapp=Non
     return {"ok": bool(r)}
 
 
+def alterar_email(pool, conta_id: int, membro_id: int, email: str) -> dict:
+    """Corrige o e-mail de um membro DESTA empresa (pedido do dono, 01/10/2026: o
+    e-mail digitado errado no convite não tinha como ser corrigido).
+
+    O e-mail é o LOGIN da pessoa, então o acesso acompanha a troca:
+      - o e-mail novo JÁ tem login no Zaq (conta própria ou membro com senha): o
+        vínculo passa a usar aquela senha — sem senha própria nesta linha, pra não
+        existirem duas senhas pra mesma pessoa (ver `gravar_senha_do_reset`) — e,
+        se o convite estava pendente, entra ativo, como no `convidar`;
+      - senão, se ela já tinha senha neste vínculo: entra com o e-mail novo e a
+        MESMA senha;
+      - senão (convite pendente, ou vínculo que usava a senha do e-mail antigo):
+        nasce um convite novo pro e-mail novo, e o link mandado pro endereço errado
+        deixa de valer. O `ativo` não muda: quem está na fila do rodízio continua.
+
+    Só mexe neste vínculo: se a pessoa for membro de outras empresas com o e-mail
+    antigo, lá nada muda. Nunca mexe no dono (o login do titular é o da conta).
+    Devolve {ok, acao: 'login_existente'|'mesma_senha'|'convite', token?, email,
+    nome, papel} ou {ok: False, erro}."""
+    from psycopg.errors import UniqueViolation
+    email = (email or "").strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1] or " " in email or len(email) > 200:
+        return {"ok": False, "erro": "E-mail inválido."}
+    try:
+        with pool.connection() as c:
+            m = c.execute(
+                """select email, nome, papel, senha_hash is not null
+                     from membros where id=%s and conta_id=%s""",
+                (membro_id, conta_id)).fetchone()
+            if not m:
+                return {"ok": False, "erro": "Membro não encontrado."}
+            if m[2] == "dono":
+                return {"ok": False, "erro": "O e-mail do dono é o login da conta — não muda por aqui."}
+            if (m[0] or "").strip().lower() == email:
+                return {"ok": False, "erro": "Esse já é o e-mail dele."}
+            if c.execute("select 1 from membros where conta_id=%s and lower(email)=%s and id<>%s",
+                         (conta_id, email, membro_id)).fetchone():
+                return {"ok": False, "erro": "Esse e-mail já está em outro membro da equipe."}
+            token = None
+            if _tem_login(c, email):
+                acao = "login_existente"
+                c.execute(
+                    """update membros
+                          set email=%s, senha_hash=null,
+                              ativo = case when convite_token is not null then true else ativo end,
+                              convite_token=null, convite_expira=null
+                        where id=%s and conta_id=%s""",
+                    (email, membro_id, conta_id))
+            elif m[3]:
+                acao = "mesma_senha"
+                c.execute("update membros set email=%s where id=%s and conta_id=%s",
+                          (email, membro_id, conta_id))
+            else:
+                acao = "convite"
+                token = secrets.token_urlsafe(24)
+                c.execute(
+                    """update membros set email=%s, convite_token=%s, convite_expira=%s
+                        where id=%s and conta_id=%s""",
+                    (email, token, _agora() + timedelta(days=7), membro_id, conta_id))
+            c.commit()
+    except UniqueViolation:
+        return {"ok": False, "erro": "Esse e-mail já está em outro membro da equipe."}
+    return {"ok": True, "acao": acao, "token": token, "email": email,
+            "nome": m[1] or "", "papel": m[2] or "vendedor"}
+
+
 def remover_membro(pool, conta_id: int, membro_id: int) -> dict:
     """Exclui o vínculo de um membro com ESTA empresa (não apaga a pessoa do Zaq).
     Nunca remove o dono. Se o membro tiver leads/registros vinculados (FK), não

@@ -7842,16 +7842,31 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {# Escolher "Período específico" NÃO envia o formulário: enviaria com as
        duas datas vazias e o resultado voltaria como mês corrente, parecendo que
        o filtro não funciona. Nesse caso só revela as caixas e espera o Filtrar. #}
-    <select name="periodo" onchange="var p=this.value==='personalizado',
+    {#- Contas a pagar/receber são fotografia do que está EM ABERTO: o período não
+        filtra (a nota ao lado diz isso). Um seletor ali era filtro que não faz
+        nada — some, e o período escolhido segue escondido pra quando voltar às
+        outras abas. -#}
+    {% if dados.sem_periodo %}<input type="hidden" name="periodo" value="{{ periodo }}">{% else %}
+    {#- Ao escolher o "Período específico…" as caixas já vêm com as datas do que
+        estava escolhido (data-de/data-ate de cada opção) — antes abriam vazias e
+        o intervalo de partida não aparecia em lugar nenhum. -#}
+    <select name="periodo" data-ant="{{ periodo }}" onchange="var p=this.value==='personalizado',
       c=document.getElementById('rel-datas');
       if(c)c.style.display=p?'':'none';
-      if(!p)this.form.submit();">
-      {% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+      if(p){var d=this.form.elements['de'],t=this.form.elements['ate'];
+        for(var i=0;i<this.options.length;i++){var o=this.options[i];
+          if(o.value===this.getAttribute('data-ant')){
+            if(d&&!d.value)d.value=o.getAttribute('data-de')||'';
+            if(t&&!t.value)t.value=o.getAttribute('data-ate')||'';}}}
+      else this.form.submit();">
+      {% if periodos_datas %}{% for o in periodos_datas %}<option value="{{ o.v }}" data-de="{{ o.de }}" data-ate="{{ o.ate }}" {% if o.v==periodo %}selected{% endif %}>{{ o.rot }}</option>{% endfor %}
+      {% else %}{% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}{% endif %}
     </select>
+    {% endif %}
     {# As duas caixas só existem no período específico — escondidas, a barra não
        cresce à toa nas outras seis opções. O navegador mostra dd/mm/aaaa em
        aparelho brasileiro e manda AAAA-MM-DD no formulário; quem formata é ele. #}
-    {% if tem_periodo_livre %}
+    {% if tem_periodo_livre and not dados.sem_periodo %}
     <span class="rel-datas" id="rel-datas" {% if periodo != 'personalizado' %}style="display:none"{% endif %}>
       <span>de</span><input type="date" name="de" value="{{ de|e }}">
       <span>até</span><input type="date" name="ate" value="{{ ate|e }}">

@@ -488,16 +488,25 @@ _ETAPAS_POR_PERFIL = {
     ),
     "clinica": (
         ("novo", "Novo", 0, True, False, False),
-        ("contatado", "Contatado", 10, False, False, False),
+        ("contatado", "Em conversa", 10, False, False, False),
         ("follow_up", "Follow-up", 20, False, False, False),
-        # as duas colunas que o dono escolheu em 22/09. As CHAVES seguem
-        # `qualificado` e `proposta` pelo mesmo motivo de "Agendado Visita": é o
-        # que fica gravado em `prospeccao.status`, e o modelo muda só o rótulo.
-        ("qualificado", "Consulta agendada", 30, False, False, False),
-        ("proposta", "Plano de tratamento", 40, False, False, False),
-        # sai do quadro (paciente fechado não é prospecção) e NÃO agenda: a data
+        # O FUNIL DA CLÍNICA VAI ATÉ O RETORNO (docs/mockups/clinica_crm_telas.html,
+        # seções 01 e 02, aprovado em 01/10/2026). As CHAVES `qualificado` e `proposta`
+        # seguem as de sempre pelo mesmo motivo de "Agendado Visita": é o que fica
+        # gravado em `prospeccao.status`, e o modelo muda só o rótulo.
+        ("qualificado", "Agendado", 30, False, False, False),
+        # o paciente VEIO (a recepção marcou Presente). O card espera aqui até o
+        # plano ser enviado: é a clínica que deve, não o paciente.
+        ("consulta", "Consulta", 35, False, False, False),
+        ("proposta", "Plano ou orçamento enviado", 40, False, False, False),
+        # sai do quadro (paciente concluído não é prospecção) e NÃO agenda: a data
         # da sessão não mora no cadastro do lead, e a ponte não teria o que ler.
-        ("ganho", "Fechado", 900, True, True, False),
+        ("ganho", "Concluído", 900, True, True, False),
+        # depois da venda (fase 'pos' em funil_modelo.FASE): contam como venda
+        # fechada e ficam fora da cobrança da vendedora. Quem cuida deles são os
+        # lembretes de sessão e de retorno (clinica_pacotes).
+        ("tratamento", "Em tratamento", 905, False, False, False),
+        ("retorno", "Retorno", 907, False, False, False),
         ("perdido", "Perdido", 910, True, False, False),
     ),
     "obras": (

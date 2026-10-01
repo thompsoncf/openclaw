@@ -327,6 +327,7 @@ def ver_evento(request: Request, evento_id: int):
             pacote_vai = None                      # a sessão do mês da assinatura cobre
         tipo_ev = next((t for t in cc.listar_tipos(c, conta_id, so_ativos=False) if t["id"] == ev["servico_id"]), None)
         volta_padrao = (tipo_ev or {}).get("volta_dias") or ""
+        funil = ca._chaves_do_funil(c, conta_id)   # o texto do Finalizar diz pra onde o card VAI nesta conta
         try:
             with c.transaction():
                 r = c.execute("select vence_em, estado from clinica_retornos where conta_id=%s and evento_id=%s",
@@ -367,6 +368,7 @@ def ver_evento(request: Request, evento_id: int):
                     "vendas": cpr.vendas_do_evento(c, conta_id, evento_id), "pagamentos": cpr.PAGAMENTOS}
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
                    pacote_feito=pacote_feito, pacote_vai=pacote_vai, assin_vai=assin_vai, assin_feito=assin_feito, volta_padrao=volta_padrao, retorno=retorno,
+                   funil=funil,
                    pac_cfg=pac_cfg, prod=prod, ficha_kid=kid, ficha=ficha, ficha_txt=_cfl.falta_txt(ficha), pre=pre,
                    abre_prontuario=abre_prontuario, rascunho=rascunho,
                    ev=ev, prof=prof, proximos=ca.PROXIMOS.get(ev["situacao"], ()), remarcar=remarcar,
@@ -661,8 +663,8 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       {% else %}
       <div class="inteira"><span class="mut">O médico propôs tratamento? (o card do paciente anda no funil com a resposta)</span>
         <div class="ag-ops" style="margin-top:.3rem">
-          <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'Fechado' }}</label>
-          <label><input type="radio" name="tratamento" value="sim" required> Sim — Plano de tratamento</label></div></div>
+          <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'vai para Retorno, se o médico pediu, ou Concluído' if 'retorno' in funil else 'Fechado' }}</label>
+          <label><input type="radio" name="tratamento" value="sim" required> Sim — {{ 'fica em Consulta até o plano ser enviado' if 'consulta' in funil else 'Plano de tratamento' }}</label></div></div>
       <label>Valor proposto (se souber)<input name="valor" inputmode="decimal" placeholder="1.500,00"></label>
       {% endif %}
       <label>O médico pediu retorno em quantos dias? (vazio: não pediu)<input name="retorno" inputmode="numeric" value="{{ '' if pacote_vai else volta_padrao }}"></label>

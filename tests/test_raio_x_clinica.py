@@ -84,16 +84,33 @@ def test_o_bloco_da_agenda_reusa_a_chave_do_recorrente():
 
 
 # ── o funil ───────────────────────────────────────────────────────────────
-def test_as_colunas_do_meio_sao_as_que_o_dono_escolheu():
+def test_as_colunas_sao_as_do_desenho_de_01_10():
+    """docs/mockups/clinica_crm_telas.html, seção 02: o funil vai até o retorno."""
     rot = {ch: r for ch, r, *_ in rxp.etapas_padrao("clinica")}
-    assert rot["qualificado"] == "Consulta agendada"
-    assert rot["proposta"] == "Plano de tratamento"
+    assert rot["contatado"] == "Em conversa"
+    assert rot["qualificado"] == "Agendado"
+    assert rot["consulta"] == "Consulta"
+    assert rot["proposta"] == "Plano ou orçamento enviado"
+    assert rot["ganho"] == "Concluído"
+    assert (rot["tratamento"], rot["retorno"]) == ("Em tratamento", "Retorno")
 
 
-def test_as_chaves_das_etapas_nao_mudaram():
-    """A chave é o que fica em `prospeccao.status`; o modelo muda só o rótulo."""
+def test_as_chaves_de_sempre_continuam_e_as_tres_novas_entram():
+    """A chave é o que fica em `prospeccao.status`: as de sempre não mudam (a agenda,
+    o plano e o voltar a chamar gravam nelas); entram só as três colunas novas."""
     chaves = [e[0] for e in rxp.etapas_padrao("clinica")]
-    assert chaves == [e[0] for e in rxp.etapas_padrao("recorrente")]
+    de_sempre = [e[0] for e in rxp.etapas_padrao("recorrente")]
+    assert [c for c in chaves if c in de_sempre] == de_sempre
+    assert [c for c in chaves if c not in de_sempre] == ["consulta", "tratamento", "retorno"]
+
+
+def test_tratamento_e_retorno_sao_pos_venda_e_consulta_nao():
+    """Em tratamento e Retorno contam como venda fechada e saem da cobrança; a
+    Consulta ainda é venda (o plano não saiu), mas ninguém cobra o paciente nela."""
+    from finance import funil_regua as fr
+    assert fm.FASE["tratamento"] == fm.FASE["retorno"] == "pos"
+    assert "consulta" not in fm.FASE
+    assert "'consulta'" in fr.sql_nao_cobra("p")
 
 
 def test_fechado_sai_do_quadro_mas_nao_agenda():

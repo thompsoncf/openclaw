@@ -294,6 +294,34 @@ def test_rotulo_que_o_dono_trocou_a_mao_vem_desmarcado(limpo):
     assert itens["rotulo:qualificado"]["marcado"] is True
 
 
+def test_nome_do_dono_que_vira_coluna_nova_vem_marcado(limpo):
+    """A Espaço Pelle (conta 39) chamou a etapa do plano de "Consulta" à mão. O modelo
+    de 01/10/2026 cria a coluna "Consulta" de verdade: sem a troca marcada, o quadro
+    ficaria com duas colunas do mesmo nome."""
+    with limpo.connection() as c:
+        for ch, rot, ordem, de in (("novo", "Novo", 0, "recorrente"), ("contatado", "Contatado", 10, "recorrente"),
+                                   ("follow_up", "Follow-up", 20, "recorrente"), ("qualificado", "Agenda", 30, ""),
+                                   ("proposta", "Consulta", 40, ""), ("ganho", "Fechado", 900, "recorrente"),
+                                   ("perdido", "Perdido", 910, "recorrente")):
+            c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, semeado_de)
+                         values (%s,%s,%s,%s,%s)""", (CONTA, ch, rot, ordem, de))
+        c.commit()
+        itens = {i["id"]: i for i in fm.plano(c, CONTA, "clinica")}
+        assert {"criar:consulta", "criar:tratamento", "criar:retorno"} <= set(itens)
+        assert itens["rotulo:proposta"]["marcado"] is True          # o nome vai pra coluna nova
+        assert "coluna nova" in itens["rotulo:proposta"]["nota"]
+        assert itens["rotulo:qualificado"]["marcado"] is False      # "Agenda" é do dono e não colide
+        assert itens["rotulo:contatado"]["marcado"] is True         # veio da semente
+        fm.aplicar(c, CONTA, "clinica", [i for i, it in itens.items() if it["marcado"]])
+        c.commit()
+        linhas = c.execute("select chave, rotulo, fase from funil_etapas where conta_id=%s", (CONTA,)).fetchall()
+    rot = {ch: r for ch, r, _f in linhas}
+    assert rot["consulta"] == "Consulta" and rot["proposta"] == "Plano ou orçamento enviado"
+    assert len(set(rot.values())) == len(rot)                       # nenhum nome repetido
+    fase = {ch: f for ch, _r, f in linhas}
+    assert (fase["consulta"], fase["tratamento"], fase["retorno"]) == ("venda", "pos", "pos")
+
+
 # ------------------------------------------------------------------ aplicar
 
 def test_aplicar_so_mexe_no_que_foi_marcado(limpo):

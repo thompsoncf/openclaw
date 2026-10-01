@@ -312,8 +312,12 @@ def horario_da_letra(c, conta_id: int, conversa_id: int, texto: str | None) -> d
 
 # ------------------------------------------------------------------ a visita viva
 
-def visita_viva(c, conta_id: int, lead_id: int) -> dict | None:
-    """A visita que a IA marcou e ainda vai acontecer (ou aconteceu há pouco)."""
+def visita_viva(c, conta_id: int, lead_id: int, agora: datetime | None = None) -> dict | None:
+    """A visita que a IA marcou e ainda vai acontecer (ou aconteceu há pouco).
+
+    `agora` é o de quem chama (o `marcar` recebe o dele): com o `now()` do banco, o
+    cenário de data fixa achava a visita "passada" no dia em que o relógio real a
+    alcançava, e a remarcação virava visita NOVA (CI do #946, 01/10/2026)."""
     # TAMBÉM a que um vendedor marcou (painel, app): sem isto, o cliente que escolhe
     # outro horário na conversa ganharia uma SEGUNDA visita em vez de mudar a dele.
     # Visita = card ligado, sem tipo de festa, sem situação da clínica, título "Visita".
@@ -327,8 +331,8 @@ def visita_viva(c, conta_id: int, lead_id: int) -> dict | None:
                     where e.conta_id=%s and e.prospeccao_id=%s and e.status='ativo'
                       and e.tipo_evento is null and (to_jsonb(e) ->> 'situacao') is null
                       and e.titulo ~* '^\\s*visita'
-                      and e.inicio > now() - interval '2 hours'
-                    order by e.inicio desc limit 1""", (conta_id, lead_id)).fetchone()
+                      and e.inicio > coalesce(%s::timestamptz, now()) - interval '2 hours'
+                    order by e.inicio desc limit 1""", (conta_id, lead_id, agora)).fetchone()
     except Exception:  # noqa: BLE001
         return None
     if not r:
@@ -403,7 +407,7 @@ def marcar(pool, conta_id: int, regra: dict, cfg: dict, lead_id: int, conversa_i
             time.sleep(0.3)
         try:
             with pool.connection() as c:
-                viva = visita_viva(c, conta_id, lead_id)
+                viva = visita_viva(c, conta_id, lead_id, agora)
                 c.commit()
             if viva and abs((viva["inicio"] - ini).total_seconds()) < 60:
                 # o cliente repetiu o horário que já tem: nada muda, nada conta

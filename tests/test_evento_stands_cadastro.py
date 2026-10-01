@@ -58,7 +58,7 @@ def pool():
         c.execute((base / "448_evento_stands.sql").read_text(encoding="utf-8"))
         c.execute((base / "451_evento_stands_cadastro_cliente.sql").read_text(encoding="utf-8"))
         c.execute((base / "452_evento_stands_sinal_saldo_grupo.sql").read_text(encoding="utf-8"))
-        c.execute((base / "454_evento_stands_aviso_vence.sql").read_text(encoding="utf-8"))
+        c.execute((base / "457_evento_stands_aviso_vence.sql").read_text(encoding="utf-8"))
         c.commit()
     cli._garantir_cols(p)
     yield p
@@ -925,7 +925,7 @@ def test_a_venda_do_vendedor_traz_contrato_e_saldo_pras_acoes(pool, conta_id, mo
 def _aplica_454(pool):
     base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with pool.connection() as c:
-        c.execute((base / "454_evento_stands_aviso_vence.sql").read_text(encoding="utf-8"))
+        c.execute((base / "457_evento_stands_aviso_vence.sql").read_text(encoding="utf-8"))
         c.commit()
 
 

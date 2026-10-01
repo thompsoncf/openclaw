@@ -452,3 +452,72 @@ def test_gestor_confirma_o_sinal_de_qualquer_um(cen, pool):
 def test_sinal_de_proposta_inexistente(cen, pool):
     out = ck.confirmar_sinal(pool, cen["conta"], 99999, membro_id=cen["vend"])
     assert out["ok"] is False
+
+
+# ── 01/10/2026: a data do app abria em branco no computador ──────────────────
+# O app pede "dd/mm/aaaa" e gravava assim; o campo de data do painel é
+# <input type=date>, que só aceita AAAA-MM-DD — o orçamento nº 47 da Prime abriu
+# no computador sem data e sem nenhum vencimento, e o funil o marcava "Sem data".
+def test_data_e_vencimento_do_app_sao_gravados_em_iso(cen, pool):
+    r = _criar(pool, cen, evento={"data": "18/01/2028", "inicio": "18:00", "fim": "23:00"},
+               parcelas=[{"venc": "01/10/2026", "valor_centavos": 345000, "forma": "Pix"},
+                         {"venc": "15/11/26", "valor_centavos": 80500, "forma": "Boleto"}])
+    d = _orc(pool, r["id"])
+    assert d["evento"]["data"] == "2028-01-18"
+    assert d["evento"]["inicio"] == "18:00" and d["evento"]["fim"] == "23:00"
+    assert [p["venc"] for p in d["parcelas"]] == ["2026-10-01", "2026-11-15"]
+    assert [p["forma"] for p in d["parcelas"]] == ["Pix", "Boleto"]
+
+
+def test_texto_que_nao_e_data_fica_como_foi_escrito(cen, pool):
+    """Converter é bom; apagar o que o vendedor escreveu, nunca."""
+    r = _criar(pool, cen, evento={"data": "a combinar", "inicio": "19h"},
+               parcelas=[{"venc": "na entrega", "valor_centavos": 1000}])
+    d = _orc(pool, r["id"])
+    assert d["evento"]["data"] == "a combinar"
+    assert d["parcelas"][0]["venc"] == "na entrega"
+
+
+def test_reabrir_no_app_nao_apaga_o_que_so_o_painel_grava(cen, pool):
+    """O painel guarda no mesmo jsonb os tipos de contrato marcados e o desconto.
+    O app só conhece seis campos, e regravar a coluna inteira jogava o resto fora."""
+    r = _criar(pool, cen, evento={"data": "2027-11-18", "inicio": "19:00"})
+    with pool.connection() as c:
+        c.execute("""update orcamentos set evento = evento || '{"contratos": ["Locação"],
+                     "desconto": 5}'::jsonb where id=%s""", (r["id"],))
+        c.commit()
+    _criar(pool, cen, orcamento_id=r["id"], evento={"data": "19/11/2027", "inicio": "20:00"})
+    ev = _orc(pool, r["id"])["evento"]
+    assert ev["contratos"] == ["Locação"] and ev["desconto"] == 5
+    assert ev["data"] == "2027-11-19" and ev["inicio"] == "20:00"
+
+
+def test_o_selo_do_funil_le_a_data_antiga_do_app():
+    """Os orçamentos que o app já gravou em dd/mm/aaaa continuam no banco — o
+    selo tem que lê-los sem precisar reescrever dado de cliente."""
+    from finance import vendas as _v
+    selo = _v.data_da_linha({"data": "18/01/2028"})
+    assert selo["sem_data"] is False and selo["iso"] == "2028-01-18"
+    assert _v.data_da_linha({"data": "2028-01-18"})["titulo"] == "18/01/2028"
+    assert _v.data_da_linha({"data": ""})["sem_data"] is True
+
+
+def test_a_forma_de_pagamento_do_app_e_a_mesma_lista_do_painel():
+    """Pedido do dono: "a forma de pagamento pelo cockpit tem que ser igual o
+    orçamento". Duas listas que divergem são duas maneiras de chamar o boleto."""
+    import re
+    from web import painel_cockpit as pc, painel_servicos as ps
+    app = re.search(r"var FORMAS=(\[[^\]]*\])", pc._ORC_JS).group(1)
+    painel = re.search(r"var FORMAS_PAGAMENTO=(\[[^\]]*\])", ps._JS_CRU).group(1)
+    assert json.loads(app) == json.loads(painel.replace("'", '"'))
+    assert "forma:forma" in pc._ORC_JS, "a forma escolhida tem que ir na parcela"
+
+
+def test_o_painel_converte_a_data_antes_de_por_no_campo_de_data():
+    """O conserto do lado do computador: o que o app já gravou em dd/mm/aaaa
+    aparece no campo, e o que não é data volta no salvar em vez de virar vazio."""
+    from web import painel_servicos as ps
+    js = ps._JS_CRU
+    assert "poeData(document.getElementById('ev-data'),ev.data)" in js
+    assert "data:lerData(document.getElementById('ev-data'))" in js
+    assert "venc:lerData(r.querySelector('.pg-venc'))" in js

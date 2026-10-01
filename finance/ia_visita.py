@@ -312,12 +312,12 @@ def horario_da_letra(c, conta_id: int, conversa_id: int, texto: str | None) -> d
 
 # ------------------------------------------------------------------ a visita viva
 
-def visita_viva(c, conta_id: int, lead_id: int, agora: datetime | None = None) -> dict | None:
+def visita_viva(c, conta_id: int, lead_id: int,
+                agora: datetime | None = None) -> dict | None:
     """A visita que a IA marcou e ainda vai acontecer (ou aconteceu há pouco).
 
-    `agora` é o de quem chama (o `marcar` recebe o dele): com o `now()` do banco, o
-    cenário de data fixa achava a visita "passada" no dia em que o relógio real a
-    alcançava, e a remarcação virava visita NOVA (CI do #946, 01/10/2026)."""
+    `agora` é o do `marcar`: o "ainda vai acontecer" tem que usar o MESMO instante
+    que o `cabe` usou pra aceitar o horário. Sem ele vale o relógio do banco."""
     # TAMBÉM a que um vendedor marcou (painel, app): sem isto, o cliente que escolhe
     # outro horário na conversa ganharia uma SEGUNDA visita em vez de mudar a dele.
     # Visita = card ligado, sem tipo de festa, sem situação da clínica, título "Visita".

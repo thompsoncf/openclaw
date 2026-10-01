@@ -233,6 +233,12 @@ def mandar(pool, conta_id: int, membro_id: int, orc_id: int) -> dict:
     da IA, e o envio fica registrado como o de qualquer proposta. Reivindica ANTES —
     dois toques não mandam duas vezes."""
     from finance import agente
+    # os dados principais (regra do dono, 01/10/2026) — ANTES de reivindicar, pra
+    # recusa não tirar o orçamento da fila de conferir
+    from finance import contrato as _ctr
+    falta = _ctr.pendencias_pra_mandar(pool, conta_id, orc_id)
+    if falta:
+        return {"ok": False, "erro": _ctr.texto_pendencias(falta), "faltam": falta}
     with pool.connection() as c:
         pegou = c.execute(
             """update ia_orcamentos set estado='enviado', conferido_por=%s, conferido_em=now()

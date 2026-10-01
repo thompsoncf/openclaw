@@ -68,6 +68,34 @@ def _linha_end(*partes) -> str:
     return " · ".join(p for p in (str(x or "").strip() for x in partes) if p)
 
 
+def faltas_do_orcamento(pool, conta_id: int, orcamento_id) -> list[str]:
+    """O que o contrato deste orçamento vai mostrar como "Campos sem valor" — a
+    MESMA conta da página do contrato (`carregar`), pra quem manda saber ANTES do
+    cliente. Em rótulo de gente ("CPF/CNPJ"), não em `cliente.doc`. Contrato já
+    assinado não tem falta: o texto congelou. Tolerante: erro devolve []."""
+    try:
+        ct = ctr.por_orcamento(pool, conta_id, orcamento_id)
+        if ct and ct.get("assinado_em"):
+            return []
+        q = qualificacao(pool, conta_id, orcamento_id)
+        if not q:
+            return []
+        _clausulas, faltas = _montar(pool, conta_id, q)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra conferir o contrato do orçamento %s: %s: %s",
+                     orcamento_id, type(e).__name__, e)
+        return []
+    return [ctr._ROTULO.get(f) or f for f in faltas]
+
+
+def _montar(pool, conta_id: int, q: dict):
+    modelo = ctr.carregar_modelo(pool, conta_id)
+    ctx = ctr.contexto(catalogo=scat.listar(pool, conta_id),
+                       orcamento=q["orcamento"], modelo=modelo,
+                       empresa=q["empresa"], modo=modelo["modo"])
+    return ctr.montar(modelo["clausulas"], ctx)
+
+
 def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
     """As PARTES e o OBJETO, do jeito que um documento desta empresa se qualifica.
 
@@ -166,6 +194,7 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
     # mesma coisa — foi de duas leituras do mesmo dado que nasceu o bug do e-mail
     # que mostrava contrato e mandava proposta.
     orcamento = ctr.completar_do_cadastro(pool, conta_id, orcamento, cliente_id)
+    orcamento = ctr.completar_do_lead(pool, conta_id, orcamento_id, orcamento)
     return {
         "empresa": empresa, "orcamento": orcamento, "evento_bruto": evento,
         "total": int(total or 0), "parcelas": parcelas,
@@ -258,11 +287,7 @@ def carregar(token: str, pool=None) -> dict | None:
     if assinado and ct.get("texto"):
         clausulas, faltas = ct["texto"], []
     else:
-        modelo = ctr.carregar_modelo(pool, ct["conta_id"])
-        ctx = ctr.contexto(catalogo=scat.listar(pool, ct["conta_id"]),
-                           orcamento=q["orcamento"], modelo=modelo,
-                           empresa=q["empresa"], modo=modelo["modo"])
-        clausulas, faltas = ctr.montar(modelo["clausulas"], ctx)
+        clausulas, faltas = _montar(pool, ct["conta_id"], q)
     orc_status = q["orc_status"]
     # O DOCUMENTO SEGUE O ORÇAMENTO: contrato de serviço é o do orçamento
     # recorrente. Lido do orçamento e não da conta, porque o assinado não muda

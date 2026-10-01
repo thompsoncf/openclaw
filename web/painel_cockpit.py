@@ -4254,6 +4254,20 @@ _ORC_JS = r"""
   };
   function pronto(j){
     $("build").style.display="none";$("rodape").style.display="none";
+    // OS DADOS PRINCIPAIS (regra do dono, 01/10/2026): a proposta fica salva, mas
+    // nenhum botão de mandar aparece enquanto faltar algo — o servidor recusa igual.
+    var pend=j.pendencias||[];
+    if(pend.length){
+      var fic=(pend.indexOf("nome do cliente")>=0||pend.indexOf("CPF ou CNPJ")>=0)
+        ?'<a class=btn href="'+O.base+'/lead/'+O.leadId+'/ficha">Preencher na ficha</a>':'';
+      $("pronto").innerHTML='<div class=pronto><div class=big>!</div><h3>Proposta salva — falta pouco</h3>'
+        +'<div class=evaviso style="margin:.6rem 0;text-align:left"><b>Não dá pra mandar ainda: falta '
+        +esc(pend.join(", "))+'.</b>Preencha e mande pela tela do orçamento.</div>'+fic
+        +'<a class="btn ghost" style="margin-top:.5rem" href="'+O.base+'/lead/'+O.leadId+'/orcamento?orc='+j.id+'">Editar o orçamento</a>'
+        +'<a class="btn ghost" style="margin-top:.5rem" href="'+O.base+'/lead/'+O.leadId+'">Voltar pro lead</a></div>';
+      $("pronto").style.display="block";
+      return;
+    }
     // sem o atalho pro WhatsApp (conta que entrega tudo pelo Zaq) o "Enviar na
     // conversa" vira a ação principal — botão fantasma sozinho parece opcional
     var wa=j.zap?'<a class=btn href="'+esc(j.zap)+'" target=_blank rel=noopener>Mandar no WhatsApp</a>':'';
@@ -4632,14 +4646,21 @@ def cockpit_ia_orcamento(request: Request, orc_id: int):
          if ev.get("inicio") else ""),
         (f"{int(ev['convidados'])} convidados" if ev.get("convidados") else "")] if x)
     feito = d["estado"] != "conferir"
+    # OS DADOS PRINCIPAIS (regra do dono, 01/10/2026): a IA monta sem o CPF, e o
+    # orçamento espera na fila até alguém completar — `iao.mandar` recusa igual.
+    from finance import contrato as _ctr_p
+    _pend = [] if feito else _ctr_p.pendencias_pra_mandar(pool, conta_id, orc_id)
+    aviso_pend = _aviso_pendencias(_pend, d, orc_id, "este orçamento") if _pend else ""
     botoes = ("<div class=fonte>Este orçamento já foi "
               + ("mandado." if d["estado"] == "enviado" else "descartado.") + "</div>"
               if feito else
-              "<button class=btn id=iaoMandar type=button>✅ Conferir e mandar</button>"
-              f"<a class='btn ghost' href='{_BASE}/orcamentos/{orc_id}'>Editar</a>"
+              ("<button class=btn type=button disabled>✅ Conferir e mandar</button>" if _pend else
+               "<button class=btn id=iaoMandar type=button>✅ Conferir e mandar</button>")
+              + f"<a class='btn ghost' href='{_BASE}/orcamentos/{orc_id}'>Editar</a>"
               "<button class='btn ghost' id=iaoDescartar type=button>Descartar</button>")
     corpo = (_hdr("Orçamento da IA", d["quem"], voltar=_BASE)
              + "<div class=toast id=toast></div><div class=scroll>"
+             + (f"<div class=secao>{aviso_pend}</div>" if aviso_pend else "")
              + f"<div class=secao><div class=rot>{_P('cliente')}</div><div class=local>"
                f"<div class=nome>{esc(d['quem'])}</div><div class=end>{festa or 'sem dados da festa'}</div></div></div>"
              + f"<div class=secao><div class=rot>O que a IA montou · nº {esc(str(d['numero'] or ''))}</div>"
@@ -5059,6 +5080,23 @@ def cockpit_orcamentos(request: Request, s: str = "", v: str = ""):
     return _page("Propostas", corpo)
 
 
+def _aviso_pendencias(falta: list, o: dict, orc_id: int, doc: str) -> str:
+    """O bloco que entra NO LUGAR dos botões de mandar quando falta dado principal:
+    o que falta e o atalho pra onde se preenche (a ficha pro nome/CPF, o orçamento
+    pro evento e as parcelas)."""
+    atalhos = ""
+    if o.get("lead_id"):
+        if {"nome do cliente", "CPF ou CNPJ"} & set(falta):
+            atalhos += (f" <a href='{_BASE}/lead/{o['lead_id']}/ficha' "
+                        "style='color:var(--neon)'>Preencher na ficha</a>")
+        if set(falta) - {"nome do cliente", "CPF ou CNPJ"}:
+            atalhos += (f" <a href='{_BASE}/lead/{o['lead_id']}/orcamento?orc={orc_id}' "
+                        "style='color:var(--neon)'>Editar o orçamento</a>")
+    return ("<div class=evaviso style='margin:0 0 .5rem'><b>Não dá pra mandar "
+            f"{esc(doc)} ainda: falta {esc(', '.join(falta))}.</b>"
+            f"Preencha e os botões de mandar aparecem.{atalhos}</div>")
+
+
 @router.get("/cockpit/orcamentos/{orc_id}", response_class=HTMLResponse)
 def cockpit_orcamento(request: Request, orc_id: int):
     g = _gerencia(request)
@@ -5091,7 +5129,14 @@ def cockpit_orcamento(request: Request, orc_id: int):
     # assinado pela empresa, e volta pra esta tela com o resultado. Fica em primeiro
     # porque é o caminho que a gente quer ensinar.
     envio = []
-    if not gestao:
+    # OS DADOS PRINCIPAIS (regra do dono, 01/10/2026): sem eles nenhum botão de
+    # mandar aparece — no lugar, o que falta e onde preencher. O servidor recusa
+    # do mesmo jeito (`cockpit._bloqueio_de_envio`).
+    from finance import contrato as _ctr_p
+    _pend = _ctr_p.pendencias_pra_mandar(get_pool(), conta_id, orc_id) if o["status"] != "fechado" else []
+    if _pend:
+        envio.append(_aviso_pendencias(_pend, o, orc_id, "a proposta"))
+    if not gestao and not _pend:
         tem_email = "@" in (o.get("email") or "")
         if tem_email:
             envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/email'>"
@@ -5102,10 +5147,10 @@ def cockpit_orcamento(request: Request, orc_id: int):
             # senão o vendedor fica olhando pra uma tela que mudou e não sabe por quê
             envio.append("<div class=dica style='margin:0 0 .5rem'>Esse " + _p('cliente') + " não tem "
                          "e-mail cadastrado — dá pra mandar na conversa ou copiar o link.</div>")
-    if o["zap"]:
+    if o["zap"] and not _pend:
         envio.append(f"<a class='btn ghost' style='margin-top:.5rem' href='{esc(o['zap'])}' "
                      f"target=_blank rel=noopener>{_ic('zap', 'ic p')} Mandar no WhatsApp</a>")
-    if o["lead_id"] and not gestao:
+    if o["lead_id"] and not gestao and not _pend:
         envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/enviar'>"
                      "<button class='btn ghost' style='margin-top:.5rem' type=submit>"
                      "Enviar na conversa do " + _p('lead') + "</button></form>")
@@ -5116,12 +5161,13 @@ def cockpit_orcamento(request: Request, orc_id: int):
         # andar sozinho. `keepalive` porque quem copia troca de app em seguida, e o
         # `catch` é mudo de propósito: o link JÁ está na área de transferência, e um
         # erro de rede não pode virar aviso dizendo o contrário.
-        envio.append("<div class=copiar><input value='" + esc(o["link"]) + "' readonly "
-                     "onclick='this.select()'><button type=button onclick=\"navigator.clipboard"
-                     ".writeText(this.previousElementSibling.value);this.textContent='Copiado';"
-                     "fetch('" + _BASE + "/orcamentos/" + str(orc_id) + "/link-copiado',"
-                     "{method:'POST',keepalive:true}).catch(function(){})\">"
-                     "Copiar</button></div>")
+        if not _pend:
+            envio.append("<div class=copiar><input value='" + esc(o["link"]) + "' readonly "
+                         "onclick='this.select()'><button type=button onclick=\"navigator.clipboard"
+                         ".writeText(this.previousElementSibling.value);this.textContent='Copiado';"
+                         "fetch('" + _BASE + "/orcamentos/" + str(orc_id) + "/link-copiado',"
+                         "{method:'POST',keepalive:true}).catch(function(){})\">"
+                         "Copiar</button></div>")
 
     fechada = o["status"] == "fechado"
 
@@ -5246,17 +5292,41 @@ def cockpit_orcamento(request: Request, orc_id: int):
                 # com todas as letras em vez de ficar muda como ficava.
                 _estado = "<b style='color:var(--coral)'>Ainda não foi enviado.</b>"
                 _rot = "Mandar na conversa"
+            # O QUE FALTA NO CONTRATO, antes de mandar — a mesma conta da página do
+            # contrato. Até 01/10/2026 quem descobria era o cliente (nº 47 da Prime,
+            # "Campos sem valor: cliente.doc"). Avisa e pergunta; não bloqueia.
+            try:
+                from web.contrato_publico import faltas_do_orcamento
+                _faltas = faltas_do_orcamento(get_pool(), conta_id, orc_id)
+            except Exception:  # noqa: BLE001
+                _faltas = []
+            _ficha = (f" <a href='{_BASE}/lead/{o['lead_id']}/ficha' style='color:var(--neon)'>"
+                      "Preencher na ficha</a>" if o.get("lead_id") else "")
+            _aviso_falta = (
+                "<div class=evaviso style='margin:.5rem 0 0'><b>Falta no contrato: "
+                f"{esc(', '.join(_faltas))}.</b>O {_p('cliente')} vai ver o aviso de campo "
+                f"sem valor e não deveria assinar assim.{_ficha}</div>") if _faltas else ""
+            import json as _json
+            _confirma = (' onsubmit="return confirm('
+                         + esc(_json.dumps(f"O contrato está sem: {', '.join(_faltas)}. "
+                                           "Mandar mesmo assim?", ensure_ascii=False))
+                         + ')"') if _faltas else ""
+            # os DADOS PRINCIPAIS travam (regra do dono, 01/10/2026); os outros
+            # campos vazios do modelo só avisam e perguntam
+            _pend_ct = _ctr_p.pendencias_pra_mandar(get_pool(), conta_id, orc_id)
+            if _pend_ct:
+                _aviso_falta = _aviso_pendencias(_pend_ct, o, orc_id, "o contrato")
             ctr_html = (
                 "<div class=eyebrow>Contrato</div><div class=bloco>"
                 f"<div class=card style='font-size:.84rem;color:var(--text-dim)'>"
                 f"Contrato{esc(_num)} · {_estado}<br>O {_p('cliente')} lê e assina pelo link, "
-                "do celular dele.</div>"
-                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/conversa'>"
+                f"do celular dele.{_aviso_falta}</div>"
+                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/conversa'{_confirma}>"
                    f"<button class=btn type=submit>{esc(_rot)}</button></form>"
-                   if o.get("lead_id") else "")
-                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/email'>"
+                   if o.get("lead_id") and not _pend_ct else "")
+                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/email'{_confirma}>"
                    "<button class='btn ghost' type=submit>Mandar por e-mail</button></form>"
-                   if (o.get("email") or "").strip() else "")
+                   if (o.get("email") or "").strip() and not _pend_ct else "")
                 + f"<a class='btn ghost' href='{esc(_ct['link'])}' target=_blank "
                   "rel=noopener>Abrir o contrato</a></div>")
 

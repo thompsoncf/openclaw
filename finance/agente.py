@@ -1120,6 +1120,19 @@ def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino
         return _enviar(c, conta_id, conversa_id, canal, destino,
                        (resposta + "\n\n" if resposta else "") + txt)
 
+    # OS DADOS PRINCIPAIS (regra do dono, 01/10/2026): sem nome, CPF/CNPJ, data e
+    # horário o link NÃO sai — a proposta fica em rascunho pra equipe completar e
+    # mandar. A proposta nasceu nesta transação, então a conferência lê por `c`.
+    from finance import contrato as _ctr
+    falta = _ctr.pendencias_em_lote(pool, conta_id, [orc_id], c=c).get(orc_id, [])
+    if falta:
+        _log.info("agente: proposta %s ficou em rascunho, falta %s", orc_id, falta)
+        # `_enviar` faz o commit — é ele que grava a proposta que nasceu aqui
+        return _enviar(c, conta_id, conversa_id, canal, destino,
+                       (resposta + "\n\n" if resposta else "")
+                       + "O seu orçamento está com a equipe — assim que ficar pronto, "
+                         "te mandamos o link 😊")
+
     from finance.email_sender import _app_url
     link = _app_url() + "/proposta/" + token
     corpo = (resposta + "\n\n" if resposta else "") + _bloco_orcamento(escolhidos, link)

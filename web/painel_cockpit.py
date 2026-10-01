@@ -1126,6 +1126,8 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .respdica{font-size:.7rem;color:var(--text-dim);line-height:1.45;
   border-left:2px solid var(--line);padding-left:.5rem}
 .respdica b{color:var(--text)}
+.assdica{font-size:.78rem;color:var(--text-dim);line-height:1.45;text-align:center;margin:0 0 .55rem}
+.assdica b{color:var(--text)}
 .respbusca{background:var(--surface);border:1px solid var(--line);border-radius:999px;
   color:var(--text);padding:.5rem .85rem;font-family:inherit;font-size:.85rem}
 .resplista{overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:.35rem}
@@ -6824,8 +6826,18 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                  "</div>")
 
     if d["ia"]:
-        acao = (f"<form method=post action='{_BASE}/lead/{lead_id}/assumir'>"
-                "<button class=btn type=submit>Assumir a conversa</button></form>")
+        # o app de ESTANDES (01/10/2026): o "Link de stands" tocado com o agente
+        # atendendo chega aqui com a mensagem no `?texto=`. Ela vai junto no Assumir e
+        # volta pronta pra caixa — antes sumia e o vendedor tinha que tocar de novo.
+        _txt = ""
+        if em_stands:
+            _qp_ia = getattr(request, "query_params", None)
+            _txt = ((_qp_ia.get("texto") if _qp_ia else "") or "")[:300]
+        acao = (f"<form method=post action='{_BASE}/lead/{lead_id}/assumir"
+                + ("?" + esc(_urlencode({"texto": _txt})) if _txt else "") + "'>"
+                + ("<div class=assdica>Toque em <b>Assumir a conversa</b>: a mensagem com "
+                   "o seu link já entra pronta na caixa.</div>" if _txt else "")
+                + "<button class=btn type=submit>Assumir a conversa</button></form>")
     else:
         # `pode_voz` chega de fora (o microfone só existe no canal QR): quem
         # monta a tela não vai buscar sessão nem banco pra decidir isso.
@@ -8755,10 +8767,15 @@ def cockpit_etapa(request: Request, lead_id: int, etapa: str = Form(...)):
 
 
 @router.post("/cockpit/lead/{lead_id}/assumir")
-def cockpit_assumir(request: Request, lead_id: int):
+def cockpit_assumir(request: Request, lead_id: int, texto: str = ""):
+    # app de estandes: a mensagem do "Link de stands" que veio no Assumir volta pra
+    # caixa da conversa. Só no perfil de estandes — nas outras contas, como era.
+    destino = f"{_BASE}/lead/{lead_id}"
+    if texto and _perfil_stands(request.session.get("conta_id")):
+        destino += "?" + _urlencode({"texto": texto[:300]})
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.assumir(p, c, m, l), "msg": "Você assumiu a conversa ✓"},
-                 f"{_BASE}/lead/{lead_id}")
+                 destino)
 
 
 @router.post("/cockpit/lead/{lead_id}/segurar")
@@ -10015,19 +10032,13 @@ _STANDS_JS = r"""
 """
 
 
-@router.get("/cockpit/stands", response_class=HTMLResponse)
-def cockpit_stands(request: Request, abrir: str = ""):
-    sess = _sessao(request)
-    g = _gerencia(request)
-    conta_id = sess[0] if sess else (g[0] if g else None)
-    meu_id = sess[1] if sess else (g[1] if g else None)
-    if conta_id is None:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    pool = get_pool()
+def _dados_do_mapa(request: Request, pool, conta_id: int, meu_id, g):
+    """O que o mapa de stands do app desenha: um dict por stand (status, cliente e,
+    só pra quem pode mexer na venda, o cadastro, o contrato e o saldo) e a contagem
+    por status. A página e o `/cockpit/stands/estado` (o mapa que se atualiza
+    sozinho) usam a mesma função — o filtro do que cada um pode ver é um só.
+    Devolve (dados, tot, gestao)."""
     from finance import evento_stands as _es
-    cfg = _es.obter_config(pool, conta_id)
-    if not cfg:
-        return RedirectResponse(_BASE, status_code=303)
     stands = _es.listar(pool, conta_id)
 
     # o nome de quem reservou/comprou — o vendedor responde "esse já foi?" na hora —
@@ -10096,6 +10107,67 @@ def cockpit_stands(request: Request, abrir: str = ""):
                 "gcods": grupos.get(s.get("grupo_id")) or [s["codigo"]]})
         if minha and s["status"] != "livre":
             dados[s["codigo"]]["minha"] = True
+    return dados, tot, gestao
+
+
+def _sub_do_mapa(tot: dict) -> str:
+    return (f"{tot['livre']} livres · {tot['pre_reservado']} reservados · "
+            f"{tot['vendido']} vendidos")
+
+
+# O MAPA SE ATUALIZA SOZINHO (01/10/2026, só o app de estandes): a cada 20 s, e na
+# hora em que o vendedor volta pro app (vindo do WhatsApp), a tela pede o estado dos
+# stands e redesenha — "esse ainda está livre?" sem abrir o mapa de novo. O stand
+# aberto não é redesenhado enquanto ele preenche um formulário (cadastro, venda).
+_STANDS_AUTO_JS = r"""
+  (function(){
+    var pedindo=false, ultimo=JSON.stringify(STANDS);
+    function digitando(){
+      if(editando||vendendo)return true;
+      var a=document.activeElement;
+      return !!(a&&a.closest&&a.closest('#stdet')&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+    }
+    function atualizar(){
+      if(pedindo||document.visibilityState==='hidden')return;
+      pedindo=true;
+      fetch(BASE_STANDS+'/estado',{headers:{'x-cockpit':'1'},credentials:'same-origin',cache:'no-store'})
+        .then(function(r){return r.ok?r.json():null;})
+        .then(function(j){
+          pedindo=false;
+          if(!j||!j.ok||!j.stands)return;
+          var novo=JSON.stringify(j.stands);
+          if(novo===ultimo)return;
+          ultimo=novo; STANDS=j.stands;
+          if(sel&&!STANDS[sel]){sel=null;editando=false;vendendo=false;}
+          render();legenda();minhas();
+          if(!digitando())detalhe();
+          var sub=document.querySelector('.hdr .tt small');
+          if(sub&&j.sub)sub.textContent=j.sub;
+        })
+        .catch(function(){pedindo=false;});
+    }
+    setInterval(atualizar,20000);
+    document.addEventListener('visibilitychange',function(){
+      if(document.visibilityState==='visible')atualizar();});
+    window.addEventListener('pageshow',function(e){if(e.persisted)atualizar();});
+  })();
+"""
+
+
+@router.get("/cockpit/stands", response_class=HTMLResponse)
+def cockpit_stands(request: Request, abrir: str = ""):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    pool = get_pool()
+    from finance import evento_stands as _es
+    cfg = _es.obter_config(pool, conta_id)
+    if not cfg:
+        return RedirectResponse(_BASE, status_code=303)
+    dados, tot, gestao = _dados_do_mapa(request, pool, conta_id, meu_id, g)
 
     # o código ASSINADO do link de vendas de quem está logado (dono sem
     # membro_id não tem: vai o link neutro)
@@ -10108,8 +10180,7 @@ def cockpit_stands(request: Request, abrir: str = ""):
         "Copiar meu link</button></div>") if meu_cod else ""
 
     from web.loja_stands import PLANTA_DEFS_JS
-    sub = (f"{tot['livre']} livres · {tot['pre_reservado']} reservados · "
-           f"{tot['vendido']} vendidos")
+    sub = _sub_do_mapa(tot)
     # o app de ESTANDES (Outlet Chic): o mapa é a tela inicial — sem seta de voltar e
     # com as abas Stands / Minhas vendas / Perfil. Gestão e as demais contas: como era.
     com_abas = _perfil_stands(conta_id)
@@ -10145,9 +10216,34 @@ def cockpit_stands(request: Request, abrir: str = ""):
             _es.regras_de_pagamento(cfg)["saldo_ate"].strftime("%d/%m")
             if _es.regras_de_pagamento(cfg)["saldo_ate"] else "") + ";"
         + f"var BASE_STANDS='{_BASE}/stands';</script>"
-        + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS + "})();</script>"
+        + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS
+        + (_STANDS_AUTO_JS if com_abas else "") + "})();</script>"
     )
     return _page("Mapa de stands", corpo)
+
+
+@router.get("/cockpit/stands/estado")
+def cockpit_stands_estado(request: Request):
+    """O MAPA QUE SE ATUALIZA SOZINHO (pedido de 01/10/2026, só o app de estandes):
+    a tela do mapa pede isto a cada 20 s e quando o vendedor volta pro app, e
+    redesenha os stands, a legenda, "Minhas vendas" e a contagem do topo. São os
+    mesmos dados (e o mesmo filtro do que cada um pode ver) que a página monta.
+    Conta sem o perfil de estandes não tem a rota."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not _perfil_stands(conta_id):
+        return JSONResponse({"ok": False}, status_code=404)
+    pool = get_pool()
+    from finance import evento_stands as _es
+    if not _es.obter_config(pool, conta_id):
+        return JSONResponse({"ok": False}, status_code=404)
+    dados, tot, _gestao = _dados_do_mapa(request, pool, conta_id, meu_id, g)
+    return JSONResponse({"ok": True, "stands": dados, "sub": _sub_do_mapa(tot)},
+                        headers={"Cache-Control": "no-store"})
 
 
 

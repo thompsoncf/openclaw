@@ -531,6 +531,9 @@ def _iniciar_poller_email() -> None:
                 if _expirados:
                     log.info("poller: ciclo #%d — %d estande(s) voltaram a livre "
                              "(prazo da pré-reserva vencido)", ciclo, len(_expirados))
+                    _es.avisar_expiradas(pool, _expirados)
+                # o vendedor fica sabendo antes: faltando 24 h pro prazo vencer
+                _es.avisar_reservas_vencendo(pool, _ag2.agora_brt())
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — evento_stands expirar falhou: %s: %s",
                          ciclo, type(e).__name__, e)

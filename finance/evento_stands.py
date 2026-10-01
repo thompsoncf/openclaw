@@ -213,6 +213,7 @@ def registrar_comprovante(pool, conta_id: int, codigo: str, comprovante_url: str
                        comprovante_em = %s,
                        prospeccao_id = coalesce(%s, prospeccao_id),
                        grupo_id = case when status='livre' then null else grupo_id end,
+                       aviso_vence_em = case when status='livre' then null else aviso_vence_em end,
                        atualizado_em = now()
                  where conta_id=%s and codigo=%s and status in ('livre','pre_reservado')
                  returning {_COLS}""",
@@ -435,7 +436,7 @@ def registrar_comprovante_grupo(pool, conta_id: int, codigos: list[str],
             f"""update evento_stands
                    set status='pre_reservado', pre_reserva_ate=%s, comprovante_url=%s,
                        comprovante_em=%s, prospeccao_id=%s, grupo_id=%s,
-                       atualizado_em=now()
+                       aviso_vence_em=null, atualizado_em=now()
                  where conta_id=%s and codigo = any(%s) and status='livre'
                  returning {_COLS}""",
             (prazo, comprovante_url, agora, prospeccao_id, grupo, conta_id,
@@ -976,6 +977,18 @@ def confirmar_pagamento(pool, conta_id: int, codigo: str,
                         type(e).__name__, e)
     _log.info("evento_stands: pagamento confirmado — conta %s, estande(s) %s", conta_id,
               ",".join(x["codigo"] for x in grupo))
+    try:
+        cods = " + ".join(x["codigo"] for x in grupo)
+        aberto = (situacao_financeira(pool, conta_id, [stand["orcamento_id"]])
+                  .get(stand["orcamento_id"], {}).get("aberto", 0)) if stand["orcamento_id"] else 0
+        ate = reg["saldo_ate"].strftime("%d/%m") if reg.get("saldo_ate") else ""
+        avisar_vendedor(pool, conta_id, stand["prospeccao_id"], "Sinal confirmado ✓",
+                        f"{cods}: a gestão confirmou o sinal. "
+                        + (f"Falta o saldo de {_reais(aberto)}" + (f" até {ate}." if ate else ".")
+                           if aberto else "Venda garantida."),
+                        url=f"/cockpit/stands?abrir={codigo}")
+    except Exception as e:  # noqa: BLE001 — o aviso é bônus
+        _log.info("evento_stands: aviso de sinal confirmado falhou: %s", e)
     return {"ok": True, "stand": stand, "financeiro": financeiro,
             "codigos": [x["codigo"] for x in grupo]}
 
@@ -1082,6 +1095,85 @@ def registrar_pagamento_saldo(pool, conta_id: int, codigo: str, valor_centavos: 
     return {"ok": True, "aberto": sit.get("aberto", 0), "quitado": sit.get("aberto", 0) == 0}
 
 
+# ---------------------------------------------------------------------------
+# AVISOS AO VENDEDOR (push no app): reserva pelo link dele, sinal confirmado,
+# reserva pra vencer e reserva vencida. Best-effort: nunca derrubam o fluxo.
+# ---------------------------------------------------------------------------
+
+def _vendedor_da_venda(pool, conta_id: int, prospeccao_id) -> tuple | None:
+    if not prospeccao_id:
+        return None
+    with pool.connection() as c:
+        r = c.execute("select vendedor_id, empresa from prospeccao where conta_id=%s and id=%s",
+                      (conta_id, prospeccao_id)).fetchone()
+    return (int(r[0]), r[1] or "") if r and r[0] else None
+
+
+def avisar_vendedor(pool, conta_id: int, prospeccao_id, titulo: str, corpo: str,
+                    url: str = "/cockpit/stands/vendas") -> int:
+    """Push pro vendedor dono da venda (a prospecção do link dele). Venda sem
+    vendedor não avisa ninguém. Devolve quantos aparelhos receberam."""
+    try:
+        v = _vendedor_da_venda(pool, conta_id, prospeccao_id)
+        if not v:
+            return 0
+        from . import cockpit as _ck
+        return _ck.enviar_push(pool, conta_id, v[0], titulo, corpo, url=url)
+    except Exception as e:  # noqa: BLE001
+        _log.info("evento_stands: push ao vendedor falhou: %s: %s", type(e).__name__, e)
+        return 0
+
+
+def avisar_reserva_nova(pool, conta_id: int, prospeccao_id, codigos: list[str],
+                        nome: str, sinal_centavos: int | None) -> int:
+    cods = " + ".join(codigos)
+    return avisar_vendedor(
+        pool, conta_id, prospeccao_id, "Nova reserva pelo seu link",
+        f"{nome or 'Um cliente'} reservou {cods}"
+        + (f" e mandou o sinal de {_reais(sinal_centavos)}" if sinal_centavos else "")
+        + ". Complete os dados do cliente pro contrato.",
+        url=f"/cockpit/stands?abrir={codigos[0]}")
+
+
+def avisar_reservas_vencendo(pool, agora, horas: int = 24) -> int:
+    """Uma vez por reserva: faltando menos de `horas` pro prazo vencer sem a gestão
+    confirmar o sinal, o vendedor é avisado (dá tempo de cobrar o comprovante)."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """update evento_stands set aviso_vence_em=now()
+                where status='pre_reservado' and aviso_vence_em is null
+                  and pre_reserva_ate is not null and pre_reserva_ate > %s
+                  and pre_reserva_ate <= %s + make_interval(hours => %s)
+                returning conta_id, codigo, prospeccao_id, pre_reserva_ate""",
+            (agora, agora, int(horas))).fetchall()
+        c.commit()
+    por_venda: dict = {}
+    for conta_id, codigo, pid, ate in rows:
+        por_venda.setdefault((conta_id, pid), {"cods": [], "ate": ate})["cods"].append(codigo)
+    n = 0
+    for (conta_id, pid), v in por_venda.items():
+        n += avisar_vendedor(
+            pool, conta_id, pid, "Reserva perto de vencer",
+            f"{' + '.join(sorted(v['cods']))}: a reserva vence {v['ate']:%d/%m às %H:%M} se o "
+            "sinal não for confirmado. Confira o comprovante com o cliente.",
+            url=f"/cockpit/stands?abrir={sorted(v['cods'])[0]}")
+    return n
+
+
+def avisar_expiradas(pool, expirados: list[dict]) -> int:
+    """O prazo venceu e o stand voltou pro mapa: o vendedor fica sabendo."""
+    por_venda: dict = {}
+    for e in expirados or []:
+        por_venda.setdefault((e["conta_id"], e.get("prospeccao_id")), []).append(e["codigo"])
+    n = 0
+    for (conta_id, pid), cods in por_venda.items():
+        n += avisar_vendedor(
+            pool, conta_id, pid, "Reserva vencida",
+            f"{' + '.join(sorted(cods))} voltou pro mapa: o sinal não foi confirmado no prazo.",
+            url="/cockpit/stands/vendas")
+    return n
+
+
 def liberar(pool, conta_id: int, codigo: str) -> bool:
     """Devolve o estande pra 'livre' — o interessado desistiu, o dono errou o
     clique, ou uma venda precisa ser desfeita. Limpa comprovante e prazo: o
@@ -1092,7 +1184,8 @@ def liberar(pool, conta_id: int, codigo: str) -> bool:
         cur = c.execute(
             """update evento_stands
                   set status='livre', pre_reserva_ate=null, comprovante_url=null,
-                      comprovante_em=null, grupo_id=null, atualizado_em=now()
+                      comprovante_em=null, grupo_id=null, aviso_vence_em=null,
+                      atualizado_em=now()
                 where conta_id=%s and status <> 'livre'
                   and (codigo=%s or (grupo_id is not null and grupo_id = (
                         select grupo_id from evento_stands where conta_id=%s and codigo=%s)))""",
@@ -1117,14 +1210,14 @@ def expirar_pre_reservas(pool, agora: datetime) -> list[dict]:
         rows = c.execute(
             """update evento_stands
                   set status='livre', pre_reserva_ate=null, grupo_id=null,
-                      atualizado_em=now()
+                      aviso_vence_em=null, atualizado_em=now()
                 where status='pre_reservado' and pre_reserva_ate is not null
                   and pre_reserva_ate <= %s
-                returning id, conta_id, codigo, pavilhao, zona""",
+                returning id, conta_id, codigo, pavilhao, zona, prospeccao_id""",
             (agora,)).fetchall()
         c.commit()
     expirados = [{"id": r[0], "conta_id": r[1], "codigo": r[2], "pavilhao": r[3],
-                  "zona": r[4]} for r in rows]
+                  "zona": r[4], "prospeccao_id": r[5]} for r in rows]
     if expirados:
         _log.info("evento_stands: %d estande(s) voltaram a livre (prazo vencido)",
                   len(expirados))

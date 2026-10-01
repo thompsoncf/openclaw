@@ -33,7 +33,9 @@ _AVISOS = {
     "aprovado": "Desconto aprovado. Agora é só enviar.",
     "enviado": "Plano enviado no WhatsApp, com o link. O Zaq cobra a decisão em D+1 e D+3.",
     "cancelado": "Plano cancelado.",
-    "aceito": "Anotado como aceito. As parcelas viraram contas a receber e o card do paciente andou no funil.",
+    "aceito": "Anotado como aceito. As parcelas viraram contas a receber. Quando o pagamento ou a entrada entrar, clique em Recebi.",
+    "recebido": "Pagamento registrado: a parcela recebeu a baixa e o card do paciente andou no funil.",
+    "nao_quis": "Anotado: o paciente não quis o plano. O card saiu da coluna do plano.",
     "config": "Configuração salva.",
 }
 
@@ -49,7 +51,7 @@ def _ir(request: Request, url: str, aviso: str = "", erro: str = "") -> Redirect
 def _ctx(request: Request) -> dict:
     return {"aviso": _AVISOS.get(request.query_params.get("aviso") or "", ""),
             "erro": request.session.pop("planos_erro", ""), "secao_ativa": "agenda", "brl": cp._brl,
-            "FORMAS": cp.FORMAS}
+            "FORMAS": cp.FORMAS, "MOTIVOS": cp.MOTIVOS_NAO_FECHOU}
 
 
 @router.get(URL, response_class=HTMLResponse)
@@ -190,8 +192,24 @@ def ver(request: Request, plano_id: int):
                    linhas=range(cp.MAX_ITENS), texto=texto, link=cp.link(p) if p["token"] else "")
 
 
+@router.post(URL + "/nao-quis")
+def nao_quis(request: Request, evento: str = Form(""), motivo: str = Form("")):
+    """O paciente saiu da consulta sem querer o plano, antes de ele ser montado."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    evento_id = _int(evento)
+    if not evento_id or motivo not in dict(cp.MOTIVOS_NAO_FECHOU):
+        return _ir(request, f"{URL}/novo?evento={evento_id or ''}", erro="Escolha o motivo.")
+    with get_pool().connection() as c:
+        cp.nao_quis_sem_plano(c, conta[0], evento_id, motivo, request.session.get("membro_id"))
+        c.commit()
+    return _ir(request, URL, "nao_quis")
+
+
 @router.post(URL + "/{plano_id}/{acao}")
-def acao(request: Request, plano_id: int, acao: str, forma: str = Form("pix"), visto: str = Form("")):
+def acao(request: Request, plano_id: int, acao: str, forma: str = Form("pix"), visto: str = Form(""),
+         motivo: str = Form("")):
     conta, gerencia, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -215,6 +233,15 @@ def acao(request: Request, plano_id: int, acao: str, forma: str = Form("pix"), v
             cp.cancelar(c, conta_id, plano_id)
             c.commit()
             return _ir(request, volta, "cancelado")
+        if acao == "nao_quis":
+            if motivo not in dict(cp.MOTIVOS_NAO_FECHOU):
+                return _ir(request, volta, erro="Escolha o motivo.")
+            ok = cp.nao_fechou(c, conta_id, plano_id, motivo, membro)
+            c.commit()
+            return _ir(request, volta, "nao_quis" if ok else "", "" if ok else "Esse plano não está mais em aberto.")
+        if acao == "recebi":
+            r = cp.receber(get_pool(), conta_id, plano_id, membro)
+            return _ir(request, volta, "recebido" if r["ok"] else "", r.get("erro") or "")
         if acao == "aceito":
             # a paciente fechou no balcão: a recepção registra (mesmo efeito do link)
             p = cp.plano(c, conta_id, plano_id)
@@ -277,6 +304,7 @@ _CSS = r"""<style>
 .pl-chip{font-size:.7rem;padding:.08rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut)}
 .pl-chip.enviado{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}
 .pl-chip.aceito{border-color:var(--verde);color:var(--verde-claro)}
+.pl-nq{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}.pl-nq select{width:auto}
 .pl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem}
 .pl-grid label,.pl-item label{display:block;font-size:.78rem;color:var(--txt-mut);margin-bottom:.15rem}
 .pl-item{display:grid;grid-template-columns:2fr 1.4fr .8fr 1fr;gap:.5rem;margin:.35rem 0}
@@ -302,7 +330,7 @@ _TPL_LISTA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="pl-linha"><div><a href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a>
       <div class="pl-mut">{% for i in p.itens %}{{ i.nome }} · {{ i.sessoes }}{% if not loop.last %} + {% endif %}{% endfor %}{% if p.prof %} · {{ p.prof }}{% endif %}</div></div>
       <span>{{ brl(p.total) }}</span>
-      <span class="pl-chip {{ p.status }}">{{ p.status_d }}{% if p.status == 'enviado' and p.validade_ate %} · vale até {{ p.validade_ate.strftime('%d/%m') }}{% endif %}{% if p.status == 'enviado' and p.visto_em %} · 👀 abriu{% endif %}{% if p.status == 'aceito' %} · {{ p.forma_d }}{% endif %}</span></div>
+      <span class="pl-chip {{ p.status }}">{{ p.status_d }}{% if p.status == 'enviado' and p.validade_ate %} · vale até {{ p.validade_ate.strftime('%d/%m') }}{% endif %}{% if p.status == 'enviado' and p.visto_em %} · 👀 abriu{% endif %}{% if p.status == 'aceito' %} · {{ p.forma_d }} · {{ 'pago' if p.pago_em else 'aguardando pagamento' }}{% endif %}{% if p.nao_fechou_motivo %} · {{ p.nao_fechou_motivo }}{% endif %}</span></div>
   {% else %}<div class="pl-mut">Nenhum plano ainda. Ele nasce da consulta: ao finalizar, "o médico propôs tratamento? sim" e depois "Montar plano de tratamento".</div>{% endfor %}
   </div>
   {% if gerencia %}
@@ -336,20 +364,35 @@ _TPL_FORM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div><span class="pl-mut">Total</span><b>{{ brl(p.total) }}</b>{% if p.desconto_efetivo %}<span class="pl-mut">desconto efetivo de {{ p.desconto_efetivo|round(1) }}% da tabela (no Pix)</span>{% endif %}</div>
     <div><span class="pl-mut">Pix à vista</span><b>{{ brl(p.pix) }}</b></div>
     <div><span class="pl-mut">Cartão</span><b>{{ p.parcelas }}× {{ brl(p.parcela) }}</b></div>
-    {% if p.status == 'aceito' %}<div><span class="pl-mut">Aceito</span><b>{{ p.forma_d }}</b><span class="pl-mut">{{ p.aceito_em.strftime('%d/%m %H:%M') }} · {{ {'link':'pelo link','whatsapp':'no WhatsApp','recepcao':'na recepção'}[p.aceito_por] }}</span></div>{% endif %}
+    {% if p.status == 'aceito' %}<div><span class="pl-mut">Aceito</span><b>{{ p.forma_d }}</b><span class="pl-mut">{{ p.aceito_em.strftime('%d/%m %H:%M') }} · {{ {'link':'pelo link','whatsapp':'no WhatsApp','recepcao':'na recepção'}[p.aceito_por] }}</span></div>
+    <div><span class="pl-mut">Pagamento</span><b>{{ 'recebido' if p.pago_em else 'aguardando' }}</b>{% if p.pago_em %}<span class="pl-mut">{{ p.pago_em.strftime('%d/%m %H:%M') }}</span>{% endif %}</div>{% endif %}
+    {% if p.nao_fechou_motivo %}<div><span class="pl-mut">Não fechou</span><b>{{ p.nao_fechou_motivo }}</b></div>{% endif %}
   </div>
   <div class="pl-acoes">
     {% if p.status == 'aguardando_aprovacao' and gerencia %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/aprovar"><input type="hidden" name="visto" value="{{ p.versao }}"><button>Aprovar desconto (efetivo {{ p.desconto_efetivo|round(1) }}% da tabela)</button></form>{% endif %}
     {% if p.status == 'aceito' and not p.titulos %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/titulos"><button class="sec">Gerar as contas a receber</button></form>{% endif %}
+    {% if p.status == 'aceito' and p.titulos and not p.pago_em %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/recebi"><button>Recebi o pagamento (ou a entrada)</button></form>{% endif %}
     {% if p.status == 'rascunho' %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/enviar"><button>Enviar no WhatsApp</button></form>{% endif %}
     {% if p.status == 'enviado' %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/aceito" style="display:flex;gap:.4rem;flex-wrap:wrap">
       <select name="forma" style="width:auto">{% for k, rot in FORMAS %}{% if k != 'parcelado' or p.parcelado %}<option value="{{ k }}">{{ rot }}</option>{% endif %}{% endfor %}</select>
       <button class="sec">Fechou na recepção</button></form>{% endif %}
-    {% if p.status in ('rascunho','aguardando_aprovacao','enviado') %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/cancelar"><button class="sec">Cancelar plano</button></form>{% endif %}
+    {% if p.status in ('rascunho','aguardando_aprovacao','enviado') %}<form class="pl-nq" method="post" action="/painel/clinica/planos/{{ p.id }}/nao_quis">
+      <select name="motivo" required><option value="">Por quê?</option>{% for k, rot in MOTIVOS %}<option value="{{ k }}">{{ rot }}</option>{% endfor %}</select>
+      <button class="sec">Paciente não quis</button></form>
+    <form method="post" action="/painel/clinica/planos/{{ p.id }}/cancelar"><button class="sec" title="Pra refazer o plano: o card do paciente não se mexe">Cancelar plano (pra refazer)</button></form>{% endif %}
     {% if link %}<a href="{{ link }}" target="_blank" rel="noopener">Ver o que o paciente vê</a>{% endif %}
   </div>
   {% if texto %}<div class="pl-mut" style="margin-top:.7rem">A mensagem que saiu:</div><div class="pl-msg">{{ texto }}</div>{% endif %}
   </div>
+  {% endif %}
+
+  {% if not p and base.evento_id %}
+  <form class="pl-cx pl-nq" method="post" action="/painel/clinica/planos/nao-quis">
+    <input type="hidden" name="evento" value="{{ base.evento_id }}">
+    <span class="pl-mut">O paciente saiu sem querer o plano?</span>
+    <select name="motivo" required><option value="">Por quê?</option>{% for k, rot in MOTIVOS %}<option value="{{ k }}">{{ rot }}</option>{% endfor %}</select>
+    <button class="sec">O paciente não quis o plano</button>
+  </form>
   {% endif %}
 
   {% if editavel %}

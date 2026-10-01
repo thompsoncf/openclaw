@@ -235,7 +235,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="hj-desligado" style="margin-top:1rem"><b>⚡ {{ vagas_esperando }} horário{% if vagas_esperando > 1 %}s{% endif %} liberado{% if vagas_esperando > 1 %}s{% endif %} por cancelamento</b> esperando você aprovar o convite. <a href="/painel/clinica/vagas">Abrir vagas liberadas</a></div>
   {% endif %}
 
-  {% if planos.aprovar or planos.vencendo or planos.responderam %}
+  {% if planos.aprovar or planos.vencendo or planos.responderam or planos.a_pagar %}
   <div class="hj-sec"><h3>Planos de tratamento</h3>
     <span class="ex">O Zaq cobra a decisão sozinho em D+1 e D+3. Aqui fica o que precisa de você.</span></div>
   <div class="hj-lista">
@@ -243,6 +243,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     {% for p in planos.responderam %}<div class="hj-card quente"><div class="cab"><a class="quem" href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a><span class="chip">respondeu depois do plano</span></div>
       <div class="hj-acoes"><a class="abre" href="/painel/clinica/planos/{{ p.id }}">Abrir plano</a></div></div>{% endfor %}
     {% for p in planos.vencendo if p not in planos.responderam %}<div class="hj-card fora"><div class="cab"><a class="quem" href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a><span class="chip fora">vence {{ p.validade_ate.strftime('%d/%m') }}</span></div></div>{% endfor %}
+    {% for p in planos.a_pagar %}<div class="hj-card fora"><div class="cab"><a class="quem" href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a><span class="chip fora">aceitou, falta o pagamento</span></div></div>{% endfor %}
   </div>
   {% endif %}
 

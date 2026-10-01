@@ -22,3 +22,10 @@ def dono_do_token(c, token: str) -> tuple[int, int] | None:
 def contas_com_plano_enviado(c) -> list[int]:
     return [r[0] for r in c.execute(
         "select distinct conta_id from clinica_planos where status='enviado'").fetchall()]
+
+
+def contas_com_plano_a_pagar(c) -> list[int]:
+    """As contas com plano aceito esperando o pagamento: o relógio confere a baixa que
+    veio do financeiro (clinica_planos.conferir_pagamentos)."""
+    return [r[0] for r in c.execute(
+        "select distinct conta_id from clinica_planos where status='aceito' and pago_em is null").fetchall()]

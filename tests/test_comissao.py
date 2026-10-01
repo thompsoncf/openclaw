@@ -169,7 +169,7 @@ def test_relatorio_do_dono_e_tela_do_vendedor_dao_o_mesmo(pool, cen, monkeypatch
     import db.conexao as conexao
     monkeypatch.setattr(conexao, "get_pool", lambda *a, **k: pool)
     import web.painel_relatorios as rel
-    monkeypatch.setattr(rel, "_intervalo", lambda periodo: (INI, FIM))
+    monkeypatch.setattr(rel, "_intervalo", lambda periodo, *a, **k: (INI, FIM))
 
     do_dono = rel._dados_comissao(pool, cen["conta"], "mes")
     linha_ana = next(l for l in do_dono["linhas"] if l["vendedor"] == "Ana")

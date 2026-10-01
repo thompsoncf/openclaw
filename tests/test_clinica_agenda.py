@@ -534,6 +534,58 @@ def test_presente_leva_o_card_pra_consulta(pool):
                          ).fetchone() == ("qualificado", "consulta", "agenda")
 
 
+def _marcar_tipo(c, tipo, h=8, dia=SEG, nome="Maria Clara", fone="(99) 98888-0001"):
+    eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, tipo)["id"],
+                           inicio=ca.utc(dia, time(h)), nome=nome, fone=fone, agora=AGORA)
+    assert erro is None, erro
+    return eid
+
+
+def test_presente_so_abre_consulta_em_horario_de_consulta(pool):
+    """"Veio ou faltou" depende do tipo do horário: o ato único (exame, teste alérgico,
+    procedimento avulso) não passa por Consulta; resolve-se no Finalizar."""
+    with pool.connection() as c:
+        teste = _marcar_tipo(c, "Testes alérgicos")
+        assert _status(c, teste)[0] == "qualificado"
+        _ate_atendimento(c, teste)
+        assert _status(c, teste)[0] == "qualificado"            # Presente não mexe
+        assert ca.mudar_situacao(c, CLINICA, teste, "finalizado", tratamento="nao") is None
+        assert _status(c, teste)[0] == "ganho"                  # o ato único conclui no Finalizar
+        proc = _marcar_tipo(c, "Procedimento clínico", h=9, nome="Outra", fone="99 97777-0097")
+        _ate_atendimento(c, proc)
+        assert _status(c, proc)[0] == "qualificado"            # procedimento avulso também não
+        consulta = _marcar_tipo(c, "Consulta", h=10, nome="Mais uma", fone="99 97777-0098")
+        _ate_atendimento(c, consulta)
+        assert _status(c, consulta)[0] == "consulta"
+
+
+def test_consulta_nova_reabre_o_card_concluido_e_o_retorno_nao(pool):
+    """Marcar consulta nova reabre o card em Agendado (o paciente voltou com outra
+    queixa). O retorno e a sessão de quem concluiu não reabrem nada."""
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        lead = ca.evento(c, CLINICA, eid)["lead"]
+        c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
+        _marcar_tipo(c, "Retorno", h=10)
+        assert _status(c, eid)[0] == "ganho"
+        _marcar_tipo(c, "Consulta", dia=SEG + timedelta(days=7))
+        assert _status(c, eid)[0] == "qualificado"
+        assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
+                         ).fetchone() == ("ganho", "qualificado", "agenda")
+        assert c.execute("select descricao from prospeccao_atividades order by id desc limit 1"
+                         ).fetchone()[0] == "Consulta nova marcada: o card voltou para Agendado."
+
+
+def test_funil_de_antes_a_consulta_nova_nao_reabre(pool):
+    with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=%s and chave in ('consulta','tratamento','retorno')",
+                  (CLINICA,))
+        eid, _ = _marcar(c)
+        c.execute("update prospeccao set status='ganho' where id=%s", (ca.evento(c, CLINICA, eid)["lead"],))
+        _marcar_tipo(c, "Consulta", dia=SEG + timedelta(days=7))
+        assert _status(c, eid)[0] == "ganho"
+
+
 def test_propos_tratamento_segura_o_card_em_consulta_com_o_plano_a_montar(pool):
     """O card só vai pra Plano enviado quando o plano é ENVIADO (clinica_planos)."""
     with pool.connection() as c:

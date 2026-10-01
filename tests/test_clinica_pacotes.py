@@ -400,6 +400,41 @@ def test_card_arrastado_pra_retorno_sem_retorno_na_fila_fica_onde_o_dono_pos(poo
         assert _card(c, lead) == "retorno"
 
 
+def test_so_horario_de_retorno_fecha_o_retorno(pool, zap):
+    """Antes qualquer horário com o mesmo profissional fechava o retorno, e a sessão
+    do pacote o apagava (desenho de 01/10/2026, seção 01)."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        _sessao(c, lead, date(2026, 10, 20))                    # sessão de procedimento, mesmo médico
+        c.commit()
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 15)))
+        c.commit()
+        assert c.execute("select estado from clinica_retornos where id=%s", (_retorno_id(c, lead),)
+                         ).fetchone()[0] == "aguardando"
+        assert ca._retorno_pendente(c, CLINICA, lead)
+        _sessao(c, lead, date(2026, 10, 27), tipo="Retorno")
+        c.commit()
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 22)))
+        c.commit()
+        assert c.execute("select estado from clinica_retornos where id=%s", (_retorno_id(c, lead),)
+                         ).fetchone()[0] == "marcado"
+        assert not ca._retorno_pendente(c, CLINICA, lead)
+
+
+def test_conta_sem_atendimento_de_retorno_no_catalogo_segue_a_regra_de_antes(pool, zap):
+    with pool.connection() as c:
+        c.execute("update servicos_catalogo set categoria='consulta' where conta_id=39 and categoria='retorno'")
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        _sessao(c, lead, date(2026, 10, 20))
+        c.commit()
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 15)))
+        c.commit()
+        assert c.execute("select estado from clinica_retornos where id=%s", (_retorno_id(c, lead),)
+                         ).fetchone()[0] == "marcado"
+
+
 # ------------------------------------------------------------------ os lembretes
 
 def test_lembra_a_proxima_sessao_sem_dizer_o_procedimento(pool, zap):

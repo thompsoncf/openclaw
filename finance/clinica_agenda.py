@@ -307,16 +307,26 @@ def _lead_do_paciente(c, conta_id: int, lead_id: int | None, nome: str, fone: st
     return lid, nome, "+" + dig, None
 
 
-def _mover_card(c, conta_id: int, lead_id: int, membro_id: int | None) -> None:
+def _mover_card(c, conta_id: int, lead_id: int, membro_id: int | None, categoria: str = "") -> None:
     """Marcar leva o card pra "Agendado" (chave `qualificado`). Só pra frente: card em
     Consulta, Plano enviado, Em tratamento, Retorno ou fechado fica onde está (a sessão
-    do pacote e o horário de retorno não tiram ninguém da coluna)."""
+    do pacote e o horário de retorno não tiram ninguém da coluna).
+
+    A EXCEÇÃO É A CONSULTA NOVA de quem já concluiu (desenho de 01/10/2026, seção 02:
+    "marcar consulta nova reabre o cartão em Agendado"): o paciente voltou com outra
+    queixa e o card volta pro quadro. Só no funil novo e só horário de consulta: o
+    retorno, a sessão e o procedimento avulso de quem concluiu não reabrem nada."""
     r = c.execute("select status from prospeccao where id=%s and conta_id=%s for update",
                   (lead_id, conta_id)).fetchone()
-    if r and r[0] in ("novo", "contatado", "follow_up"):
-        c.execute("update prospeccao set status='qualificado', atualizado_em=now() where id=%s and conta_id=%s",
-                  (lead_id, conta_id))
+    if not r:
+        return
+    reabre = r[0] == "ganho" and categoria == "consulta" and "consulta" in _chaves_do_funil(c, conta_id)
+    if r[0] in ("novo", "contatado", "follow_up") or reabre:
+        c.execute("update prospeccao set status='qualificado', estagio='lead', atualizado_em=now() "
+                  "where id=%s and conta_id=%s", (lead_id, conta_id))
         fr.registrar_movimento(c, conta_id, lead_id, r[0], "qualificado", "agenda", membro_id)
+        if reabre:
+            _nota(c, lead_id, membro_id, "Consulta nova marcada: o card voltou para Agendado.")
 
 
 def _faixa_do_horario(c, conta_id: int, profissional_id: int, inicio: datetime) -> dict | None:
@@ -384,7 +394,7 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
         # o card sem celular ganha o do WhatsApp, no formato de _lead_do_paciente
         dig = _digitos(fone)
         fone_pac = "+" + (dig if dig.startswith("55") else "55" + dig)
-    _mover_card(c, conta_id, lid, membro_id)
+    _mover_card(c, conta_id, lid, membro_id, tipo.get("categoria") or "")
     loc_id = faixa["local_id"] if faixa else None
     loc = next((x for x in cc.listar_locais(c, conta_id) if x["id"] == loc_id), None)
     # O TÍTULO NÃO DIZ O PROCEDIMENTO: é o que a agenda de sempre e o .ics mostram.
@@ -457,10 +467,23 @@ def _outra_marcada(c, conta_id: int, lead: int, evento_id: int) -> bool:
 _ANTES_DO_DIA = ("novo", "contatado", "follow_up", "qualificado")
 
 
+#: o horário que dá um retorno por marcado (desenho de 01/10/2026, seção 01): de
+#: categoria "retorno". Antes qualquer horário com o mesmo profissional fechava o
+#: retorno, e a sessão do pacote o apagava. A conta que não tem nenhum atendimento de
+#: categoria retorno no catálogo segue a regra de antes (senão o retorno nunca fecharia).
+#: Condição pronta pra um WHERE, com `e` = o horário e `r` = o retorno.
+SQL_HORARIO_DE_RETORNO = """(exists (select 1 from servicos_catalogo s_
+                                     where s_.id = e.servico_id and s_.conta_id = e.conta_id
+                                       and s_.categoria = 'retorno')
+                             or not exists (select 1 from servicos_catalogo x_
+                                             where x_.conta_id = r.conta_id and x_.categoria = 'retorno'
+                                               and coalesce(x_.ativo, true)))"""
+
+
 def _retorno_pendente(c, conta_id: int, lead_id: int) -> bool:
     """O paciente tem retorno pedido e ainda não marcado? A mesma leitura de
-    `clinica_pacotes.fechar_retornos` (um horário com o profissional DEPOIS do pedido
-    dá o retorno por marcado), feita na hora: o Finalizar não espera o relógio."""
+    `clinica_pacotes.fechar_retornos` (um horário DE RETORNO com o profissional depois
+    do pedido dá o retorno por marcado), feita na hora: o Finalizar não espera o relógio."""
     try:
         with c.transaction():
             return c.execute(
@@ -472,7 +495,8 @@ def _retorno_pendente(c, conta_id: int, lead_id: int) -> bool:
                                          and e.prospeccao_id = r.prospeccao_id
                                          and e.profissional_id = r.profissional_id
                                          and e.situacao not in ('cancelou','faltou') and e.status='ativo'
-                                         and e.inicio > o.inicio)
+                                         and e.inicio > o.inicio
+                                         and """ + SQL_HORARIO_DE_RETORNO + """)
                     limit 1""", (conta_id, lead_id)).fetchone() is not None
     except Exception:  # noqa: BLE001 — sem a 381
         return False
@@ -514,7 +538,9 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
     """O CARD ANDA QUANDO A AGENDA ANDA (docs/mockups/clinica_crm_telas.html, seção 01,
     aprovado em 01/10/2026). Devolve a etapa nova, ou None se o card ficou onde estava.
 
-        presente                 antes do dia → Consulta: o paciente veio
+        presente                 antes do dia → Consulta: o paciente veio. Só em horário
+                                 de consulta ou avaliação (categoria "consulta"); os
+                                 outros tipos só andam no Finalizar
         faltou / cancelou        Agendado → Follow-up ("faltou, remarcar").
                                  Não é Perdido: faltar não é desistir. Vale também
                                  pro card que só estava em Consulta por causa deste
@@ -544,18 +570,21 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
     """
     r = c.execute("""select e.prospeccao_id, p.status, coalesce(p.valor_estimado_centavos, 0),
                             coalesce(s.setup_centavos, 0), to_char(e.inicio - interval '3 hours', 'DD/MM HH24:MI'),
-                            e.situacao
+                            e.situacao, coalesce(s.categoria, '')
                        from eventos_agenda e
                        join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
                        left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
                       where e.id=%s and e.conta_id=%s""", (evento_id, conta_id)).fetchone()
     if not r:
         return None
-    lead, atual, valor_atual, preco_tipo, quando, sit_evento = r
+    lead, atual, valor_atual, preco_tipo, quando, sit_evento, categoria = r
     chaves = _chaves_do_funil(c, conta_id)
     tem_consulta, tem_retorno = "consulta" in chaves, "retorno" in chaves
     destino, nota, valor = None, None, None
-    if nova == "presente" and atual in _ANTES_DO_DIA and tem_consulta:
+    if nova == "presente" and atual in _ANTES_DO_DIA and tem_consulta and categoria in ("consulta", ""):
+        # "VEIO OU FALTOU" DEPENDE DO TIPO DO HORÁRIO (seção 01): só a consulta e a
+        # avaliação abrem a coluna Consulta. Sessão, retorno, procedimento e exame são
+        # resolvidos no Finalizar (o ato único conclui ali mesmo)
         destino = "consulta"
     elif nova in ("faltou", "cancelou") and "follow_up" in chaves \
             and (atual == "qualificado" or (atual == "consulta" and tem_consulta

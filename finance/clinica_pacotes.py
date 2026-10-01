@@ -372,8 +372,9 @@ def retornos(c, conta_id: int, agora: datetime, dias: int = 14) -> list[dict]:
 
 
 def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
-    """Marcou com o profissional depois do pedido → 'marcado'; 30 dias depois do prazo
-    sem marcar → 'vencido' (sai da fila)."""
+    """Marcou um horário DE RETORNO com o profissional depois do pedido → 'marcado' (a
+    sessão do pacote não fecha o retorno: `clinica_agenda.SQL_HORARIO_DE_RETORNO`); 30
+    dias depois do prazo sem marcar → 'vencido' (sai da fila)."""
     n = 0
     try:
         with c.transaction():
@@ -385,6 +386,7 @@ def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
                                                    and e.situacao not in ('cancelou','faltou') and e.status='ativo'
                                                    and e.inicio > (select o.inicio from eventos_agenda o
                                                                     where o.id = r.evento_id and o.conta_id = r.conta_id)
+                                                   and """ + ca.SQL_HORARIO_DE_RETORNO + r"""
                                                    and (e.prospeccao_id = r.prospeccao_id
                                                         or (length(regexp_replace(r.paciente_fone, '\D', '', 'g')) >= 8
                                                             and right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8)
@@ -397,6 +399,7 @@ def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
                                       and e.situacao not in ('cancelou','faltou') and e.status='ativo'
                                       and e.inicio > (select o.inicio from eventos_agenda o
                                                        where o.id = r.evento_id and o.conta_id = r.conta_id)
+                                      and """ + ca.SQL_HORARIO_DE_RETORNO + r"""
                                       and (e.prospeccao_id = r.prospeccao_id
                                            or (length(regexp_replace(r.paciente_fone, '\D', '', 'g')) >= 8
                                                and right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8)

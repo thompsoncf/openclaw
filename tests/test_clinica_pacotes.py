@@ -317,6 +317,8 @@ def test_retorno_marcado_segura_o_card_e_o_cancelamento_devolve_pra_fila(pool, z
         assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "retorno"   # marcado: espera o dia
         assert ca.mudar_situacao(c, CLINICA, volta, "cancelou") is None
         c.commit()
+        # antes de o relógio devolver o retorno pra fila, o card não é dado por concluído
+        assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "retorno"
         ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 23)))
         c.commit()
         assert c.execute("select estado from clinica_retornos where id=%s", (_retorno_id(c, lead),)
@@ -341,6 +343,51 @@ def test_retorno_que_nasce_depois_do_finalizar_leva_o_card_de_concluido_pra_reto
         c.commit()
         assert ckp.varrer_retorno(c) == 1
         assert _card(c, lead) == "retorno"
+
+
+def test_a_mao_do_dono_vale_mais_que_a_fila_ate_a_fila_mudar(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        assert _card(c, lead) == "retorno"
+        # o dono arrasta pra Concluído com o retorno ainda a fazer: fica
+        c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
+        c.execute("""insert into funil_movimentos (conta_id, prospeccao_id, de, para, motivo, criado_em)
+                     values (39,%s,'retorno','ganho','manual', now() + interval '1 minute')""", (lead,))
+        c.commit()
+        assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "ganho"
+        # e de volta pra Retorno, com o retorno já vencido: fica também
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 12, 15)))
+        c.execute("update prospeccao set status='retorno' where id=%s", (lead,))
+        c.execute("""insert into funil_movimentos (conta_id, prospeccao_id, de, para, motivo, criado_em)
+                     values (39,%s,'ganho','retorno','manual', now() + interval '2 minutes')""", (lead,))
+        c.commit()
+        assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "retorno"
+
+
+def test_pacote_que_nao_nasce_nao_derruba_o_aceite_e_o_card_conclui(pool, zap, monkeypatch):
+    """O pacote nasce na transação do aceite, dentro de um savepoint: se falha, o aceite
+    vale, os títulos saem e o card vai pra Concluído (sem saldo, nada o tiraria de
+    Em tratamento)."""
+    def _quebra(*a, **k):
+        raise RuntimeError("sem pacote")
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        itens, _e = cp.limpar_itens(
+            [{"servico_id": _tipo(c, "Procedimento estético")["id"], "sessoes": 4, "valor": ""}],
+            {t["id"]: t for t in cc.listar_tipos(c, CLINICA)})
+        pid, _e = cp.salvar(c, CLINICA, lead=lead, evento_id=None, profissional_id=_manoel(c), paciente="Lúcia Ferreira",
+                            fone=FONE, itens=itens, desconto_pct="0", pix_desconto_pct="0", cartao_parcelas="4",
+                            parcelado=True, membro_id=51, pode_aprovar=True)
+        c.commit()
+        assert cp.enviar(c, CLINICA, pid, 51, AGORA)["ok"]
+        token = cp.plano(c, CLINICA, pid)["token"]
+    monkeypatch.setattr(ckp, "criar_do_plano", _quebra)
+    assert cp.aceitar(pool, token, nome="Lúcia Ferreira", forma="cartao", agora=AGORA)
+    with pool.connection() as c:
+        assert cp.plano(c, CLINICA, pid)["status"] == "aceito"
+        assert ckp.listar(c, CLINICA) == []
+        assert _card(c, lead) == "ganho"
 
 
 def test_card_arrastado_pra_retorno_sem_retorno_na_fila_fica_onde_o_dono_pos(pool, zap):

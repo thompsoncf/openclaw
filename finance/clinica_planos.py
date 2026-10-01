@@ -386,6 +386,9 @@ def _mover(c, conta_id: int, lead: int | None, destino: str, valor: int | None, 
     if not r:
         return
     pode = _ANTES if destino == "proposta" else _ANTES + ("proposta",)
+    # só as colunas DO MODELO: a "Retorno" criada à mão em fase de venda tem a mesma chave
+    chaves = ca._chaves_do_funil(c, conta_id)
+    pode = tuple(x for x in pode if x not in ("consulta", "retorno") or x in chaves)
     if r[0] == destino and valor:
         # já está na etapa (o Finalizar pôs em Plano de tratamento): o valor é o do plano
         c.execute("update prospeccao set valor_estimado_centavos=%s, atualizado_em=now() where id=%s and conta_id=%s",
@@ -428,13 +431,14 @@ def enviar(c, conta_id: int, plano_id: int, membro_id: int | None, agora: dateti
     if res.get("ok"):
         c.execute("update clinica_planos set mensagem_id=%s, ultima_msg_id=%s where id=%s and conta_id=%s",
                   (res.get("mensagem_id"), res.get("mensagem_id"), plano_id, conta_id))
+        c.commit()                      # a mensagem saiu: o registro dela não espera a trava do card
         try:
-            with c.transaction():
-                # O CARD SÓ VAI PRA "PLANO ENVIADO" QUANDO O PLANO SAIU. Movido antes do
-                # WhatsApp, o envio que falhava deixava o paciente fora de Consulta (onde
-                # ninguém o cobra) sem ter recebido nada (revisão de 01/10/2026)
-                _mover(c, conta_id, p["lead"], "proposta", p["total"], membro_id)
+            # O CARD SÓ VAI PRA "PLANO ENVIADO" QUANDO O PLANO SAIU. Movido antes do
+            # WhatsApp, o envio que falhava deixava o paciente fora de Consulta (onde
+            # ninguém o cobra) sem ter recebido nada (revisão de 01/10/2026)
+            _mover(c, conta_id, p["lead"], "proposta", p["total"], membro_id)
         except Exception:  # noqa: BLE001 — o plano saiu; o card é consequência
+            c.rollback()
             _log.warning("planos: card não andou no envio (plano %s)", plano_id, exc_info=True)
     else:
         # NÃO SAIU: o plano volta pra rascunho. Um plano 'enviado' que o paciente nunca

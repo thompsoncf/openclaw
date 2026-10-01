@@ -636,10 +636,17 @@ def test_nao_de_outro_atendimento_nao_fecha_o_card_que_espera_o_plano(pool):
         depois, _ = _marcar(c, h=10, nome="Filho")
         assert ca.evento(c, CLINICA, filho)["lead"] == ca.evento(c, CLINICA, mae)["lead"]
         _ate_atendimento(c, mae)
+        c.commit()                      # cada clique é uma transação: o relógio anda entre eles
         assert ca.mudar_situacao(c, CLINICA, mae, "finalizado", tratamento="sim", valor_centavos=320000) is None
+        c.commit()
         _ate_atendimento(c, filho)
+        c.commit()
         assert ca.mudar_situacao(c, CLINICA, filho, "finalizado", tratamento="nao") is None
+        c.commit()
         assert _status(c, mae) == ("consulta", 320000)
+        # a tela tinha prometido Retorno ou Concluído: a linha do tempo diz por que ficou
+        assert "O card segue em Consulta" in c.execute(
+            "select descricao from prospeccao_atividades order by id desc limit 1").fetchone()[0]
         assert ca.mudar_situacao(c, CLINICA, depois, "cancelou") is None
         assert _status(c, mae) == ("consulta", 320000)
         assert c.execute("select tratamento_proposto from eventos_agenda where id in (%s,%s,%s) order by id",
@@ -674,6 +681,71 @@ def test_proposta_de_outra_passagem_nao_segura_o_card(pool):
         assert _status(c, novo)[0] == "consulta"
         assert ca.mudar_situacao(c, CLINICA, novo, "finalizado", tratamento="nao") is None
         assert _status(c, novo)[0] == "ganho"
+
+
+def test_chegou_esquecido_de_outro_dia_nao_prende_o_card_em_consulta(pool):
+    """Nada fecha o Presente sozinho. O "Chegou" que a recepção esqueceu de finalizar
+    na semana passada não é "outro paciente na clínica" hoje (2ª revisão de 01/10/2026)."""
+    with pool.connection() as c:
+        esquecido, _ = _marcar(c)
+        assert ca.mudar_situacao(c, CLINICA, esquecido, "presente") is None
+        hoje, _ = _marcar(c, dia=SEG + timedelta(days=7))
+        assert ca.evento(c, CLINICA, hoje)["lead"] == ca.evento(c, CLINICA, esquecido)["lead"]
+        _ate_atendimento(c, hoje)
+        assert ca.mudar_situacao(c, CLINICA, hoje, "finalizado", tratamento="nao") is None
+        assert _status(c, hoje)[0] == "ganho"
+
+
+def test_card_arrastado_pra_consulta_depois_da_proposta_continua_esperando_o_plano(pool):
+    """O card estava em Concluído quando o médico propôs (não anda sozinho); a recepção
+    o arrasta pra Consulta pra montar o plano. O movimento à mão é mais novo que a
+    proposta e não a apaga: o "não" seguinte não fecha o card."""
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        lead = ca.evento(c, CLINICA, eid)["lead"]
+        c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
+        _ate_atendimento(c, eid)
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="sim") is None
+        assert _status(c, eid)[0] == "ganho"
+        c.commit()
+        c.execute("update prospeccao set status='consulta' where id=%s", (lead,))
+        c.execute("""insert into funil_movimentos (conta_id, prospeccao_id, de, para, motivo)
+                     values (%s,%s,'ganho','consulta','manual')""", (CLINICA, lead))
+        outro, _ = _marcar(c, h=9, nome="Filho")
+        _ate_atendimento(c, outro)
+        assert ca.mudar_situacao(c, CLINICA, outro, "finalizado", tratamento="nao") is None
+        assert _status(c, outro)[0] == "consulta"
+
+
+def test_cancelar_por_fora_a_consulta_ja_finalizada_nao_desfaz_o_plano_a_montar(pool):
+    from finance import agenda as ag
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        _ate_atendimento(c, eid)
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="sim") is None
+        c.commit()
+    assert ag.cancelar_evento(pool, CLINICA, eid)
+    with pool.connection() as c:
+        assert _status(c, eid)[0] == "consulta"
+
+
+def test_etapa_retorno_do_funil_antigo_criada_a_mao_nao_e_de_onde_a_agenda_tira(pool):
+    """Conta sem o modelo novo, com uma etapa "Retorno" criada à mão em fase de venda
+    (a chave é o nome): o card que está nela não sai pelo Finalizar, como na regra de antes."""
+    with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=%s and chave in ('consulta','tratamento','retorno')",
+                  (CLINICA,))
+        c.execute("insert into funil_etapas (conta_id, chave, fase) values (%s,'retorno','venda')", (CLINICA,))
+        eid, _ = _marcar(c)
+        c.execute("update prospeccao set status='retorno' where id=%s", (ca.evento(c, CLINICA, eid)["lead"],))
+        _ate_atendimento(c, eid)
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado") is None
+        assert _status(c, eid)[0] == "retorno"
+        eid2, _ = _marcar(c, h=9, nome="Outra", fone="99 97777-0096")
+        c.execute("update prospeccao set status='retorno' where id=%s", (ca.evento(c, CLINICA, eid2)["lead"],))
+        _ate_atendimento(c, eid2)
+        assert ca.mudar_situacao(c, CLINICA, eid2, "finalizado", tratamento="nao") is None
+        assert _status(c, eid2)[0] == "retorno"
 
 
 def test_chegou_por_engano_e_cancelado_por_fora_volta_pro_follow_up(pool):

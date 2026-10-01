@@ -206,6 +206,16 @@ def salvar_config(pool, conta_id: int, *, ativo: bool, emails: str,
 
 # ------------------------------------------------------------------ os números
 
+def _e_clinica(pool, conta_id: int) -> bool:
+    """A conta é do nicho clínica? Tolerante: na dúvida, não é (a carteira conta igual a antes)."""
+    try:
+        with pool.connection() as c:
+            return c.execute("""select 1 from contas ct join nichos n on n.id = ct.nicho_id
+                                 where ct.id=%s and n.slug='clinica'""", (conta_id,)).fetchone() is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) -> dict:
     """O que o Raio-X não calcula por não ser pergunta de tela.
 
@@ -219,6 +229,10 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
            "sem_data": 0, "titulos_vencidos": 0, "titulos_vencidos_valor": 0,
            "sinal_pago": 0, "por_vendedor": []}
     festa = _vis.vende_festa(pool, conta_id)     # a régua da visita segue o nicho
+    # Em tratamento e Retorno (clínica) já fecharam: não são carteira aberta. SÓ na
+    # clínica: em outro nicho, a etapa "Retorno" criada à mão tem a mesma chave e é
+    # venda em aberto. Lido aqui, e não na consulta, que roda igual em toda conta
+    fora_da_carteira = "('ganho','perdido'" + (",'tratamento','retorno'" if _e_clinica(pool, conta_id) else "") + ")"
     with pool.connection() as c:
         def _um(sql, args, chave):
             try:
@@ -292,13 +306,7 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
                                and c.assinado_em >= %s and c.assinado_em < %s),
                            (select count(*) from prospeccao p
                              where p.vendedor_id = m.id
-                               and p.status not in ('ganho','perdido')
-                               -- Em tratamento e Retorno já fecharam: não são carteira aberta.
-                               -- Só na clínica: em outro nicho, a etapa "Retorno" criada à
-                               -- mão tem a mesma chave e é venda em aberto
-                               and not (p.status in ('tratamento','retorno') and exists (
-                                    select 1 from contas ct_ join nichos nc_ on nc_.id = ct_.nicho_id
-                                     where ct_.id = p.conta_id and nc_.slug = 'clinica')))
+                               and p.status not in """ + fora_da_carteira + """)
                       from membros m
                      where m.conta_id=%s and coalesce(m.ativo,true) and m.papel='vendedor'
                      order by 2""",

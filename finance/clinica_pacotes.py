@@ -603,8 +603,7 @@ def varrer_retorno(c) -> int:
                                    and (r.estado = 'aguardando' or (r.estado = 'marcado' and exists (
                                         select 1 from eventos_agenda e
                                          where e.id = r.marcado_evento_id and e.conta_id = r.conta_id
-                                           and e.status = 'ativo'
-                                           and e.situacao not in ('finalizado', 'cancelou', 'faltou')))))))
+                                           and coalesce(e.situacao, '') <> 'finalizado'))))))
                     limit 200""").fetchall()
     except Exception:  # noqa: BLE001 — sem a régua ou sem a 381
         return 0
@@ -630,8 +629,11 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                 try:
                     with c.transaction():
                         contas = [r[0] for r in c.execute(
+                            # 'marcado' também: o horário que fechou o retorno pode ter sido
+                            # cancelado, e é `fechar_retornos` que o devolve pra fila
                             """select conta_id from clinica_pacotes where estado='ativo'
-                               union select conta_id from clinica_retornos where estado='aguardando'""").fetchall()]
+                               union select conta_id from clinica_retornos
+                                      where estado in ('aguardando', 'marcado')""").fetchall()]
                 except Exception:  # noqa: BLE001 — sem a 381
                     contas = []
                 for conta_id in contas:

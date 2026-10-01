@@ -7898,9 +7898,9 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {% if not dados.filtro_extra %}
     {# Busca NA TELA, e só nas abas que ainda não têm a do servidor — duas caixas
        de busca na mesma tela é pergunta sem resposta óbvia ("qual das duas?").
-       Aqui ela é client-side de propósito: as linhas já vieram todas (teto de 300
-       na consulta), então filtrar é instantâneo e não custa uma ida ao servidor
-       a cada tecla. #}
+       Aqui ela é client-side de propósito: as linhas mostradas já estão no HTML
+       (até 300 — acima disso a tela avisa), então filtrar é instantâneo e não
+       custa uma ida ao servidor a cada tecla. #}
     <input type="search" id="rel-q" placeholder="🔎 filtrar na tela…"
            aria-label="Filtrar as linhas mostradas" autocomplete="off">
     {% endif %}
@@ -8125,7 +8125,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   </script>
   {% endif %}
   <script>
-  // Filtro NA TELA. As linhas já estão todas no HTML (a consulta tem teto de 300),
+  // Filtro NA TELA. As linhas mostradas já estão no HTML (até 300; acima disso a tela avisa),
   // então não há ida ao servidor: filtrar é instantâneo.
   //
   // O TOTAL É RECALCULADO, e isso não é enfeite. Filtrar por um cliente e deixar o
@@ -8194,6 +8194,13 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   })();
   </script>
   <p class="mut" style="margin-top:.6rem"><span id="rel-conta">{{ dados.linhas|length }}</span> registro(s){% if not dados.mock %} · {{ periodo_rotulo }}{% endif %}</p>
+  {# O total e as métricas contam TODAS as linhas do período; a tabela mostra as
+     primeiras. Dito na tela, senão "300 registros" com um total maior que a soma
+     da coluna parece erro de conta. #}
+  {% if dados.linhas_total and dados.linhas_total > dados.linhas|length %}
+  <p class="mut" style="margin-top:.2rem">Mostrando {{ dados.linhas|length }} de {{ dados.linhas_total }} registros. O total e os números do topo contam todos os {{ dados.linhas_total }}; o “filtrar na tela” procura só nos mostrados — pra ver os outros, escolha um período menor.</p>
+  {% endif %}
+  {% if dados.incompleto %}<p class="mut" style="margin-top:.2rem;color:var(--amar)">⚠ Período grande demais: passou de {{ dados.linhas_total }} registros e a conta pode estar incompleta. Escolha um período menor.</p>{% endif %}
 </div>
 {% endblock %}"""
 
@@ -8380,7 +8387,7 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
 </div>
 {% endif %}
 <p class="aviso">{% if dados.mock %}🧪 Dados de exemplo — este relatório ainda não está ligado à base real.
-  {% else %}Documento gerencial gerado pelo Zaq a partir dos lançamentos da conta.{% endif %} {{ dados.linhas|length }} registro(s).</p>
+  {% else %}Documento gerencial gerado pelo Zaq a partir dos lançamentos da conta.{% endif %} {{ dados.linhas|length }} registro(s){% if dados.linhas_total and dados.linhas_total > dados.linhas|length %} listados de {{ dados.linhas_total }} — o total considera todos{% endif %}.</p>
 </body></html>"""
 
 

@@ -52,6 +52,16 @@ _intervalo = _per.intervalo
 from finance import relogio as _relogio  # noqa: E402 — o "hoje" de Brasília
 
 
+#: QUANTAS LINHAS a tela e o PDF mostram. A CONTA (total, métricas, taxas do
+#: funil) usa todas: até 01/10/2026 a consulta parava em 300 (500 no caixa) e o
+#: total era somado só do que voltou — num "Todo o período" longo ele sairia menor
+#: que o de verdade, sem aviso. Quem corta agora é o `_contexto`, e avisa.
+LINHAS_NA_TELA = 300
+#: teto de segurança da consulta. Bem acima de qualquer conta hoje (a maior tinha
+#: menos de 250 lançamentos de receita); se um dia chegar nele, a tela diz.
+_TETO_CONSULTA = 20000
+
+
 def periodos_da_aba(tipo: str) -> list[tuple[str, str]]:
     """As opções de período que a aba oferece. Só a Agenda difere."""
     return PERIODOS_AGENDA if tipo == "agenda" else PERIODOS
@@ -251,7 +261,7 @@ def _dados_vendas(pool, conta_id, periodo, de=None, ate=None):
                  left join titulos t on t.lancamento_id = l.id and t.conta_id = l.conta_id
                 where l.conta_id=%s and l.tipo='receita' and l.natureza='empresa'
                   and l.data >= %s and l.data <= %s
-                order by l.data desc, l.id desc limit 300""",
+                order by l.data desc, l.id desc limit 20000""",
             (conta_id, ini, fim),
         ).fetchall()
 
@@ -374,7 +384,8 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
     coluna constante não informa; ocupa. (O campo continua no banco, no filtro e
     no que a aba Empresa mostra — o que saiu é a coluna desta tabela.)"""
     hoje = _relogio.hoje()
-    tits = emp.listar_titulos(pool, conta_id, status="aberto", tipo=tipo, limite=300)
+    tits = emp.listar_titulos(pool, conta_id, status="aberto", tipo=tipo,
+                                limite=_TETO_CONSULTA)
     candidatos = emp.pagamentos_candidatos(pool, conta_id, tits, tipo)
     verbo = "pago" if tipo == "pagar" else "recebido"
     # a pílula concorda com "a conta", que é o sujeito da linha: "Talvez paga".
@@ -532,7 +543,7 @@ def _dados_caixa(pool, conta_id, tipo, periodo, de=None, ate=None):
                  left join titulos t on t.lancamento_id = l.id and t.conta_id = l.conta_id
                 where l.conta_id=%s and l.tipo=%s and l.natureza='empresa'
                   and l.data >= %s and l.data <= %s
-                order by l.data desc, l.id desc limit 500""",
+                order by l.data desc, l.id desc limit 20000""",
             (conta_id, lanc_tipo, ini, fim),
         ).fetchall()
         # o que ainda não foi classificado como empresa ou pessoal, no MESMO
@@ -852,7 +863,7 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                   left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
                   left join contas ct on ct.id = o.conta_id
                  where {where2_sql}
-                 order by o.criado_em desc limit 300""",
+                 order by o.criado_em desc limit 20000""",
             params2).fetchall()
 
     linhas = []
@@ -1007,7 +1018,7 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                   left join membros m on m.id::text = o.criado_por and m.conta_id = c.conta_id
                   left join contas ct on ct.id = c.conta_id
                  where {where2_sql}
-                 order by c.criado_em desc limit 300""",
+                 order by c.criado_em desc limit 20000""",
             params2).fetchall()
 
     # O VALOR QUE VALE HOJE, não o congelado na assinatura. Contrato com aditivo
@@ -1309,7 +1320,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                   from eventos_agenda e
                   {join_orc}
                  where {where2_sql}
-                 order by e.inicio asc limit 300""",
+                 order by e.inicio asc limit 20000""",
             params2).fetchall()
 
     # nomes da equipe: sem eles a leitura do título devolveria o VENDEDOR na
@@ -1649,7 +1660,7 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca,
       left join orcamentos o on o.id = p.orcamento_id
      where {" and ".join(onde)}
      order by coalesce(l.prim_in, p.criado_em) desc, p.id desc
-     limit 300"""
+     limit 20000"""
     with pool.connection() as c:
         rows = c.execute(sql, p_conv + params).fetchall()
 
@@ -1800,8 +1811,13 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     Cada taxa vem com a cobertura porque, sem ela, o relatório mente por omissão:
     em 26/08, na conta 34, "2 de 3 apareceram" pareceria 67% de comparecimento —
     mas 8 visitas já tinham acontecido e 5 estavam sem resposta nenhuma.
+
+    O MÊS INTEIRO, como a Agenda (decisão do dono em 01/10/2026): a visita marcada
+    pro dia 20 conta como agendada desde que foi marcada, e não só quando o dia
+    chega. Comparecimento não infla com isso — a taxa já mede só as que passaram.
+    Leads e orçamentos não mudam: nada deles nasce no futuro.
     """
-    ini, fim = _intervalo(periodo, de, ate)
+    ini, fim = _intervalo(periodo, de, ate, ate_o_fim=True)
     where, params = "", [conta_id]
     if periodo != "todos":
         # o dia de Teresina, como o Raio-X: `e.inicio::date` é o dia do banco
@@ -1825,7 +1841,7 @@ def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     with pool.connection() as c:
         rows = c.execute(_SQL_VISITAS.replace("{visita}", _vis.sql_conta(
                              "e", festa=_vis.vende_festa(pool, conta_id)))
-                         + where + " order by e.inicio desc limit 300",
+                         + where + " order by e.inicio desc limit 20000",
                          params).fetchall()
         # os leads que entraram por conversa — o topo do funil. Fora do filtro de
         # vendedor de propósito: o lead chega antes de ter dono, e recortar por
@@ -1991,7 +2007,7 @@ def _rotulo_periodo(tipo: str, periodo: str, de, ate) -> str:
     o rótulo genérico não serve de nada — quem escolheu 01/12 a 31/12 quer ver
     isso escrito, não "Período específico…"."""
     if periodo == "personalizado":
-        i, f = _intervalo(periodo, de, ate, ate_o_fim=(tipo == "agenda"))
+        i, f = _intervalo(periodo, de, ate, ate_o_fim=(tipo in ("agenda", "funil")))
         return f"{_fmt(i)} a {_fmt(f)}"
     return _PERIODO_ROTULO.get(periodo, periodo)
 
@@ -2005,7 +2021,18 @@ def _contexto(conta_id: int, tipo: str, periodo: str, status: str = "",
     dados = TIPOS[tipo]["montar"](get_pool(), conta_id, periodo, status=status,
                                   vendedor=vendedor, q=q, especie=especie,
                                   de=de, ate=ate, data_por=data_por)
-    return tipo, periodo, dados
+    return tipo, periodo, _cortar_pra_tela(dados)
+
+
+def _cortar_pra_tela(dados: dict) -> dict:
+    """Mostra no máximo LINHAS_NA_TELA linhas — DEPOIS de a aba ter feito a conta
+    com todas. `linhas_total` é o que a tela usa pra dizer quantas existem."""
+    linhas = dados.get("linhas") or []
+    dados["linhas_total"] = len(linhas)
+    dados["incompleto"] = len(linhas) >= _TETO_CONSULTA
+    if len(linhas) > LINHAS_NA_TELA:
+        dados["linhas"] = linhas[:LINHAS_NA_TELA]
+    return dados
 
 
 # ---------------------------------------------------------------------------

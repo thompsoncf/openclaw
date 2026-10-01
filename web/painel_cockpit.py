@@ -10130,8 +10130,8 @@ _STANDS_AUTO_JS = r"""
     function atualizar(){
       if(pedindo||document.visibilityState==='hidden')return;
       pedindo=true;
-      fetch(BASE_STANDS+'/estado',{headers:{'x-cockpit':'1'},credentials:'same-origin',cache:'no-store'})
-        .then(function(r){return r.ok?r.json():null;})
+      // silencioso: quem não foi pedido não avisa (ver web/zap_fetch.py)
+      zapFetch(BASE_STANDS+'/estado',{headers:{'x-cockpit':'1'},cache:'no-store',silencioso:true})
         .then(function(j){
           pedindo=false;
           if(!j||!j.ok||!j.stands)return;

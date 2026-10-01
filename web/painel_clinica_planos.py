@@ -34,8 +34,11 @@ _AVISOS = {
     "enviado": "Plano enviado no WhatsApp, com o link. O Zaq cobra a decisão em D+1 e D+3.",
     "cancelado": "Plano cancelado.",
     "aceito": "Anotado como aceito. As parcelas viraram contas a receber. Quando o pagamento ou a entrada entrar, clique em Recebi.",
-    "recebido": "Pagamento registrado: a parcela recebeu a baixa e o card do paciente andou no funil.",
+    "recebido": "Pagamento registrado. O card do paciente foi para Em tratamento (ou Concluído, se o plano não tem sessões).",
+    "recebido_so": "Pagamento registrado.",
     "nao_quis": "Anotado: o paciente não quis o plano. O card saiu da coluna do plano.",
+    "nao_quis_ficou": "Anotado: o paciente não quis o plano. O card ficou onde estava: outro plano dele está em jogo, outro atendimento espera a clínica, ou ele nunca foi atendido.",
+    "desistiu": "Anotado: o paciente desistiu antes de pagar. O pacote foi encerrado; as parcelas em aberto continuam no financeiro (cancele lá se não forem mais cobradas).",
     "config": "Configuração salva.",
 }
 
@@ -62,8 +65,9 @@ def lista(request: Request):
     with get_pool().connection() as c:
         planos = cp.listar(c, conta[0])
         cfg = cp.config(c, conta[0])
+        funil_novo = "tratamento" in ca._chaves_do_funil(c, conta[0])
     return _render("clinica_planos.html", request, titulo="Planos de tratamento", **_ctx(request),
-                   planos=planos, cfg=cfg, gerencia=gerencia)
+                   planos=planos, cfg=cfg, gerencia=gerencia, funil_novo=funil_novo)
 
 
 @router.post(URL + "/config")
@@ -184,12 +188,14 @@ def ver(request: Request, plano_id: int):
         tipos = list(_tipos(c, conta_id).values())
         profs = ca._profs_que_atendem(c, conta_id)
         texto = cp.texto_envio(c, p) if p["token"] else ""
+        funil_novo = "tratamento" in ca._chaves_do_funil(c, conta_id)
     form = request.session.pop("plano_form", None) or {}
     return _render("clinica_plano_form.html", request, titulo="Plano de tratamento", **_ctx(request),
                    base={"paciente": p["paciente"], "fone": p["fone"], "lead": p["lead"],
                          "evento_id": p["evento_id"], "profissional_id": p["profissional_id"]},
                    cfg=cfg, tipos=tipos, profs=profs, p=p, form=form, gerencia=gerencia,
-                   linhas=range(cp.MAX_ITENS), texto=texto, link=cp.link(p) if p["token"] else "")
+                   linhas=range(cp.MAX_ITENS), texto=texto, link=cp.link(p) if p["token"] else "",
+                   funil_novo=funil_novo)
 
 
 @router.post(URL + "/nao-quis")
@@ -202,9 +208,9 @@ def nao_quis(request: Request, evento: str = Form(""), motivo: str = Form("")):
     if not evento_id or motivo not in dict(cp.MOTIVOS_NAO_FECHOU):
         return _ir(request, f"{URL}/novo?evento={evento_id or ''}", erro="Escolha o motivo.")
     with get_pool().connection() as c:
-        cp.nao_quis_sem_plano(c, conta[0], evento_id, motivo, request.session.get("membro_id"))
+        destino = cp.nao_quis_sem_plano(c, conta[0], evento_id, motivo, request.session.get("membro_id"))
         c.commit()
-    return _ir(request, URL, "nao_quis")
+    return _ir(request, URL, "nao_quis" if destino and destino != "consulta" else "nao_quis_ficou")
 
 
 @router.post(URL + "/{plano_id}/{acao}")
@@ -236,12 +242,18 @@ def acao(request: Request, plano_id: int, acao: str, forma: str = Form("pix"), v
         if acao == "nao_quis":
             if motivo not in dict(cp.MOTIVOS_NAO_FECHOU):
                 return _ir(request, volta, erro="Escolha o motivo.")
-            ok = cp.nao_fechou(c, conta_id, plano_id, motivo, membro)
+            antes = cp.plano(c, conta_id, plano_id)
+            destino = cp.nao_fechou(c, conta_id, plano_id, motivo, membro)
             c.commit()
-            return _ir(request, volta, "nao_quis" if ok else "", "" if ok else "Esse plano não está mais em aberto.")
+            if not destino:
+                return _ir(request, volta, erro="Esse plano não está mais em aberto.")
+            if antes and antes["status"] == "aceito":
+                return _ir(request, volta, "desistiu")
+            return _ir(request, volta, "nao_quis" if destino not in ("fica", "consulta") else "nao_quis_ficou")
         if acao == "recebi":
             r = cp.receber(get_pool(), conta_id, plano_id, membro)
-            return _ir(request, volta, "recebido" if r["ok"] else "", r.get("erro") or "")
+            return _ir(request, volta, ("recebido" if r.get("destino") else "recebido_so") if r["ok"] else "",
+                       r.get("erro") or "")
         if acao == "aceito":
             # a paciente fechou no balcão: a recepção registra (mesmo efeito do link)
             p = cp.plano(c, conta_id, plano_id)
@@ -330,7 +342,7 @@ _TPL_LISTA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="pl-linha"><div><a href="/painel/clinica/planos/{{ p.id }}">{{ p.paciente }}</a>
       <div class="pl-mut">{% for i in p.itens %}{{ i.nome }} · {{ i.sessoes }}{% if not loop.last %} + {% endif %}{% endfor %}{% if p.prof %} · {{ p.prof }}{% endif %}</div></div>
       <span>{{ brl(p.total) }}</span>
-      <span class="pl-chip {{ p.status }}">{{ p.status_d }}{% if p.status == 'enviado' and p.validade_ate %} · vale até {{ p.validade_ate.strftime('%d/%m') }}{% endif %}{% if p.status == 'enviado' and p.visto_em %} · 👀 abriu{% endif %}{% if p.status == 'aceito' %} · {{ p.forma_d }} · {{ 'pago' if p.pago_em else 'aguardando pagamento' }}{% endif %}{% if p.nao_fechou_motivo %} · {{ p.nao_fechou_motivo }}{% endif %}</span></div>
+      <span class="pl-chip {{ p.status }}">{{ p.status_d }}{% if p.status == 'enviado' and p.validade_ate %} · vale até {{ p.validade_ate.strftime('%d/%m') }}{% endif %}{% if p.status == 'enviado' and p.visto_em %} · 👀 abriu{% endif %}{% if p.status == 'aceito' %} · {{ p.forma_d }}{% if funil_novo %} · {{ 'pago' if p.pago_em else 'aguardando pagamento' }}{% endif %}{% endif %}{% if p.nao_fechou_motivo %} · {{ p.nao_fechou_motivo }}{% endif %}</span></div>
   {% else %}<div class="pl-mut">Nenhum plano ainda. Ele nasce da consulta: ao finalizar, "o médico propôs tratamento? sim" e depois "Montar plano de tratamento".</div>{% endfor %}
   </div>
   {% if gerencia %}
@@ -365,13 +377,16 @@ _TPL_FORM = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div><span class="pl-mut">Pix à vista</span><b>{{ brl(p.pix) }}</b></div>
     <div><span class="pl-mut">Cartão</span><b>{{ p.parcelas }}× {{ brl(p.parcela) }}</b></div>
     {% if p.status == 'aceito' %}<div><span class="pl-mut">Aceito</span><b>{{ p.forma_d }}</b><span class="pl-mut">{{ p.aceito_em.strftime('%d/%m %H:%M') }} · {{ {'link':'pelo link','whatsapp':'no WhatsApp','recepcao':'na recepção'}[p.aceito_por] }}</span></div>
-    <div><span class="pl-mut">Pagamento</span><b>{{ 'recebido' if p.pago_em else 'aguardando' }}</b>{% if p.pago_em %}<span class="pl-mut">{{ p.pago_em.strftime('%d/%m %H:%M') }}</span>{% endif %}</div>{% endif %}
+    {% if funil_novo %}<div><span class="pl-mut">Pagamento</span><b>{{ 'recebido' if p.pago_em else 'aguardando' }}</b></div>{% endif %}{% endif %}
     {% if p.nao_fechou_motivo %}<div><span class="pl-mut">Não fechou</span><b>{{ p.nao_fechou_motivo }}</b></div>{% endif %}
   </div>
   <div class="pl-acoes">
     {% if p.status == 'aguardando_aprovacao' and gerencia %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/aprovar"><input type="hidden" name="visto" value="{{ p.versao }}"><button>Aprovar desconto (efetivo {{ p.desconto_efetivo|round(1) }}% da tabela)</button></form>{% endif %}
     {% if p.status == 'aceito' and not p.titulos %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/titulos"><button class="sec">Gerar as contas a receber</button></form>{% endif %}
-    {% if p.status == 'aceito' and p.titulos and not p.pago_em %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/recebi"><button>Recebi o pagamento (ou a entrada)</button></form>{% endif %}
+    {% if funil_novo and p.status == 'aceito' and p.titulos and not p.pago_em %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/recebi"><button>Recebi o pagamento (ou a entrada)</button></form>{% endif %}
+    {% if funil_novo and p.status == 'aceito' and not p.pago_em %}<form class="pl-nq" method="post" action="/painel/clinica/planos/{{ p.id }}/nao_quis">
+      <select name="motivo" required><option value="">Por quê?</option>{% for k, rot in MOTIVOS %}<option value="{{ k }}">{{ rot }}</option>{% endfor %}</select>
+      <button class="sec">Paciente desistiu antes de pagar</button></form>{% endif %}
     {% if p.status == 'rascunho' %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/enviar"><button>Enviar no WhatsApp</button></form>{% endif %}
     {% if p.status == 'enviado' %}<form method="post" action="/painel/clinica/planos/{{ p.id }}/aceito" style="display:flex;gap:.4rem;flex-wrap:wrap">
       <select name="forma" style="width:auto">{% for k, rot in FORMAS %}{% if k != 'parcelado' or p.parcelado %}<option value="{{ k }}">{{ rot }}</option>{% endif %}{% endfor %}</select>

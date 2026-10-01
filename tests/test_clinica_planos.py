@@ -48,7 +48,7 @@ def pool():
                                            vencimento date, valor_centavos bigint)""")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
                   "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql",
-                  "472_clinica_plano_pago_e_nao_fechou.sql"):
+                  "474_clinica_plano_pago_e_nao_fechou.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("update servicos_catalogo set setup_centavos=80000 where conta_id=39 and nome='Procedimento estético'")
@@ -296,15 +296,15 @@ def test_paciente_nao_quis_o_plano_conclui_com_o_valor_da_consulta(pool, zap):
         pid = _plano(c, lead)
         assert cp.enviar(c, CLINICA, pid, 51, AGORA)["ok"]
         assert _card(c, lead) == ("proposta", 362000)
-        assert not cp.nao_fechou(c, CLINICA, pid, "inventado", 51)
-        assert cp.nao_fechou(c, CLINICA, pid, "preco", 51)
+        assert cp.nao_fechou(c, CLINICA, pid, "inventado", 51) is None
+        assert cp.nao_fechou(c, CLINICA, pid, "preco", 51) == "ganho"
         c.commit()
         assert _card(c, lead) == ("ganho", 50000)
         p = cp.plano(c, CLINICA, pid)
         assert (p["status"], p["nao_fechou_motivo"]) == ("recusado", "Achou caro")
         assert c.execute("select descricao from prospeccao_atividades order by id desc limit 1"
                          ).fetchone()[0] == "Plano não fechado (Achou caro). O card foi para Concluído."
-        assert not cp.nao_fechou(c, CLINICA, pid, "preco", 51)        # já encerrado
+        assert cp.nao_fechou(c, CLINICA, pid, "preco", 51) is None    # já encerrado
 
 
 def test_recusado_pelo_link_com_retorno_a_fazer_vai_pro_retorno(pool, zap):
@@ -338,15 +338,15 @@ def test_o_que_segura_o_card_na_coluna_do_plano(pool, zap):
         lead, _conv = _paciente(c)
         pid = _plano(c, lead)
         cp.enviar(c, CLINICA, pid, 51, AGORA)
-        assert cp.nao_fechou(c, CLINICA, pid, "adiou", 51)
+        assert cp.nao_fechou(c, CLINICA, pid, "adiou", 51) == "fica"
         assert _card(c, lead)[0] == "proposta"                        # nunca veio: segue a venda
         outro, _conv = _paciente(c, nome="Rita Souza", fone="+5599988880002")
         _atendido(c, outro)
         p1, p2 = _plano(c, outro), _plano(c, outro)
         cp.enviar(c, CLINICA, p1, 51, AGORA)
-        assert cp.nao_fechou(c, CLINICA, p1, "preco", 51)
+        assert cp.nao_fechou(c, CLINICA, p1, "preco", 51) == "fica"
         assert _card(c, outro)[0] == "proposta"                       # o p2 ainda está montando
-        assert cp.nao_fechou(c, CLINICA, p2, "preco", 51)
+        assert cp.nao_fechou(c, CLINICA, p2, "preco", 51) == "ganho"
         assert _card(c, outro)[0] == "ganho"
 
 
@@ -363,6 +363,89 @@ def test_o_paciente_que_saiu_sem_querer_o_plano(pool, zap):
         eid2 = _atendido(c, outro, h=10)
         c.execute("update clinica_planos set evento_id=%s where id=%s", (eid2, _plano(c, outro)))
         assert cp.nao_quis_sem_plano(c, CLINICA, eid2, "preco", 51) is None   # já tem plano: é pelo plano
+
+
+def test_o_plano_da_mae_recusado_nao_fecha_o_plano_a_montar_do_filho(pool, zap):
+    """Mãe e filho no mesmo card, os dois com proposta. O plano da mãe é recusado; o do
+    filho ainda nem foi montado: o card volta pra Consulta, não vai pra Concluído."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        mae = _atendido(c, lead, h=9)
+        _atendido(c, lead, h=10)                                      # o filho, mesmo card
+        pid = _plano(c, lead)
+        c.execute("update clinica_planos set evento_id=%s where id=%s", (mae, pid))
+        assert cp.enviar(c, CLINICA, pid, 51, AGORA)["ok"]
+        assert _card(c, lead)[0] == "proposta"
+        assert cp.nao_fechou(c, CLINICA, pid, "preco", 51) == "consulta"
+        assert _card(c, lead) == ("consulta", 50000)
+        assert "outro atendimento dele ainda espera a clínica" in c.execute(
+            "select descricao from prospeccao_atividades order by id desc limit 1").fetchone()[0]
+
+
+def test_o_valor_volta_ao_da_consulta_e_nao_ao_da_ultima_sessao(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        _atendido(c, lead, h=9)                                       # consulta, R$ 500
+        sessao, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c),
+                                  servico_id=_tipo(c, "Procedimento estético")["id"],
+                                  inicio=ca.utc(date(2026, 9, 28), time(11)), lead_id=lead, agora=AGORA)
+        assert erro is None
+        for s in ("confirmado", "presente", "atendimento", "finalizado"):
+            assert ca.mudar_situacao(c, CLINICA, sessao, s) is None   # R$ 800, a última passagem
+        pid = _plano(c, lead)
+        cp.enviar(c, CLINICA, pid, 51, AGORA)
+        assert cp.nao_fechou(c, CLINICA, pid, "adiou", 51) == "ganho"
+        assert _card(c, lead) == ("ganho", 50000)
+
+
+def test_desistiu_depois_de_aceitar_e_antes_de_pagar(pool, zap):
+    """O aceito que nunca é pago tem saída: o plano encerra com o motivo, o pacote que
+    nasceu no aceite é encerrado e o card sai da coluna do plano."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        _atendido(c, lead)
+    pid = _aceito(pool, lead)
+    with pool.connection() as c:
+        assert c.execute("select count(*) from clinica_pacotes where plano_id=%s and estado='ativo'",
+                         (pid,)).fetchone()[0] == 1
+        assert cp.nao_fechou(c, CLINICA, pid, "adiou", 51) == "ganho"
+        c.commit()
+        assert c.execute("select estado, encerrado_motivo from clinica_pacotes where plano_id=%s", (pid,)
+                         ).fetchone() == ("encerrado", "desistiu antes de pagar (Vai pensar / adiou)")
+        assert cp.em_aberto(c, CLINICA, AGORA)["a_pagar"] == []
+        assert cp.receber(pool, CLINICA, pid, 51)["ok"] is False      # não está mais aceito
+
+
+def test_o_pagamento_nao_tira_de_perdido_e_leva_de_concluido_pra_em_tratamento(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
+        c.commit()
+    pid = _aceito(pool, lead)                                         # o paciente que já tinha concluído
+    with pool.connection() as c:
+        assert _card(c, lead)[0] == "ganho"                           # aceitar não mexe
+    assert cp.receber(pool, CLINICA, pid, 51)["destino"] == "tratamento"
+    with pool.connection() as c:
+        outro, _conv = _paciente(c, nome="Rita Souza", fone="+5599988880002")
+    p2 = _aceito(pool, outro)
+    with pool.connection() as c:
+        c.execute("update prospeccao set status='perdido' where id=%s", (outro,))
+        c.commit()
+    assert cp.receber(pool, CLINICA, p2, 51) == {"ok": True, "destino": None}
+    with pool.connection() as c:
+        assert _card(c, outro)[0] == "perdido"
+
+
+def test_o_relogio_confere_a_conta_que_so_tem_plano_aceito(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    pid = _aceito(pool, lead)
+    with pool.connection() as c:
+        c.execute("update titulos set status='pago' where id=%s", (cp.plano(c, CLINICA, pid)["titulos"][0],))
+        c.commit()
+    assert cp.rodar(pool, AGORA)["pagos"] == 1
+    with pool.connection() as c:
+        assert _card(c, lead)[0] == "tratamento"
 
 
 def test_funil_de_antes_nada_muda(pool, zap):
@@ -382,6 +465,8 @@ def test_funil_de_antes_nada_muda(pool, zap):
     with pool.connection() as c:
         assert _card(c, lead2)[0] == "ganho"                          # aceitou: Fechado, como sempre
     assert cp.receber(pool, CLINICA, pid2, 51) == {"ok": True, "destino": None}
+    with pool.connection() as c:
+        assert cp.em_aberto(c, CLINICA, AGORA)["a_pagar"] == []      # o aceite já fechou o card
 
 
 def test_telas_recebi_e_nao_quis(cli, pool, zap):

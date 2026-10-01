@@ -1,4 +1,4 @@
--- 473_novidade_clinica_plano_pago.sql
+-- 475_novidade_clinica_plano_pago.sql
 -- O aviso da entrega 1b do CRM da clínica (docs/mockups/clinica_crm_telas.html, seção 01,
 -- "O dinheiro", aprovado em 01/10/2026), seguindo a seção 5 do CLAUDE.md.
 --

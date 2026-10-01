@@ -1,4 +1,4 @@
--- 472_clinica_plano_pago_e_nao_fechou.sql
+-- 474_clinica_plano_pago_e_nao_fechou.sql
 -- CRM da clínica, entrega 1b (docs/mockups/clinica_crm_telas.html, seção 01, "O dinheiro",
 -- aprovado em 01/10/2026). finance/clinica_planos.py.
 --

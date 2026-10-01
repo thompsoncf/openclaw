@@ -49,7 +49,7 @@ def pool():
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
                   "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql",
-                  "472_clinica_plano_pago_e_nao_fechou.sql"):
+                  "474_clinica_plano_pago_e_nao_fechou.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("""update servicos_catalogo set setup_centavos=80000, volta_dias=null
@@ -267,6 +267,21 @@ def test_sessoes_feitas_antes_de_pagar_o_pagamento_conclui_na_hora(pool, zap):
         c.commit()
         assert cp.conferir_pagamentos(c, CLINICA) == 1
         assert _card(c, lead) == "ganho"
+
+
+def test_o_lembrete_de_sessao_espera_o_pagamento(pool, zap):
+    """Plano aceito não é plano pago: o paciente não é chamado pra marcar sessão antes."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    pid = _plano_aceito(pool, lead, pago=False)
+    with pool.connection() as c:
+        _finalizar(c, _sessao(c, lead, SEG))
+        liberou = SEG + timedelta(days=21)
+        assert ckp.lembrar(c, CLINICA, _br(liberou))["sessao"] == 0
+        c.execute("update titulos set status='pago' where id=%s", (cp.plano(c, CLINICA, pid)["titulos"][0],))
+        c.commit()
+        assert cp.conferir_pagamentos(c, CLINICA) == 1
+        assert ckp.lembrar(c, CLINICA, _br(liberou))["sessao"] == 1
 
 
 def test_consulta_que_nao_e_do_pacote_nao_baixa(pool, zap):

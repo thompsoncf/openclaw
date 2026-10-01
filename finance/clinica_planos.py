@@ -602,7 +602,7 @@ def recusar(c, token: str) -> bool:
                                where id=%s and conta_id=%s and status='enviado'
                                returning id, conta_id, prospeccao_id""", dono).fetchone()
     if r:
-        _sem_plano(c, r[1], r[2], "recusou pelo link", None)
+        _sem_plano(c, r[1], r[2], "recusou pelo link", None, plano_id=r[0])
         p = plano(c, r[1], r[0])
         _avisar(c, r[1], p, f"Plano recusado: {p['paciente']}", "Recusou pelo link. Vale uma ligação.")
     return r is not None
@@ -610,20 +610,37 @@ def recusar(c, token: str) -> bool:
 
 # ------------------------------------------------------------------ o plano que não fecha
 
-def nao_fechou(c, conta_id: int, plano_id: int, motivo: str, membro_id: int | None) -> bool:
+def nao_fechou(c, conta_id: int, plano_id: int, motivo: str, membro_id: int | None) -> str | None:
     """"Paciente não quis", na recepção, com o motivo. Vale pro plano ainda não aceito
-    (rascunho, esperando o dono, enviado). Diferente de cancelar, que é pra refazer o
-    plano e não mexe no card."""
+    (rascunho, esperando o dono, enviado) e, no funil novo, pro aceito que nunca foi
+    pago (o paciente desistiu antes de pagar: o pacote que nasceu no aceite é
+    encerrado; as parcelas em aberto ficam pro financeiro decidir). Diferente de
+    cancelar, que é pra refazer o plano e não mexe no card.
+
+    Devolve a etapa nova do card, "fica" se ele ficou onde estava, ou None se o plano
+    já não estava em aberto."""
     txt = dict(MOTIVOS_NAO_FECHOU).get(motivo)
     if not txt:
-        return False
+        return None
+    funil_novo = "tratamento" in ca._chaves_do_funil(c, conta_id)
     r = c.execute("""update clinica_planos set status='recusado', nao_fechou_motivo=%s, atualizado_em=now()
-                      where id=%s and conta_id=%s and status in ('rascunho','aguardando_aprovacao','enviado')
-                      returning prospeccao_id""", (txt, plano_id, conta_id)).fetchone()
+                      where id=%s and conta_id=%s
+                        and (status in ('rascunho','aguardando_aprovacao','enviado')
+                             or (%s and status = 'aceito' and pago_em is null))
+                      returning prospeccao_id, aceito_em is not null""",
+                  (txt, plano_id, conta_id, funil_novo)).fetchone()
     if not r:
-        return False
-    _sem_plano(c, conta_id, r[0], txt, membro_id)
-    return True
+        return None
+    if r[1]:
+        try:
+            with c.transaction():
+                c.execute("""update clinica_pacotes set estado='encerrado', encerrado_motivo=%s, encerrado_por=%s,
+                                    encerrado_em=now(), atualizado_em=now()
+                              where conta_id=%s and plano_id=%s and estado in ('ativo','vencido')""",
+                          (f"desistiu antes de pagar ({txt})"[:200], membro_id, conta_id, plano_id))
+        except Exception:  # noqa: BLE001 — sem a 381
+            _log.warning("planos: pacote do plano desistido não encerrado (plano %s)", plano_id, exc_info=True)
+    return _sem_plano(c, conta_id, r[0], txt, membro_id, plano_id=plano_id) or "fica"
 
 
 def nao_quis_sem_plano(c, conta_id: int, evento_id: int, motivo: str, membro_id: int | None) -> str | None:
@@ -636,18 +653,83 @@ def nao_quis_sem_plano(c, conta_id: int, evento_id: int, motivo: str, membro_id:
     ev = ca.evento(c, conta_id, evento_id)
     if not ev or not ev.get("lead") or ev.get("situacao") != "finalizado" or do_evento(c, conta_id, evento_id):
         return None
-    return card_sem_plano(c, conta_id, ev["lead"], txt, membro_id)
-
-
-def _sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: int | None) -> None:
     try:
         with c.transaction():
-            card_sem_plano(c, conta_id, lead, motivo, membro_id)
+            # a proposta deste atendimento está resolvida: não é mais "plano a montar"
+            # pra quem olhar o card depois (a linha do tempo guarda que houve proposta)
+            c.execute("update eventos_agenda set tratamento_proposto=false where id=%s and conta_id=%s",
+                      (evento_id, conta_id))
+    except Exception:  # noqa: BLE001 — sem a 471
+        pass
+    return card_sem_plano(c, conta_id, ev["lead"], f"propôs, mas o paciente não quis: {txt}", membro_id,
+                          evento_id=evento_id)
+
+
+def _sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: int | None,
+               plano_id: int | None = None) -> str | None:
+    try:
+        with c.transaction():
+            ev = c.execute("select evento_id from clinica_planos where id=%s and conta_id=%s",
+                           (plano_id, conta_id)).fetchone() if plano_id else None
+            return card_sem_plano(c, conta_id, lead, motivo, membro_id, evento_id=ev[0] if ev else None)
     except Exception:  # noqa: BLE001 — o plano encerrou; o card é consequência
         _log.warning("planos: card não andou com o plano que não fechou (lead %s)", lead, exc_info=True)
+        return None
 
 
-def card_sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: int | None) -> str | None:
+def _outro_em_aberto(c, conta_id: int, lead: int, evento_id: int | None) -> bool:
+    """Outro atendimento do mesmo card ainda espera a clínica (o mesmo cuidado de
+    `clinica_agenda._segura_em_consulta`): um paciente do card na clínica hoje (a mãe e
+    o filho no mesmo celular), ou uma proposta desta passagem sem plano montado."""
+    try:
+        with c.transaction():
+            return c.execute(
+                """select 1 from eventos_agenda o
+                    where o.conta_id=%s and o.prospeccao_id=%s and o.status='ativo' and o.id <> %s
+                      and ((o.situacao in ('presente', 'atendimento')
+                            and (o.inicio - interval '3 hours')::date = (now() - interval '3 hours')::date)
+                           or (o.situacao = 'finalizado' and o.tratamento_proposto
+                               and o.situacao_em >= now() - interval '60 days'
+                               and o.situacao_em >= coalesce(
+                                   (select max(m.criado_em) from funil_movimentos m
+                                     where m.conta_id = o.conta_id and m.prospeccao_id = o.prospeccao_id
+                                       and m.para = 'consulta' and m.motivo = 'agenda'), '-infinity')
+                               -- a proposta já virou plano: o montado a partir dela, ou o
+                               -- montado pelo card (sem consulta) depois dela
+                               and not exists (select 1 from clinica_planos pl
+                                                where pl.conta_id = o.conta_id and pl.status <> 'cancelado'
+                                                  and (pl.evento_id = o.id
+                                                       or (pl.evento_id is null and pl.prospeccao_id = o.prospeccao_id
+                                                           and pl.criado_em >= o.situacao_em)))))
+                    limit 1""", (conta_id, lead, evento_id or 0)).fetchone() is not None
+    except Exception:  # noqa: BLE001 — sem a 471
+        return False
+
+
+def _preco_da_consulta(c, conta_id: int, lead: int, evento_id: int | None) -> int | None:
+    """O valor que o card volta a ter: o do atendimento de onde o plano saiu; sem ele,
+    o da última consulta finalizada. None = o paciente nunca foi atendido."""
+    for sql, args in (
+            ("""select coalesce(s.setup_centavos, 0) from eventos_agenda e
+                  left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
+                 where e.id=%s and e.conta_id=%s and e.prospeccao_id=%s and e.situacao='finalizado'""",
+             (evento_id or 0, conta_id, lead)),
+            ("""select coalesce(s.setup_centavos, 0) from eventos_agenda e
+                  join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
+                 where e.conta_id=%s and e.prospeccao_id=%s and e.status='ativo' and e.situacao='finalizado'
+                   and s.categoria = 'consulta'
+                 order by e.inicio desc limit 1""", (conta_id, lead)),
+            ("""select 0 from eventos_agenda e
+                 where e.conta_id=%s and e.prospeccao_id=%s and e.status='ativo' and e.situacao='finalizado'
+                 limit 1""", (conta_id, lead))):
+        r = c.execute(sql, args).fetchone()
+        if r:
+            return int(r[0])
+    return None
+
+
+def card_sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: int | None,
+                   evento_id: int | None = None) -> str | None:
     """PLANO QUE NÃO FECHA NÃO PERDE O PACIENTE (desenho de 01/10/2026, seção 01). O card
     em Consulta ou em Plano enviado vai pra Retorno, se há retorno a fazer, ou pra
     Concluído; o valor volta a ser o da consulta. "Perdido" fica pra quem nunca virou
@@ -656,12 +738,16 @@ def card_sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: i
     Fica onde está: na conta com o funil de antes (como sempre foi); quando outro plano
     do paciente ainda está em jogo (montando, enviado, ou aceito esperando pagamento);
     e quando ele nunca foi atendido (o orçamento direto pelo WhatsApp é venda, e segue
-    com a vendedora na coluna do plano)."""
+    com a vendedora na coluna do plano).
+
+    Vai pra Consulta (ou fica lá) quando outro atendimento do card ainda espera a
+    clínica (`_outro_em_aberto`): o plano da mãe recusado não fecha o card do filho
+    que está na sala, nem o "plano a montar" de outra consulta."""
     if not lead:
         return None
     from finance import funil_regua as fr
     chaves = ca._chaves_do_funil(c, conta_id)
-    if "ganho" not in chaves or not ({"consulta", "tratamento", "retorno"} & chaves):
+    if "ganho" not in chaves or "tratamento" not in chaves:
         return None
     r = c.execute("select status from prospeccao where id=%s and conta_id=%s for update", (lead, conta_id)).fetchone()
     if not r or r[0] not in tuple(x for x in ("consulta", "proposta") if x == "proposta" or x in chaves):
@@ -671,15 +757,23 @@ def card_sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: i
                      and (status in ('rascunho','aguardando_aprovacao','enviado')
                           or (status = 'aceito' and pago_em is null)) limit 1""", (conta_id, lead)).fetchone():
         return None
-    preco = c.execute("""select coalesce(s.setup_centavos, 0) from eventos_agenda e
-                           left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
-                          where e.conta_id=%s and e.prospeccao_id=%s and e.status='ativo' and e.situacao='finalizado'
-                          order by e.inicio desc limit 1""", (conta_id, lead)).fetchone()
-    if not preco:
+    preco = _preco_da_consulta(c, conta_id, lead, evento_id)
+    if preco is None:
         return None                     # nunca foi atendido: é venda, segue com a vendedora
+    if _outro_em_aberto(c, conta_id, lead, evento_id):
+        if atual == "consulta" or "consulta" not in chaves:
+            ca._nota(c, lead, membro_id, f"Plano não fechado ({motivo}). O card segue em Consulta: "
+                                         "outro atendimento dele ainda espera a clínica.")
+            return None
+        c.execute("""update prospeccao set status='consulta', estagio='lead', valor_estimado_centavos=%s,
+                            atualizado_em=now() where id=%s and conta_id=%s""", (preco, lead, conta_id))
+        fr.registrar_movimento(c, conta_id, lead, atual, "consulta", "plano", membro_id)
+        ca._nota(c, lead, membro_id, f"Plano não fechado ({motivo}). O card voltou para Consulta: "
+                                     "outro atendimento dele ainda espera a clínica.")
+        return "consulta"
     destino = "retorno" if "retorno" in chaves and ca._retorno_pendente(c, conta_id, lead) else "ganho"
     c.execute("""update prospeccao set status=%s, estagio='lead', valor_estimado_centavos=%s, atualizado_em=now()
-                  where id=%s and conta_id=%s""", (destino, int(preco[0]), lead, conta_id))
+                  where id=%s and conta_id=%s""", (destino, preco, lead, conta_id))
     fr.registrar_movimento(c, conta_id, lead, atual, destino, "plano", membro_id)
     ca._nota(c, lead, membro_id, f"Plano não fechado ({motivo}). O card foi para "
                                  f"{'Retorno' if destino == 'retorno' else 'Concluído'}.")
@@ -720,10 +814,19 @@ def receber(pool, conta_id: int, plano_id: int, membro_id: int | None) -> dict:
             return {"ok": False, "erro": "Não há parcela em aberto neste plano."}
         r = _emp.dar_baixa_titulo(pool, conta_id, aberto[0], membro_id=membro_id) or {}
         if not r.get("ok"):
-            return {"ok": False, "erro": r.get("erro") or "A baixa não entrou. Confira no financeiro."}
-    with pool.connection() as c:
-        destino = _confirmar_pagamento(c, conta_id, plano_id, membro_id)
-        c.commit()
+            with pool.connection() as c:
+                # o duplo clique (ou o financeiro no mesmo instante) já deu a baixa: vale
+                pago = c.execute("select 1 from titulos where conta_id=%s and id = any(%s) and status='pago' "
+                                 "limit 1", (conta_id, ids)).fetchone()
+            if not pago:
+                return {"ok": False, "erro": r.get("erro") or "A baixa não entrou. Confira no financeiro."}
+    try:
+        with pool.connection() as c:
+            destino = _confirmar_pagamento(c, conta_id, plano_id, membro_id)
+            c.commit()
+    except Exception:  # noqa: BLE001 — a baixa entrou; o relógio leva o card no próximo ciclo
+        _log.warning("planos: pagamento recebido e card não andou (plano %s)", plano_id, exc_info=True)
+        return {"ok": True, "destino": None}
     return {"ok": True, "destino": destino}
 
 
@@ -739,7 +842,7 @@ def conferir_pagamentos(c, conta_id: int) -> int:
                                    where t.conta_id = p.conta_id and t.status = 'pago'
                                      and t.id in (select (jsonb_array_elements_text(p.titulos))::bigint))
                     limit 200""", (conta_id,)).fetchall()]
-    except Exception:  # noqa: BLE001 — sem a 472 ou sem títulos
+    except Exception:  # noqa: BLE001 — sem a 474 ou sem títulos
         return 0
     n = 0
     for pid in ids:
@@ -998,7 +1101,9 @@ def em_aberto(c, conta_id: int, agora: datetime) -> dict:
                 (conta_id,)).fetchall()]
             a_pagar = [r[0] for r in c.execute(
                 """select id from clinica_planos where conta_id=%s and status='aceito' and pago_em is null
-                    order by aceito_em limit 20""", (conta_id,)).fetchall()]
+                    order by aceito_em desc limit 20""", (conta_id,)).fetchall()]
+            if "tratamento" not in ca._chaves_do_funil(c, conta_id):
+                a_pagar = []                # funil de antes: o aceite já fechou o card
     except Exception:  # noqa: BLE001
         return {"aprovar": 0, "vencendo": [], "responderam": [], "a_pagar": []}
     hoje = ca.hoje_br(agora)
@@ -1028,10 +1133,9 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                 try:
                     with c.transaction():
                         # e quem tem plano aceito esperando pagamento (a baixa pode vir do financeiro)
-                        contas = sorted(set(contas) | {r[0] for r in c.execute(
-                            "select distinct conta_id from clinica_planos where status='aceito' and pago_em is null"
-                        ).fetchall()})
-                except Exception:  # noqa: BLE001 — sem a 472
+                        from finance.clinica_planos_publico import contas_com_plano_a_pagar
+                        contas = sorted(set(contas) | set(contas_com_plano_a_pagar(c)))
+                except Exception:  # noqa: BLE001 — sem a 474
                     pass
                 for conta_id in contas:
                     try:

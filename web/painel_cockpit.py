@@ -1302,6 +1302,11 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
    primeira ganha do `.secao` acima dela. */
 .avulso.ev2{padding-top:.45rem}
 .avulso input.hr{flex:1;font-family:var(--mono)}
+.avulso select,.avl select.fp{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);padding:.55rem .7rem;font-family:inherit;font-size:.85rem}
+.avl select.fp{flex:1 1 100%;padding:.35rem .55rem;font-size:.8rem}
+.avulso input.fpo{display:none}
+.avulso.tem-outro input.fpo{display:block}
 .evaviso{margin:.45rem 1.1rem 0;padding:.45rem .6rem;border-radius:10px;font-size:.78rem;
  line-height:1.45;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:var(--ambar)}
 .evaviso b{display:block}
@@ -4083,24 +4088,55 @@ _ORC_JS = r"""
     $("addnome").value="";$("addval").value="";pintaAvulsos();soma();toast("Item adicionado");
   };
   // ---- o evento e as parcelas (só no nicho de eventos) ----
+  // O servidor grava data e vencimento em ISO (é o que o campo de data do
+  // computador aceita); aqui o vendedor lê e digita dd/mm/aaaa.
+  function brData(v){
+    var s=String(v==null?'':v).trim(), m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m?m[3]+'/'+m[2]+'/'+m[1]:s;
+  }
+  // A MESMA LISTA DO PAINEL (web/painel_servicos, FORMAS_PAGAMENTO). Até
+  // 01/10/2026 o app gravava toda parcela com a forma em branco. Forma que não
+  // está na lista (escrita no painel em "Outro") entra como opção própria e não
+  // se perde ao reabrir.
+  var FORMAS=["Pix","Cartão de crédito","Cartão de débito","Boleto","Dinheiro","Transferência"];
+  function opcoesForma(atual){
+    var lista=FORMAS.slice();if(atual&&lista.indexOf(atual)<0)lista.push(atual);
+    return '<option value="">Forma de pagamento…</option>'+lista.map(function(f){
+      return '<option value="'+esc(f)+'"'+(f===atual?' selected':'')+'>'+esc(f)+'</option>';
+    }).join("");
+  }
   var parcelas=[];
   function pintaParcelas(){
     var box=$("parcelas");if(!box)return;
     box.innerHTML=parcelas.map(function(p,i){
-      return '<div class=avl><b>'+esc(p.venc||"a combinar")+'</b>'
+      return '<div class=avl><b>'+esc(brData(p.venc)||"a combinar")+'</b>'
         +'<span class=vl>'+brl(Math.round(p.valor_centavos/100))+'</span>'
-        +'<button type=button data-px="'+i+'" aria-label="Remover parcela">×</button></div>';
+        +'<button type=button data-px="'+i+'" aria-label="Remover parcela">×</button>'
+        +'<select class=fp data-pf="'+i+'" aria-label="Forma de pagamento">'
+        +opcoesForma(p.forma||"")+'</select></div>';
     }).join("");
   }
   document.addEventListener("click",function(e){
     var x=e.target.closest("[data-px]");if(!x)return;
     parcelas.splice(parseInt(x.getAttribute("data-px"),10),1);pintaParcelas();
   });
+  document.addEventListener("change",function(e){
+    var s=e.target.closest&&e.target.closest("[data-pf]");
+    if(s){var p=parcelas[parseInt(s.getAttribute("data-pf"),10)];if(p)p.forma=s.value;return;}
+    if(e.target.id==="pcforma")
+      e.target.parentNode.classList.toggle("tem-outro",e.target.value==="Outro");
+  });
+  var pf=$("pcforma");
+  if(pf)pf.innerHTML=opcoesForma("")+'<option value="Outro">Outro…</option>';
   var pa=$("pcadd");
   if(pa)pa.onclick=function(){
     var v=parseInt(($("pcval").value||"").replace(/\D/g,''),10);
     if(!v){toast("Informe o valor da parcela");return;}
-    parcelas.push({venc:$("pcvenc").value.trim(),valor_centavos:v*100,forma:"",obs:""});
+    // a forma escolhida FICA no seletor: plano de 10 parcelas no boleto não
+    // obriga a escolher boleto dez vezes.
+    var forma=pf?pf.value:"";
+    if(forma==="Outro")forma=($("pcformaoutro").value||"").trim();
+    parcelas.push({venc:$("pcvenc").value.trim(),valor_centavos:v*100,forma:forma,obs:""});
     $("pcvenc").value="";$("pcval").value="";pintaParcelas();
   };
   // ---- reabrir uma proposta: repõe o que já estava gravado ----
@@ -4123,7 +4159,7 @@ _ORC_JS = r"""
     // `evfim` entra aqui junto com os outros: sem ele, abrir no app um orçamento
     // que o desktop gravou com encerramento e salvar APAGAVA o encerramento — o
     // campo voltava vazio e o coletarEvento mandava vazio por cima.
-    p("evdata",ev.data);p("evini",ev.inicio);p("evfim",ev.fim);p("evtipo",ev.tipo);
+    p("evdata",ev.data==null?null:brData(ev.data));p("evini",ev.inicio);p("evfim",ev.fim);p("evtipo",ev.tipo);
     p("evlocal",ev.local);p("evconv",ev.convidados);
     (d.parcelas||[]).forEach(function(x){parcelas.push(x);});
     var b=$("gerar");if(b)b.textContent="Salvar a proposta";
@@ -4315,9 +4351,11 @@ def cockpit_orcamento_montar(request: Request, lead_id: int, orc: int = 0):
                  "<div class='avulso ev2'><input id=evlocal placeholder='Local' autocomplete=off></div>"
                  "<div class=secao><div class=rot>Parcelas</div></div>"
                  "<div id=parcelas></div>"
-                 "<div class='avulso ev2'><input id=pcvenc placeholder='Vencimento' autocomplete=off>"
+                 "<div class='avulso ev2'><input id=pcvenc placeholder='Vencimento (dd/mm/aaaa)' autocomplete=off>"
                  "<input class=v id=pcval inputmode=numeric placeholder='R$' autocomplete=off>"
-                 "<button type=button id=pcadd aria-label='Adicionar parcela'>+</button></div>")
+                 "<button type=button id=pcadd aria-label='Adicionar parcela'>+</button></div>"
+                 "<div class='avulso ev2'><select id=pcforma aria-label='Forma de pagamento'></select>"
+                 "<input class=fpo id=pcformaoutro placeholder='Especifique' autocomplete=off></div>")
                 if evento_mode else "")
              + "</div>"
              + "<div class=rodape-b id=rodape>"

@@ -887,6 +887,85 @@ def test_a_pagina_do_lead_no_app_de_estandes_nao_tem_nada_de_festa(pool, monkeyp
     assert "Link de stands" not in prime
 
 
+def test_com_o_agente_atendendo_o_assumir_leva_a_mensagem_do_link(pool, monkeypatch):
+    """O "Link de stands" tocado com o agente atendendo: o Assumir leva a mensagem e
+    avisa que ela já entra pronta na caixa. Só no app de estandes."""
+    from web import painel_cockpit as pc
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    for n in ("_bloco_aconteceu", "_bloco_resgate", "_bloco_visita", "_bloco_espera"):
+        monkeypatch.setattr(pc, n, lambda *a, **k: "")
+    monkeypatch.setattr(pc, "_link_stands_texto", lambda c, m: "MSG")
+    d = {"empresa": "Loja X", "mensagens": [], "etapas": [], "ia": True}
+
+    def pagina(em_stands):
+        monkeypatch.setattr(pc, "_perfil_stands", lambda cid: em_stands)
+        req = _Req(conta_id=40, membro_id=2)
+        req.query_params = {"texto": "Oi! link de vendas"}
+        for _ in range(80):                      # o lead fake ganha as chaves que a tela lê
+            try:
+                return pc._lead_vendedor(req, 28, d).body.decode("utf-8")
+            except KeyError as e:
+                d[e.args[0]] = None
+        raise AssertionError("a tela do lead não montou")
+
+    stands, prime = pagina(True), pagina(False)
+    assert "action='/cockpit/lead/28/assumir?texto=Oi%21+link+de+vendas'" in stands
+    assert "<div class=assdica>" in stands and "já entra pronta na caixa" in stands
+    assert "action='/cockpit/lead/28/assumir'" in prime and "<div class=assdica>" not in prime
+
+
+def test_assumir_a_conversa_devolve_a_mensagem_pra_caixa(monkeypatch):
+    """Assumida a conversa, a mensagem do "Link de stands" volta no `?texto=` da página
+    do lead — que já a põe na caixa. Sem mensagem, ou fora do app de estandes, como era."""
+    from urllib.parse import parse_qs, urlsplit
+    from web import painel_cockpit as pc
+    destinos = []
+    monkeypatch.setattr(pc, "_agir", lambda req, lid, fn, destino: destinos.append(destino))
+    msg = "Oi! Escolha o seu stand: https://app.zaq-ia.com/e/outlet-chic?v=2-abc"
+    monkeypatch.setattr(pc, "_perfil_stands", lambda cid: True)
+    pc.cockpit_assumir(_Req(conta_id=40, membro_id=2), 28, texto=msg)
+    alvo = urlsplit(destinos[-1])
+    assert alvo.path == "/cockpit/lead/28" and parse_qs(alvo.query)["texto"] == [msg]
+    pc.cockpit_assumir(_Req(conta_id=40, membro_id=2), 28)
+    assert destinos[-1] == "/cockpit/lead/28"
+    monkeypatch.setattr(pc, "_perfil_stands", lambda cid: False)    # a Prime: como era
+    pc.cockpit_assumir(_Req(conta_id=34, membro_id=5), 28, texto=msg)
+    assert destinos[-1] == "/cockpit/lead/28"
+
+
+def test_o_mapa_do_app_de_estandes_se_atualiza_sozinho(pool, conta_id, monkeypatch):
+    """A tela do mapa pede /cockpit/stands/estado (só no app de estandes) e redesenha,
+    com o mesmo filtro do que cada um pode ver. Fora do app, nem script nem rota."""
+    import json
+    carla, rui = _membro(pool, conta_id, "Carla"), _membro(pool, conta_id, "Rui")
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    pc, req = _cockpit(pool, conta_id, monkeypatch, carla)
+    monkeypatch.setattr(pc, "_perfil_stands", lambda cid: True)
+    assert "BASE_STANDS+'/estado'" in pc.cockpit_stands(req).body.decode("utf-8")
+    j = json.loads(pc.cockpit_stands_estado(req).body)
+    assert j["ok"] and j["stands"]["G60"]["status"] == "livre"
+    assert j["sub"] == "2 livres · 0 reservados · 0 vendidos"
+
+    # um cliente reservou pelo link da Carla: o pedido seguinte já traz
+    _reservar(pool, conta_id, monkeypatch, ["G60"], sinal=150000)
+    _dono_da_venda(pool, conta_id, "G60", carla)
+    es.salvar_cadastro_stand(pool, conta_id, "G60", _dados())
+    j = json.loads(pc.cockpit_stands_estado(req).body)
+    assert j["stands"]["G60"]["status"] == "reservado" and j["stands"]["G60"]["minha"]
+    assert j["stands"]["G60"]["cad"]["doc"] and j["sub"] == "1 livres · 1 reservados · 0 vendidos"
+    # o Rui vê o stand reservado, mas não o cadastro do cliente da Carla
+    pc, req_rui = _cockpit(pool, conta_id, monkeypatch, rui)
+    alheia = json.loads(pc.cockpit_stands_estado(req_rui).body)["stands"]["G60"]
+    assert alheia["status"] == "reservado" and "cad" not in alheia and "minha" not in alheia
+
+    # conta sem o app de estandes (a Prime): nem o script, nem a rota
+    monkeypatch.setattr(pc, "_perfil_stands", lambda cid: False)
+    assert "/estado" not in pc.cockpit_stands(req).body.decode("utf-8")
+    assert pc.cockpit_stands_estado(req).status_code == 404
+
+
 def test_a_venda_do_vendedor_traz_contrato_e_saldo_pras_acoes(pool, conta_id, monkeypatch):
     import json
     import re

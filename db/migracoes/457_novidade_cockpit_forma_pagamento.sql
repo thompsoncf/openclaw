@@ -13,15 +13,25 @@
 -- nº 47 da Prime abria lá sem data e sem vencimento nenhum). O corpo conta,
 -- porque foi a reclamação de quem usa.
 --
--- PÚBLICO `eventos`: parcelas e data do evento só existem no orçamento desse
--- modo (`vendas.modo_por_nicho`, o mesmo portão de `contrato.tem_contrato`).
--- PRA QUEM: vendedor — é quem monta o orçamento no app. Sem resumo: é ajuste de
--- tela interna, não vai pro site.
+-- PÚBLICO `orcamento_evento_app` (portão novo de CONTA, finance/novidades.py):
+-- parcelas e data do evento só existem no orçamento de evento, e `eventos`
+-- sozinho alcançaria o Outlet Chic, cujo app é o de estandes — sem o botão de
+-- Orçamento. PRA QUEM: vendedor — é quem monta o orçamento no app. Sem resumo: é
+-- ajuste de tela interna, não vai pro site.
+-- QUEM RECEBE (01/10/2026): Prime Eventos e Doce Mell.
 --
 -- Aditiva e idempotente.
 
+alter table public.novidades drop constraint if exists novidades_publico_check;
+alter table public.novidades add constraint novidades_publico_check
+  check (publico in ('todos','produto','servico','eventos','recorrente',
+                     'canal_proprio','seguros','suplementos','empresa',
+                     'clinica','construcao','mais_de_um_chip','visita_da_ia',
+                     'resgate_ligado','resgate_eventos','esteira_ligada',
+                     'resgate_ativo','funil_atendimento','orcamento_evento_app'));
+
 insert into public.novidades (chave, tipo, publico, pra_quem, titulo, link, corpo, publicado_em) values
-('cockpit-forma-de-pagamento', 'mudanca', 'eventos', '{vendedor}',
+('cockpit-forma-de-pagamento', 'mudanca', 'orcamento_evento_app', '{vendedor}',
  'Forma de pagamento nas parcelas do orçamento',
  '/cockpit',
  $txt$No orçamento do app, cada parcela agora tem a forma de pagamento: Pix, Cartão de crédito, Cartão de débito, Boleto, Dinheiro, Transferência ou Outro — a mesma lista do computador. A forma escolhida fica marcada pra próxima parcela, então um plano todo no boleto se monta escolhendo uma vez só.
@@ -32,3 +42,4 @@ on conflict (chave) do nothing;
 
 -- rollback:
 --   delete from public.novidades where chave = 'cockpit-forma-de-pagamento';
+--   (e o check volta ao da 411)

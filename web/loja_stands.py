@@ -587,9 +587,14 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
      29/09/2026: "a caixa da reserva embaixo não ficou legal"). */
   .floor-outer{overflow:auto;margin:0;padding:36px 12px 54px;max-height:78vh;}
   .floor-stage{display:flex;justify-content:center;min-width:min-content;perspective:2000px;}
-  .floor-zoom{transform-style:preserve-3d;transition:transform .25s ease;transform-origin:50% 0;}
+  /* pointer-events: o .floor-zoom é só a moldura do zoom. No Mapa 3D ele divide o
+     espaço 3D com os stands (que agora são filhos diretos do chão, cada um com seu
+     translateZ) e o navegador entregava o clique PRA ELE, não pro stand — no
+     computador nenhum stand selecionava no 3D (01/10/2026). Quem recebe o clique é
+     o chão (.floor-grid) e o que está em cima dele. */
+  .floor-zoom{transform-style:preserve-3d;transition:transform .25s ease;transform-origin:50% 0;pointer-events:none;}
   .floor-grid{
-    position:relative;padding:20px;border-radius:18px;
+    position:relative;padding:20px;border-radius:18px;pointer-events:auto;
     --pl-dim:var(--fg-dim);--pl-line:rgba(245,243,230,0.2);--pl-surf:var(--surface);
     background:
       linear-gradient(160deg, color-mix(in srgb, var(--floor) 78%, var(--surface-2) 22%), var(--floor));

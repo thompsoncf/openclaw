@@ -510,7 +510,8 @@ def liberar(request: Request, codigo: str):
 
 @router.post("/painel/eventos/estandes/{codigo}/comprovante")
 async def anexar_comprovante(request: Request, codigo: str, nome: str = Form(""),
-                             whatsapp: str = Form(""), arquivo: UploadFile = File(...)):
+                             whatsapp: str = Form(""), vendedor: str = Form(""),
+                             arquivo: UploadFile = File(...)):
     """O gestor ANEXA o comprovante pelo painel — a venda fechada por fora
     (WhatsApp, presencial) entra pelo MESMO cano da página pública
     (subir_e_registrar_comprovante): trava o stand, nasce prospecção, proposta
@@ -522,12 +523,13 @@ async def anexar_comprovante(request: Request, codigo: str, nome: str = Form("")
     mesma regra de web/loja_stands (tests/test_event_loop_nao_trava.py)."""
     conteudo = await arquivo.read()
     return await run_in_threadpool(_anexar_comprovante_sync, request, codigo,
-                                   nome, whatsapp, conteudo,
-                                   arquivo.content_type or "")
+                                   nome, whatsapp, conteudo, arquivo.content_type or "",
+                                   vendedor)
 
 
 def _anexar_comprovante_sync(request: Request, codigo: str, nome: str,
-                             whatsapp: str, conteudo: bytes, content_type: str):
+                             whatsapp: str, conteudo: bytes, content_type: str,
+                             vendedor: str = ""):
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
         return cfg_ou_redir
@@ -535,7 +537,10 @@ def _anexar_comprovante_sync(request: Request, codigo: str, nome: str,
     pid = None
     if (nome or "").strip():
         from web.loja_stands import _criar_prospeccao_simples
-        pid = _criar_prospeccao_simples(pool, conta[0], nome, whatsapp)
+        # a venda fechada por fora fica no nome do vendedor escolhido (comissão e
+        # ranking); o id vira o código assinado que a página pública também usa
+        vcod = es.codigo_vendedor(int(vendedor)) if (vendedor or "").isdigit() else ""
+        pid = _criar_prospeccao_simples(pool, conta[0], nome, whatsapp, vcod)
     r = es.subir_e_registrar_comprovante(pool, conta[0], codigo, conteudo,
                                          content_type, prospeccao_id=pid)
     if not r.get("ok"):
@@ -942,6 +947,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         <div class="campos">
           <input type="text" name="nome" placeholder="Nome do lojista (pra nascer o contrato)" maxlength="200">
           <input type="text" name="whatsapp" placeholder="WhatsApp (opcional)" maxlength="40">
+          {% if vendedores %}<select name="vendedor"><option value="">— venda sem vendedor —</option>
+            {% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select>{% endif %}
         </div>
         {% endif %}
         <input type="file" name="arquivo" accept="image/*,application/pdf" required>

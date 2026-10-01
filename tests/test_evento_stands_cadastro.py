@@ -58,6 +58,7 @@ def pool():
         c.execute((base / "448_evento_stands.sql").read_text(encoding="utf-8"))
         c.execute((base / "451_evento_stands_cadastro_cliente.sql").read_text(encoding="utf-8"))
         c.execute((base / "452_evento_stands_sinal_saldo_grupo.sql").read_text(encoding="utf-8"))
+        c.execute((base / "454_evento_stands_aviso_vence.sql").read_text(encoding="utf-8"))
         c.commit()
     cli._garantir_cols(p)
     yield p
@@ -917,3 +918,123 @@ def test_a_venda_do_vendedor_traz_contrato_e_saldo_pras_acoes(pool, conta_id, mo
     with pool.connection() as c:
         c.execute("delete from contratos where conta_id=%s", (conta_id,))
         c.commit()
+
+
+# ------------------------- avisos, venda registrada pelo app e app da gestão
+
+def _aplica_454(pool):
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    with pool.connection() as c:
+        c.execute((base / "454_evento_stands_aviso_vence.sql").read_text(encoding="utf-8"))
+        c.commit()
+
+
+def _pushes(monkeypatch):
+    from finance import cockpit as ck
+    enviados = []
+    monkeypatch.setattr(ck, "enviar_push",
+                        lambda pool, cid, mid, titulo, corpo, url="/cockpit", **k:
+                        enviados.append((mid, titulo, corpo, url)) or 1)
+    return enviados
+
+
+def test_o_vendedor_e_avisado_da_reserva_do_sinal_e_do_prazo(pool, conta_id, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    _aplica_454(pool)
+    carla = _membro(pool, conta_id, "Carla")
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    enviados = _pushes(monkeypatch)
+    _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    _dono_da_venda(pool, conta_id, "G60", carla)
+    pid = es.buscar(pool, conta_id, "G60")["prospeccao_id"]
+    # reserva nova pelo link
+    assert es.avisar_reserva_nova(pool, conta_id, pid, ["G60", "G61"], "Boutique", 300000) == 1
+    assert enviados[-1][0] == carla and "G60 + G61" in enviados[-1][2]
+    # perto de vencer: avisa UMA vez
+    agora = datetime.now(timezone.utc)
+    with pool.connection() as c:
+        c.execute("update evento_stands set pre_reserva_ate=%s where conta_id=%s",
+                  (agora + timedelta(hours=5), conta_id))
+        c.commit()
+    assert es.avisar_reservas_vencendo(pool, agora) == 1          # uma venda, 2 stands
+    assert "perto de vencer" in enviados[-1][1]
+    assert es.avisar_reservas_vencendo(pool, agora) == 0          # não repete
+    # sinal confirmado
+    es.confirmar_pagamento(pool, conta_id, "G60", sinal_centavos=300000)
+    assert enviados[-1][1] == "Sinal confirmado ✓" and "R$ 5.400,00" in enviados[-1][2]
+
+
+def test_venda_sem_vendedor_e_reserva_vencida(pool, conta_id, monkeypatch):
+    _aplica_454(pool)
+    carla = _membro(pool, conta_id, "Carla")
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    enviados = _pushes(monkeypatch)
+    _reservar(pool, conta_id, monkeypatch, ["G60"], sinal=150000)   # pelo link neutro
+    pid = es.buscar(pool, conta_id, "G60")["prospeccao_id"]
+    assert es.avisar_reserva_nova(pool, conta_id, pid, ["G60"], "X", 150000) == 0
+    assert enviados == []                                          # ninguém pra avisar
+    _dono_da_venda(pool, conta_id, "G60", carla)
+    es.avisar_expiradas(pool, [{"conta_id": conta_id, "codigo": "G60", "prospeccao_id": pid}])
+    assert enviados[-1][0] == carla and "voltou pro mapa" in enviados[-1][2]
+
+
+def test_o_vendedor_registra_pelo_app_a_venda_fechada_no_whatsapp(pool, conta_id, monkeypatch):
+    from finance import comprovantes as comprov
+    from finance import contrato as ctr
+    from finance import vendas
+    _aplica_454(pool)
+    carla = _membro(pool, conta_id, "Carla")
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    _criar_stand(pool, conta_id, "G61")
+    _pushes(monkeypatch)
+    monkeypatch.setattr(comprov, "subir_em", lambda *a, **k: None)
+    monkeypatch.setattr(vendas, "modo_do_orcamento", lambda p, c: "evento")
+    monkeypatch.setattr(ctr, "criar_para_orcamento", lambda *a, **k: {"id": 1, "token": "t"})
+    pc, req = _cockpit(pool, conta_id, monkeypatch, carla)
+    pdf = b"%PDF-1.4 x"
+    # sinal abaixo do mínimo pra 2 stands: recusa e nada trava
+    r = pc._registrar_venda_sync(req, "G60", "Loja Zap", "(86) 9 9111-2222", "1.500",
+                                 "g61", pdf, "application/pdf")
+    assert r.status_code == 303 and "mínimo" in req.session["ck_err"]
+    assert es.buscar(pool, conta_id, "G60")["status"] == "livre"
+    r = pc._registrar_venda_sync(req, "G60", "Loja Zap", "(86) 9 9111-2222", "3.000",
+                                 "g61", pdf, "application/pdf")
+    assert "G60 + G61" in req.session["ck_ok"]
+    a, b = es.buscar(pool, conta_id, "G60"), es.buscar(pool, conta_id, "G61")
+    assert a["status"] == b["status"] == "pre_reservado" and a["grupo_id"] == b["grupo_id"]
+    with pool.connection() as c:
+        vid = c.execute("select vendedor_id from prospeccao where id=%s",
+                        (a["prospeccao_id"],)).fetchone()[0]
+    assert vid == carla                                            # a venda é dela
+
+
+def test_a_gestao_do_outlet_chic_abre_no_mapa_e_ve_o_ranking(pool, conta_id, monkeypatch):
+    from web import painel_cockpit as pc
+    _aplica_454(pool)
+    carla = _membro(pool, conta_id, "Carla")
+    _config_evento(pool, conta_id)
+    for cod in ("G60", "G61", "G62"):
+        _criar_stand(pool, conta_id, cod)
+    _reservar(pool, conta_id, monkeypatch, ["G60", "G61"], sinal=300000)
+    _dono_da_venda(pool, conta_id, "G60", carla)
+    es.confirmar_pagamento(pool, conta_id, "G60", sinal_centavos=300000)
+    _reservar(pool, conta_id, monkeypatch, ["G62"], sinal=150000, zap="86977776666",
+              nome="Sem Vendedor Ltda")
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_ligar_voc", lambda cid: None)
+    monkeypatch.setattr(pc, "_perfil_stands", lambda cid: True)
+    monkeypatch.setattr(pc, "_gerencia", lambda r: (conta_id, None))
+    monkeypatch.setattr(pc, "_sessao", lambda r: None)
+    req = _Req(conta_id=conta_id, papel="dono")
+    r = pc.cockpit_inicio(req)
+    assert r.status_code == 303 and r.headers["location"].endswith("/cockpit/stands")
+    html = pc.cockpit_stands_ranking(req).body.decode("utf-8")
+    assert html.index("Carla") < html.index("Sem vendedor")        # quem vendeu mais primeiro
+    assert "R$ 8.400" in html and "R$ 3.000" in html                # vendido e recebido dela
+    assert "Ranking" in html and "Vendas" in html                   # abas da gestão
+    vendas = pc.cockpit_stands_vendas(req).body.decode("utf-8")
+    assert "Vendedor: <b>Carla</b>" in vendas and "sem vendedor" in vendas

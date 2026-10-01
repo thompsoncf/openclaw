@@ -44,6 +44,7 @@ def pool():
         c.execute((base / "448_evento_stands.sql").read_text(encoding="utf-8"))
         c.execute((base / "451_evento_stands_cadastro_cliente.sql").read_text(encoding="utf-8"))
         c.execute((base / "452_evento_stands_sinal_saldo_grupo.sql").read_text(encoding="utf-8"))
+        c.execute((base / "454_evento_stands_aviso_vence.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()

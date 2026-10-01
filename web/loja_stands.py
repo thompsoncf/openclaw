@@ -153,6 +153,22 @@ def loja_stands(request: Request, slug: str):
     vend = es.vendedor_do_codigo(pool, conta_id, v_raw) if v_raw else None
     vendedor_link = v_raw if vend else ""
     vendedor_nome = (vend or {}).get("nome") or ""
+    # ?c=<código> é o link que a vendedora manda pro cliente que ela cadastrou ANTES
+    # ("+ Novo cliente", 01/10/2026): a página abre com o nome fantasia e o WhatsApp
+    # dele, e a reserva vai pro cadastro — a venda nasce com o contrato completo. O
+    # código é assinado (es.codigo_cliente); inválido = a página de sempre.
+    c_raw = "".join(ch for ch in (request.query_params.get("c") or "")[:40]
+                    if ch.isalnum() or ch == "-")
+    cli_link = es.cliente_do_codigo(pool, conta_id, c_raw) if c_raw else None
+    # dentro de <script>: o nome é digitado por gente, então nada de < > & crus
+    if cli_link:
+        from web.contrato_publico import _fone
+        cli_link["whatsapp"] = _fone(cli_link["whatsapp"])
+    cliente_json = (json.dumps({"codigo": c_raw, "nome": cli_link["nome"],
+                                "whatsapp": cli_link["whatsapp"], "vendedora": vendedor_nome})
+                    if cli_link else "null")
+    cliente_json = (cliente_json.replace("<", "\\u003c").replace(">", "\\u003e")
+                    .replace("&", "\\u0026"))
     reg = es.regras_de_pagamento(cfg)
     regras_json = json.dumps({
         "minimo": reg["sinal_minimo_centavos"], "max": reg["max_por_empresa"],
@@ -164,7 +180,7 @@ def loja_stands(request: Request, slug: str):
                                         if msg == "ok" else []),
         cfg=cfg, marca=marca, n_total=len(stands), stands_json=stands_json,
         data_br=_data_br, msg=msg, msg_codigo=msg_codigo, ct=ct,
-        vendedor_link=vendedor_link, vendedor_nome=vendedor_nome,
+        vendedor_link=vendedor_link, vendedor_nome=vendedor_nome, cliente_json=cliente_json,
         ct_json=json.dumps(ct or None), stand_link_json=json.dumps(stand_link or None),
         # injeção segura no JS: sempre via json.dumps, nunca string crua
         pix_json=json.dumps({"chave": cfg["pix_chave"], "titular": cfg["pix_titular"]}),
@@ -180,6 +196,7 @@ async def loja_stands_comprovante(request: Request, slug: str,
                                   codigo: str = Form(...), nome: str = Form(""),
                                   whatsapp: str = Form(""), vendedor: str = Form(""),
                                   codigo2: str = Form(""), sinal: str = Form(""),
+                                  cliente: str = Form(""),
                                   arquivo: UploadFile = File(...)):
     """Recebe o comprovante do sinal — é ESTE POST que, no modo 'pagamento',
     trava o estande (livre -> pre_reservado). Sem login: qualquer visitante da
@@ -195,7 +212,7 @@ async def loja_stands_comprovante(request: Request, slug: str,
     conteudo = await arquivo.read()
     return await run_in_threadpool(
         _loja_stands_comprovante_sync, slug, codigo, nome, whatsapp, vendedor,
-        conteudo, arquivo.content_type or "", codigo2, sinal)
+        conteudo, arquivo.content_type or "", codigo2, sinal, cliente)
 
 
 def _centavos(txt: str) -> int | None:
@@ -212,7 +229,7 @@ def _centavos(txt: str) -> int | None:
 
 def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: str,
                                   vendedor: str, conteudo: bytes, content_type: str,
-                                  codigo2: str = "", sinal: str = ""):
+                                  codigo2: str = "", sinal: str = "", cliente: str = ""):
     pool = get_pool()
     cfg = es.buscar_config_por_slug(pool, slug)
     if cfg is None:
@@ -240,9 +257,13 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
             f"/e/{slug}?msg=erro_{v.get('cod') or 'reserva'}&codigo={codigo}", status_code=303)
 
     prospeccao_id = _criar_prospeccao_simples(pool, conta_id, nome, whatsapp, vendedor)
+    # cliente cadastrado antes pela vendedora (link com `?c=`): a reserva vai pro
+    # cadastro dele. Código assinado e revalidado aqui; inválido = o caminho de sempre.
+    cli = es.cliente_do_codigo(pool, conta_id, cliente) if (cliente or "").strip() else None
     r = es.subir_e_registrar_comprovante(pool, conta_id, codigo, conteudo, content_type,
                                          prospeccao_id=prospeccao_id,
-                                         junto_com=codigos[1:], sinal_centavos=v["sinal"])
+                                         junto_com=codigos[1:], sinal_centavos=v["sinal"],
+                                         cliente_id=(cli or {}).get("id"))
     if not r["ok"]:
         _log.info("loja_stands: comprovante recusado (%s/%s): %s", conta_id, codigo,
                   r.get("erro"))
@@ -424,6 +445,9 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   .hero-meta b{color:#F3F1E3;font-weight:700;}
   .hero-pitch{max-width:62ch;margin-top:14px;color:#C9C7B4;font-size:14.5px;line-height:1.55;}
   .info-strip{margin-top:18px;padding:10px 14px;border-radius:10px;background:rgba(22,227,174,0.12);border:1px solid rgba(22,227,174,0.35);font-size:13px;color:#D8F5E9;line-height:1.5;}
+  .cli-box{margin-top:12px;padding:12px 14px;border:1.5px solid var(--mint);border-radius:12px;background:var(--surface);}
+  .cli-nota{margin:0;font-size:12.5px;color:#CFEFE3;line-height:1.45;}
+  .cli-nota b{color:var(--fg);}
 
   .msg{max-width:1180px;margin:16px auto 0;padding:12px 14px;border-radius:10px;font-size:13.5px;font-weight:600;line-height:1.5;}
   .msg.ok{background:rgba(22,227,174,0.12);border:1px solid rgba(22,227,174,0.45);color:#D8F5E9;}
@@ -725,6 +749,7 @@ var STAND_LINK = {{ stand_link_json|safe }};
 var REGRAS = {{ regras_json|safe }};   // sinal mínimo por stand (centavos), máximo por empresa, data do saldo
 var JUST_SENT_CODES = {{ just_sent_codes_json|safe }};
 var VENDEDOR_LINK = "{{ vendedor_link }}";  // o `v` do link — vai no form do comprovante
+var CLIENTE_LINK = {{ cliente_json|safe }};  // o cadastro feito antes pela vendedora (`c` do link)
 var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
 </script>
 {% raw %}<script>
@@ -783,7 +808,9 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
   // A RESERVA (até 2 stands da mesma empresa, um contrato só): `cart` são os stands
   // juntados; `draft` guarda o que a pessoa já digitou, porque a caixa é refeita a
   // cada stand adicionado.
-  var cart = [], adicionando = false, draft = {nome:'', whatsapp:'', sinal:null};
+  var cart = [], adicionando = false,
+      draft = {nome: CLIENTE_LINK ? CLIENTE_LINK.nome : '',
+               whatsapp: CLIENTE_LINK ? CLIENTE_LINK.whatsapp : '', sinal:null};
   function stOf(code){ return stands.filter(function(x){ return x.code === code; })[0]; }
   function reservaCodes(){ if (cart.length) return cart.slice(); return selectedCode ? [selectedCode] : []; }
   function totalC(codes){ return codes.reduce(function(a, c){ return a + ((stOf(c) || {}).precoC || 0); }, 0); }
@@ -1130,14 +1157,18 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         html += '  <input type="hidden" name="codigo" value="' + esc(codes[0]) + '">';
         if (codes[1]) html += '  <input type="hidden" name="codigo2" value="' + esc(codes[1]) + '">';
         if (VENDEDOR_LINK) html += '  <input type="hidden" name="vendedor" value="' + esc(VENDEDOR_LINK) + '">';
+        if (CLIENTE_LINK) html += '  <input type="hidden" name="cliente" value="' + esc(CLIENTE_LINK.codigo) + '">';
         html += '<div class="sinal-box"><div class="sinal-tit">Sinal e saldo</div>';
         html += '<div class="panel-row"><span>Sinal mínimo</span><b>R$ 1.500 por stand' + (n > 1 ? ' · ' + reais(minimo) : '') + '</b></div>';
         html += '<label class="fld"><span>Valor do sinal enviado <i>*</i></span><input class="up-input" type="text" name="sinal" inputmode="decimal" value="' + esc(sinalV) + '" oninput="atualizaSaldo(this.value)"></label>';
         html += '<div class="panel-row"><span>Saldo</span><b id="v-saldo">' + reais(Math.max(0, totalR - Math.round(numBR(sinalV) * 100))) + '</b></div>';
         if (REGRAS.saldoAte) html += '<div class="panel-row"><span>Saldo até</span><b>' + esc(REGRAS.saldoAte) + ' (dia do evento)</b></div>';
         html += '<p class="upload-sub" style="margin-top:6px;text-align:left">Pode mandar mais que o mínimo agora. O saldo é pago em uma ou mais vezes, por Pix ou cartão' + (REGRAS.saldoAte ? ', até ' + esc(REGRAS.saldoAte) : '') + ' — a organização registra cada pagamento.</p></div>';
+        // cliente cadastrado antes pela vendedora: os dados dele já vêm preenchidos
+        if (CLIENTE_LINK) html += '<div class="cli-box"><p class="cli-nota">Seus dados já vieram do cadastro feito por ' + (CLIENTE_LINK.vendedora ? '<b>' + esc(CLIENTE_LINK.vendedora) + '</b>' : 'quem te atendeu') + '. Confira:</p>';
         html += '  <label class="fld"><span>Nome fantasia</span><input class="up-input" type="text" name="nome" placeholder="Ex.: Boutique Nova Era" required maxlength="200" autocomplete="organization" value="' + esc(draft.nome) + '" oninput="draftCampo(this.name, this.value)"></label>';
         html += '  <label class="fld"><span>WhatsApp <i>*</i></span><input class="up-input" type="tel" name="whatsapp" placeholder="(86) 9 9999-9999" required maxlength="40" autocomplete="tel" value="' + esc(draft.whatsapp) + '" oninput="draftCampo(this.name, this.value)"></label>';
+        if (CLIENTE_LINK) html += '</div>';
         html += '  <div class="fld-erro" data-erro hidden></div>';
         html += '  <label class="upload-box">';
         html += '    <div class="upload-label">Comprovante do sinal (Pix)</div>';

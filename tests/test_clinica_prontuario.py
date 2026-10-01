@@ -238,7 +238,10 @@ def test_abrir_o_rascunho_fica_no_registro_e_o_retorno_depois_de_finalizar(tela,
         o_que = [x["o_que"] for x in acc.registro(c, CLINICA, datetime.now(timezone.utc))]
         assert "evolução (rascunho)" in o_que
         r = c.execute("select vence_em from clinica_retornos where evento_id=%s", (eid,)).fetchone()
+        card = c.execute("""select p.status from prospeccao p
+                             join eventos_agenda e on e.prospeccao_id = p.id where e.id=%s""", (eid,)).fetchone()[0]
     assert r is not None                                           # o retorno da evolução foi pra agenda
+    assert card == "retorno"                # e o card, que tinha ido pra Concluído, acompanha a fila
 
 
 def test_a_evolucao_so_liga_ao_atendimento_do_proprio_profissional(banco, zap):  # noqa: F811

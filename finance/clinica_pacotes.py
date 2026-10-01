@@ -420,8 +420,15 @@ def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
 
 def dispensar_retorno(c, conta_id: int, retorno_id: int) -> bool:
     r = c.execute("""update clinica_retornos set estado='dispensado', atualizado_em=now()
-                      where id=%s and conta_id=%s and estado='aguardando' returning id""",
+                      where id=%s and conta_id=%s and estado='aguardando' returning id, prospeccao_id""",
                   (retorno_id, conta_id)).fetchone()
+    if r and r[1]:
+        try:
+            with c.transaction():
+                # saiu da fila: o card não fica esperando em Retorno um retorno que não vem
+                ca.card_do_retorno(c, conta_id, r[1])
+        except Exception:  # noqa: BLE001 — dispensar é o pedido; o card é consequência
+            _log.warning("pacotes: card do retorno não andou (retorno %s)", retorno_id, exc_info=True)
     return r is not None
 
 
@@ -540,9 +547,80 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
 
 # ------------------------------------------------------------------ o poller
 
+def varrer_tratamento(c) -> int:
+    """O card em Em tratamento cujo saldo acabou FORA do Finalizar (pacote vencido,
+    encerrado pela recepção): vai pra Retorno ou Concluído, como no Finalizar
+    (`clinica_agenda.card_do_tratamento`). Só olha contas que têm a coluna."""
+    n = 0
+    try:
+        with c.transaction():
+            leads = c.execute(
+                """select p.conta_id, p.id from prospeccao p
+                    where p.status = 'tratamento'
+                      and p.conta_id in (select conta_id from funil_etapas
+                                          where chave = 'tratamento' and fase = 'pos')
+                      and exists (select 1 from clinica_pacotes k
+                                   where k.conta_id = p.conta_id and k.prospeccao_id = p.id)
+                      and not exists (select 1 from clinica_pacotes k
+                                       where k.conta_id = p.conta_id and k.prospeccao_id = p.id
+                                         and k.estado = 'ativo' and k.sessoes_usadas < k.sessoes_total)
+                    limit 200""").fetchall()
+    except Exception:  # noqa: BLE001 — sem a régua ou sem a 381
+        return 0
+    for conta_id, lead in leads:
+        try:
+            with c.transaction():
+                n += 1 if ca.card_do_tratamento(c, conta_id, lead) else 0
+        except Exception:  # noqa: BLE001
+            _log.warning("pacotes: card do tratamento não andou (lead %s)", lead, exc_info=True)
+    c.commit()
+    return n
+
+
+def varrer_retorno(c) -> int:
+    """A coluna Retorno acompanha a fila de retornos (`clinica_agenda.card_do_retorno`):
+    o card em Concluído cujo retorno nasceu ou reabriu depois do Finalizar vai pra
+    Retorno; o card em Retorno cujo retorno venceu ou foi tirado da fila vai pra
+    Concluído. Só olha contas que têm a coluna, como pós-venda."""
+    n = 0
+    try:
+        with c.transaction():
+            leads = c.execute(
+                """select p.conta_id, p.id from prospeccao p
+                    where p.status in ('ganho', 'retorno')
+                      and p.conta_id in (select conta_id from funil_etapas
+                                          where chave = 'retorno' and fase = 'pos')
+                      and ((p.status = 'ganho' and exists (
+                                select 1 from clinica_retornos r
+                                 where r.conta_id = p.conta_id and r.prospeccao_id = p.id
+                                   and r.estado = 'aguardando'))
+                        or (p.status = 'retorno'
+                            and exists (select 1 from clinica_retornos r
+                                         where r.conta_id = p.conta_id and r.prospeccao_id = p.id)
+                            and not exists (
+                                select 1 from clinica_retornos r
+                                 where r.conta_id = p.conta_id and r.prospeccao_id = p.id
+                                   and (r.estado = 'aguardando' or (r.estado = 'marcado' and exists (
+                                        select 1 from eventos_agenda e
+                                         where e.id = r.marcado_evento_id and e.conta_id = r.conta_id
+                                           and coalesce(e.situacao, '') <> 'finalizado'))))))
+                    limit 200""").fetchall()
+    except Exception:  # noqa: BLE001 — sem a régua ou sem a 381
+        return 0
+    for conta_id, lead in leads:
+        try:
+            with c.transaction():
+                n += 1 if ca.card_do_retorno(c, conta_id, lead) else 0
+        except Exception:  # noqa: BLE001
+            _log.warning("pacotes: card do retorno não andou (lead %s)", lead, exc_info=True)
+    c.commit()
+    return n
+
+
 def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
-    total = {"contas": 0, "sessao": 0, "retorno": 0, "validade": 0, "vencidos": 0}
+    total = {"contas": 0, "sessao": 0, "retorno": 0, "validade": 0, "vencidos": 0, "concluidos": 0,
+             "cards_retorno": 0}
     with pool.connection() as lockc:
         if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
             return total
@@ -551,8 +629,11 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                 try:
                     with c.transaction():
                         contas = [r[0] for r in c.execute(
+                            # 'marcado' também: o horário que fechou o retorno pode ter sido
+                            # cancelado, e é `fechar_retornos` que o devolve pra fila
                             """select conta_id from clinica_pacotes where estado='ativo'
-                               union select conta_id from clinica_retornos where estado='aguardando'""").fetchall()]
+                               union select conta_id from clinica_retornos
+                                      where estado in ('aguardando', 'marcado')""").fetchall()]
                 except Exception:  # noqa: BLE001 — sem a 381
                     contas = []
                 for conta_id in contas:
@@ -564,6 +645,8 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                     except Exception:  # noqa: BLE001
                         c.rollback()
                         _log.warning("pacotes: conta %s falhou", conta_id, exc_info=True)
+                total["concluidos"] = varrer_tratamento(c)
+                total["cards_retorno"] = varrer_retorno(c)
         finally:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
     return total

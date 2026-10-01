@@ -206,6 +206,16 @@ def salvar_config(pool, conta_id: int, *, ativo: bool, emails: str,
 
 # ------------------------------------------------------------------ os números
 
+def _e_clinica(pool, conta_id: int) -> bool:
+    """A conta é do nicho clínica? Tolerante: na dúvida, não é (a carteira conta igual a antes)."""
+    try:
+        with pool.connection() as c:
+            return c.execute("""select 1 from contas ct join nichos n on n.id = ct.nicho_id
+                                 where ct.id=%s and n.slug='clinica'""", (conta_id,)).fetchone() is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) -> dict:
     """O que o Raio-X não calcula por não ser pergunta de tela.
 
@@ -219,6 +229,10 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
            "sem_data": 0, "titulos_vencidos": 0, "titulos_vencidos_valor": 0,
            "sinal_pago": 0, "por_vendedor": []}
     festa = _vis.vende_festa(pool, conta_id)     # a régua da visita segue o nicho
+    # Em tratamento e Retorno (clínica) já fecharam: não são carteira aberta. SÓ na
+    # clínica: em outro nicho, a etapa "Retorno" criada à mão tem a mesma chave e é
+    # venda em aberto. Lido aqui e passado como parâmetro: há banco sem a tabela de nichos
+    clinica = _e_clinica(pool, conta_id)
     with pool.connection() as c:
         def _um(sql, args, chave):
             try:
@@ -291,11 +305,13 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
                                and """ + _cd.SQL_CT_VENDEDOR + """ = m.id
                                and c.assinado_em >= %s and c.assinado_em < %s),
                            (select count(*) from prospeccao p
-                             where p.vendedor_id = m.id and p.status not in ('ganho','perdido'))
+                             where p.vendedor_id = m.id
+                               and p.status not in ('ganho','perdido')
+                               and not (%s and p.status in ('tratamento','retorno')))
                       from membros m
                      where m.conta_id=%s and coalesce(m.ativo,true) and m.papel='vendedor'
                      order by 2""",
-                    (ini, fim, ini, fim, ini, fim, ini, fim, conta_id)).fetchall()
+                    (ini, fim, ini, fim, ini, fim, ini, fim, clinica, conta_id)).fetchall()
             out["por_vendedor"] = [
                 {"id": r[0], "nome": r[1], "primeiro": (r[1] or "—").split(" ")[0],
                  "entraram": int(r[2]), "visitas": int(r[3]), "fechou": int(r[4]),

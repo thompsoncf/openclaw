@@ -48,7 +48,7 @@ def pool():
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
-                  "379_clinica_planos.sql", "381_clinica_pacotes.sql"):
+                  "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("""update servicos_catalogo set setup_centavos=80000, volta_dias=null
@@ -167,6 +167,81 @@ def test_finalizar_baixa_uma_sessao_e_conclui_na_ultima(pool, zap):
         assert ckp.do_evento(c, CLINICA, extra) is None
 
 
+def _card(c, lead):
+    return c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0]
+
+
+def test_o_card_sai_de_em_tratamento_quando_o_saldo_acaba(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        assert _card(c, lead) == "tratamento"
+        for n in range(3):
+            _finalizar(c, _sessao(c, lead, SEG + timedelta(days=n)))
+            assert _card(c, lead) == "tratamento"               # a sessão não tira da coluna
+        _finalizar(c, _sessao(c, lead, SEG + timedelta(days=3)))
+        assert _card(c, lead) == "ganho"                        # acabou o saldo, sem retorno: Concluído
+        assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
+                         ).fetchone() == ("tratamento", "ganho", "pacote")
+
+
+def test_saldo_acabou_com_retorno_pedido_vai_pro_retorno(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        for n in range(3):
+            _finalizar(c, _sessao(c, lead, SEG + timedelta(days=n)))
+        _finalizar(c, _sessao(c, lead, SEG + timedelta(days=3)), retorno_dias=30)
+        assert _card(c, lead) == "retorno"
+
+
+def test_pacote_encerrado_tira_o_card_pelo_relogio(pool, zap):
+    """O saldo também acaba fora do Finalizar (a recepção encerra, o pacote vence)."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        assert ckp.varrer_tratamento(c) == 0                    # com saldo, fica
+        assert ckp.encerrar(c, CLINICA, ckp.listar(c, CLINICA)[0]["id"], "desistiu", 51)
+        c.commit()
+        assert ckp.varrer_tratamento(c) == 1
+        assert _card(c, lead) == "ganho"
+
+
+def test_pacote_encerrado_com_retorno_a_fazer_vai_pro_retorno_pelo_relogio(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        assert _card(c, lead) == "tratamento"                   # a consulta avulsa não tira da coluna
+        assert ckp.encerrar(c, CLINICA, ckp.listar(c, CLINICA)[0]["id"], "desistiu", 51)
+        c.commit()
+        assert ckp.varrer_tratamento(c) == 1
+        assert _card(c, lead) == "retorno"
+
+
+def test_plano_sem_sessoes_conclui_em_vez_de_prender_em_tratamento(pool, zap):
+    """Plano só de item avulso (produto, protocolo) não vira pacote. Sem saldo, nada
+    tiraria o card de Em tratamento: é venda concluída (revisão de 01/10/2026)."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        itens, _e = cp.limpar_itens([{"servico_id": None, "nome": "Protocolo domiciliar", "sessoes": 1, "valor": "420"}],
+                                    {t["id"]: t for t in cc.listar_tipos(c, CLINICA)})
+        pid, _e = cp.salvar(c, CLINICA, lead=lead, evento_id=None, profissional_id=_manoel(c), paciente="Lúcia Ferreira",
+                            fone=FONE, itens=itens, desconto_pct="0", pix_desconto_pct="0", cartao_parcelas="1",
+                            parcelado=False, membro_id=51, pode_aprovar=True)
+        c.commit()
+        assert cp.enviar(c, CLINICA, pid, 51, AGORA)["ok"]
+        token = cp.plano(c, CLINICA, pid)["token"]
+    assert cp.aceitar(pool, token, nome="Lúcia Ferreira", forma="pix", agora=AGORA)
+    with pool.connection() as c:
+        assert ckp.listar(c, CLINICA) == []
+        assert _card(c, lead) == "ganho"
+
+
 def test_consulta_que_nao_e_do_pacote_nao_baixa(pool, zap):
     with pool.connection() as c:
         lead, _conv = _paciente(c)
@@ -198,6 +273,131 @@ def test_retorno_pedido_chama_7_dias_antes_e_sai_quando_marca(pool, zap):
         ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 22)))
         c.commit()
         assert ckp.retornos(c, CLINICA, _br(date(2026, 10, 22))) == []
+
+
+def _retorno_id(c, lead):
+    return c.execute("select id from clinica_retornos where prospeccao_id=%s order by id desc limit 1",
+                     (lead,)).fetchone()[0]
+
+
+def test_retorno_tirado_da_fila_conclui_o_card(pool, zap):
+    """Nada tirava o card de Retorno além de um Finalizar futuro: o paciente que a
+    recepção dispensou ficava lá pra sempre (revisão de 01/10/2026)."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        assert _card(c, lead) == "retorno"
+        assert ckp.dispensar_retorno(c, CLINICA, _retorno_id(c, lead))
+        c.commit()
+        assert _card(c, lead) == "ganho"
+        assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
+                         ).fetchone() == ("retorno", "ganho", "retorno")
+
+
+def test_retorno_vencido_conclui_o_card_pelo_relogio(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        assert ckp.varrer_retorno(c) == 0                       # a fazer: fica em Retorno
+        assert _card(c, lead) == "retorno"
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 12, 15)))   # 30 dias depois do prazo, sem marcar
+        c.commit()
+        assert ckp.varrer_retorno(c) == 1
+        assert _card(c, lead) == "ganho"
+
+
+def test_retorno_marcado_segura_o_card_e_o_cancelamento_devolve_pra_fila(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        volta = _sessao(c, lead, date(2026, 10, 27), tipo="Retorno")
+        c.commit()
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 22)))
+        c.commit()
+        assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "retorno"   # marcado: espera o dia
+        assert ca.mudar_situacao(c, CLINICA, volta, "cancelou") is None
+        c.commit()
+        # antes de o relógio devolver o retorno pra fila, o card não é dado por concluído
+        assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "retorno"
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 10, 23)))
+        c.commit()
+        assert c.execute("select estado from clinica_retornos where id=%s", (_retorno_id(c, lead),)
+                         ).fetchone()[0] == "aguardando"
+        assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "retorno"   # voltou pra fila: continua a fazer
+
+
+def test_retorno_que_nasce_depois_do_finalizar_leva_o_card_de_concluido_pra_retorno(pool, zap):
+    """A recepção finaliza sem retorno e o card vai pra Concluído; o médico assina a
+    evolução depois, com retorno em 30 dias. O card acompanha a fila."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        eid = _sessao(c, lead, SEG, tipo="Consulta")
+        _finalizar(c, eid, tratamento="nao")
+        assert _card(c, lead) == "ganho"
+        assert ckp.agendar_retorno(c, CLINICA, ca.evento(c, CLINICA, eid), 30)
+        assert ca.card_do_retorno(c, CLINICA, lead) == "retorno"
+        c.commit()
+        assert _card(c, lead) == "retorno"
+        # e pelo relógio, quando ninguém chamou na hora
+        c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
+        c.commit()
+        assert ckp.varrer_retorno(c) == 1
+        assert _card(c, lead) == "retorno"
+
+
+def test_a_mao_do_dono_vale_mais_que_a_fila_ate_a_fila_mudar(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
+        assert _card(c, lead) == "retorno"
+        # o dono arrasta pra Concluído com o retorno ainda a fazer: fica
+        c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
+        c.execute("""insert into funil_movimentos (conta_id, prospeccao_id, de, para, motivo, criado_em)
+                     values (39,%s,'retorno','ganho','manual', now() + interval '1 minute')""", (lead,))
+        c.commit()
+        assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "ganho"
+        # e de volta pra Retorno, com o retorno já vencido: fica também
+        ckp.fechar_retornos(c, CLINICA, _br(date(2026, 12, 15)))
+        c.execute("update prospeccao set status='retorno' where id=%s", (lead,))
+        c.execute("""insert into funil_movimentos (conta_id, prospeccao_id, de, para, motivo, criado_em)
+                     values (39,%s,'ganho','retorno','manual', now() + interval '2 minutes')""", (lead,))
+        c.commit()
+        assert ckp.varrer_retorno(c) == 0 and _card(c, lead) == "retorno"
+
+
+def test_pacote_que_nao_nasce_nao_derruba_o_aceite_e_o_card_conclui(pool, zap, monkeypatch):
+    """O pacote nasce na transação do aceite, dentro de um savepoint: se falha, o aceite
+    vale, os títulos saem e o card vai pra Concluído (sem saldo, nada o tiraria de
+    Em tratamento)."""
+    def _quebra(*a, **k):
+        raise RuntimeError("sem pacote")
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        itens, _e = cp.limpar_itens(
+            [{"servico_id": _tipo(c, "Procedimento estético")["id"], "sessoes": 4, "valor": ""}],
+            {t["id"]: t for t in cc.listar_tipos(c, CLINICA)})
+        pid, _e = cp.salvar(c, CLINICA, lead=lead, evento_id=None, profissional_id=_manoel(c), paciente="Lúcia Ferreira",
+                            fone=FONE, itens=itens, desconto_pct="0", pix_desconto_pct="0", cartao_parcelas="4",
+                            parcelado=True, membro_id=51, pode_aprovar=True)
+        c.commit()
+        assert cp.enviar(c, CLINICA, pid, 51, AGORA)["ok"]
+        token = cp.plano(c, CLINICA, pid)["token"]
+    monkeypatch.setattr(ckp, "criar_do_plano", _quebra)
+    assert cp.aceitar(pool, token, nome="Lúcia Ferreira", forma="cartao", agora=AGORA)
+    with pool.connection() as c:
+        assert cp.plano(c, CLINICA, pid)["status"] == "aceito"
+        assert ckp.listar(c, CLINICA) == []
+        assert _card(c, lead) == "ganho"
+
+
+def test_card_arrastado_pra_retorno_sem_retorno_na_fila_fica_onde_o_dono_pos(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        c.execute("update prospeccao set status='retorno' where id=%s", (lead,))
+        c.commit()
+        assert ckp.varrer_retorno(c) == 0
+        assert ca.card_do_retorno(c, CLINICA, lead) is None
+        assert _card(c, lead) == "retorno"
 
 
 # ------------------------------------------------------------------ os lembretes

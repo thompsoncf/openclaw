@@ -1,0 +1,307 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Método ROTA Pelle</title>
+<style>
+/* Papel claro da clínica (mesmo sistema dos outros desenhos em docs/mockups): cream, navy, dourado; tema único, de propósito */
+:root{--papel:#EFEBE3;--tinta:#14213D;--tinta-2:#3B4757;--mudo:#8A8475;--ouro:#B8862E;--linha:#DCD5C6;--cartao:#fff;--borda:#E3DDD0;--verde:#1c7a4f;--verde-f:#E8F5EE;--amarelo:#D9932B;--amarelo-f:#FFF6E8;--vermelho:#B4453C;--vermelho-f:#FDECEA;--azul:#2F5D8A;--azul-f:#E9F0F8;
+ --fonte:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--papel);color:var(--tinta);font:14px/1.6 var(--fonte);padding-block:26px;padding-inline:16px}
+.wrap{max-width:920px;margin:0 auto}
+h1{font-size:26px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+.lead{font-size:14.5px;color:var(--tinta-2);margin:0 0 22px;line-height:1.65;max-width:68ch}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ouro);font-weight:700;margin:34px 0 4px;padding-top:18px;border-top:2px solid var(--linha)}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 12px;text-wrap:balance}
+h3{font-size:14.5px;margin:18px 0 6px}
+p{margin:0 0 12px;max-width:72ch}
+ul{margin:0 0 12px;padding-left:20px}li{margin-bottom:5px}
+.nota,.alerta,.perigo,.bom{border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65;border:1px solid var(--borda)}
+.nota{background:#FBFAF7;border-left:3px solid var(--ouro)}
+.alerta{background:var(--amarelo-f);border-color:#F0DDBA;border-left:3px solid var(--amarelo);color:#7A4E0C}.alerta b{color:#5C3A06}
+.perigo{background:var(--vermelho-f);border-color:#F5C6C0;border-left:3px solid var(--vermelho);color:#8C332C}.perigo b{color:#6E241E}
+.bom{background:var(--verde-f);border-color:#BFE3D0;border-left:3px solid var(--verde);color:#155c3b}.bom b{color:#0e3d27}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--cartao);border:1px solid var(--borda);border-radius:10px;overflow:hidden}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--mudo);font-weight:700;border-bottom:1px solid var(--borda)}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid var(--borda);border-radius:4px;padding:1px 5px;font-size:11.5px;font-family:var(--mono);color:var(--tinta)}
+.big{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-bottom:14px}
+.big div{background:var(--cartao);border:1px solid var(--borda);border-radius:10px;padding:10px 12px;min-width:0}
+.big b{display:block;font-size:1.5rem;line-height:1.2;font-variant-numeric:tabular-nums}
+.big span{font-size:11.5px;color:var(--mudo)}
+.tag{display:inline-block;font-size:10px;letter-spacing:.04em;border-radius:99px;padding:1px 8px;border:1px solid var(--borda);color:var(--tinta-2);white-space:nowrap;font-weight:600}
+.tag.ex{border-color:#BFE3D0;color:var(--verde);background:var(--verde-f)}
+.tag.cf{border-color:#CFDDEC;color:var(--azul);background:var(--azul-f)}
+.tag.co{border-color:#F0DDBA;color:#7A4E0C;background:var(--amarelo-f)}
+.tag.tz{border-color:#F5C6C0;color:#8C332C;background:var(--vermelho-f)}
+.rota{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem;margin:10px 0 14px}
+.rota div{background:var(--cartao);border:1px solid var(--borda);border-radius:10px;padding:12px 13px;min-width:0}
+.rota b{display:block;font-size:1.6rem;color:var(--ouro);line-height:1}
+.rota strong{display:block;font-size:14px;margin:6px 0 4px}
+.rota span{font-size:12.5px;color:var(--tinta-2);line-height:1.5}
+.jor{border-left:3px solid var(--linha);margin:8px 0 14px 8px;padding-left:16px}
+.et{position:relative;margin-bottom:14px;background:var(--cartao);border:1px solid var(--borda);border-radius:10px;padding:11px 13px}
+.et::before{content:"";position:absolute;left:-26px;top:16px;width:13px;height:13px;border-radius:50%;background:var(--ouro);border:3px solid var(--papel)}
+.et .t{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;margin-bottom:4px}
+.et .t b{font-size:14.5px}
+.et .meta{font-size:12.5px;color:var(--tinta-2)}
+.et .meta b{color:var(--tinta)}
+.bar{display:grid;grid-template-columns:150px 1fr 54px;gap:8px;align-items:center;font-size:12.5px;margin-bottom:4px}
+.bar i{display:block;height:12px;border-radius:3px;background:var(--azul)}
+.bar i.ruim{background:var(--vermelho)}.bar i.meio{background:var(--amarelo)}.bar i.bom{background:var(--verde)}
+.bar .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--tinta-2)}
+.horas{display:grid;grid-template-columns:repeat(16,1fr);gap:3px;align-items:end;height:110px;margin:8px 0 2px}
+.horas i{display:block;background:var(--azul);border-radius:3px 3px 0 0;min-height:2px}
+.horas i.fora{background:#C9BFA8}
+.hl{display:grid;grid-template-columns:repeat(16,1fr);gap:3px;font-size:10px;color:var(--mudo);text-align:center;margin-bottom:10px;font-variant-numeric:tabular-nums}
+.sem{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:8px 0 12px}
+.sem div{background:var(--cartao);border:1px solid var(--borda);border-radius:8px;padding:7px 6px;text-align:center;min-width:0}
+.sem b{display:block;font-size:12px}
+.sem small{display:block;font-size:10.5px;color:var(--mudo);line-height:1.35}
+.sem .zero{color:var(--vermelho);font-weight:700}
+.q{background:var(--cartao);border:1px solid var(--borda);border-left:3px solid var(--tinta);border-radius:8px;padding:12px 16px;margin-bottom:10px}
+.q .qt{font-weight:700;font-size:14px;margin-bottom:3px}
+.q .qo{font-size:13px;color:var(--tinta-2);line-height:1.6}
+.zap{background:#E9DFD4;border-radius:12px;padding:12px;max-width:430px;margin:0 0 14px}
+.zap .b{background:#fff;border-radius:8px;padding:7px 10px;margin:0 30px 8px 0;font-size:13px;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.zap .b.eu{background:#D9FDD3;margin:0 0 8px 30px}
+.zap .h{font-size:10.5px;color:#667;text-align:right;margin-top:2px}
+.fontes{font-size:12px;color:var(--tinta-2);columns:2;column-gap:24px}
+.fontes li{break-inside:avoid;margin-bottom:4px}
+a{color:var(--azul)}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid var(--linha);font-size:11.5px;color:var(--mudo);line-height:1.6}
+@media (max-width:640px){.big,.rota{grid-template-columns:repeat(2,1fr)}.bar{grid-template-columns:110px 1fr 48px}.fontes{columns:1}.sem{grid-template-columns:repeat(4,1fr)}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head><body>
+<div class="wrap">
+
+<div class="alerta"><b>Pesquisa de base, 01/10/2026.</b> A ordem de implantação desta página foi substituída pelo plano de fases (clinica_crm_fases.html): pessoa primeiro, ensaio do follow-up, ensaio do resgate, IA por último. Ficam valendo o diagnóstico, as práticas e as fontes. Os números são da própria Espaço Pelle no Zaq, de 23/09 a 01/10/2026, só totais e tempos: nenhum nome, telefone ou texto de conversa foi lido. As práticas vêm de estudos e das plataformas que mais convertem em clínicas, com a fonte no fim. Onde o Zaq já faz, está marcado; onde falta, está marcado também.</div>
+
+<h1>Método ROTA Pelle: do primeiro "oi" ao paciente que indica</h1>
+<p class="lead">A pergunta que este mapa responde: <b>o que os CRMs e as clínicas que mais convertem no mundo fazem de diferente, e como isso cabe na Espaço Pelle, com uma dermatologista-sede em Pedreiras, um médico que roda 9 cidades, duas pessoas na recepção e o WhatsApp como porta de entrada.</b> A resposta cabe em quatro verbos: Responde, Organiza, Termina, Acompanha. Onze dos itens são só ligar chave no Zaq. O resto se constrói em semanas.</p>
+
+<div class="big">
+  <div><b>138</b><span>conversas no WhatsApp em 8 dias (2.638 mensagens)</span></div>
+  <div><b>8,8 min</b><span>mediana da 1ª resposta; 18% esperam mais de 2 h</span></div>
+  <div><b>1 de 12</b><span>mensagens de sábado e domingo respondidas</span></div>
+  <div><b>0 de 67</b><span>cartões do funil com a cidade preenchida</span></div>
+  <div><b>2</b><span>agendamentos no Zaq (a agenda ainda roda fora)</span></div>
+  <div><b>0</b><span>planos, pacotes, termos e pré-consultas</span></div>
+</div>
+
+<h2><span class="n">01</span>O que os números de 8 dias mostram</h2>
+<p class="sub">Volume bom, triagem nenhuma, fim de semana no vazio</p>
+
+<h3>Quando o paciente escreve (mensagens recebidas por hora)</h3>
+<div class="horas" aria-label="Mensagens recebidas por hora do dia, de 6h às 21h">
+  <i style="height:1%" title="6h: 2"></i><i style="height:3%" title="7h: 7"></i><i style="height:47%" title="8h: 99"></i><i style="height:100%" title="9h: 210"></i><i style="height:90%" title="10h: 190"></i><i style="height:63%" title="11h: 132"></i><i style="height:30%" title="12h: 62"></i><i style="height:58%" title="13h: 121"></i><i style="height:81%" title="14h: 171"></i><i style="height:49%" title="15h: 102"></i><i style="height:62%" title="16h: 130"></i><i style="height:49%" title="17h: 102"></i><i class="fora" style="height:10%" title="18h: 20"></i><i class="fora" style="height:3%" title="19h: 6"></i><i class="fora" style="height:1%" title="20h: 2"></i><i class="fora" style="height:1%" title="21h: 3"></i>
+</div>
+<div class="hl"><span>6h</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span><span>21h</span></div>
+<p>Pico das 9h às 11h (532 mensagens) e das 14h às 17h (505). As respostas da clínica param às 18h. As barras cinzas são mensagens que chegam depois disso e esperam até o dia seguinte.</p>
+
+<h3>Por dia da semana (recebidas / respondidas)</h3>
+<div class="sem">
+  <div><b>Seg</b><small>210 / 205</small></div><div><b>Ter</b><small>276 / 278</small></div><div><b>Qua</b><small>301 / 295</small></div><div><b>Qui</b><small>353 / 296</small></div><div><b>Sex</b><small>207 / 204</small></div><div><b>Sáb</b><small class="zero">7 / 1</small></div><div><b>Dom</b><small class="zero">5 / 0</small></div>
+</div>
+
+<h3>Tempo até a primeira resposta (83 conversas medidas)</h3>
+<div class="bar"><span>até 5 min</span><i class="bom" style="width:46%"></i><span class="v">46%</span></div>
+<div class="bar"><span>5 a 30 min</span><i class="meio" style="width:27%"></i><span class="v">27%</span></div>
+<div class="bar"><span>30 min a 2 h</span><i class="meio" style="width:10%"></i><span class="v">10%</span></div>
+<div class="bar"><span>mais de 2 h</span><i class="ruim" style="width:18%"></i><span class="v">18%</span></div>
+<p style="margin-top:8px">O estudo de referência (InsideSales, 15 mil leads; HBR 2011, 2.241 empresas) diz que responder em 5 minutos, e não em 30, dá 100 vezes mais chance de falar com a pessoa e 21 vezes mais de qualificá-la. A Pelle acerta em quase metade dos casos. A outra metade é o que este método resolve primeiro.</p>
+
+<div class="tw"><table>
+<tr><th>O número</th><th>O que ele quer dizer</th></tr>
+<tr><td>5 conversas nunca respondidas; 17 com uma mensagem só do lead</td><td>Leads que esfriaram sem ninguém tocar. O motor de "voltar a chamar" do Zaq está desligado e o agente também.</td></tr>
+<tr><td>23 conversas com mais de 15 mensagens do lead (média 9,8 recebidas / 9,3 enviadas)</td><td>Negociação longa no braço da recepção: sem roteiro, sem plano de tratamento e sem cadência automática. Nenhum plano e nenhum pacote cadastrado.</td></tr>
+<tr><td>65 de 67 cartões em "Novo", todos "quente", origem "WhatsApp" em 66</td><td>O funil não está sendo usado. Sem cidade, não há data para oferecer; sem origem, os cerca de R$ 5 mil por mês de rádio, blog/TV, tráfego e consultoria não têm retorno medido.</td></tr>
+<tr><td>Agente desligado e sem configuração</td><td>Quem escreve de Codó no domingo à noite só é atendido na segunda. A Doctoralia mede que 33% dos pacientes preferem marcar fora do horário comercial.</td></tr>
+<tr><td>0 termos e 0 pré-consultas (link da ficha desligado)</td><td>Sem o termo de imagem, as fotos cifradas do prontuário não podem ser usadas. Sem consentimento destacado, nenhuma campanha de reativação é segura pela LGPD.</td></tr>
+<tr><td>Dívida de ~R$ 14,7 mil/mês; injetáveis Galderma ~R$ 5,1 mil/mês</td><td>Cada falta numa cidade de viagem é deslocamento pago sem receita. A confirmação de véspera está desligada; o lembrete sozinho derruba faltas de 38,6% para 25,5% (PMC 2022).</td></tr>
+</table></div>
+
+<h2><span class="n">02</span>O método em quatro verbos</h2>
+<p class="sub">ROTA, porque o médico roda nove cidades e o paciente precisa saber quando ele passa pela dele</p>
+<div class="rota">
+  <div><b>R</b><strong>Responde</strong><span>Ninguém espera mais de 5 minutos. No pico a recepção responde; fora dele o agente acolhe, pergunta cidade e queixa e já oferece data.</span></div>
+  <div><b>O</b><strong>Organiza</strong><span>Sem cidade não existe data; sem origem não existe decisão de marketing. Nenhum cartão sai de "Novo" sem os dois.</span></div>
+  <div><b>T</b><strong>Termina</strong><span>Toda conversa termina em horário marcado. Toda consulta termina em plano, nem que seja "só retorno". Todo retorno é marcado antes de o paciente sair.</span></div>
+  <div><b>A</b><strong>Acompanha</strong><span>Confirmação na véspera, vaga reposta pela fila, cobrança do plano, lembrete de sessão e de retorno rodam sozinhos. A pessoa só entra quando o paciente responde.</span></div>
+</div>
+<ul>
+  <li><b>O agente acolhe e marca, a pessoa fecha.</b> Brenda e Cristiane gastam o tempo com quem respondeu, não digitando o primeiro "oi".</li>
+  <li><b>Medir toda segunda, por cidade.</b> Seis números: leads novos, % respondidos em 5 min, lead → consulta, falta, consulta → plano, plano → fechado. Cada um com dono e meta.</li>
+  <li><b>Dentro da regra.</b> CFM 2.336/2023: preço e condição de pagamento podem; promessa de resultado, sorteio, brinde e "o melhor do Maranhão" não. LGPD: mensagem automática nunca cita o procedimento; campanha só com consentimento separado e "responda SAIR" em toda mensagem.</li>
+</ul>
+
+<h2><span class="n">03</span>A jornada do paciente, etapa por etapa</h2>
+<p class="sub">Cada etapa com a meta, a prática que sustenta e o que fazer no Zaq</p>
+<p><span class="tag ex">existe</span> já faz, basta usar &nbsp; <span class="tag cf">configurar</span> liga na tela, sem código &nbsp; <span class="tag co">construir</span> precisa de código &nbsp; <span class="tag tz">terceiro</span> depende de alguém de fora</p>
+
+<div class="jor">
+<div class="et"><div class="t"><b>1. Chegada</b> <span class="tag cf">configurar</span></div>
+<div class="meta">Acolher em segundos, capturar cidade e queixa, nunca deixar sem resposta, inclusive à noite e no fim de semana. <b>Meta:</b> 80% das primeiras respostas em até 5 min no pico; 0 conversas sem resposta na semana; sábado e domingo 100% respondidos (hoje 1 de 12).<br><b>No Zaq:</b> Prospecção › Comunicação › Agentes IA: agente ligado, horário 24h, responder e qualificar ligados, tom informal. Instruções com as 9 cidades e a rota do Dr. Manoel; FAQ com endereço, estacionamento e formas de pagamento. Funil › Régua: cobrança da equipe ligada para avisar Brenda/Cristiane quando um lead passa do tempo sem resposta. Tela Hoje, bloco "Esperando resposta", é a fila de não respondidos. Os avisos esperam as 8h (já existe), então o agente pode ficar 24h sem acordar ninguém.</div></div>
+
+<div class="et"><div class="t"><b>2. Qualificação</b> <span class="tag cf">configurar</span> <span class="tag co">construir</span></div>
+<div class="meta">Saber de que cidade é, por onde chegou e o que busca, para oferecer a data certa e priorizar quem está quente. <b>Meta:</b> cidade e origem em 100% dos cartões (hoje 0 de 67 com cidade); temperatura real em 100%; ao menos 50% dos leads do mês chegam a "Consulta agendada".<br><b>No Zaq:</b> o campo cidade já existe no cartão (0 de 67 é falta de preenchimento, não de campo). Os links <code>wa.me</code> com código de origem já gravam o código no cartão e a tela Origens já mede o que cada mídia virou. Configurar: Régua › temperatura automática ligada. Construir: o agente perguntar e gravar a cidade (hoje ele pede nome, nascimento e para quem é) e a trava que impede "Novo" → "Consulta agendada" sem cidade e origem.</div></div>
+
+<div class="et"><div class="t"><b>3. Agendamento na própria conversa</b> <span class="tag cf">configurar</span></div>
+<div class="meta">Marcar na primeira conversa, na próxima passagem do Dr. Manoel pela cidade do paciente, sem a recepção virar gargalo. <b>Meta:</b> 100% da agenda real dentro do Zaq (hoje 2 agendamentos); ao menos 40% das marcações feitas pelo agente; fila de vagas com ao menos 1 pessoa em cada cidade cheia.<br><b>No Zaq:</b> Configurar clínica: Locais já têm as 9 cidades; falta a Grade do Dr. Manoel em cada cidade (semanal, quinzenal ou "3ª quinta") e a grade da Juliana. Em Atendimentos, marcar "o agente pode marcar" em Consulta, Avaliação, Retorno e Sessão de pacote (cirurgia, testes e coleta ficam com a recepção). Vagas › config: modo "aprova", teto 20. O "Colocar no ar" diz o que ainda falta.</div></div>
+
+<div class="et"><div class="t"><b>4. Confirmação e pré-consulta</b> <span class="tag cf">configurar</span> <span class="tag co">construir</span></div>
+<div class="meta">Reduzir falta e chegar à consulta com ficha, termos e queixa já lidos. <b>Meta:</b> falta abaixo de 10% em 60 dias, medida por cidade; 80% das fichas completas antes da consulta; os 3 termos cadastrados (hoje 0).<br><b>No Zaq:</b> Agenda › config: confirmação na véspera ligada (1 confirma / 2 remarcar) e link da ficha ligado; a pré-consulta vem junto. Tela Termos: LGPD (o texto editável precisa incluir lembretes, retorno e campanhas por WhatsApp; hoje só cobre "marcar e lembrar consultas"), uso de imagem (clínico / divulgação / não, revogável) e termo por procedimento. O balcão com QR cobre quem chega sem preencher. Construir: segundo lembrete 3 h antes com o endereço da cidade e mensagem a quem faltou.</div></div>
+
+<div class="et"><div class="t"><b>5. Consulta que termina em plano</b> <span class="tag ex">existe</span></div>
+<div class="meta">O médico fecha a consulta com plano registrado e retorno pedido; a recepção já vê o que fazer. <b>Meta:</b> 100% das consultas finalizadas com "o médico propôs tratamento?" respondido; consulta → plano acima de 60%; 100% com retorno em N dias registrado.<br><b>No Zaq:</b> ao finalizar o atendimento na agenda, "propôs tratamento? sim/não" (o cartão vai para Plano de tratamento sozinho) e "retorno em N dias". A evolução assinada no prontuário também gera o retorno. Configurar: o catálogo com os procedimentos reais (toxina, preenchimento, Sculptra, laser por área, sessão dermatofuncional), com preço e intervalo de volta, para o plano nascer em 3 cliques.</div></div>
+
+<div class="et"><div class="t"><b>6. Fechamento no balcão</b> <span class="tag ex">existe</span> <span class="tag co">construir</span></div>
+<div class="meta">O plano vira orçamento com sessões, valor, Pix ou cartão e validade, apresentado na saída e cobrado sozinho. <b>Meta:</b> plano → fechado acima de 50% em 7 dias; 5 pacotes-padrão no catálogo (hoje 0); ao menos 1 plano por dia de atendimento.<br><b>No Zaq:</b> Planos: procedimentos, sessões, desconto no Pix, cartão em N vezes, link <code>/plano/…</code>, cobrança automática em D+1 e D+3. Plano aceito vira pacote e títulos no Financeiro. Configurar: desconto no Pix, parcelas, validade de 7 dias, teto de desconto. Construir: toques D+7 (educativo, sem promessa) e D+14 (última chamada), porque hoje a cobrança para em D+3.</div></div>
+
+<div class="et"><div class="t"><b>7. Tratamento e retorno</b> <span class="tag ex">existe</span></div>
+<div class="meta">Ninguém some entre sessões; o retorno de 30 dias cai na próxima passagem pela mesma cidade. <b>Meta:</b> retorno marcado antes de vencer em 80% dos casos; sessão de pacote marcada em até 7 dias; vaga cancelada reposta em metade dos casos.<br><b>No Zaq:</b> Pacotes › config: lembretes ligados, aviso de retorno 7 dias antes, validade 12 meses. Produtos: lembrete de reposição ligado. Assinatura "cartão Pelle": mensalidade com sessões inclusas e prioridade na fila de vagas, sem sorteio nem brinde. A tela Hoje mostra "sessões liberadas" e "retornos chegando". <span class="tag tz">terceiro</span> Confirmar com o representante Galderma o programa de pontos no Brasil (98% dos pacientes do ASPIRE voltam ao mesmo profissional).</div></div>
+
+<div class="et"><div class="t"><b>8. Satisfação e indicação</b> <span class="tag co">construir</span></div>
+<div class="meta">Ouvir o paciente 24 h depois, corrigir antes da próxima viagem e transformar quem gostou em indicação. <b>Meta:</b> NPS acima de +60 em 90 dias; 100% das notas baixas contatadas em 1 dia; 10% dos cartões novos do mês com origem "Indicação" (hoje 0 de 67).<br><b>No Zaq:</b> não existe NPS, pedido de avaliação nem programa de indicação. Existe a origem "Indicação" na agenda e "como conheceu" na ficha. Construir: uma pergunta 0 a 10 por WhatsApp 24 h após "finalizado"; nota baixa vira item na tela Hoje; nota alta recebe o link do Google e "conhece alguém de [cidade]?" com link de indicação; campo "quem indicou" no cartão. Nunca desconto, sorteio ou brinde.</div></div>
+
+<div class="et"><div class="t"><b>9. Reativação de quem sumiu</b> <span class="tag ex">existe</span> <span class="tag co">construir</span></div>
+<div class="meta">Trazer de volta quem não vem há 6, 12 e 24 meses, uma semana antes de cada viagem à cidade. <b>Meta:</b> base do Amigo importada antes do desligamento; 10% de retorno dos inativos de 6 a 12 meses de Pedreiras e Bacabal em 60 dias.<br><b>No Zaq:</b> existe o filtro "sem vir há 6 meses" em Pacientes e o motor de campanhas por WhatsApp com modelo aprovado, teto por dia e sem duplicar. A base do Amigo sobe hoje pelo importador CSV do funil (nome, celular, cidade). Construir: seleção por faixa e cidade na tela Pacientes, o "SAIR" e a trava de 1 automática por paciente por dia; importar nascimento e última visita. Só para quem aceitou o termo de comunicação.</div></div>
+</div>
+
+<h2><span class="n">04</span>O mapa de implantação</h2>
+<p class="sub">Onda 1 é só chave na tela. Onda 2 é código curto. Onda 3 é código maior ou depende de terceiro.</p>
+
+<h3>Onda 1: semana 1, sem código (12 itens)</h3>
+<div class="tw"><table>
+<tr><th>#</th><th>O que</th><th>Onde no Zaq</th><th>Por que (evidência)</th></tr>
+<tr><td class="num">1</td><td><b>Agente 24h</b> com instruções (cidade, queixa, rota das 9 cidades) e FAQ <span class="tag cf">configurar</span></td><td>Prospecção › Comunicação › Agentes IA. Urgência (192) já funciona fora do horário. Testar uma semana em 2 ou 3 conversas ligadas à mão antes da chave mestra.</td><td>Sáb 7/1, dom 5/0. Doctoralia: 33% marcam fora do horário, 13% no fim de semana.</td></tr>
+<tr><td class="num">2</td><td><b>Grade itinerante por cidade</b>, grade da Juliana, agente marca Consulta, Avaliação, Retorno e Sessão <span class="tag cf">configurar</span></td><td>Configurar clínica › Profissionais, Locais, Grade, Atendimentos.</td><td>138 conversas e 2 agendamentos. Prospyr: lead → consulta deve ficar entre 50% e 70%.</td></tr>
+<tr><td class="num">3</td><td><b>Confirmação na véspera</b> (1 confirma / 2 remarcar) <span class="tag cf">configurar</span></td><td>Agenda › config. "Lembrados x confirmaram" em Números. A mensagem não diz o procedimento.</td><td>PMC 2022: faltas de 38,6% para 25,5%. iClinic: até 30% menos faltas.</td></tr>
+<tr><td class="num">4</td><td><b>Link da ficha, pré-consulta e os 3 termos</b> (LGPD com campanhas, imagem, procedimento) <span class="tag cf">configurar</span></td><td>Agenda › config (ficha) e tela Termos. Balcão com QR para quem não preencheu. Foto no prontuário só com o termo de imagem.</td><td>LGPD art. 11: consentimento específico e destacado. RxPhoto: conversão de consulta de 45% para 90% com foto padronizada e preparo.</td></tr>
+<tr><td class="num">5</td><td><b>Preço da consulta pelo agente</b> e catálogo com procedimentos, preço e intervalo de volta <span class="tag cf">configurar</span></td><td>Configurar › Atendimentos: "o agente pode dizer este preço" (só grava com preço maior que zero).</td><td>CFM 2.336: pode divulgar valor e condição de pagamento. Prospyr: fechamento de 60% a 80% quando o preço é apresentado na consulta.</td></tr>
+<tr><td class="num">6</td><td><b>Régua da equipe e temperatura por fatos</b> <span class="tag cf">configurar</span></td><td>Funil › Régua: cobrança ligada (sem resposta, bola nossa), temperatura ligada (quente 72 h, morno 14 dias, frio após 4 toques), gatilhos ligados; perdido automático e teto de dias para os 67 "quentes" eternos. Se a tela não aceitar 5 min no "sem resposta", vira item da onda 2.</td><td>18% esperam mais de 2 h; p90 = 716 min. HBR 2011: responder em até 1 h dá 7x mais chance de qualificar.</td></tr>
+<tr><td class="num">7</td><td><b>Voltar a chamar depois do preço</b> (+3 h, +1 d, +3 d, +7 d) <span class="tag cf">configurar</span></td><td>Tela Hoje: modo "sugere" na 1ª semana, "ligado" na 2ª. Só dispara quando a <b>recepção</b> escreve o preço: combinar que ela sempre repete o preço por escrito antes de oferecer data. Os 17 leads de uma mensagem só não entram aqui: caem em "Esperando resposta" ou, com o agente ligado, no "IA insiste".</td><td>17 conversas de 1 mensagem; 23 com mais de 15. MarketingSherpa: 79% dos leads nunca convertem por falta de acompanhamento.</td></tr>
+<tr><td class="num">8</td><td><b>Links de WhatsApp com código por mídia e cidade</b> (#RP rádio Pedreiras, #RB rádio Bacabal, #IG, #GO, #IND) <span class="tag ex">existe</span></td><td>O código entra na mensagem pré-preenchida, grava no cartão e aparece na tela Origens. A rádio termina com "chama no WhatsApp"; o link vai na bio e nos anúncios do gestor de tráfego. Falta (onda 2): levar o código até a origem da consulta e criar "Rádio" na lista da agenda.</td><td>66 de 67 com origem genérica; ~R$ 5 mil/mês sem atribuição.</td></tr>
+<tr><td class="num">9</td><td><b>Plano de tratamento configurado e 5 pacotes-padrão</b> <span class="tag cf">configurar</span></td><td>Planos › config: desconto no Pix, parcelas no cartão, validade 7 dias, teto de desconto 10%, cobrança ligada. A recepção monta o plano logo após "finalizado com proposta".</td><td>0 planos e 0 pacotes; dívida pede receita antecipada. Prospyr: fechamento de 60% a 80%.</td></tr>
+<tr><td class="num">10</td><td><b>Fila de vagas por cancelamento</b> <span class="tag cf">configurar</span></td><td>Vagas › config: modo "aprova", teto 20 por dia. Chama 3 e depois 5 na ordem assinante › pediu horário › já vem no dia › recebeu preço › retorno vencido. Em 30 dias, "auto" nas cidades quinzenais.</td><td>Vaga perdida numa cidade quinzenal só volta 15 dias depois.</td></tr>
+<tr><td class="num">11</td><td><b>Lembretes de sessão, retorno e reposição de produto</b> <span class="tag cf">configurar</span></td><td>Pacotes › config e Produtos › config. Nenhuma mensagem diz o procedimento nem o nome do produto.</td><td>ECU 2019 (dermatologia): faltas de 25-30% para 11% com protocolo de retorno.</td></tr>
+<tr><td class="num">12</td><td><b>Rotina da recepção</b>: tela Hoje às 8h, 12h e 17h, cockpit no celular, respostas rápidas (preço, endereço, estacionamento), fecho de conversa <span class="tag ex">existe</span></td><td>Tela Hoje: "O agente passou pra você", "Esperando resposta", "Responderam e não marcaram", vagas e planos vencendo. Dividir: Brenda = Pedreiras, Bacabal, Codó; Cristiane = as outras seis. Quem é dona do cartão recebe o aviso.</td><td>1.279 respostas humanas em 8 dias sem fila de prioridade.</td></tr>
+</table></div>
+
+<h3>Onda 2: semanas 2 e 3, código curto (7 itens)</h3>
+<div class="tw"><table>
+<tr><th>#</th><th>O que</th><th>O que já existe e o que falta</th></tr>
+<tr><td class="num">13</td><td><b>Cidade perguntada pelo agente</b> e trava "Novo" → "Consulta agendada" sem cidade e origem <span class="tag co">construir</span></td><td>O campo cidade existe no cartão, no formulário, na tela Pacientes e no Cockpit. Falta o agente perguntar e gravar, e a trava na régua.</td></tr>
+<tr><td class="num">14</td><td><b>Painel de segunda por cidade</b> <span class="tag ex">existe</span> <span class="tag co">construir</span></td><td>Existe o e-mail semanal de segunda (dono com tabela por pessoa), os Números da clínica (ocupação, faltas, consulta → plano, plano → fechado) e o tempo de 1ª resposta no Raio-X. Falta o filtro por cidade e por origem nos Números, com o % em 5 min na mesma tela. Reunião de 15 min toda segunda antes de montar a rota.</td></tr>
+<tr><td class="num">15</td><td><b>Base de pacientes do Amigo</b> <span class="tag ex">existe</span> <span class="tag co">construir</span></td><td>Hoje: o importador CSV do funil sobe nome, celular e cidade, e a tela Pacientes já lista esses contatos. Falta importar nascimento e última visita, marcar "como conheceu = já é paciente", e documentar a migração e a eliminação no Amigo (LGPD). Brevium: 14% dos pacientes perdidos voltam em um ano quando chamados.</td></tr>
+<tr><td class="num">16</td><td><b>Segundo lembrete 3 h antes</b> com endereço da cidade e o que levar <span class="tag co">construir</span></td><td>Hoje só a véspera. Respeita a janela da régua e 1 automática por paciente por dia. Quem não confirmou até 2 h antes vira item na tela Hoje para ligação. Atlas Medical Center (dermatologia): falta de 14,2% para 4,9% com lembrete em etapas.</td></tr>
+<tr><td class="num">17</td><td><b>Mensagem a quem faltou</b> e remarcação pelo agente <span class="tag co">construir</span></td><td>Hoje "faltou" só leva o cartão para Follow-up com a nota "remarcar". Construir: 2 h depois, "sentimos sua falta, quer remarcar para a próxima vez em [cidade]?", e o agente oferece as datas. Registrar o motivo da falta.</td></tr>
+<tr><td class="num">18</td><td><b>Cadência do plano D+7 e D+14</b> <span class="tag co">construir</span></td><td>Hoje cobra em D+1 e D+3 e para no vencimento. D+7 educativo (sem promessa, dentro da CFM) e D+14 com a oferta de entrar na fila de vagas da cidade. Para quando o paciente responde (já existe).</td></tr>
+<tr><td class="num">19</td><td><b>Retorno obrigatório ao finalizar</b>, ou motivo <span class="tag co">construir</span></td><td>O campo "retorno em N dias" existe, mas é opcional. Construir o botão "marcar retorno" já aberto na próxima passagem pela mesma cidade; se o paciente não marcar, motivo obrigatório. O balcão com QR mostra a data.</td></tr>
+</table></div>
+
+<h3>Onda 3: código maior ou terceiro (7 itens)</h3>
+<div class="tw"><table>
+<tr><th>#</th><th>O que</th><th>Detalhe</th></tr>
+<tr><td class="num">20</td><td><b>NPS 24 h depois + avaliação no Google</b> <span class="tag co">construir</span></td><td>Motor novo nos moldes do "voltar a chamar": uma pergunta 0 a 10; nota 0 a 6 vira item vermelho na tela Hoje para o Dr. Manoel; 9 e 10 recebem o link curto do Google. Nota guardada no cartão e nos Números. Sem incentivo (CFM). GrowSurf: 72% usam avaliação online e indicação como primeiro passo; Nielsen: 92% confiam em recomendação.</td></tr>
+<tr><td class="num">21</td><td><b>Pedido de indicação e campo "quem indicou"</b> <span class="tag co">construir</span></td><td>Após nota alta: "conhece alguém de [cidade]? encaminha este link" com código #IND; agradecimento pessoal do médico e prioridade na fila de vagas. GrowSurf: indicações respondem por 40% a 65% dos novos pacientes em saúde.</td></tr>
+<tr><td class="num">22</td><td><b>Reativação por faixa</b> (6, 12, 24 meses), uma semana antes da viagem <span class="tag co">construir</span></td><td>Usa o motor de campanhas que já existe (modelo aprovado, teto por dia, sem duplicar). Construir a seleção por faixa e cidade e o "SAIR". Resposta cai no agente, que oferece a data da cidade. Prospyr: 8% a 15% voltam na faixa de 6 a 12 meses.</td></tr>
+<tr><td class="num">23</td><td><b>Link público de agenda por cidade</b> <span class="tag co">construir</span></td><td>Hoje só o agente e a recepção marcam. Uma página por cidade mostrando só os dias da grade daquele local, para os atendimentos que o agente já marca. Vai no bot, na bio e no anúncio de rádio.</td></tr>
+<tr><td class="num">24</td><td><b>Pontuação do lead</b> além da temperatura <span class="tag co">construir</span></td><td>+2 cidade, +2 pediu data, +3 pediu preço de procedimento, +3 indicado, -2 sem resposta há 3 dias, -5 há 10. Ordena a tela Hoje. Só depois de a temperatura automática rodar um mês.</td></tr>
+<tr><td class="num">25</td><td><b>Ligação perdida vira WhatsApp</b> <span class="tag tz">terceiro</span></td><td>Não existe telefonia no Zaq. Depende de operadora ou PABX virtual que avise a ligação não atendida; o Zaq dispara "vi que você ligou, me diz sua cidade" e abre o cartão com origem "ligação". Weave: 35% das ligações a consultórios são perdidas. O público mais velho do interior liga por causa da rádio.</td></tr>
+<tr><td class="num">26</td><td><b>Programa de pontos Galderma (ASPIRE)</b> <span class="tag tz">terceiro</span></td><td>Confirmar com o representante se existe no Brasil e como cadastrar o paciente no balcão. Se existir, entra como campo no finalizar.</td></tr>
+</table></div>
+
+<h2><span class="n">05</span>Como fica a primeira conversa</h2>
+<p class="sub">O agente acolhe, pergunta cidade e queixa, oferece a data da cidade e marca; a recepção entra só se precisar</p>
+<div class="zap">
+  <div class="b">Boa noite, queria marcar uma consulta com o Dr. Manoel<div class="h">dom 21:14</div></div>
+  <div class="b eu">Boa noite! Aqui é a recepção virtual da Espaço Pelle 😊 Me diz sua cidade e, em uma frase, o que você quer tratar, que eu já vejo a próxima data do Dr. Manoel aí perto.<div class="h">21:14</div></div>
+  <div class="b">Sou de Codó, é uma mancha no rosto<div class="h">21:15</div></div>
+  <div class="b eu">Perfeito. Em Codó o Dr. Manoel atende na quinta, 16/10. Tenho 9h, 10h30 e 14h. A consulta é R$ 000 e inclui o retorno em 30 dias. Qual horário prefere?<div class="h">21:15</div></div>
+  <div class="b">10h30<div class="h">21:16</div></div>
+  <div class="b eu">Prontinho! Quinta 16/10, 10h30, em Codó. Me passa seu nome completo e data de nascimento, e se é para você ou para outra pessoa. Vou te mandar o link para completar a ficha antes do dia.<div class="h">21:16</div></div>
+</div>
+<p>O valor é ilustrativo. O agente não fala de sintoma, não indica tratamento nem promete resultado: isso é regra fixa do Zaq. A pré-consulta, com a queixa detalhada e alergias, vai pelo link, que só o profissional lê.</p>
+
+<h2><span class="n">06</span>Metas para os primeiros 30 dias</h2>
+<div class="tw"><table>
+<tr><th>Número</th><th>Hoje</th><th>Meta em 30 dias</th><th>Onde medir</th></tr>
+<tr><td>1ª resposta em até 5 min (pico)</td><td class="num">46%</td><td class="num">80%</td><td>Raio-X; bloco "Esperando resposta" na tela Hoje</td></tr>
+<tr><td>Conversas sem resposta na semana</td><td class="num">5</td><td class="num">0</td><td>Tela Hoje</td></tr>
+<tr><td>Fim de semana e noite respondidos pelo agente</td><td class="num">1 de 12</td><td class="num">100%</td><td>Agentes IA (ligado, 24h)</td></tr>
+<tr><td>Agenda dentro do Zaq</td><td class="num">2</td><td>100%, com 40% marcados pelo agente</td><td>Agenda; Números (origem do agendamento)</td></tr>
+<tr><td>Cidade e origem nos cartões novos</td><td class="num">0 de 67</td><td class="num">100%</td><td>Funil; tela Origens (5 links com código em uso)</td></tr>
+<tr><td>Falta</td><td>sem medida</td><td>abaixo de 15% (10% em 60 dias)</td><td>Números: "lembrados x confirmaram" acima de 70%</td></tr>
+<tr><td>Termos e pré-consulta</td><td class="num">0</td><td>3 termos; 80% das consultas com ficha antes de chegar</td><td>Termos; Pacientes (ficha completa)</td></tr>
+<tr><td>Consulta → plano</td><td>sem medida</td><td>100% com "propôs tratamento?" respondido; 60% com plano; 10 planos enviados; 5 pacotes-padrão</td><td>Números; Planos</td></tr>
+<tr><td>Painel de segunda</td><td class="num">0</td><td class="num">4 reuniões</td><td>E-mail semanal + Números por cidade</td></tr>
+</table></div>
+
+<h2><span class="n">07</span>Quem faz o quê</h2>
+<div class="tw"><table>
+<tr><th>Pessoa</th><th>Responde por</th><th>Rotina</th></tr>
+<tr><td><b>Agente do Zaq</b></td><td>Primeira resposta 24h, cidade e queixa, preço da consulta, oferecer data e marcar, lembretes, vaga, cobrança do plano</td><td>Sempre. Passa para a recepção o que não resolve.</td></tr>
+<tr><td><b>Brenda</b> (Pedreiras, Bacabal, Codó)</td><td>Fechar o que o agente passou, repetir o preço por escrito, montar o plano na saída, aprovar vagas</td><td>Tela Hoje às 8h, 12h e 17h; cockpit no celular no resto do dia</td></tr>
+<tr><td><b>Cristiane</b> (as outras seis cidades)</td><td>O mesmo, para as cidades dela, e a base do Amigo</td><td>Mesma rotina</td></tr>
+<tr><td><b>Dr. Manoel</b></td><td>Consulta termina em plano e retorno; evolução assinada; nota baixa do NPS</td><td>Finalizar na agenda; 15 min na segunda</td></tr>
+<tr><td><b>Juliana</b></td><td>Sessões de pacote e retorno de dermatofuncional</td><td>Grade própria; finalizar na agenda</td></tr>
+<tr><td><b>Dono</b></td><td>Liberar contas a pagar, aprovar textos do agente e dos termos, ler o e-mail de segunda, decidir a rota</td><td>Segunda, 15 min, 6 números por cidade</td></tr>
+</table></div>
+
+<h2><span class="n">08</span>Riscos e como evitar</h2>
+<ul>
+  <li><b>A tela Hoje vira rotina ou nada funciona.</b> O agente passa casos para a recepção; se ninguém olha às 8h, 12h e 17h, o paciente fica sem resposta duas vezes.</li>
+  <li><b>Agente ligado sem instruções e FAQ.</b> Ele responde "valor sob consulta" para tudo e passa demais. Testar uma semana em 2 ou 3 conversas ligadas à mão antes da chave mestra.</li>
+  <li><b>Grade itinerante errada.</b> O agente marca em dia que o médico não vai. A grade não guarda histórico: toda mudança de rota entra antes de o agente oferecer horário.</li>
+  <li><b>Agenda paralela.</b> Caderno ou celular pessoal deixam o funil cego e a fila de vagas oferece horário já tomado.</li>
+  <li><b>"Voltar a chamar" só dispara com preço escrito pela recepção.</b> Se a humana nunca repete o preço, a sequência nunca começa.</li>
+  <li><b>Pressão de caixa.</b> Desconto acima do teto, "sorteio" ou "garantia" ferem a CFM. Cortar o marketing antes de 30 dias é cortar antes de o painel por origem mostrar o que funciona.</li>
+  <li><b>LGPD.</b> Foto ou campanha antes dos 3 termos, lista de pacientes passada ao gestor de tráfego ou a parceiros (CIMLAB, parceria de procedimento) expõem a clínica. A migração do Amigo precisa ser documentada e os dados lá, apagados.</li>
+  <li><b>Insistência.</b> Vaga, plano, pacote, produto, voltar a chamar e véspera somados podem parecer pressão. O Zaq limita a 1 automática por paciente por dia e respeita SAIR e PARAR; o tom se revisa toda semana.</li>
+  <li><b>Internet fraca e paciente mais velho.</b> O link da ficha pode travar: manter o balcão com QR e o papel, e a recepção preenche pelo paciente quando preciso.</li>
+</ul>
+
+<h2><span class="n">09</span>O que preciso de você para começar amanhã</h2>
+<div class="q"><div class="qt">A. A rota do Dr. Manoel</div><div class="qo">Dia e frequência em cada uma das 9 cidades (ex.: Codó toda 3ª quinta; Bacabal quinzenal às terças). É o que trava o item 2 e, com ele, o agente marcar sozinho.</div></div>
+<div class="q"><div class="qt">B. Brenda e Cristiane</div><div class="qo">Função de cada uma no cadastro e a divisão de cidades. A sugestão acima é um ponto de partida.</div></div>
+<div class="q"><div class="qt">C. Preços que o agente pode dizer</div><div class="qo">Valor da consulta e da avaliação. Se quiser, também dos procedimentos (a CFM permite). Sem preço maior que zero, o agente não diz nada.</div></div>
+<div class="q"><div class="qt">D. Catálogo real e os 5 pacotes-padrão</div><div class="qo">Procedimentos com preço e intervalo de volta (toxina 4 a 6 meses, preenchimento, Sculptra, laser por área, sessão dermatofuncional) e os 5 pacotes mais vendidos.</div></div>
+<div class="q"><div class="qt">E. Textos do agente e dos termos</div><div class="qo">Eu escrevo o rascunho das instruções, do FAQ (endereço de cada cidade, estacionamento, pagamento) e dos 3 termos; você e o Dr. Manoel aprovam. Nada vai ao ar sem a aprovação.</div></div>
+<div class="q"><div class="qt">F. A base de pacientes do Amigo</div><div class="qo">Exportar em planilha: nome, celular, cidade, nascimento, última visita. Sobe hoje pelo importador do funil; o resto entra na onda 2.</div></div>
+<div class="q"><div class="qt">G. Ordem</div><div class="qo">Proponho: onda 1 inteira esta semana (eu configuro com você na tela, item por item), onda 2 nas duas seguintes, onda 3 depois do primeiro painel de segunda. Se quiser inverter alguma coisa, me diz.</div></div>
+
+<h2><span class="n">10</span>Fontes</h2>
+<ul class="fontes">
+  <li>HBR 2011, The Short Life of Online Sales Leads: <a href="https://hbr.org/2011/03/the-short-life-of-online-sales-leads">hbr.org</a></li>
+  <li>InsideSales / MIT 2007, Lead Response Management (resumo): <a href="https://ainora.lt/blog/lead-response-time-statistics-every-study-2026">ainora.lt</a></li>
+  <li>PMC 2022, lembrete por SMS e falta (38,6% → 25,5%): <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC9258479">pmc.ncbi.nlm.nih.gov</a></li>
+  <li>ECU 2019, falta em clínica de dermatologia (25-30% → 11%): <a href="https://medicine.ecu.edu/medicaleducation/distinction-day-2019/allen-examining-no-show-appointment-rates-in-a-dermatology-clinic-an-approach-to-scheduling-follow-up-appointments">medicine.ecu.edu</a></li>
+  <li>Curogram/ModMed, Atlas Medical Center (14,2% → 4,9%): <a href="https://curogram.com/blog/emr-integration/modmed/modmed-patients-respond-sms-appointment-reminders-98-open-rate">curogram.com</a></li>
+  <li>Doctoralia, 33% marcam fora do horário: <a href="https://medicinasa.com.br/agenda-clinica-doctoralia/">medicinasa.com.br</a></li>
+  <li>Doctoralia, falta e call center: <a href="https://medicinasa.com.br/doctoralia-noshow">medicinasa.com.br</a></li>
+  <li>iClinic, até 30% menos faltas: <a href="https://diariodocomercio.com.br/?p=11258">diariodocomercio.com.br</a></li>
+  <li>Opinion Box jun/2025, WhatsApp no Brasil: <a href="https://canaltech.com.br/apps/o-que-os-brasileiros-mais-fazem-no-whatsapp-segundo-pesquisa/">canaltech.com.br</a></li>
+  <li>Weave, Power of Phone Calls (35% de ligações perdidas): <a href="https://content.getweave.com/repairing-the-holes-within-your-marketing-strategy-case-study/powerofphonecalls-casestudy-v3">getweave.com</a></li>
+  <li>Prospyr, benchmarks de clínica estética: <a href="https://prospyrmed.com/blog/post/how-to-benchmark-kpis-for-aesthetic-clinics">prospyrmed.com</a></li>
+  <li>Prospyr, conversão de lead (12,5% média; 55-75% as melhores): <a href="https://prospyrmed.com/blog/post/metrics-track-lead-conversion-success">prospyrmed.com</a></li>
+  <li>Prospyr, reativação por faixa: <a href="https://prospyrmed.com/blog/post/win-back-inactive-clients-aesthetic-clinics">prospyrmed.com</a></li>
+  <li>RxPhoto/PatientNow, conversão de consulta 45% → 90%: <a href="https://rxphoto.com/resources/blog/consultation-conversion-rate-aesthetic-practices">rxphoto.com</a></li>
+  <li>Brevium, dermatologia e estética (14% e 20% de retorno): <a href="https://brevium.com/case-study/redefining-patient-journeys-the-power-of-brevium-in-dermatology-and-aesthetics">brevium.com</a></li>
+  <li>Galderma ASPIRE, 98% voltam ao mesmo profissional: <a href="https://practicaldermatology.com/news/galderma-introduces-aspire-loyalty-program-for-the-aesthetic-industry/2458936/">practicaldermatology.com</a></li>
+  <li>Drive Research, NPS em saúde: <a href="https://driveresearch.com/market-research-company-blog/healthcare-net-promoter-score-definition-formula-benchmarks/">driveresearch.com</a></li>
+  <li>GrowSurf, indicação em saúde: <a href="https://growsurf.com/statistics/health-referral-statistics/">growsurf.com</a></li>
+  <li>Nielsen, confiança em recomendação (92%): <a href="https://digitalwellbeing.org/word-of-mouth-still-most-trusted-resource-says-nielsen-implications-for-social-commerce/">digitalwellbeing.org</a></li>
+  <li>HubSpot, 30 estatísticas de nutrição (Forrester, MarketingSherpa, Annuitas): <a href="https://blog.hubspot.com/blog/tabid/6307/bid/30901/30-thought-provoking-lead-nurturing-stats-you-can-t-ignore">blog.hubspot.com</a></li>
+  <li>Resolução CFM 2.336/2023 (publicidade médica): <a href="https://smabr.com/publicidade-e-propaganda-medica/">smabr.com</a></li>
+  <li>Lei 13.709/2018, LGPD (arts. 5º, 11 e 52): <a href="https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709.htm">planalto.gov.br</a></li>
+  <li>Confidata, LGPD em clínicas (2026): <a href="https://confidata.com.br/blog/lgpd-clinicas-medicas-guia-adequacao-2026">confidata.com.br</a></li>
+</ul>
+
+<div class="ftr">Método ROTA Pelle, desenho da parte 5 da clínica no Zaq, 01/10/2026. Números: produção do Zaq, conta da Espaço Pelle, 23/09 a 01/10/2026, só totais. Práticas: 24 levantadas, 26 itens no mapa, cada afirmação sobre o Zaq conferida contra o código (7 correções aplicadas). Nada foi ligado nem alterado na clínica por este desenho.</div>
+</div>
+</body></html>

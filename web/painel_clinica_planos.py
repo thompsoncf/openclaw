@@ -33,7 +33,7 @@ _AVISOS = {
     "aprovado": "Desconto aprovado. Agora é só enviar.",
     "enviado": "Plano enviado no WhatsApp, com o link. O Zaq cobra a decisão em D+1 e D+3.",
     "cancelado": "Plano cancelado.",
-    "aceito": "Anotado como aceito. As parcelas viraram contas a receber e o card foi para Fechado.",
+    "aceito": "Anotado como aceito. As parcelas viraram contas a receber e o card do paciente andou no funil.",
     "config": "Configuração salva.",
 }
 

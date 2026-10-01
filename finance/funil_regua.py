@@ -846,10 +846,23 @@ def sql_nao_cobra(alias: str = "p") -> str:
     a data) e a Data segurada (aprovou e espera o sinal, com prazo próprio). Nenhum
     motor de cobrança chama nem fecha como "não respondeu" quem está nelas — o resgate
     já não chamava na entrada, mas os toques, o perdido do resgate e a IA insiste
-    chamavam (revisão de 27/09/2026). Condição pronta pra um WHERE."""
-    return (f"({alias}.status <> 'lista_espera' and {alias}.status not in "
+    chamavam (revisão de 27/09/2026). Condição pronta pra um WHERE.
+
+    E a CONSULTA da clínica (`consulta`, 01/10/2026): o paciente já veio e espera o
+    plano que a recepção ainda não enviou. Chamá-lo "pra marcar uma consulta" ou
+    fechá-lo como "não respondeu" seria cobrar dele a demora que é nossa. SÓ NA CONTA
+    DO NICHO CLÍNICA: a chave de uma etapa criada à mão é o nome dela, e a coluna
+    "Consulta" do escritório de advocacia continua sendo cobrada como sempre foi."""
+    return (f"({alias}.status <> 'lista_espera' and not ({alias}.status = 'consulta' and {sql_e_clinica(alias)}) "
+            f"and {alias}.status not in "
             f"(select fe.chave from funil_etapas fe where fe.conta_id = {alias}.conta_id "
             "and fe.gatilho = 'orcamento_aprovado' and fe.fase = 'venda'))")
+
+
+def sql_e_clinica(alias: str = "p") -> str:
+    """A conta do card é do nicho clínica? Subconsulta correlacionada, como as de cima."""
+    return (f"exists (select 1 from contas ct_ join nichos nc_ on nc_.id = ct_.nicho_id "
+            f"where ct_.id = {alias}.conta_id and nc_.slug = 'clinica')")
 
 
 def sql_encerradas_nao(alias: str = "p") -> str:

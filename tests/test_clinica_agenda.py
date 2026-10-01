@@ -560,17 +560,27 @@ def test_presente_so_abre_consulta_em_horario_de_consulta(pool):
         assert _status(c, consulta)[0] == "consulta"
 
 
+def test_ato_unico_finalizado_sem_a_pergunta_nao_fica_em_agendado(pool):
+    """O "um toque" (e a sessão de pacote, que não pergunta do tratamento): o horário
+    que não abre Consulta resolve o card no Finalizar, mesmo sem a resposta."""
+    with pool.connection() as c:
+        teste = _marcar_tipo(c, "Testes alérgicos")
+        _ate_atendimento(c, teste)
+        assert ca.mudar_situacao(c, CLINICA, teste, "finalizado") is None
+        assert _status(c, teste)[0] == "ganho"
+
+
 def test_consulta_nova_reabre_o_card_concluido_e_o_retorno_nao(pool):
     """Marcar consulta nova reabre o card em Agendado (o paciente voltou com outra
     queixa). O retorno e a sessão de quem concluiu não reabrem nada."""
     with pool.connection() as c:
         eid, _ = _marcar(c)
         lead = ca.evento(c, CLINICA, eid)["lead"]
-        c.execute("update prospeccao set status='ganho' where id=%s", (lead,))
+        c.execute("update prospeccao set status='ganho', valor_estimado_centavos=300000 where id=%s", (lead,))
         _marcar_tipo(c, "Retorno", h=10)
-        assert _status(c, eid)[0] == "ganho"
+        assert _status(c, eid) == ("ganho", 300000)
         _marcar_tipo(c, "Consulta", dia=SEG + timedelta(days=7))
-        assert _status(c, eid)[0] == "qualificado"
+        assert _status(c, eid) == ("qualificado", 0)            # venda nova: sem o valor da anterior
         assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
                          ).fetchone() == ("ganho", "qualificado", "agenda")
         assert c.execute("select descricao from prospeccao_atividades order by id desc limit 1"

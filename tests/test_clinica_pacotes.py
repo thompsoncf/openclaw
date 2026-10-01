@@ -48,7 +48,8 @@ def pool():
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
-                  "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql", "477_clinica_resultados.sql"):
+                  "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql",
+                  "474_clinica_plano_pago_e_nao_fechou.sql", "477_clinica_resultados.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("""update servicos_catalogo set setup_centavos=80000, volta_dias=null
@@ -99,7 +100,7 @@ def _paciente(c, nome="Lúcia Ferreira", fone=FONE):
     return lead, conv
 
 
-def _plano_aceito(pool, lead, forma="cartao"):
+def _plano_aceito(pool, lead, forma="cartao", pago=True):
     with pool.connection() as c:
         itens, _e = cp.limpar_itens(
             [{"servico_id": _tipo(c, "Procedimento estético")["id"], "sessoes": 4, "valor": ""},
@@ -112,6 +113,12 @@ def _plano_aceito(pool, lead, forma="cartao"):
         cp.enviar(c, CLINICA, pid, 51, AGORA)
         token = cp.plano(c, CLINICA, pid)["token"]
     assert cp.aceitar(pool, token, nome="Lúcia Ferreira", forma=forma, agora=AGORA)
+    if pago:
+        # plano aceito não é plano pago: a entrada leva o card pra Em tratamento
+        with pool.connection() as c:
+            c.execute("update titulos set status='pago' where id=%s", (cp.plano(c, CLINICA, pid)["titulos"][0],))
+            c.commit()
+            assert cp.conferir_pagamentos(c, CLINICA) == 1
     return pid
 
 
@@ -239,7 +246,42 @@ def test_plano_sem_sessoes_conclui_em_vez_de_prender_em_tratamento(pool, zap):
     assert cp.aceitar(pool, token, nome="Lúcia Ferreira", forma="pix", agora=AGORA)
     with pool.connection() as c:
         assert ckp.listar(c, CLINICA) == []
+        assert _card(c, lead) == "proposta"                     # aceito, aguardando o pagamento
+        c.execute("update titulos set status='pago'")
+        c.commit()
+        assert cp.conferir_pagamentos(c, CLINICA) == 1
         assert _card(c, lead) == "ganho"
+
+
+def test_sessoes_feitas_antes_de_pagar_o_pagamento_conclui_na_hora(pool, zap):
+    """A recepção deixou fazer as sessões antes do pagamento: o card esperou em Plano
+    enviado e, quando o pagamento entra, passa por Em tratamento e já sai."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead, pago=False)
+    with pool.connection() as c:
+        for n in range(4):
+            _finalizar(c, _sessao(c, lead, SEG + timedelta(days=n)))
+        assert _card(c, lead) == "proposta"
+        c.execute("update titulos set status='pago'")
+        c.commit()
+        assert cp.conferir_pagamentos(c, CLINICA) == 1
+        assert _card(c, lead) == "ganho"
+
+
+def test_o_lembrete_de_sessao_espera_o_pagamento(pool, zap):
+    """Plano aceito não é plano pago: o paciente não é chamado pra marcar sessão antes."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    pid = _plano_aceito(pool, lead, pago=False)
+    with pool.connection() as c:
+        _finalizar(c, _sessao(c, lead, SEG))
+        liberou = SEG + timedelta(days=21)
+        assert ckp.lembrar(c, CLINICA, _br(liberou))["sessao"] == 0
+        c.execute("update titulos set status='pago' where id=%s", (cp.plano(c, CLINICA, pid)["titulos"][0],))
+        c.commit()
+        assert cp.conferir_pagamentos(c, CLINICA) == 1
+        assert ckp.lembrar(c, CLINICA, _br(liberou))["sessao"] == 1
 
 
 def test_consulta_que_nao_e_do_pacote_nao_baixa(pool, zap):
@@ -387,6 +429,9 @@ def test_pacote_que_nao_nasce_nao_derruba_o_aceite_e_o_card_conclui(pool, zap, m
     with pool.connection() as c:
         assert cp.plano(c, CLINICA, pid)["status"] == "aceito"
         assert ckp.listar(c, CLINICA) == []
+        c.execute("update titulos set status='pago'")
+        c.commit()
+        assert cp.conferir_pagamentos(c, CLINICA) == 1
         assert _card(c, lead) == "ganho"
 
 
@@ -398,6 +443,14 @@ def test_card_arrastado_pra_retorno_sem_retorno_na_fila_fica_onde_o_dono_pos(poo
         assert ckp.varrer_retorno(c) == 0
         assert ca.card_do_retorno(c, CLINICA, lead) is None
         assert _card(c, lead) == "retorno"
+
+
+def test_marcar_da_fila_de_retornos_abre_no_tipo_retorno(cli, pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=10)
+        retorno = _tipo(c, "Retorno")["id"]
+    assert f"tipo={retorno}&" in cli.get("/painel/clinica/pacotes").text
 
 
 def test_so_horario_de_retorno_fecha_o_retorno(pool, zap):
@@ -422,9 +475,12 @@ def test_so_horario_de_retorno_fecha_o_retorno(pool, zap):
         assert not ca._retorno_pendente(c, CLINICA, lead)
 
 
-def test_conta_sem_atendimento_de_retorno_no_catalogo_segue_a_regra_de_antes(pool, zap):
+def test_profissional_sem_atendimento_de_retorno_segue_a_regra_de_antes(pool, zap):
+    """O retorno exige o mesmo profissional; quem não faz nenhum atendimento de retorno
+    não teria como fechá-lo (a Juliana, na semente: avaliação, procedimento e sessão)."""
     with pool.connection() as c:
-        c.execute("update servicos_catalogo set categoria='consulta' where conta_id=39 and categoria='retorno'")
+        c.execute("""delete from clinica_profissional_tipos pt using servicos_catalogo s
+                      where s.id = pt.servico_id and s.categoria = 'retorno' and pt.conta_id = 39""")
         lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
         _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30)
         _sessao(c, lead, date(2026, 10, 20))
@@ -575,7 +631,7 @@ def test_uma_automatica_por_dia_somando_os_lembretes(pool, zap):
 def test_parcela_atrasada_so_trava_com_a_regra_ligada(pool, zap):
     with pool.connection() as c:
         lead, _conv = _paciente(c)
-    _plano_aceito(pool, lead)
+    _plano_aceito(pool, lead, pago=False)   # a entrada ainda não entrou
     with pool.connection() as c:
         est = _tipo(c, "Procedimento estético")["id"]
         c.execute("update titulos set vencimento = current_date - 10 where id = (select min(id) from titulos)")
@@ -745,7 +801,7 @@ def test_lembrete_que_falhou_nao_conta(pool, zap, monkeypatch):
 def test_parcela_atrasada_vale_pro_agente_e_pra_vaga(pool, zap):
     with pool.connection() as c:
         lead, _conv = _paciente(c)
-    _plano_aceito(pool, lead)
+    _plano_aceito(pool, lead, pago=False)   # a entrada ainda não entrou
     with pool.connection() as c:
         c.execute("update titulos set vencimento = current_date - 10 where id = (select min(id) from titulos)")
         ckp.salvar_config(c, CLINICA, validade="12", lembretes="ligado", aviso="7", bloqueia=True)

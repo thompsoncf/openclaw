@@ -9647,35 +9647,33 @@ _STANDS_CSS = """<style>
   padding:8px 12px;border-radius:999px;border:1px solid var(--line,#1E2A23);
   background:var(--surface,#121A16);color:var(--text-dim,#8FA197);width:auto;min-height:0;margin:0}
 .stpav button.on{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
-.stleg{display:flex;gap:14px;flex-wrap:wrap;padding:.6rem .9rem;font-size:.74rem;color:var(--text-dim,#8FA197)}
-.stleg i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+.stleg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:.6rem .9rem;font-size:.74rem;color:var(--text-dim,#8FA197)}
+.stleg span{display:inline-flex;align-items:center;gap:5px}
+.stleg i{width:18px;height:13px;box-sizing:border-box;border:1px solid transparent;border-radius:4px;display:inline-block;flex:0 0 auto}
 .stleg b{color:var(--text,#EAF2ED);font-family:var(--mono,monospace)}
 .stouter{overflow:hidden;padding:.2rem .4rem 0}
 .ststage{display:flex;justify-content:flex-start}
 .stzoom{transform-origin:0 0}
-.stgrid{position:relative;display:grid;gap:4px;width:max-content;padding:14px;border-radius:14px;
-  background:#0D120F;box-shadow:inset 0 0 0 1px var(--line,#1E2A23)}
-.stgrid .blk{display:flex;flex-direction:column;gap:3px}
-.stgrid .lbl{font-size:7.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;
-  color:var(--text-dim,#8FA197);background:var(--surface,#121A16);border:1px solid var(--line,#1E2A23);
-  border-radius:4px;padding:2px 5px;white-space:nowrap;width:fit-content}
-.stgrid .cel{display:flex;flex-wrap:wrap;align-content:flex-start;gap:3px}
+.stgrid{position:relative;padding:14px;border-radius:14px;
+  background:#0D120F;box-shadow:inset 0 0 0 1px var(--line,#1E2A23);
+  --pl-dim:var(--text-dim,#8FA197);--pl-line:rgba(234,242,237,.2);--pl-surf:var(--surface,#121A16)}
 .stgrid .std{appearance:none;cursor:pointer;border:1px solid var(--line,#1E2A23);border-radius:5px;
   width:auto;min-height:0;margin:0;font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;
   line-height:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;flex:0 0 auto}
-.stgrid .std.livre{background:rgba(37,211,102,.22);color:var(--text,#EAF2ED)}
-.stgrid .std.reservado{background:rgba(224,163,46,.3);color:var(--text,#EAF2ED)}
-.stgrid .std.vendido{background:rgba(224,87,79,.3);color:var(--text-dim,#8FA197)}
-.stgrid .std.sel{outline:2px solid var(--neon,#25D366)}
-.stgrid .dec{display:flex;align-items:center;justify-content:center;text-align:center;border-radius:8px;
-  font-size:8px;font-weight:700;color:var(--text-dim,#8FA197);border:1.5px dashed var(--line,#1E2A23);padding:4px}
-.stgrid .dec.corridor,.stgrid .dec.avenue{writing-mode:vertical-rl;text-orientation:mixed;
-  font-size:7.5px;letter-spacing:.06em;text-transform:uppercase;padding:6px 2px}
-.stgrid .dec.avenue{border:none;opacity:.6;justify-content:flex-start;padding-top:6px}
-.stgrid .dec.gate{border-style:solid}
-.stgrid .dec.wc{border-style:dotted}
-.stgrid .dec.avenueh{border:none;font-size:7.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.6}
-.stgrid .dec.faixa{border:none;background:#CFC8B8;color:#3A362C;font-weight:800;letter-spacing:.06em;font-size:8.5px}
+/* status — mesmo vocabulário do painel e da página pública: LIVRE = cheio e liso ·
+   RESERVADO = cheio com hachura + aro claro · VENDIDO = escuro com contorno (01/10/2026:
+   as tintas a 22–30% eram três tons escuros quase iguais). Borda de 2px e hachura de
+   passo 8px porque o mapa inteiro encolhe (~0,45x) no celular. */
+.stgrid .std.livre,.stleg i.livre{background:#25D366;border-color:#25D366;color:#04150C}
+.stgrid .std.reservado,.stleg i.reservado{
+  background:repeating-linear-gradient(135deg, rgba(26,16,0,.24) 0 4px, rgba(26,16,0,0) 4px 8px), #E0A32E;
+  border-color:#F0C070;color:#1A1000;text-shadow:0 0 2px #E0A32E,0 0 2px #E0A32E,0 0 1px #E0A32E}
+.stgrid .std.vendido,.stleg i.vendido{background:#64201B;border-color:#E0574F;color:#F6E3E0}
+.stgrid .std.livre,.stgrid .std.reservado,.stgrid .std.vendido{border-width:2px}
+/* a legenda não é encolhida: hachura na metade do passo, pra bater com o tile na tela */
+.stleg i.reservado{background:repeating-linear-gradient(135deg, rgba(26,16,0,.24) 0 2px, rgba(26,16,0,0) 2px 4px), #E0A32E}
+/* o anel cabe no vão entre os stands (2px) e fica por cima dos vizinhos */
+.stgrid .std.sel,.stgrid .std:focus-visible{outline:3px solid var(--text,#EAF2ED);outline-offset:0;z-index:3}
 .stdet{margin:.7rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);
   border-radius:12px;background:var(--surface,#121A16)}
 .stdet .cod{font-family:var(--mono,monospace);font-weight:800;font-size:1.05rem;margin-right:.5rem}
@@ -9782,9 +9780,6 @@ _STANDS_CSS = """<style>
 
 _STANDS_JS = r"""
   var tamLabel={'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
-  // pegada proporcional (largura=frente, altura=fundo) escalada pra grid de 30px
-  var sizeBase={'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
-  var ESCALA=30/34;
   var pav='inferior', sel=null, editando=false, filtro='', vendendo=false;
   // o que o contrato precisa do cliente (mesma lista do painel do gestor)
   var REQ=[['fantasia','Nome fantasia'],['whats','WhatsApp'],['razao','Razão social'],['doc','CNPJ/CPF'],
@@ -9803,13 +9798,11 @@ _STANDS_JS = r"""
     pavsEl.appendChild(b);
   });
 
-  function tile(code, def){
+  // só o botão: posição e tamanho quem dá é a planta medida (plantaMontar)
+  function tile(code){
     var s=STANDS[code]; if(!s)return null;
     var b=document.createElement('button');
     b.className='std '+s.status+(code===sel?' sel':'')+(filtro&&s.status!==filtro?' apaga':'');
-    var base=sizeBase[s.tamanho]||{w:29,h:23};
-    b.style.width=Math.round(((def&&def.w)||base.w)*ESCALA)+'px';
-    b.style.height=Math.round(((def&&def.h)||base.h)*ESCALA)+'px';
     b.textContent=code;
     b.onclick=function(){sel=code;editando=false;vendendo=false;render();detalhe();
       document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});};
@@ -9819,32 +9812,11 @@ _STANDS_JS = r"""
   function render(){
     var grid=document.getElementById('stgrid');
     var p=pavilions.filter(function(x){return x.key===pav;})[0];
-    grid.style.gridTemplateColumns='repeat(24, 30px)';
-    grid.style.gridTemplateRows='repeat('+p.rows+', 26px)';
-    grid.innerHTML='';
-    p.decor.forEach(function(d){
-      var e=document.createElement('div');
-      e.className='dec'+(d.kind?' '+d.kind:'');
-      e.style.gridColumn=d.col+' / span '+d.cspan;
-      e.style.gridRow=d.row+' / span '+d.rspan;
-      e.textContent=d.label; grid.appendChild(e);
-    });
-    p.defs.forEach(function(d){
-      var blk=document.createElement('div'); blk.className='blk';
-      blk.style.gridColumn=d.col+' / span '+d.cspan;
-      blk.style.gridRow=d.row+' / span '+d.rspan;
-      if(d.label){var l=document.createElement('div');l.className='lbl';l.textContent=d.label;blk.appendChild(l);}
-      var cel=document.createElement('div'); cel.className='cel';
-      for(var n=d.from;n<=d.to;n++){
-        var num=d.prefix==='i'?String(n).padStart(2,'0'):String(n);
-        var t=tile(d.prefix+num, d); if(t)cel.appendChild(t);
-      }
-      blk.appendChild(cel); grid.appendChild(blk);
-    });
+    plantaMontar(grid,p,{larg:812,pad:14,miolo:6,tile:tile});
     escala();
   }
 
-  // celular: a planta (24 col) encolhe pra caber na tela — mesma regra da
+  // celular: a planta (812px) encolhe pra caber na tela — mesma regra da
   // página pública
   function escala(){
     var outer=document.getElementById('stouter'), stage=document.getElementById('ststage'),
@@ -9861,9 +9833,9 @@ _STANDS_JS = r"""
     Object.keys(STANDS).forEach(function(c){ if(STANDS[c].pavilhao!==pav)return;
       t[STANDS[c].status]=(t[STANDS[c].status]||0)+1; });
     document.getElementById('stleg').innerHTML=
-      '<span><i style="background:#25D366"></i>Livre <b>'+(t.livre||0)+'</b></span>'+
-      '<span><i style="background:#E0A32E"></i>Reservado <b>'+(t.reservado||0)+'</b></span>'+
-      '<span><i style="background:#E0574F"></i>Vendido <b>'+(t.vendido||0)+'</b></span>';
+      '<span><i class=livre></i>Livre <b>'+(t.livre||0)+'</b></span>'+
+      '<span><i class=reservado></i>Reservado <b>'+(t.reservado||0)+'</b></span>'+
+      '<span><i class=vendido></i>Vendido <b>'+(t.vendido||0)+'</b></span>';
   }
 
   function detalhe(){
@@ -10275,7 +10247,7 @@ def cockpit_stands(request: Request, abrir: str = ""):
         "<button class=prim type=button onclick=\"stCopiarMeuLink(this)\">"
         "Copiar meu link</button></div>") if meu_cod else ""
 
-    from web.loja_stands import PLANTA_DEFS_JS
+    from web.loja_stands import PLANTA_CSS, PLANTA_DEFS_JS
     sub = _sub_do_mapa(tot)
     # o app de ESTANDES (Outlet Chic): o mapa é a tela inicial — sem seta de voltar e
     # com as abas Stands / Minhas vendas / Perfil. Gestão e as demais contas: como era.
@@ -10284,6 +10256,7 @@ def cockpit_stands(request: Request, abrir: str = ""):
         _hdr("Mapa de stands", sub, voltar="" if com_abas else _BASE)
         + _flash(request)
         + _STANDS_CSS
+        + "<style>" + PLANTA_CSS + "</style>"   # cenário da planta: o mesmo das 3 telas
         + "<div class=scroll>"
         + meu_link_html
         + "<div class=stbusca><input id=stq type=search autocomplete=off "

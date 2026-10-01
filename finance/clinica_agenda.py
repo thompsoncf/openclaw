@@ -322,8 +322,11 @@ def _mover_card(c, conta_id: int, lead_id: int, membro_id: int | None, categoria
         return
     reabre = r[0] == "ganho" and categoria == "consulta" and "consulta" in _chaves_do_funil(c, conta_id)
     if r[0] in ("novo", "contatado", "follow_up") or reabre:
-        c.execute("update prospeccao set status='qualificado', estagio='lead', atualizado_em=now() "
-                  "where id=%s and conta_id=%s", (lead_id, conta_id))
+        # o card reaberto começa a venda nova sem o valor da anterior: o Finalizar põe o
+        # da consulta, e o plano o dele
+        c.execute("update prospeccao set status='qualificado', estagio='lead', atualizado_em=now(), "
+                  "valor_estimado_centavos = case when %s then 0 else valor_estimado_centavos end "
+                  "where id=%s and conta_id=%s", (reabre, lead_id, conta_id))
         fr.registrar_movimento(c, conta_id, lead_id, r[0], "qualificado", "agenda", membro_id)
         if reabre:
             _nota(c, lead_id, membro_id, "Consulta nova marcada: o card voltou para Agendado.")
@@ -469,15 +472,19 @@ _ANTES_DO_DIA = ("novo", "contatado", "follow_up", "qualificado")
 
 #: o horário que dá um retorno por marcado (desenho de 01/10/2026, seção 01): de
 #: categoria "retorno". Antes qualquer horário com o mesmo profissional fechava o
-#: retorno, e a sessão do pacote o apagava. A conta que não tem nenhum atendimento de
-#: categoria retorno no catálogo segue a regra de antes (senão o retorno nunca fecharia).
-#: Condição pronta pra um WHERE, com `e` = o horário e `r` = o retorno.
+#: retorno, e a sessão do pacote o apagava. O profissional que não faz nenhum
+#: atendimento de categoria retorno (o retorno exige o mesmo profissional, e a agenda
+#: não marca tipo que ele não faz) segue a regra de antes: senão o retorno dele nunca
+#: fecharia. Condição pronta pra um WHERE, com `e` = o horário e `r` = o retorno.
 SQL_HORARIO_DE_RETORNO = """(exists (select 1 from servicos_catalogo s_
                                      where s_.id = e.servico_id and s_.conta_id = e.conta_id
                                        and s_.categoria = 'retorno')
-                             or not exists (select 1 from servicos_catalogo x_
-                                             where x_.conta_id = r.conta_id and x_.categoria = 'retorno'
-                                               and coalesce(x_.ativo, true)))"""
+                             or not exists (select 1 from clinica_profissional_tipos pt_
+                                              join servicos_catalogo x_ on x_.id = pt_.servico_id
+                                                                     and x_.conta_id = pt_.conta_id
+                                             where pt_.conta_id = r.conta_id
+                                               and pt_.profissional_id = r.profissional_id
+                                               and x_.categoria = 'retorno' and coalesce(x_.ativo, true)))"""
 
 
 def _retorno_pendente(c, conta_id: int, lead_id: int) -> bool:
@@ -616,8 +623,12 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
         # só as colunas DO MODELO: a "Retorno" que a conta criou à mão em fase de venda
         # tem a mesma chave e não é de onde a agenda tira ninguém
         novas = (("consulta",) if tem_consulta else ()) + (("retorno",) if tem_retorno else ())
-        if tratamento is None and atual in novas:
-            tratamento = "nao"          # finalizou sem a pergunta: o card não fica preso
+        if tratamento is None and (atual in novas or (tem_consulta and atual in _ANTES_DO_DIA
+                                                      and categoria not in ("consulta", ""))):
+            # finalizou sem a pergunta (sessão de pacote; o "um toque" do ato único): o
+            # card não fica preso, nem em Consulta nem em Agendado, que o Presente desse
+            # tipo de horário não move
+            tratamento = "nao"
         de_onde = _ANTES_DO_DIA + novas
         if tratamento == "sim" and atual in de_onde:
             destino = "consulta" if tem_consulta else ("proposta" if "proposta" in chaves else None)

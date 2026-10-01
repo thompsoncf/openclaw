@@ -15,15 +15,15 @@ insert into public.novidades (chave, tipo, publico, pra_quem, titulo, resumo, li
  'A agenda agora olha o tipo do horário',
  'Só consulta e avaliação levam o cartão para Consulta; só um horário de retorno dá o retorno por marcado; e consulta nova reabre o paciente que já tinha concluído.',
  '/painel/clinica/agenda',
- $txt$Vale para quem já aplicou o funil novo da clínica (Funil › Régua › "As etapas do funil"). O tipo do horário é a categoria do atendimento no catálogo (Configurar › Atendimentos).
+ $txt$O tipo do horário é a categoria do atendimento no catálogo (Configurar › Atendimentos). O que mexe no cartão vale para quem já aplicou o funil novo da clínica (Funil › Régua › "As etapas do funil"); a regra do retorno vale para toda a clínica.
 
 O QUE MUDA
 
 - Presente só leva o cartão para Consulta em horário de consulta ou avaliação. Exame, teste alérgico, vacina e procedimento avulso se resolvem no Finalizar: concluído, retorno ou plano.
-- O retorno pedido pelo médico só sai da fila "a marcar" quando a recepção marca um horário do tipo retorno (Retorno, Cortesia, Retirada de teste alérgico). Antes, qualquer horário com o mesmo profissional fechava o retorno, e uma sessão de pacote o apagava.
+- O retorno pedido pelo médico só sai da fila "a marcar" quando a recepção marca um horário do tipo retorno (Retorno, Cortesia, Retirada de teste alérgico). Antes, qualquer horário com o mesmo profissional fechava o retorno, e uma sessão de pacote o apagava. O botão "Marcar" da fila de retornos já abre a agenda no tipo retorno.
 - Marcar uma consulta nova para quem já tinha concluído traz o cartão de volta para Agendado. Retorno e sessão não reabrem.
 
-Se a clínica não tiver nenhum atendimento da categoria retorno no catálogo, o retorno continua fechando com qualquer horário, como antes.$txt$,
+Se o profissional não faz nenhum atendimento da categoria retorno, o retorno dele continua fechando com qualquer horário, como antes.$txt$,
  timestamptz '2026-10-02 12:30:00+00')
 on conflict (chave) do nothing;
 

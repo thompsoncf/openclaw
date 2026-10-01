@@ -14,11 +14,18 @@ COMO ANDA
      plano espera o dono ou o gestor aprovar antes de sair.
   3. Sai pelo WhatsApp, com o link. O paciente aceita no link (nome e forma) ou
      respondendo 1 (Pix), 2 (cartão) ou 3 (parcelado).
-  4. Aceito: o card vai pra Fechado com o valor, cada parcela vira um título a
-     receber, e a recepção é avisada.
+  4. Aceito: cada parcela vira um título a receber e a recepção é avisada. PLANO
+     ACEITO NÃO É PLANO PAGO (entrega 1b, 01/10/2026): na conta com o funil novo o
+     card fica em Plano enviado, "aceito, aguardando pagamento", e só vai pra Em
+     tratamento quando uma parcela do plano é paga (`receber`, ou a baixa feita pelo
+     financeiro, que o relógio percebe em `conferir_pagamentos`). Na conta que não
+     aplicou o modelo, o aceite leva pra Fechado, como sempre foi.
   5. A DECISÃO É COBRADA SOZINHA (passo 2): D+1 "conseguiu ver?", D+3 o lembrete
      com as formas; na véspera de vencer a recepção é avisada; vencido, sai da rua.
      Se o paciente responde qualquer coisa, o automático para e fica com a pessoa.
+  6. PLANO QUE NÃO FECHA NÃO PERDE O PACIENTE: recusado (pelo link ou na recepção,
+     com o motivo) ou vencido, o card do paciente que já foi atendido vai pra Retorno
+     ou Concluído (`card_sem_plano`), com o valor de volta ao da consulta.
 
 A PROPOSTA NÃO É PRONTUÁRIO: o nome do procedimento e o valor, nunca diagnóstico,
 queixa ou promessa de resultado. Os lembretes automáticos nem o procedimento dizem.
@@ -43,6 +50,10 @@ FORMA_D = dict(FORMAS)
 STATUS_D = {"rascunho": "rascunho", "aguardando_aprovacao": "esperando o dono aprovar o desconto",
             "enviado": "enviado", "aceito": "aceito", "recusado": "recusado", "vencido": "vencido",
             "cancelado": "cancelado"}
+#: por que o plano não fechou, quando é a recepção que diz (o link e o relógio dizem sozinhos)
+MOTIVOS_NAO_FECHOU = (("preco", "Achou caro"), ("adiou", "Vai pensar / adiou"),
+                      ("outra_clinica", "Fez em outra clínica"), ("sem_resposta", "Não respondeu"),
+                      ("outro", "Outro motivo"))
 _RESPOSTA = {"1": "pix", "2": "cartao", "3": "parcelado"}
 _RE_RESPOSTA = re.compile(r"^\s*([123])\s*[.!)✅👍]*\s*$")
 
@@ -162,7 +173,7 @@ _COLS = """p.id, p.prospeccao_id, p.evento_id, p.profissional_id, p.paciente_nom
            p.parcelado, p.validade_ate, p.status, p.token, p.enviado_em, p.visto_em, p.aceito_em,
            p.aceito_forma, p.aceito_nome, p.aceito_por, p.titulos, p.criado_em, p.desconto_aprovado_em,
            p.conta_id, p.toque1_em, p.toque3_em, p.conversa_id, p.ultima_msg_id, p.mensagem_id,
-           to_char(p.atualizado_em, 'YYYY-MM-DD"T"HH24:MI:SS.US')"""
+           to_char(p.atualizado_em, 'YYYY-MM-DD"T"HH24:MI:SS.US'), p.pago_em, p.nao_fechou_motivo"""
 
 
 def _dict(c, r) -> dict:
@@ -179,7 +190,7 @@ def _dict(c, r) -> dict:
             "titulos": r[22] if isinstance(r[22], list) else json.loads(r[22] or "[]"), "criado_em": r[23],
             "desconto_aprovado_em": r[24], "conta_id": conta_id, "toque1_em": r[26], "toque3_em": r[27],
             "conversa_id": r[28], "ultima_msg_id": r[29], "mensagem_id": r[30], "versao": r[31],
-            **contas}
+            "pago_em": r[32], "nao_fechou_motivo": r[33], **contas}
 
 
 def plano(c, conta_id: int, plano_id: int) -> dict | None:
@@ -464,8 +475,8 @@ def marcar_visto(c, token: str) -> None:
 def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str = "link",
             agora: datetime | None = None) -> bool:
     """Aceita o plano ENVIADO e dentro da validade. Idempotente (o update com o status
-    é a trava). Aceito: títulos a receber, pacote de sessões, card em Em tratamento (em
-    Fechado, se o plano não tem sessões ou a conta ainda não tem essa coluna) e aviso
+    é a trava). Aceito: títulos a receber, pacote de sessões, card em Plano enviado
+    aguardando o pagamento (em Fechado, na conta que ainda não tem o funil novo) e aviso
     à recepção."""
     agora = agora or datetime.now(timezone.utc)
     nome = " ".join((nome or "").split())
@@ -487,24 +498,23 @@ def aceitar(pool, token: str, *, nome: str, forma: str, ip: str = "", por: str =
             return False
         plano_id, conta_id = r
         p = plano(c, conta_id, plano_id)
-        # as sessões compradas viram SALDO (fase 6): um pacote por procedimento. Nasce NA
-        # MESMA TRANSAÇÃO do aceite e do card: o card em Em tratamento sem pacote não
-        # tinha quem o tirasse de lá, e o relógio que passasse entre um commit e o outro
-        # via "saldo acabou" num tratamento que nem tinha começado (revisão de 01/10/2026)
-        tem_pacote = False
+        # as sessões compradas viram SALDO (fase 6): um pacote por procedimento, na mesma
+        # transação do aceite (o pacote existe antes de o pagamento levar o card)
         try:
             with c.transaction():
                 from finance import clinica_pacotes as ckp
                 ckp.criar_do_plano(c, conta_id, p, agora)
-                tem_pacote = c.execute("select 1 from clinica_pacotes where conta_id=%s and plano_id=%s limit 1",
-                                       (conta_id, plano_id)).fetchone() is not None
         except Exception:  # noqa: BLE001 — sem a 381: o aceite vale; o saldo a recepção cria
             _log.warning("planos: pacote não criado (plano %s)", plano_id, exc_info=True)
-        # com sessões a fazer, o card vai pra Em tratamento, que conta como venda fechada
-        # (fase 'pos') e sai de lá quando o saldo acaba. Plano só de produto ou item
-        # avulso não tem saldo: é venda concluída
-        destino = "tratamento" if tem_pacote and "tratamento" in ca._chaves_do_funil(c, conta_id) else "ganho"
-        _mover(c, conta_id, p["lead"], destino, p["pix"] if forma == "pix" else p["total"], None)
+        valor = p["pix"] if forma == "pix" else p["total"]
+        if "tratamento" in ca._chaves_do_funil(c, conta_id):
+            # PLANO ACEITO NÃO É PLANO PAGO: o card fica em Plano enviado, aceito e
+            # aguardando o pagamento; quem o leva pra Em tratamento é `_confirmar_pagamento`
+            _mover(c, conta_id, p["lead"], "proposta", valor, None)
+            if p["lead"]:
+                ca._nota(c, p["lead"], None, f"Plano aceito ({FORMA_D[forma]}): aguardando o pagamento.")
+        else:
+            _mover(c, conta_id, p["lead"], "ganho", valor, None)   # funil de antes: fechou
         c.commit()
     ids = _titulos(pool, p, forma, agora)
     with pool.connection() as c:
@@ -587,13 +597,301 @@ def gerar_titulos(pool, conta_id: int, plano_id: int) -> int:
 def recusar(c, token: str) -> bool:
     from finance.clinica_planos_publico import dono_do_token
     dono = dono_do_token(c, token)
-    r = dono and c.execute("""update clinica_planos set status='recusado', atualizado_em=now()
-                               where id=%s and conta_id=%s and status='enviado' returning id, conta_id""",
-                           dono).fetchone()
+    r = dono and c.execute("""update clinica_planos set status='recusado', nao_fechou_motivo='recusou pelo link',
+                                      atualizado_em=now()
+                               where id=%s and conta_id=%s and status='enviado'
+                               returning id, conta_id, prospeccao_id""", dono).fetchone()
     if r:
+        _sem_plano(c, r[1], r[2], "recusou pelo link", None, plano_id=r[0])
         p = plano(c, r[1], r[0])
         _avisar(c, r[1], p, f"Plano recusado: {p['paciente']}", "Recusou pelo link. Vale uma ligação.")
     return r is not None
+
+
+# ------------------------------------------------------------------ o plano que não fecha
+
+def nao_fechou(c, conta_id: int, plano_id: int, motivo: str, membro_id: int | None) -> str | None:
+    """"Paciente não quis", na recepção, com o motivo. Vale pro plano ainda não aceito
+    (rascunho, esperando o dono, enviado) e, no funil novo, pro aceito que nunca foi
+    pago (o paciente desistiu antes de pagar: o pacote que nasceu no aceite é
+    encerrado; as parcelas em aberto ficam pro financeiro decidir). Diferente de
+    cancelar, que é pra refazer o plano e não mexe no card.
+
+    Devolve a etapa nova do card, "fica" se ele ficou onde estava, ou None se o plano
+    já não estava em aberto."""
+    txt = dict(MOTIVOS_NAO_FECHOU).get(motivo)
+    if not txt:
+        return None
+    funil_novo = "tratamento" in ca._chaves_do_funil(c, conta_id)
+    r = c.execute("""update clinica_planos set status='recusado', nao_fechou_motivo=%s, atualizado_em=now()
+                      where id=%s and conta_id=%s
+                        and (status in ('rascunho','aguardando_aprovacao','enviado')
+                             or (%s and status = 'aceito' and pago_em is null))
+                      returning prospeccao_id, aceito_em is not null""",
+                  (txt, plano_id, conta_id, funil_novo)).fetchone()
+    if not r:
+        return None
+    if r[1]:
+        try:
+            with c.transaction():
+                c.execute("""update clinica_pacotes set estado='encerrado', encerrado_motivo=%s, encerrado_por=%s,
+                                    encerrado_em=now(), atualizado_em=now()
+                              where conta_id=%s and plano_id=%s and estado in ('ativo','vencido')""",
+                          (f"desistiu antes de pagar ({txt})"[:200], membro_id, conta_id, plano_id))
+        except Exception:  # noqa: BLE001 — sem a 381
+            _log.warning("planos: pacote do plano desistido não encerrado (plano %s)", plano_id, exc_info=True)
+    return _sem_plano(c, conta_id, r[0], txt, membro_id, plano_id=plano_id) or "fica"
+
+
+def nao_quis_sem_plano(c, conta_id: int, evento_id: int, motivo: str, membro_id: int | None) -> str | None:
+    """O paciente saiu da consulta sem querer o plano, antes de ele ser montado: o card
+    sai de Consulta ("plano a montar") pelo mesmo caminho do plano recusado. Devolve a
+    etapa nova, ou None se o card ficou onde estava."""
+    txt = dict(MOTIVOS_NAO_FECHOU).get(motivo)
+    if not txt:
+        return None
+    ev = ca.evento(c, conta_id, evento_id)
+    if not ev or not ev.get("lead") or ev.get("situacao") != "finalizado" or do_evento(c, conta_id, evento_id):
+        return None
+    try:
+        with c.transaction():
+            # a proposta deste atendimento está resolvida: não é mais "plano a montar"
+            # pra quem olhar o card depois (a linha do tempo guarda que houve proposta)
+            c.execute("update eventos_agenda set tratamento_proposto=false where id=%s and conta_id=%s",
+                      (evento_id, conta_id))
+    except Exception:  # noqa: BLE001 — sem a 471
+        pass
+    return card_sem_plano(c, conta_id, ev["lead"], f"propôs, mas o paciente não quis: {txt}", membro_id,
+                          evento_id=evento_id)
+
+
+def _sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: int | None,
+               plano_id: int | None = None) -> str | None:
+    try:
+        with c.transaction():
+            ev = c.execute("select evento_id from clinica_planos where id=%s and conta_id=%s",
+                           (plano_id, conta_id)).fetchone() if plano_id else None
+            return card_sem_plano(c, conta_id, lead, motivo, membro_id, evento_id=ev[0] if ev else None)
+    except Exception:  # noqa: BLE001 — o plano encerrou; o card é consequência
+        _log.warning("planos: card não andou com o plano que não fechou (lead %s)", lead, exc_info=True)
+        return None
+
+
+def _outro_em_aberto(c, conta_id: int, lead: int, evento_id: int | None) -> bool:
+    """Outro atendimento do mesmo card ainda espera a clínica (o mesmo cuidado de
+    `clinica_agenda._segura_em_consulta`): um paciente do card na clínica hoje (a mãe e
+    o filho no mesmo celular), ou uma proposta desta passagem sem plano montado."""
+    try:
+        with c.transaction():
+            return c.execute(
+                """select 1 from eventos_agenda o
+                    where o.conta_id=%s and o.prospeccao_id=%s and o.status='ativo' and o.id <> %s
+                      and ((o.situacao in ('presente', 'atendimento')
+                            and (o.inicio - interval '3 hours')::date = (now() - interval '3 hours')::date)
+                           or (o.situacao = 'finalizado' and o.tratamento_proposto
+                               and o.situacao_em >= now() - interval '60 days'
+                               and o.situacao_em >= coalesce(
+                                   (select max(m.criado_em) from funil_movimentos m
+                                     where m.conta_id = o.conta_id and m.prospeccao_id = o.prospeccao_id
+                                       and m.para = 'consulta' and m.motivo = 'agenda'), '-infinity')
+                               -- a proposta já virou plano: o montado a partir dela, ou o
+                               -- montado pelo card (sem consulta) depois dela
+                               and not exists (select 1 from clinica_planos pl
+                                                where pl.conta_id = o.conta_id and pl.status <> 'cancelado'
+                                                  and (pl.evento_id = o.id
+                                                       or (pl.evento_id is null and pl.prospeccao_id = o.prospeccao_id
+                                                           and pl.criado_em >= o.situacao_em)))))
+                    limit 1""", (conta_id, lead, evento_id or 0)).fetchone() is not None
+    except Exception:  # noqa: BLE001 — sem a 471
+        return False
+
+
+def _preco_da_consulta(c, conta_id: int, lead: int, evento_id: int | None) -> int | None:
+    """O valor que o card volta a ter: o do atendimento de onde o plano saiu; sem ele,
+    o da última consulta finalizada. None = o paciente nunca foi atendido."""
+    for sql, args in (
+            ("""select coalesce(s.setup_centavos, 0) from eventos_agenda e
+                  left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
+                 where e.id=%s and e.conta_id=%s and e.prospeccao_id=%s and e.situacao='finalizado'""",
+             (evento_id or 0, conta_id, lead)),
+            ("""select coalesce(s.setup_centavos, 0) from eventos_agenda e
+                  join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
+                 where e.conta_id=%s and e.prospeccao_id=%s and e.status='ativo' and e.situacao='finalizado'
+                   and s.categoria = 'consulta'
+                 order by e.inicio desc limit 1""", (conta_id, lead)),
+            ("""select 0 from eventos_agenda e
+                 where e.conta_id=%s and e.prospeccao_id=%s and e.status='ativo' and e.situacao='finalizado'
+                 limit 1""", (conta_id, lead))):
+        r = c.execute(sql, args).fetchone()
+        if r:
+            return int(r[0])
+    return None
+
+
+def card_sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: int | None,
+                   evento_id: int | None = None) -> str | None:
+    """PLANO QUE NÃO FECHA NÃO PERDE O PACIENTE (desenho de 01/10/2026, seção 01). O card
+    em Consulta ou em Plano enviado vai pra Retorno, se há retorno a fazer, ou pra
+    Concluído; o valor volta a ser o da consulta. "Perdido" fica pra quem nunca virou
+    paciente.
+
+    Fica onde está: na conta com o funil de antes (como sempre foi); quando outro plano
+    do paciente ainda está em jogo (montando, enviado, ou aceito esperando pagamento);
+    e quando ele nunca foi atendido (o orçamento direto pelo WhatsApp é venda, e segue
+    com a vendedora na coluna do plano).
+
+    Vai pra Consulta (ou fica lá) quando outro atendimento do card ainda espera a
+    clínica (`_outro_em_aberto`): o plano da mãe recusado não fecha o card do filho
+    que está na sala, nem o "plano a montar" de outra consulta."""
+    if not lead:
+        return None
+    from finance import funil_regua as fr
+    chaves = ca._chaves_do_funil(c, conta_id)
+    if "ganho" not in chaves or "tratamento" not in chaves:
+        return None
+    r = c.execute("select status from prospeccao where id=%s and conta_id=%s for update", (lead, conta_id)).fetchone()
+    if not r or r[0] not in tuple(x for x in ("consulta", "proposta") if x == "proposta" or x in chaves):
+        return None
+    atual = r[0]
+    if c.execute("""select 1 from clinica_planos where conta_id=%s and prospeccao_id=%s
+                     and (status in ('rascunho','aguardando_aprovacao','enviado')
+                          or (status = 'aceito' and pago_em is null)) limit 1""", (conta_id, lead)).fetchone():
+        return None
+    preco = _preco_da_consulta(c, conta_id, lead, evento_id)
+    if preco is None:
+        return None                     # nunca foi atendido: é venda, segue com a vendedora
+    if _outro_em_aberto(c, conta_id, lead, evento_id):
+        if atual == "consulta" or "consulta" not in chaves:
+            ca._nota(c, lead, membro_id, f"Plano não fechado ({motivo}). O card segue em Consulta: "
+                                         "outro atendimento dele ainda espera a clínica.")
+            return None
+        c.execute("""update prospeccao set status='consulta', estagio='lead', valor_estimado_centavos=%s,
+                            atualizado_em=now() where id=%s and conta_id=%s""", (preco, lead, conta_id))
+        fr.registrar_movimento(c, conta_id, lead, atual, "consulta", "plano", membro_id)
+        ca._nota(c, lead, membro_id, f"Plano não fechado ({motivo}). O card voltou para Consulta: "
+                                     "outro atendimento dele ainda espera a clínica.")
+        return "consulta"
+    destino = "retorno" if "retorno" in chaves and ca._pendente(c, conta_id, lead) else "ganho"
+    c.execute("""update prospeccao set status=%s, estagio='lead', valor_estimado_centavos=%s, atualizado_em=now()
+                  where id=%s and conta_id=%s""", (destino, preco, lead, conta_id))
+    fr.registrar_movimento(c, conta_id, lead, atual, destino, "plano", membro_id)
+    ca._nota(c, lead, membro_id, f"Plano não fechado ({motivo}). O card foi para "
+                                 f"{'Retorno' if destino == 'retorno' else 'Concluído'}.")
+    return destino
+
+
+# ------------------------------------------------------------------ o pagamento
+
+def _ids_titulos(p: dict) -> list[int]:
+    out = []
+    for t in p.get("titulos") or []:
+        try:
+            out.append(int(t))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def receber(pool, conta_id: int, plano_id: int, membro_id: int | None) -> dict:
+    """"Recebi o pagamento (ou a entrada)": dá baixa na primeira parcela em aberto do
+    plano (a mesma baixa do financeiro, que lança no caixa) e leva o card. Se alguma
+    parcela já foi paga pelo financeiro, só confirma, sem baixar outra."""
+    from finance import empresa as _emp
+    with pool.connection() as c:
+        p = plano(c, conta_id, plano_id)
+        if not p or p["status"] != "aceito":
+            return {"ok": False, "erro": "Esse plano não está aceito."}
+        ids = _ids_titulos(p)
+        if not ids:
+            return {"ok": False, "erro": "O plano ainda não tem as contas a receber: gere primeiro."}
+        pago = c.execute("select 1 from titulos where conta_id=%s and id = any(%s) and status='pago' limit 1",
+                         (conta_id, ids)).fetchone()
+        aberto = None if pago else c.execute(
+            """select id from titulos where conta_id=%s and id = any(%s) and status='aberto'
+                order by vencimento, id limit 1""", (conta_id, ids)).fetchone()
+    if not pago:
+        if not aberto:
+            return {"ok": False, "erro": "Não há parcela em aberto neste plano."}
+        r = _emp.dar_baixa_titulo(pool, conta_id, aberto[0], membro_id=membro_id) or {}
+        if not r.get("ok"):
+            with pool.connection() as c:
+                # o duplo clique (ou o financeiro no mesmo instante) já deu a baixa: vale
+                pago = c.execute("select 1 from titulos where conta_id=%s and id = any(%s) and status='pago' "
+                                 "limit 1", (conta_id, ids)).fetchone()
+            if not pago:
+                return {"ok": False, "erro": r.get("erro") or "A baixa não entrou. Confira no financeiro."}
+    try:
+        with pool.connection() as c:
+            destino = _confirmar_pagamento(c, conta_id, plano_id, membro_id)
+            c.commit()
+    except Exception:  # noqa: BLE001 — a baixa entrou; o relógio leva o card no próximo ciclo
+        _log.warning("planos: pagamento recebido e card não andou (plano %s)", plano_id, exc_info=True)
+        return {"ok": True, "destino": None}
+    return {"ok": True, "destino": destino}
+
+
+def conferir_pagamentos(c, conta_id: int) -> int:
+    """O relógio: o plano aceito cuja parcela foi paga POR FORA (baixa no financeiro,
+    conciliação do banco) leva o card como o Recebi. Devolve quantos planos confirmou."""
+    try:
+        with c.transaction():
+            ids = [r[0] for r in c.execute(
+                """select p.id from clinica_planos p
+                    where p.conta_id=%s and p.status='aceito' and p.pago_em is null
+                      and exists (select 1 from titulos t
+                                   where t.conta_id = p.conta_id and t.status = 'pago'
+                                     and t.id in (select (jsonb_array_elements_text(p.titulos))::bigint))
+                    limit 200""", (conta_id,)).fetchall()]
+    except Exception:  # noqa: BLE001 — sem a 474 ou sem títulos
+        return 0
+    n = 0
+    for pid in ids:
+        try:
+            with c.transaction():
+                _confirmar_pagamento(c, conta_id, pid, None)
+                n += 1
+        except Exception:  # noqa: BLE001
+            _log.warning("planos: pagamento não confirmado (plano %s)", pid, exc_info=True)
+    c.commit()
+    return n
+
+
+def _confirmar_pagamento(c, conta_id: int, plano_id: int, membro_id: int | None) -> str | None:
+    """Grava `pago_em` e leva o card: Em tratamento, se o plano virou pacote de sessões;
+    senão (só produto ou item avulso) Concluído. Idempotente: o update com `pago_em is
+    null` é a trava. Devolve a etapa nova, ou None se o card ficou onde estava."""
+    from finance import funil_regua as fr
+    r = c.execute("""update clinica_planos set pago_em=now(), atualizado_em=now()
+                      where id=%s and conta_id=%s and status='aceito' and pago_em is null
+                      returning prospeccao_id""", (plano_id, conta_id)).fetchone()
+    if not r or not r[0]:
+        return None
+    lead = r[0]
+    chaves = ca._chaves_do_funil(c, conta_id)
+    if "tratamento" not in chaves:
+        return None                     # funil de antes: o aceite já levou pra Fechado
+    try:
+        with c.transaction():
+            tem_pacote = c.execute("select 1 from clinica_pacotes where conta_id=%s and plano_id=%s limit 1",
+                                   (conta_id, plano_id)).fetchone() is not None
+    except Exception:  # noqa: BLE001 — sem a 381
+        tem_pacote = False
+    destino = "tratamento" if tem_pacote else ("ganho" if "ganho" in chaves else None)
+    st = c.execute("select status from prospeccao where id=%s and conta_id=%s for update", (lead, conta_id)).fetchone()
+    # de onde o pagamento leva: o que vem antes do tratamento, e o paciente que já
+    # tinha concluído e comprou um tratamento novo
+    pode = tuple(x for x in _ANTES + ("proposta", "ganho") if x not in ("consulta", "retorno") or x in chaves)
+    if not destino or not st or st[0] not in pode or st[0] == destino:
+        return None
+    c.execute("update prospeccao set status=%s, estagio='lead', atualizado_em=now() where id=%s and conta_id=%s",
+              (destino, lead, conta_id))
+    fr.registrar_movimento(c, conta_id, lead, st[0], destino, "pagamento", membro_id)
+    ca._nota(c, lead, membro_id, "Pagamento do plano recebido: " + (
+        "o tratamento começa." if destino == "tratamento" else "venda concluída."))
+    if destino == "tratamento":
+        # as sessões podem ter sido feitas antes de pagar: saldo zerado sai na hora
+        ca.card_do_tratamento(c, conta_id, lead, membro_id)
+    return destino
 
 
 def _avisar(c, conta_id: int, p: dict, titulo: str, corpo: str) -> None:
@@ -723,10 +1021,13 @@ def cobrar(pool, c, conta_id: int, agora: datetime) -> dict:
     from finance import funil_regua as fr
     out = {"toques": 0, "avisos": 0, "vencidos": 0}
     hoje = ca.hoje_br(agora)
-    r = c.execute("""update clinica_planos set status='vencido', atualizado_em=now()
-                      where conta_id=%s and status='enviado' and validade_ate < %s returning id""",
+    r = c.execute("""update clinica_planos set status='vencido', nao_fechou_motivo='venceu sem resposta',
+                            atualizado_em=now()
+                      where conta_id=%s and status='enviado' and validade_ate < %s returning id, prospeccao_id""",
                   (conta_id, hoje)).fetchall()
     out["vencidos"] = len(r)
+    for _pid, lead in r:
+        _sem_plano(c, conta_id, lead, "venceu sem resposta", None)
     c.commit()
     cfg = config(c, conta_id)
     enviados = [plano(c, conta_id, x[0]) for x in c.execute(
@@ -788,8 +1089,9 @@ def _toque_hoje(c, conta_id: int, conv: int, inicio_dia: datetime) -> bool:
 
 
 def em_aberto(c, conta_id: int, agora: datetime) -> dict:
-    """O que a tela Hoje mostra: desconto esperando aprovação, planos vencendo e
-    planos que o paciente respondeu (o automático parou; é da recepção)."""
+    """O que a tela Hoje mostra: desconto esperando aprovação, planos vencendo, planos
+    que o paciente respondeu (o automático parou; é da recepção) e quem aceitou e ainda
+    não pagou (o card espera o pagamento pra ir pra Em tratamento)."""
     try:
         with c.transaction():
             aprov = c.execute("select count(*) from clinica_planos where conta_id=%s and status='aguardando_aprovacao'",
@@ -797,20 +1099,26 @@ def em_aberto(c, conta_id: int, agora: datetime) -> dict:
             ids = [r[0] for r in c.execute(
                 "select id from clinica_planos where conta_id=%s and status='enviado' order by validade_ate",
                 (conta_id,)).fetchall()]
+            a_pagar = [r[0] for r in c.execute(
+                """select id from clinica_planos where conta_id=%s and status='aceito' and pago_em is null
+                    order by aceito_em desc limit 20""", (conta_id,)).fetchall()]
+            if "tratamento" not in ca._chaves_do_funil(c, conta_id):
+                a_pagar = []                # funil de antes: o aceite já fechou o card
     except Exception:  # noqa: BLE001
-        return {"aprovar": 0, "vencendo": [], "responderam": []}
+        return {"aprovar": 0, "vencendo": [], "responderam": [], "a_pagar": []}
     hoje = ca.hoje_br(agora)
     ps = [plano(c, conta_id, i) for i in ids]
     return {"aprovar": aprov,
             "vencendo": [p for p in ps if p["validade_ate"] and p["validade_ate"] <= hoje + timedelta(days=1)],
-            "responderam": [p for p in ps if _paciente_falou(c, conta_id, p)]}
+            "responderam": [p for p in ps if _paciente_falou(c, conta_id, p)],
+            "a_pagar": [plano(c, conta_id, i) for i in a_pagar]}
 
 
 # ------------------------------------------------------------------ o poller
 
 def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
-    total = {"contas": 0, "aceites": 0, "toques": 0, "avisos": 0, "vencidos": 0}
+    total = {"contas": 0, "aceites": 0, "toques": 0, "avisos": 0, "vencidos": 0, "pagos": 0}
     with pool.connection() as lockc:
         if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
             return total
@@ -822,11 +1130,19 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                         contas = contas_com_plano_enviado(c)
                 except Exception:  # noqa: BLE001 — sem a 379
                     contas = []
+                try:
+                    with c.transaction():
+                        # e quem tem plano aceito esperando pagamento (a baixa pode vir do financeiro)
+                        from finance.clinica_planos_publico import contas_com_plano_a_pagar
+                        contas = sorted(set(contas) | set(contas_com_plano_a_pagar(c)))
+                except Exception:  # noqa: BLE001 — sem a 474
+                    pass
                 for conta_id in contas:
                     try:
                         total["aceites"] += processar(pool, c, conta_id, agora)
                         r = cobrar(pool, c, conta_id, agora)
                         c.commit()
+                        total["pagos"] += conferir_pagamentos(c, conta_id)
                         total["contas"] += 1
                         for k in ("toques", "avisos", "vencidos"):
                             total[k] += r[k]

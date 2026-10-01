@@ -9760,6 +9760,24 @@ _STANDS_CSS = """<style>
 .stdet .sts b{color:var(--text,#EAF2ED)}
 .stvazio{margin:1.2rem .8rem;padding:1rem;border:1px dashed var(--line,#1E2A23);border-radius:12px;
   color:var(--text-dim,#8FA197);font-size:.85rem;line-height:1.5}
+.stdica{margin:.1rem 0 .6rem;background:#10241A;border:1px solid #1E4A3A;border-radius:10px;
+  padding:.6rem .7rem;font-size:.8rem;line-height:1.45;color:#CFEFDC}
+.stdica b{color:#46F58A}
+.clitopo{display:flex;gap:8px;padding:.7rem .8rem 0}
+.clitopo input{flex:1;min-width:0;box-sizing:border-box;background:var(--surface,#121A16);
+  border:1px solid var(--line,#1E2A23);border-radius:10px;color:var(--text,#EAF2ED);font-size:16px;
+  padding:10px 12px;margin:0}
+.clinovo{display:inline-flex;align-items:center;gap:6px;min-height:44px;box-sizing:border-box;
+  padding:0 14px;border-radius:10px;background:var(--neon,#25D366);color:#04150C;font-weight:800;
+  font-size:.88rem;text-decoration:none;white-space:nowrap}
+.cvd.novo{border:1.5px solid #1E4A3A}
+.cvd .tag{font-size:.66rem;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap;
+  background:var(--surface-2,#16201B);border:1px solid var(--line,#1E2A23);color:var(--text-dim,#8FA197)}
+.cvd .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:.6rem}
+.cvd .acts a{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;padding:0 14px;
+  border-radius:10px;font-weight:700;font-size:.85rem;text-decoration:none}
+.cvd .acts .zap{border:1.5px solid var(--neon,#25D366);background:rgba(37,211,102,.12);color:var(--neon,#25D366)}
+.cvd .acts .gh{border:1px solid var(--line,#1E2A23);background:var(--surface-2,#16201B);color:var(--text,#EAF2ED)}
 </style>"""
 
 _STANDS_JS = r"""
@@ -9894,7 +9912,10 @@ _STANDS_JS = r"""
     var h='';
     if(s.ct){
       var url=location.origin+'/contrato/'+s.ct;
-      var mct='Olá, '+nome+'! Segue o contrato '+cods+' no Outlet Chic. É só abrir, conferir e assinar pelo celular: '+url;
+      // cadastro incompleto: o cliente completa os dados no próprio link (01/10/2026)
+      var falta=s.cad?faltando(s.cad).length:0;
+      var mct='Olá, '+nome+'! Segue o contrato '+cods+' no Outlet Chic. '+
+        (falta?'Abra o link, complete os dados da empresa e assine pelo celular: ':'É só abrir, conferir e assinar pelo celular: ')+url;
       if(num)h+='<a class=zap href="https://wa.me/'+num+'?text='+encodeURIComponent(mct)+'" target=_blank rel=noopener>'+(s.ct_ok?'Reenviar contrato ✓':'Mandar contrato')+'</a>';
       h+='<button type=button onclick="stCopiarTxt(this,\''+url+'\')">Copiar link do contrato</button>';
     }
@@ -9975,6 +9996,7 @@ _STANDS_JS = r"""
     h+='<div class=stbar><span style="width:'+Math.round(n/REQ.length*100)+'%"></span></div>';
     h+='<div class=stcadt><b id=stn>'+n+'/'+REQ.length+'</b> <span id=stfalta>'+
        (f.length?'faltam pro contrato: '+esc(f.join(', ')):'cadastro completo — o contrato sai com todos os dados')+'</span></div>';
+    if(f.length&&s.ct)h+='<div class=stdica><b>Novo:</b> não precisa esperar. Mande o contrato agora: o cliente completa esses dados no próprio link, antes de assinar.</div>';
     if(!editando){
       h+='<button class=stbtn type=button onclick="stEditar()">'+(f.length?'Completar dados do cliente':'Ver / editar dados do cliente')+'</button>';
     } else {
@@ -10555,22 +10577,167 @@ def cockpit_stands_clientes(request: Request):
             f"<div class=sub>{esc(' · '.join(e['codigos']))}"
             f"{('<br>' + esc(' · '.join(linhas))) if linhas else ''}</div></a>"
             f"<div class=chips>{chip}{botao_zap}</div></div>")
+    com_abas = _perfil_stands(conta_id)
+    # A CARTEIRA DE QUEM AINDA NÃO RESERVOU (01/10/2026): os clientes que ela
+    # cadastrou em "+ Novo cliente", com o link de vendas que já leva o cadastro
+    # (`?c=`) — quando o cliente reserva por ele, a venda nasce completa.
+    pode_cadastrar = bool(com_abas and meu_id)
+    novos = []
+    if pode_cadastrar:
+        from finance import evento_stands as _es
+        from finance.email_sender import _app_url
+        minimo = _es.regras_de_pagamento(cfg)["sinal_minimo_centavos"]
+        novos = [_cartao_cliente_novo(cfg, meu_id, cad, minimo, _app_url())
+                 for cad in _es.clientes_do_vendedor_sem_stand(pool, conta_id, meu_id)]
     vazio = ("<div class=stvazio>Nenhum cliente ainda. Quando alguém comprar pelo seu link, "
              "a empresa aparece aqui.</div>")
-    busca = ("<div style='padding:.7rem .8rem 0'><input id=stbusca type=search placeholder='Buscar cliente' "
-             "autocomplete=off style='width:100%;box-sizing:border-box;background:var(--surface,#121A16);"
-             "border:1px solid var(--line,#1E2A23);border-radius:10px;color:var(--text,#EAF2ED);"
-             "font-size:16px;padding:10px 12px'></div>") if cartoes else ""
+    busca = ("<div class=clitopo><input id=stbusca type=search placeholder='Buscar cliente' "
+             "aria-label='Buscar cliente' autocomplete=off>"
+             + (f"<a class=clinovo href='{_BASE}/stands/clientes/novo'>"
+                "<svg width=16 height=16 viewBox='0 0 24 24' fill=none stroke=currentColor "
+                "stroke-width=2.6 stroke-linecap=round aria-hidden=true><path d='M12 5v14M5 12h14'/>"
+                "</svg>Novo cliente</a>" if pode_cadastrar else "")
+             + "</div>") if (cartoes or novos or pode_cadastrar) else ""
     js = ("<script>(function(){var b=document.getElementById('stbusca');if(!b)return;"
           "b.addEventListener('input',function(){var t=b.value.trim().toLowerCase();"
           "Array.prototype.forEach.call(document.querySelectorAll('.cvd'),function(c){"
           "c.style.display=(t&&c.getAttribute('data-nome').indexOf(t)<0)?'none':'';});});})();</script>")
-    com_abas = _perfil_stands(conta_id)
-    corpo = (_hdr("Clientes", f"{len(cartoes)} empresa{'s' if len(cartoes) != 1 else ''}",
+    n = len(cartoes) + len(novos)
+    corpo = (_hdr("Clientes", f"{n} empresa{'s' if n != 1 else ''}",
                   voltar="" if com_abas else _BASE)
-             + _STANDS_CSS + "<div class=scroll>" + busca + ("".join(cartoes) or vazio) + "</div>"
+             + _flash(request)
+             + _STANDS_CSS + "<div class=scroll>" + busca + ("".join(novos + cartoes) or vazio)
+             + "</div>"
              + (_abas_stands("clientes", gestao=gestao) if com_abas else "") + js)
     return _page("Clientes", corpo)
+
+
+def _cartao_cliente_novo(cfg: dict, meu_id: int, cad: dict, minimo: int, app_url: str) -> str:
+    """O cartão do cliente cadastrado antes da reserva: "Ainda sem stand", o que falta
+    pro contrato e o link de vendas que já leva o cadastro dele (`?v=` + `?c=`)."""
+    from urllib.parse import quote as _quote
+    from finance import evento_stands as _es
+    fantasia = cad.get("fantasia") or "Cliente"
+    zap = "".join(ch for ch in (cad.get("whats") or "") if ch.isdigit())
+    if 10 <= len(zap) <= 11:
+        zap = "55" + zap
+    link = (f"{app_url.rstrip('/')}/e/{cfg['slug']}?v={_es.codigo_vendedor(meu_id)}"
+            f"&c={_es.codigo_cliente(cad['cliente_id'])}")
+    msg = (f"Oi, {fantasia}! Escolha o seu stand direto no mapa e reserve com o sinal de "
+           f"{_brl(minimo)} por stand: {link}")
+    falta = cad.get("faltam") or []
+    chip = (f"<span class='chip amb'>Cadastro {cad.get('n_ok', 0)}/{cad.get('n_total', 7)}</span>"
+            if falta else "<span class='chip ok'>Cadastro completo ✓</span>")
+    linhas = [x for x in (cad.get("razao"), cad.get("doc"),
+                          " · ".join(y for y in (cad.get("cidade"), cad.get("uf")) if y)) if x]
+    acoes = (f"<a class=zap target=_blank rel=noopener "
+             f"href='https://wa.me/{zap}?text={_quote(msg)}'>Mandar link de vendas</a>"
+             f"<a class=gh target=_blank rel=noopener href='https://wa.me/{zap}'>WhatsApp</a>"
+             ) if zap else ""
+    return (f"<div class='cvd novo' data-nome='{esc(fantasia.lower())}'>"
+            f"<div class=topo><span class=nm>{esc(fantasia)}</span>"
+            "<span class=tag>Ainda sem stand</span></div>"
+            + (f"<div class=sub>{esc(' · '.join(linhas))}</div>" if linhas else "")
+            + f"<div class=chips>{chip}</div>"
+            + (f"<div class=acts>{acoes}</div>" if acoes else "") + "</div>")
+
+
+# O Receita do "Novo cliente": a mesma consulta do formulário do stand
+_CLI_NOVO_JS = r"""<script>
+window.cliReceita=function(){
+  var f=document.getElementById('cliform'), m=document.getElementById('clirecmsg');
+  var doc=(f.elements['doc'].value||'').trim(); m.hidden=false;
+  if(!doc){m.textContent='Digite o CNPJ antes.';return;}
+  m.textContent='Consultando a Receita…';
+  zapFetch('__BASE__/stands/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+    if(!j){m.textContent='Não consegui consultar agora — digite os dados.';return;}
+    if(!j.ok){m.textContent=j.erro||'Não consegui consultar agora.';return;}
+    if(j.nome)f.elements['razao'].value=j.nome;
+    if(j.email&&!f.elements['email'].value.trim())f.elements['email'].value=j.email;
+    if(j.cidade)f.elements['cidade'].value=j.cidade;
+    if(j.uf)f.elements['uf'].value=j.uf;
+    m.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+  });
+};
+</script>"""
+
+
+def _pagina_cliente_novo(dados: dict, erro: str = "") -> HTMLResponse:
+    """"+ Novo cliente" (aprovado na maquete, 01/10/2026): o cadastro do lojista antes
+    da reserva. Só nome fantasia e WhatsApp são obrigatórios agora."""
+    def campo(k, rot, req=False, extra=""):
+        valor = esc((dados or {}).get(k) or "")
+        return (f"<label class=stfld><span>{rot}{' <i>*</i>' if req else ''}</span>"
+                f"<input name={k} value=\"{valor}\" maxlength=300 {extra}"
+                f"{' required' if req else ''}></label>")
+    form = ("<div class=stcad style='margin:.2rem .8rem 1rem;border-top:0'>"
+            f"<form method=post action='{_BASE}/stands/clientes/novo' id=cliform>"
+            + (f"<div class=sterr>{esc(erro)}</div>" if erro else "")
+            + campo("fantasia", "Nome fantasia", True, "autocomplete=organization")
+            + campo("whats", "WhatsApp", True, "inputmode=tel autocomplete=tel")
+            + "<div class=stlin>"
+            + campo("doc", "CNPJ / CPF", False, "inputmode=numeric placeholder='00.000.000/0000-00'")
+            + "<button class=strec type=button onclick='cliReceita()'>Receita</button></div>"
+            + "<div class=stnota id=clirecmsg hidden></div>"
+            + campo("razao", "Razão social", False, "placeholder='Como sai no contrato'")
+            + campo("rep", "Representante legal", False, "placeholder='Quem assina pelo lojista'")
+            + campo("end", "Endereço", False, "placeholder='Rua, número, bairro'")
+            + "<div class=stlin>" + campo("cep", "CEP", False, "inputmode=numeric")
+            + campo("cidade", "Cidade") + campo("uf", "UF", False, "style='text-transform:uppercase'")
+            + "</div>"
+            + campo("email", "E-mail", False, "inputmode=email")
+            + "<div class=stac><button class=stsalvar type=submit>Salvar cliente</button></div>"
+            + "<div class=stnota>Só nome fantasia e WhatsApp são obrigatórios agora. O que faltar, "
+              "o cliente completa no link do contrato.</div>"
+            + "</form></div>")
+    corpo = (_hdr("Novo cliente", "Quando ele reservar pelo seu link, a venda já nasce completa.",
+                  voltar=f"{_BASE}/stands/clientes")
+             + _STANDS_CSS + "<div class=scroll>" + form + "</div>"
+             + _CLI_NOVO_JS.replace("__BASE__", _BASE))
+    return _page("Novo cliente", corpo)
+
+
+def _vendedora_do_app(request: Request):
+    """(conta_id, membro_id) de quem pode ter carteira no app de estandes — ou None."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None or not meu_id or not _perfil_stands(conta_id):
+        return None
+    return conta_id, meu_id
+
+
+@router.get("/cockpit/stands/clientes/novo", response_class=HTMLResponse)
+def cockpit_stands_cliente_novo(request: Request):
+    if not (_sessao(request) or _gerencia(request)):
+        return RedirectResponse("/cockpit/login", status_code=303)
+    if not _vendedora_do_app(request):
+        return RedirectResponse(f"{_BASE}/stands/clientes", status_code=303)
+    return _pagina_cliente_novo({})
+
+
+@router.post("/cockpit/stands/clientes/novo")
+def cockpit_stands_cliente_novo_salvar(request: Request, fantasia: str = Form(""),
+                                       whats: str = Form(""), doc: str = Form(""),
+                                       razao: str = Form(""), rep: str = Form(""),
+                                       email: str = Form(""), end: str = Form(""),
+                                       cep: str = Form(""), cidade: str = Form(""),
+                                       uf: str = Form("")):
+    if not (_sessao(request) or _gerencia(request)):
+        return RedirectResponse("/cockpit/login", status_code=303)
+    quem = _vendedora_do_app(request)
+    if not quem:
+        return RedirectResponse(f"{_BASE}/stands/clientes", status_code=303)
+    dados = {"fantasia": fantasia, "whats": whats, "doc": doc, "razao": razao, "rep": rep,
+             "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf}
+    from finance import evento_stands as _es
+    r = _es.cadastrar_cliente_do_vendedor(get_pool(), quem[0], quem[1], dados)
+    if not r.get("ok"):
+        return _pagina_cliente_novo(dados, r.get("erro") or "Não consegui salvar agora.")
+    request.session["ck_ok"] = ("Cliente salvo ✓ Mande o link de vendas pra ele: quando reservar, "
+                                "a venda já nasce com o cadastro.")
+    return RedirectResponse(f"{_BASE}/stands/clientes", status_code=303)
 
 
 @router.post("/cockpit/stands/{codigo}/venda")

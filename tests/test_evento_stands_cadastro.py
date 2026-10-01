@@ -59,6 +59,7 @@ def pool():
         c.execute((base / "451_evento_stands_cadastro_cliente.sql").read_text(encoding="utf-8"))
         c.execute((base / "452_evento_stands_sinal_saldo_grupo.sql").read_text(encoding="utf-8"))
         c.execute((base / "457_evento_stands_aviso_vence.sql").read_text(encoding="utf-8"))
+        c.execute((base / "461_clientes_vendedor.sql").read_text(encoding="utf-8"))
         c.commit()
     cli._garantir_cols(p)
     yield p
@@ -1117,6 +1118,248 @@ def test_a_gestao_do_outlet_chic_abre_no_mapa_e_ve_o_ranking(pool, conta_id, mon
     assert "Ranking" in html and "Vendas" in html                   # abas da gestão
     vendas = pc.cockpit_stands_vendas(req).body.decode("utf-8")
     assert "Vendedor: <b>Carla</b>" in vendas and "sem vendedor" in vendas
+
+
+# ------------- o cliente completa os dados no link do contrato (01/10/2026)
+
+def _contrato_de_verdade(pool, conta_id, monkeypatch, vendedor=None, codigos=("G60", "G61")):
+    """Uma reserva pelo cano da página pública, com o contrato REAL (link público)."""
+    from finance import contrato as ctr
+    from finance import vendas
+    from web import contrato_publico as cp
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    with pool.connection() as c:
+        for m in ("160_contrato_modelo.sql", "164_contratos.sql", "165_contrato_token.sql",
+                  "189_contrato_enviado_em.sql", "194_assinar_antes_do_sinal.sql",
+                  "201_contrato_aditivos.sql", "311_contrato_servico.sql"):
+            c.execute((base / m).read_text(encoding="utf-8"))
+        for col in ("razao_social", "nome_fantasia", "endereco", "bairro", "cep", "cidade",
+                    "uf", "telefone", "email_empresa", "logo_url"):
+            c.execute(f"alter table contas add column if not exists {col} text")
+        c.execute("delete from contratos")
+        c.execute("delete from contrato_modelo where conta_id=%s", (conta_id,))
+        c.execute("insert into contrato_modelo (conta_id, clausulas) values (%s, %s::jsonb)",
+                  (conta_id, '[{"titulo":"I","corpo":"Cláusula de teste."}]'))
+        pid = c.execute(
+            "insert into prospeccao (conta_id, empresa, whatsapp, status, origem, vendedor_id) "
+            "values (%s,'Boutique Nova Era','86988887777','novo','pagina_stands',%s) "
+            "returning id", (conta_id, vendedor)).fetchone()[0]
+        c.commit()
+    _config_evento(pool, conta_id)
+    for cod in codigos:
+        _criar_stand(pool, conta_id, cod)
+    monkeypatch.setattr(vendas, "modo_do_orcamento", lambda p, c: "evento")
+    monkeypatch.setattr(ctr, "conta_tem_contrato", lambda p, c: True)
+    monkeypatch.setattr(cp.scat, "listar", lambda *a, **k: [])
+    monkeypatch.setattr(cp, "get_pool", lambda: pool)
+    r = es.subir_e_registrar_comprovante(
+        pool, conta_id, codigos[0], b"%PDF-1.4 x", "application/pdf", prospeccao_id=pid,
+        subir=lambda *a, **k: None, junto_com=list(codigos[1:]), sinal_centavos=300000)
+    return r["contrato_token"], pid
+
+
+def _sem_contratos(pool, conta_id):
+    with pool.connection() as c:
+        c.execute("delete from contratos where conta_id=%s", (conta_id,))
+        c.commit()
+
+
+def _dados_do_link(**kw):
+    base = {"fantasia": "Boutique Nova Era", "whats": "(86) 9 8888-7777",
+            "razao": "Boutique Nova Era Comércio Ltda", "doc": CNPJ_VALIDO,
+            "rep": "Ana Paula Souza", "email": "", "end": "Av. Frei Serafim, 1200",
+            "cep": "64001-020", "cidade": "Teresina", "uf": "PI"}
+    base.update(kw)
+    return base
+
+
+def test_o_cliente_completa_os_dados_no_link_do_contrato_e_so_entao_assina(
+        pool, conta_id, monkeypatch):
+    from finance import contrato as ctr
+    from web import contrato_publico as cp
+    carla = _membro(pool, conta_id, "Carla")
+    enviados = _pushes(monkeypatch)
+    monkeypatch.setattr(es, "app_de_stands", lambda p, c: True)
+    token, _pid = _contrato_de_verdade(pool, conta_id, monkeypatch, vendedor=carla)
+    # a observação da equipe nunca passa pela mão do cliente
+    es.salvar_cadastro_stand(pool, conta_id, "G60", {"fantasia": "Boutique Nova Era",
+                                                     "whats": "(86) 9 8888-7777",
+                                                     "obs": "cliente VIP"})
+    req = _Req()
+    req.client = None
+    d = cp.carregar(token, pool)
+    assert d["cadastro"]["codigos"] == ["G60", "G61"] and d["cadastro"]["faltam"]
+    assert d["pode_assinar"] is False
+    html = cp.contrato_publico(req, token).body.decode("utf-8")
+    assert "Complete os dados da sua empresa" in html and f"/contrato/{token}/dados" in html
+    assert "✓ Assinar contrato" not in html and "complete no topo da página" in html
+
+    # assinar antes de completar: o SERVIDOR recusa, não só a tela
+    cp.contrato_assinar(req, token, nome="Ana Paula Souza", doc="", aceite="on", dia="")
+    assert not ctr.por_token(pool, token)["assinado_em"]
+
+    # documento inválido: volta com o erro e com o que foi digitado
+    r = cp.contrato_dados(req, token, **_dados_do_link(doc="123"))
+    corpo = r.body.decode("utf-8")
+    assert r.status_code == 200 and "11 (CPF) ou 14 (CNPJ)" in corpo
+    assert "Boutique Nova Era Comércio Ltda" in corpo and enviados == []
+
+    # tudo certo: salva, avisa a vendedora UMA vez e libera a assinatura
+    r = cp.contrato_dados(req, token, **_dados_do_link())
+    assert r.status_code == 303 and r.headers["location"].endswith("?ok=dados")
+    assert [(m, t) for m, t, *_ in enviados] == [(carla, "Cadastro completo ✓")]
+    assert "G60 + G61" in enviados[0][2]
+    d = cp.carregar(token, pool)
+    assert d["cadastro"]["faltam"] == [] and d["pode_assinar"] is True
+    assert d["contratante"]["nome"] == "Boutique Nova Era Comércio Ltda"
+    assert d["contratante"]["representante"] == "Ana Paula Souza"
+    g60, g61 = es.buscar(pool, conta_id, "G60"), es.buscar(pool, conta_id, "G61")
+    assert g60["cliente_id"] and g60["cliente_id"] == g61["cliente_id"]
+    assert cli.obter_clientes(pool, conta_id, [g60["cliente_id"]])[g60["cliente_id"]]["obs"] \
+        == "cliente VIP"
+    html = cp.contrato_publico(req, token, ok="dados").body.decode("utf-8")
+    assert "Dados salvos." in html and "✓ Assinar contrato" in html
+    assert "editar os dados da empresa" in html and "Complete os dados" not in html
+    assert "Os dados da sua empresa" in cp.contrato_publico(req, token, editar="1").body.decode()
+
+    # salvar de novo, já completo, não avisa outra vez
+    cp.contrato_dados(req, token, **_dados_do_link())
+    assert len(enviados) == 1
+    _sem_contratos(pool, conta_id)
+
+
+def test_o_contrato_de_quem_nao_tem_o_perfil_de_estandes_segue_como_era(
+        pool, conta_id, monkeypatch):
+    from web import contrato_publico as cp
+    monkeypatch.setattr(es, "app_de_stands", lambda p, c: False)
+    token, _pid = _contrato_de_verdade(pool, conta_id, monkeypatch)
+    d = cp.carregar(token, pool)
+    assert d["cadastro"] is None and d["pode_assinar"] is True
+    req = _Req()
+    req.client = None
+    html = cp.contrato_publico(req, token).body.decode("utf-8")
+    assert "Complete os dados da sua empresa" not in html and "✓ Assinar contrato" in html
+    r = cp.contrato_dados(req, token, **_dados_do_link())
+    assert r.status_code == 303 and r.headers["location"] == f"/contrato/{token}"
+    g60 = es.buscar(pool, conta_id, "G60")
+    assert es.cadastros_dos_stands(pool, conta_id, [g60])["G60"]["razao"] == ""
+    _sem_contratos(pool, conta_id)
+
+
+# ------------- a vendedora cadastra o cliente ANTES da reserva (01/10/2026)
+
+def _moda_encanto(**kw):
+    base = _dados(fantasia="Moda Encanto", whats="(86) 9 8111-2233",
+                  razao="Moda Encanto Confecções Ltda", rep="Juliana Costa")
+    base.update(kw)
+    return base
+
+
+def test_a_vendedora_cadastra_antes_e_a_reserva_pelo_link_do_cliente_nasce_completa(
+        pool, conta_id, monkeypatch):
+    from finance import comprovantes as comprov
+    from finance import contrato as ctr
+    from finance import vendas
+    from web import loja_stands as ls
+    carla, rui = _membro(pool, conta_id, "Carla"), _membro(pool, conta_id, "Rui")
+    enviados = _pushes(monkeypatch)
+    r = es.cadastrar_cliente_do_vendedor(pool, conta_id, carla, _moda_encanto())
+    assert r["ok"] and r["acao"] == "criado"
+    cid = r["cliente_id"]
+    carteira = es.clientes_do_vendedor_sem_stand(pool, conta_id, carla)
+    assert [c["cliente_id"] for c in carteira] == [cid] and carteira[0]["faltam"] == []
+    assert es.clientes_do_vendedor_sem_stand(pool, conta_id, rui) == []
+    # o mesmo lojista não troca de vendedora; e só fantasia + WhatsApp são obrigatórios
+    r2 = es.cadastrar_cliente_do_vendedor(pool, conta_id, rui, _moda_encanto())
+    assert not r2["ok"] and "outra vendedora" in r2["erro"]
+    assert not es.cadastrar_cliente_do_vendedor(pool, conta_id, carla,
+                                                {"fantasia": "Loja", "whats": "8699"})["ok"]
+    # o código do cliente é assinado: forjado, ou de outra conta, não vale
+    codigo = es.codigo_cliente(cid)
+    assert es.cliente_do_codigo(pool, conta_id, codigo)["nome"] == "Moda Encanto"
+    assert es.cliente_do_codigo(pool, conta_id, f"{cid}-0000000000") is None
+    assert es.cliente_do_codigo(pool, conta_id + 999, codigo) is None
+
+    monkeypatch.setattr(ls, "get_pool", lambda: pool)
+    monkeypatch.setattr(comprov, "subir_em", lambda *a, **k: None)
+    monkeypatch.setattr(vendas, "modo_do_orcamento", lambda p, c: "evento")
+    monkeypatch.setattr(ctr, "criar_para_orcamento",
+                        lambda *a, **k: {"id": 1, "token": "tok-contrato"})
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    r = ls._loja_stands_comprovante_sync(
+        "outlet-chic", "G60", "Moda Encanto", "(86) 9 8111-2233", es.codigo_vendedor(carla),
+        b"%PDF-1.4 x", "application/pdf", "", "1500", codigo)
+    assert r.status_code == 303 and "msg=ok" in r.headers["location"]
+    g60 = es.buscar(pool, conta_id, "G60")
+    assert g60["cliente_id"] == cid
+    assert es.cadastros_dos_stands(pool, conta_id, [g60])["G60"]["faltam"] == []
+    with pool.connection() as c:
+        assert c.execute("select count(*) from clientes").fetchone()[0] == 1  # não nasceu outro
+        empresa, socio = c.execute(
+            "select empresa, to_jsonb(o)->>'socio' from orcamentos o where id=%s",
+            (g60["orcamento_id"],)).fetchone()
+    assert empresa == "Moda Encanto Confecções Ltda" and socio == "Juliana Costa"
+    assert es.clientes_do_vendedor_sem_stand(pool, conta_id, carla) == []  # virou venda
+    assert "Cadastro completo: já pode mandar o contrato" in enviados[-1][2]
+    r3 = es.cadastrar_cliente_do_vendedor(pool, conta_id, carla, _moda_encanto())
+    assert not r3["ok"] and "já tem stand" in r3["erro"]
+
+
+def test_a_aba_clientes_do_app_tem_novo_cliente_e_o_link_que_leva_o_cadastro(
+        pool, conta_id, monkeypatch):
+    carla = _membro(pool, conta_id, "Carla")
+    _config_evento(pool, conta_id)
+    pc, req = _cockpit(pool, conta_id, monkeypatch, carla)
+    monkeypatch.setattr(pc, "_perfil_stands", lambda cid: True)
+    assert "action='/cockpit/stands/clientes/novo'" in \
+        pc.cockpit_stands_cliente_novo(req).body.decode("utf-8")
+    r = pc.cockpit_stands_cliente_novo_salvar(req, fantasia="", whats="")
+    assert r.status_code == 200 and "Preencha o nome fantasia" in r.body.decode("utf-8")
+    r = pc.cockpit_stands_cliente_novo_salvar(
+        req, fantasia="Moda Encanto", whats="(86) 9 8111-2233", doc="", razao="", rep="",
+        email="", end="", cep="", cidade="", uf="")
+    assert r.status_code == 303 and r.headers["location"] == "/cockpit/stands/clientes"
+    cid = es.clientes_do_vendedor_sem_stand(pool, conta_id, carla)[0]["cliente_id"]
+    html = pc.cockpit_stands_clientes(req).body.decode("utf-8")
+    assert "href='/cockpit/stands/clientes/novo'" in html and "Ainda sem stand" in html
+    assert "Cadastro 2/7" in html and "Cliente salvo" in html
+    assert "wa.me/5586981112233?text=" in html and "Mandar link de vendas" in html
+    assert "%26c%3D" + es.codigo_cliente(cid) in html               # o link leva o cadastro
+    assert "v%3D" + es.codigo_vendedor(carla) in html                # e a marca da vendedora
+    # conta sem o app de estandes: nem o botão, nem a rota
+    monkeypatch.setattr(pc, "_perfil_stands", lambda cid: False)
+    assert "clientes/novo" not in pc.cockpit_stands_clientes(req).body.decode("utf-8")
+    assert pc.cockpit_stands_cliente_novo(req).status_code == 303
+
+
+def test_a_pagina_publica_abre_com_o_cadastro_do_cliente_do_link(pool, conta_id, monkeypatch):
+    from web import loja_stands as ls
+    monkeypatch.setattr(ls, "get_pool", lambda: pool)
+    carla = _membro(pool, conta_id, "Carla")
+    _config_evento(pool, conta_id)
+    _criar_stand(pool, conta_id, "G60")
+    cid = es.cadastrar_cliente_do_vendedor(
+        pool, conta_id, carla, {"fantasia": "Moda </script><b>x",
+                                "whats": "(86) 9 8111-2233"})["cliente_id"]
+
+    def pagina(**q):
+        req = _Req()
+        req.query_params = q
+        return ls.loja_stands(req, "outlet-chic").body.decode("utf-8")
+
+    html = pagina(c=es.codigo_cliente(cid), v=es.codigo_vendedor(carla))
+    assert 'var CLIENTE_LINK = {"codigo": "' in html and '"vendedora": "Carla"' in html
+    # dentro do <script>, o nome digitado não fecha a tag
+    assert "Moda \\u003c/script\\u003e\\u003cb\\u003ex" in html and "</script><b>x" not in html
+    assert "var CLIENTE_LINK = null" in pagina(c=f"{cid}-0000000000")
+    assert "var CLIENTE_LINK = null" in pagina()
+
+
+def test_o_app_manda_o_contrato_avisando_que_o_cliente_completa_os_dados():
+    from web import painel_cockpit as pc
+    assert "complete os dados da empresa e assine pelo celular" in pc._STANDS_JS
+    assert "o cliente completa esses dados no próprio link" in pc._STANDS_JS
 
 
 # ------- reserva nova nasce limpa; reserva da lista, sem prazo nem comprovante (01/10/2026)

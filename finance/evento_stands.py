@@ -214,6 +214,12 @@ def registrar_comprovante(pool, conta_id: int, codigo: str, comprovante_url: str
                        prospeccao_id = coalesce(%s, prospeccao_id),
                        grupo_id = case when status='livre' then null else grupo_id end,
                        aviso_vence_em = case when status='livre' then null else aviso_vence_em end,
+                       -- RESERVA NOVA NASCE LIMPA (01/10/2026): o stand que foi liberado
+                       -- (ou venceu) ainda aponta pra proposta e pro cliente de quem
+                       -- estava lá, e `garantir_orcamento_e_contrato` reaproveitaria o
+                       -- contrato dessa pessoa. Reenvio no MESMO pre_reservado mantém.
+                       orcamento_id = case when status='livre' then null else orcamento_id end,
+                       cliente_id = case when status='livre' then null else cliente_id end,
                        atualizado_em = now()
                  where conta_id=%s and codigo=%s and status in ('livre','pre_reservado')
                  returning {_COLS}""",
@@ -436,7 +442,9 @@ def registrar_comprovante_grupo(pool, conta_id: int, codigos: list[str],
             f"""update evento_stands
                    set status='pre_reservado', pre_reserva_ate=%s, comprovante_url=%s,
                        comprovante_em=%s, prospeccao_id=%s, grupo_id=%s,
-                       aviso_vence_em=null, atualizado_em=now()
+                       aviso_vence_em=null, atualizado_em=now(),
+                       -- reserva nova nasce limpa (ver `registrar_comprovante`)
+                       orcamento_id=null, cliente_id=null
                  where conta_id=%s and codigo = any(%s) and status='livre'
                  returning {_COLS}""",
             (prazo, comprovante_url, agora, prospeccao_id, grupo, conta_id,

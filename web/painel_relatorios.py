@@ -215,7 +215,7 @@ def _fora_de_vendas(origem, categoria, descricao, grupo_plano):
     return None
 
 
-def _dados_vendas(pool, conta_id, periodo):
+def _dados_vendas(pool, conta_id, periodo, de=None, ate=None):
     """Vendas: o que o negócio VENDEU — produto ou serviço.
 
     Antes esta aba somava todo lançamento de receita da empresa, viesse de onde
@@ -238,7 +238,7 @@ def _dados_vendas(pool, conta_id, periodo):
     do CLAUDE.md vale pra tela — dinheiro do cliente não desaparece de uma
     contagem sem explicação.
     """
-    ini, fim = _intervalo(periodo)
+    ini, fim = _intervalo(periodo, de, ate)
     with pool.connection() as c:
         rows = c.execute(
             """select l.data, l.descricao, l.categoria, l.origem,
@@ -488,7 +488,7 @@ _ORIGEM = {
 }
 
 
-def _dados_caixa(pool, conta_id, tipo, periodo):
+def _dados_caixa(pool, conta_id, tipo, periodo, de=None, ate=None):
     """Contas pagas / Contas recebidas: o DINHEIRO que andou, não o título baixado.
 
     Antes estas duas abas liam `titulos` com status='pago'. O efeito, conferido em
@@ -520,7 +520,7 @@ def _dados_caixa(pool, conta_id, tipo, periodo):
     despesa sem natureza definida) e sumir com ele é o erro que esta aba acabou
     de deixar de cometer.
     """
-    ini, fim = _intervalo(periodo)
+    ini, fim = _intervalo(periodo, de, ate)
     lanc_tipo = "despesa" if tipo == "pagar" else "receita"
     with pool.connection() as c:
         rows = c.execute(
@@ -608,14 +608,14 @@ def _dados_caixa(pool, conta_id, tipo, periodo):
     return dados
 
 
-def _dados_comissao(pool, conta_id, periodo):
+def _dados_comissao(pool, conta_id, periodo, de=None, ate=None):
     """Comissão do período por vendedor.
 
     A conta vive em finance/comissao.py — o MESMO lugar que o Cockpit consulta.
     Antes cada tela fazia a sua e os números não batiam: aqui somava
     `lancamentos`, lá somava o valor estimado do lead."""
     from finance import comissao as com
-    ini, fim = _intervalo(periodo)
+    ini, fim = _intervalo(periodo, de, ate)
     linhas = []
     sem_config = 0
     sem_vendedor = 0
@@ -767,7 +767,8 @@ def _vendedores_da_conta(pool, conta_id: int) -> list[tuple[int, str]]:
     return [(r[0], r[1]) for r in rows]
 
 
-def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
+def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
+                      de=None, ate=None) -> dict:
     """TODOS os orçamentos, sem fatiar por aba — Status corta em grupo (fechados/
     em aberto) ou específico, Vendedor e busca por cliente cortam junto. As
     métricas do topo ignoram o filtro de Status de propósito (mostram a
@@ -786,7 +787,7 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     de uma empresa) fica vazio a maior parte do tempo. Mesma regra que
     `_espelhar_cliente` (web/painel_servicos.py) já usa: `empresa or
     cliente`."""
-    ini, fim = _intervalo(periodo)
+    ini, fim = _intervalo(periodo, de, ate)
     where = ["o.conta_id=%s"]
     params: list = [conta_id]
     if periodo != "todos":
@@ -929,13 +930,13 @@ CT_DATA_POR = [("assinatura", "Assinatura"), ("criacao", "Criação")]
 
 
 def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
-                     data_por: str = "assinatura") -> dict:
+                     data_por: str = "assinatura", de=None, ate=None) -> dict:
     """TODOS os contratos vivos (sem os substituídos por aditivo — mesma trava de
     `finance/contrato.por_orcamento`). Vendedor vem do orçamento de origem: o
     contrato quase nunca grava `criado_por` (ver finance/contrato.py). Cliente
     também vem do orçamento de origem, com a mesma regra `empresa or cliente`
     de `_dados_orcamentos` — mesmo formulário, mesma confusão de campo."""
-    ini, fim = _intervalo(periodo)
+    ini, fim = _intervalo(periodo, de, ate)
     data_por = data_por if data_por in dict(CT_DATA_POR) else "assinatura"
     where = ["c.conta_id=%s", "c.substitui_id is null"]
     params: list = [conta_id]
@@ -1534,7 +1535,8 @@ def _chips_da_conta(pool, conta_id: int) -> tuple[str, dict[int, str]]:
 ORIGENS_GARIMPO = ("google_places",)
 
 
-def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) -> dict:
+def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca,
+                      de=None, ate=None) -> dict:
     """TODOS os leads do período, quanto cada um esperou e quantos viraram proposta.
 
     A BASE É O LEAD, não a conversa — e isso é o coração da tela. Até 07/09/2026 a
@@ -1570,7 +1572,7 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
        conversa não esperou por ninguém, e somá-lo ali diluiria o único número que
        mede atendimento. Ele conta pra conversão, não pra espera.
     """
-    ini, fim = _intervalo(periodo)
+    ini, fim = _intervalo(periodo, de, ate)
     # O filtro de CHIP mora na conversa (CTE `conv`); os demais moram no lead, e
     # por isso vão no `where` de fora — é o lead que é a base agora.
     onde_conv, p_conv = ["cv.conta_id=%s", "cv.prospeccao_id is not null"], [conta_id]
@@ -1791,14 +1793,15 @@ _SQL_VISITAS = """
 """
 
 
-def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
+def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
+                 de=None, ate=None) -> dict:
     """O funil comercial: lead → visita agendada → aconteceu → respondida → sinal.
 
     Cada taxa vem com a cobertura porque, sem ela, o relatório mente por omissão:
     em 26/08, na conta 34, "2 de 3 apareceram" pareceria 67% de comparecimento —
     mas 8 visitas já tinham acontecido e 5 estavam sem resposta nenhuma.
     """
-    ini, fim = _intervalo(periodo)
+    ini, fim = _intervalo(periodo, de, ate)
     where, params = "", [conta_id]
     if periodo != "todos":
         # o dia de Teresina, como o Raio-X: `e.inicio::date` é o dia do banco
@@ -1946,17 +1949,25 @@ FUNIL_OPCOES = [
 
 
 TIPOS = {
-    "vendas": {"label": "Vendas", "montar": lambda pool, cid, per, **f: _dados_vendas(pool, cid, per)},
+    # `de`/`ate` vão pra TODA aba com período: sem eles o "Período específico"
+    # cairia calado no mês corrente (tests/test_relatorios_periodo.py confere aba
+    # por aba). As de títulos em aberto são fotografia, não têm período.
+    "vendas": {"label": "Vendas", "montar": lambda pool, cid, per, **f: _dados_vendas(
+        pool, cid, per, f.get("de"), f.get("ate"))},
     "contas_pagar": {"label": "Contas a pagar", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "pagar")},
     "contas_receber": {"label": "Contas a receber", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "receber")},
-    "pagas": {"label": "Contas pagas", "montar": lambda pool, cid, per, **f: _dados_caixa(pool, cid, "pagar", per)},
-    "comissao": {"label": "Comissão", "montar": lambda pool, cid, per, **f: _dados_comissao(pool, cid, per)},
-    "recebidas": {"label": "Contas recebidas", "montar": lambda pool, cid, per, **f: _dados_caixa(pool, cid, "receber", per)},
+    "pagas": {"label": "Contas pagas", "montar": lambda pool, cid, per, **f: _dados_caixa(
+        pool, cid, "pagar", per, f.get("de"), f.get("ate"))},
+    "comissao": {"label": "Comissão", "montar": lambda pool, cid, per, **f: _dados_comissao(
+        pool, cid, per, f.get("de"), f.get("ate"))},
+    "recebidas": {"label": "Contas recebidas", "montar": lambda pool, cid, per, **f: _dados_caixa(
+        pool, cid, "receber", per, f.get("de"), f.get("ate"))},
     "orcamentos": {"label": "Orçamentos", "montar": lambda pool, cid, per, **f: _dados_orcamentos(
-        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""),
+        de=f.get("de"), ate=f.get("ate"))},
     "contratos": {"label": "Contratos", "montar": lambda pool, cid, per, **f: _dados_contratos(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""),
-        data_por=f.get("data_por") or "assinatura")},
+        data_por=f.get("data_por") or "assinatura", de=f.get("de"), ate=f.get("ate"))},
     "agenda": {"label": "Agenda", "montar": lambda pool, cid, per, **f: _dados_agenda(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""),
         especie=f.get("especie", ""), de=f.get("de"), ate=f.get("ate"))},
@@ -1967,9 +1978,11 @@ TIPOS = {
     # favorito e na URL do PDF que já saiu daqui. Só o RÓTULO muda — a aba deixou
     # de ser só do chip quando o cadastro manual entrou.
     "leads_chip": {"label": "Leads e conversão", "montar": lambda pool, cid, per, **f: _dados_leads_chip(
-        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""),
+        de=f.get("de"), ate=f.get("ate"))},
     "funil": {"label": "Funil", "montar": lambda pool, cid, per, **f: _dados_funil(
-        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""),
+        de=f.get("de"), ate=f.get("ate"))},
 }
 
 

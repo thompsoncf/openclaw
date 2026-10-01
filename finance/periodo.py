@@ -16,16 +16,17 @@ from datetime import date, datetime, timedelta, timezone
 #: repetido aqui pra este módulo não importar a agenda.
 _BRT = timezone(timedelta(hours=-3))
 
-#: as pílulas do histórico. "Período específico" NÃO entra aqui, e não é
-#: esquecimento: as abas de Relatórios chamam `intervalo(periodo)` sem `de`/`ate`,
-#: então escolher datas ali cairia calado no mês corrente — filtro que mente é
-#: pior que filtro que não existe.
+#: as pílulas do histórico. "Período específico" entrou em 01/10/2026 (pedido do
+#: dono): até ali as abas chamavam `intervalo(periodo)` sem `de`/`ate` e a opção
+#: ficava de fora, porque cairia calada no mês corrente. Agora todas repassam as
+#: datas — e um teste por aba confere que elas chegam na consulta.
 PERIODOS = [
     ("mes", "Este mês"),
     ("mes_passado", "Mês passado"),
     ("90d", "Últimos 90 dias"),
     ("ano", "Este ano"),
     ("todos", "Todo o período"),
+    ("personalizado", "Período específico…"),
 ]
 
 #: as pílulas de quem olha pra frente (Agenda) — e de quem aceita datas na mão.
@@ -110,7 +111,8 @@ def intervalo(periodo: str, de=None, ate=None,
     if periodo == "30d":
         return hoje - timedelta(days=29), hoje
     if periodo == "90d":
-        return hoje - timedelta(days=90), hoje
+        # 89, como os outros: com 90 eram 91 dias
+        return hoje - timedelta(days=89), hoje
     if periodo == "prox30":
         return hoje, hoje + timedelta(days=30)
     if periodo == "prox90":

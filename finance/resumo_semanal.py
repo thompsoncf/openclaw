@@ -231,8 +231,8 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
     festa = _vis.vende_festa(pool, conta_id)     # a régua da visita segue o nicho
     # Em tratamento e Retorno (clínica) já fecharam: não são carteira aberta. SÓ na
     # clínica: em outro nicho, a etapa "Retorno" criada à mão tem a mesma chave e é
-    # venda em aberto. Lido aqui, e não na consulta, que roda igual em toda conta
-    fora_da_carteira = "('ganho','perdido'" + (",'tratamento','retorno'" if _e_clinica(pool, conta_id) else "") + ")"
+    # venda em aberto. Lido aqui e passado como parâmetro: há banco sem a tabela de nichos
+    clinica = _e_clinica(pool, conta_id)
     with pool.connection() as c:
         def _um(sql, args, chave):
             try:
@@ -306,11 +306,12 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
                                and c.assinado_em >= %s and c.assinado_em < %s),
                            (select count(*) from prospeccao p
                              where p.vendedor_id = m.id
-                               and p.status not in """ + fora_da_carteira + """)
+                               and p.status not in ('ganho','perdido')
+                               and not (%s and p.status in ('tratamento','retorno')))
                       from membros m
                      where m.conta_id=%s and coalesce(m.ativo,true) and m.papel='vendedor'
                      order by 2""",
-                    (ini, fim, ini, fim, ini, fim, ini, fim, conta_id)).fetchall()
+                    (ini, fim, ini, fim, ini, fim, ini, fim, clinica, conta_id)).fetchall()
             out["por_vendedor"] = [
                 {"id": r[0], "nome": r[1], "primeiro": (r[1] or "—").split(" ")[0],
                  "entraram": int(r[2]), "visitas": int(r[3]), "fechou": int(r[4]),

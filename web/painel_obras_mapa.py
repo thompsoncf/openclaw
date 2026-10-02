@@ -264,6 +264,7 @@ _CSS_MAPA = r"""<style>
 .pf-kpis span{background:var(--borda);border-radius:8px;padding:4px 10px;font-size:13px}
 .pf-alerta{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:9px;
   padding:.5rem .7rem;margin:.4rem 0;font-size:.84rem;color:#F0DCA6}
+.matlinha{background:var(--borda);border-radius:8px;padding:7px 11px;font-size:13px;margin-top:8px}
 </style>"""
 
 _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
@@ -324,6 +325,7 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
       <div class="pf-kpis" id="pf-kpis"></div>
       <div class="pf-alerta" id="pf-alerta" style="display:none"></div>
       <div class="etlist" id="pf-etapas"></div>
+      <div class="matlinha" id="pf-mat" style="display:none"></div>
     </div>
   </div>
 </div>
@@ -452,6 +454,12 @@ function perfil(l){
   document.getElementById('pf-etapas').innerHTML = vago ? '' : l.etapas.map(function(e){
     return '<div class="' + (e[1] ? 'fez' : 'nao') + '">' + (e[1] ? '✓' : '○') + ' ' + esc(e[0]) + '</div>';
   }).join('');
+  var mt = document.getElementById('pf-mat');
+  if (!vago && (l.mat || l.mat_alerta)){
+    mt.style.display = '';
+    mt.innerHTML = '🧱 <b>Material na obra:</b> ' + esc(l.mat || 'nada no saldo') +
+      (l.mat_alerta ? ' — <b>⚠️ ' + esc(l.mat_alerta) + '</b>' : '');
+  } else mt.style.display = 'none';
   if (window.innerWidth < 700) box.scrollIntoView({behavior:'smooth'});
 }
 montar();

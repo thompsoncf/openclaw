@@ -132,8 +132,15 @@ def painel_obras(request: Request):
                       key=og._ordem_lote)
         grupos_view.append({"g": g, "obras": dela, "r": og.resumo(dela)})
     soltas = [o for o in abertas if not (mapa.get(o["id"]) or {}).get("grupo_id")]
+    try:
+        from finance import obra_material as omat
+        deposito = omat.deposito(pool, conta[0])
+        rotulo_mat = omat.rotulo
+    except Exception:  # noqa: BLE001 — sem a 484
+        deposito, rotulo_mat = [], None
     return _render(
         "obras", request, titulo="Obras", secao_ativa="obras", brl=_brl,
+        deposito=deposito, rotulo_mat=rotulo_mat,
         grupos=grupos, grupos_view=grupos_view, soltas=soltas, rotulo=og.rotulo(pool, conta[0]),
         obras=abertas, arquivadas=[o for o in obras if o["status"] == "arquivada"],
         n_andamento=len(andamento),
@@ -214,6 +221,7 @@ def ficha(request: Request, obra_id: int):
                    cheio=_cheio,
                    sou_dono=request.session.get("papel", "dono") == "dono",
                    fotos=_fotos_da_ficha(conta[0], o),
+                   material=_material_da_ficha(conta[0], o),
                    empreita=_empreita_da_ficha(conta[0], o),
                    quadra=_quadra_da_ficha(conta[0], o),
                    sinapi=_sinapi_da_ficha(conta[0], _cheio),
@@ -485,6 +493,19 @@ def _empreita_da_ficha(conta_id: int, o: dict) -> dict:
             "pago": {e["id"]: e["pago_centavos"] for e in sit["etapas"]}}
 
 
+def _material_da_ficha(conta_id: int, o: dict) -> dict:
+    """O quadro de material da obra (migração 484): entrou / usado / na obra,
+    os furos e o alerta das irmãs. Sem a 484, a seção nem aparece."""
+    try:
+        from finance import obra_material as omat
+        linhas = omat.quadro_da_obra(get_pool(), conta_id, o["id"])
+        return {"linhas": linhas, "furos": omat.furos(linhas),
+                "alerta": omat.alerta_irmas(get_pool(), conta_id, o),
+                "rotulo": omat.rotulo, "qtd": omat._qtd}
+    except Exception:  # noqa: BLE001
+        return {"linhas": [], "furos": [], "alerta": "", "rotulo": None, "qtd": None}
+
+
 def _fotos_da_ficha(conta_id: int, o: dict) -> dict:
     """As fotos da ficha por etapa. Sem a 369, a seção abre vazia."""
     try:
@@ -584,6 +605,20 @@ def rotulo_grupo(request: Request, rotulo: str = Form("")):
         return redir
     og.salvar_rotulo(get_pool(), conta[0], rotulo)
     return RedirectResponse("/painel/obras", status_code=303)
+
+
+@router.post("/painel/obras/deposito-minimo")
+def deposito_minimo(request: Request, produto: list[int] = Form([]),
+                    minimo: list[str] = Form([])):
+    """Os mínimos do depósito, todos de uma vez (migração 484). `def` síncrono,
+    como as etapas: banco síncrono não entra em handler async."""
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    from finance import obra_material as omat
+    for pid, m in zip(produto, minimo):
+        omat.salvar_minimo(get_pool(), conta[0], pid, _num(m) or 0)
+    return RedirectResponse("/painel/obras#deposito", status_code=303)
 
 
 def _grupo_da_conta(conta_id: int, grupo_id: int) -> dict | None:
@@ -893,6 +928,23 @@ ou divida entre as obras em andamento, quando for de todas.</p>
 {% if sem.n > sem.itens|length %}<p class="ob-mut">Mostrando os {{ sem.itens|length }} mais recentes.</p>{% endif %}
 {% else %}<p class="ob-mut">Nenhum gasto de obra sem obra. ✅</p>{% endif %}
 
+{% if deposito %}{% set baixos = deposito|selectattr('abaixo')|list %}
+<details class="ob-box" id="deposito" style="margin-top:1.4rem"{% if baixos %} open{% endif %}>
+<summary>Depósito de material · {{ deposito|length }}{% if baixos %} · ⚠️ {{ baixos|length }} abaixo do mínimo{% endif %}</summary>
+{% for r in baixos %}<div class="ob-alertas">⚠️ {{ r.nome|e }} abaixo do mínimo: {{ rotulo_mat(r.saldo, r.unidade)|e }} (mínimo {{ rotulo_mat(r.minimo, r.unidade)|e }})</div>{% endfor %}
+<form method="post" action="/painel/obras/deposito-minimo">
+<div class="ob-rolo"><table class="ob-tab">
+<tr><th>Material</th><th style="text-align:right">Entrou</th><th style="text-align:right">Saiu</th><th style="text-align:right">No depósito</th><th style="text-align:right">Mínimo</th></tr>
+{% for r in deposito %}<tr><td{% if r.chave %} style="font-weight:600"{% endif %}>{{ r.nome|e }}</td>
+  <td class="v">{{ rotulo_mat(r.entrou, r.unidade)|e }}</td><td class="v">{{ '%g'|format(r.usado) }}</td>
+  <td class="v"><b>{{ rotulo_mat(r.saldo, r.unidade)|e }}</b>{% if r.abaixo %} ⚠️{% endif %}</td>
+  <td class="v"><input type="hidden" name="produto" value="{{ r.produto_id }}">
+    <input name="minimo" value="{{ '%g'|format(r.minimo) if r.minimo else '' }}" inputmode="decimal" style="max-width:5.5rem;text-align:right" placeholder="—"></td></tr>{% endfor %}
+</table></div>
+<div class="ob-acoes" style="margin-top:.5rem"><button class="ob-bt">Salvar mínimos</button>
+<span class="ob-mut">A nota sem obra entra aqui; “levei 10 sacos pra casa 2” transfere. Mínimo avisa quando o depósito baixar.</span></div>
+</form></details>{% endif %}
+
 {% if arquivadas %}<details class="ob-box" style="margin-top:1.4rem"><summary>Arquivadas · {{ arquivadas|length }}</summary>
 <div class="ob-lista" style="margin-top:.6rem">{% for o in arquivadas %}<a class="ob-card" href="/painel/obras/{{ o.id }}">
   <div><span class="nm">{{ o.nome|e }}</span><div class="ob-mut">{{ o.rotulo_tipo }}</div></div>
@@ -1100,6 +1152,18 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
       <input type="hidden" name="etapa_id" value="{{ e.id }}"><input type="hidden" name="concluida" value="{{ '0' if e.concluida_em else '1' }}">
       <button class="ob-bt">{{ 'Desmarcar' if e.concluida_em else 'Concluída' }}</button></form>
   </div>{% endfor %}</div>
+
+{% if material.linhas %}<h3 class="ob-sec" id="material">Material na obra</h3>
+{% if material.alerta %}<div class="ob-alertas">⚠️ {{ material.alerta|e }}</div>{% endif %}
+{% for f in material.furos %}<div class="ob-alertas">⚠️ {{ f|e }}</div>{% endfor %}
+<div class="ob-rolo"><table class="ob-tab">
+<tr><th>Material</th><th style="text-align:right">Entrou</th><th style="text-align:right">Usado</th><th style="text-align:right">Na obra</th></tr>
+{% for r in material.linhas %}<tr><td{% if r.chave %} style="font-weight:600"{% endif %}>{{ r.nome|e }}</td>
+  <td class="v">{{ material.rotulo(r.entrou, r.unidade)|e }}</td><td class="v">{{ material.qtd(r.usado) }}</td>
+  <td class="v"><b>{{ material.rotulo(r.saldo, r.unidade)|e }}</b></td></tr>{% endfor %}
+</table></div>
+<p class="ob-mut">A foto da nota já entra aqui sozinha, item a item. Pelo WhatsApp: “usei 15 sacos na {{ o.nome|lower|e }}”, “levei 10 do depósito”. O dinheiro continua em custos — isto é quantidade.</p>
+{% endif %}
 
 <h3 class="ob-sec" id="fotos">Fotos da obra{% if fotos.n %} · {{ fotos.n }}{% endif %}</h3>
 {% if fotos.grupos %}{% for g in fotos.grupos %}<div class="ob-box"><b>{{ g.nome|e }}</b>

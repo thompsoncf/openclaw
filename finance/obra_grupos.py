@@ -411,6 +411,9 @@ def por_na_quadra(pool, conta_id: int, lancamento_id: int, grupo_id: int) -> dic
         c.execute("""update lancamentos set centro_custo_id=%s, natureza=coalesce(natureza, 'empresa')
                       where id=%s and conta_id=%s""", (centro, lancamento_id, conta_id))
         c.commit()
+    # custo comum não é de casa nenhuma: o material da nota volta pro depósito
+    from . import obra_material as _omat
+    _omat.realocar_do_lancamento(pool, conta_id, lancamento_id)
     return {"quadra": nome, "valor_centavos": int(lanc[2])}
 
 

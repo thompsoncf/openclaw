@@ -181,7 +181,9 @@ def andamento(obras: list[dict]) -> int:
 
 
 def comecou(o: dict, hoje: date | None = None) -> bool:
-    hoje = hoje or date.today()
+    if hoje is None:
+        from .relogio import hoje as _hoje_br   # o dia de Brasília, não o do servidor
+        hoje = _hoje_br()
     return bool((o.get("inicio_em") and o["inicio_em"] <= hoje)
                 or any(e["concluida_em"] for e in o.get("etapas", [])))
 

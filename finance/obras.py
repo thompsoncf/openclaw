@@ -589,10 +589,16 @@ def bloco_persona(pool, conta_id: int) -> str:
             for o in obras)
         linhas = [
             f"OBRAS ABERTAS desta empresa (cada uma é um centro de custo): {lista}.",
-            "- Despesa de obra da EMPRESA: pergunte de qual dessas obras é. Com a "
-            "resposta, passe centro_custo com o NOME EXATO da obra no lancar_despesa. "
-            "Se for de mais de uma (ou de todas), registre sem centro_custo e chame "
-            "dividir_entre_obras com o id do lançamento.",
+            "- Despesa de obra da EMPRESA sem a obra dita: registre e chame "
+            "oferecer_escolha(tipo='obra') — os botões com as obras vão sozinhos; você "
+            "escreve só \"É de qual obra?\". Quando ele tocar (ou disser) a obra: "
+            "por_na_obra com o id do lançamento. \"Dividir entre todas\" -> "
+            "dividir_entre_obras com todas=true; \"Quadra X (dividir)\" -> "
+            "dividir_entre_obras com quadra. Se ele já disse a obra, passe centro_custo "
+            "com o NOME EXATO dela no lancar_despesa e não pergunte.",
+            "- \"Terminei a casa 2\" / \"mais uma etapa da casa 2\" SEM dizer qual etapa: "
+            "oferecer_escolha(tipo='etapa', obra='casa 2') e pergunte só \"Qual etapa ficou "
+            "pronta?\". Com a resposta, marcar_etapa.",
             "- \"quanto já gastei na casa 2?\", \"como está a obra?\" -> consultar_obra.",
             "- \"terminou o telhado da casa 3\" -> marcar_etapa (uma chamada por etapa).",
             "- PAGAMENTO DO EMPREITEIRO POR ETAPA (\"paguei 10 mil pro empreiteiro, primeira "

@@ -640,7 +640,10 @@ def _bloco_das_quadras(pool, conta_id: int) -> list[str]:
             "começaram e diz quem ficou de fora); \"desfaz\" -> desfazer_etapa_quadra.",
             f"- Nota de material \"pra {rot.lower()} 5\": registre sem centro_custo e chame "
             "dividir_entre_obras com quadra (divide pelo m²). Pagamento de empreiteiro da "
-            f"{rot.lower()} inteira: pagar_etapa com quadra no lugar da obra."]
+            f"{rot.lower()} inteira: pagar_etapa com quadra no lugar da obra.",
+            "- CUSTO COMUM (terraplanagem, rede de água e esgoto, poste, muro — de todas as casas "
+            f"e de nenhuma): registre sem centro_custo e chame por_na_quadra. Ele entra no custo "
+            "de cada casa pelo m²."]
 
 
 def _bloco_das_reformas(pool, conta_id: int, obras: list[dict]) -> list[str]:

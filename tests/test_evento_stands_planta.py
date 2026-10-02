@@ -153,6 +153,7 @@ def test_a_planta_roda_de_verdade_no_node(tmp_path):
   Estilo.prototype.setProperty = function(k, v){ this.vars[k] = v; };
   function El(tag){ this.tag = tag; this.style = new Estilo(); this.children = []; this.className = ''; this.textContent = ''; }
   El.prototype.appendChild = function(c){ this.children.push(c); };
+  El.prototype.setAttribute = function(k, v){ (this.attrs = this.attrs || {})[k] = v; };
   global.document = {
     createElement: function(tag){ return new El(tag); },
     createTextNode: function(t){ return {texto: t}; }
@@ -168,6 +169,10 @@ def test_a_planta_roda_de_verdade_no_node(tmp_path):
       semPosicao: botoes.filter(function(b){ return !(b.style.left && b.style.top && b.style.width && b.style.height); }).length,
       menorLetra: Math.min.apply(null, botoes.map(function(b){ return parseFloat(b.style.fontSize); })),
       duasLinhas: botoes.filter(function(b){ return b.children.length === 3; }).map(function(b){ return b.code; }),
+      semRotulo: botoes.filter(function(b){ return b.children.length === 3 && (b.attrs || {})['aria-label'] !== b.code; }).length,
+      letrasPorFila: (function(){ var f = {}; botoes.forEach(function(b){
+        var k = b.style.top + '|' + b.style.height + '|' + b.code.length; (f[k] = f[k] || {})[b.style.fontSize] = 1; });
+        return Math.max.apply(null, Object.keys(f).map(function(k){ return Object.keys(f[k]).length; })); })(),
       cenario: grid.children.length - botoes.length,
       icones: grid.children.filter(function(c){ return /^<svg /.test(c.innerHTML || ''); }).length
     };
@@ -193,6 +198,9 @@ def test_a_planta_roda_de_verdade_no_node(tmp_path):
         # na largura do computador (794px) nenhum código cai abaixo de 8px
         assert d["menorLetra"] >= 8, (pav, d["menorLetra"])
         assert d["cenario"] > 15, pav
+        # vizinhos da mesma fila têm a MESMA letra; quem quebra em duas linhas leva o nome inteiro
+        assert d["letrasPorFila"] == 1, pav
+        assert d["semRotulo"] == 0, pav
     # os estreitos e altos do Superior escrevem em duas linhas, como a planta do PDF
     assert set(out["pav"]["superior"]["duasLinhas"]) == (
         {f"S{n}" for n in range(127, 130)} | {f"S{n}" for n in range(143, 155)})
@@ -211,5 +219,7 @@ def test_a_foto_da_fachada_e_so_da_outlet_chic():
         r = pub.foto_stand(nome)
         assert r.status_code == 200 and r.body[:3] == b"\xff\xd8\xff", nome      # JPEG de verdade
     assert pub.foto_stand("../segredo").status_code == 404
+    # em tablet e celular deitado a foto não passa de 55% da altura da tela
+    assert "calc(55vh*16/9)" in pub._TPL
     # o topo só ganha a foto quando a página tem fachada
     assert "{% if fachada %}<figure class=\"hero-foto\">" in pub._TPL

@@ -466,13 +466,21 @@ PLANTA_DEFS_JS = r"""
       if (d.g) el.style.transform = 'rotate(' + d.g + 'deg)';
       grid.appendChild(el);
     });
+    // a fila (mesmo topo, mesma altura, mesmo nº de letras) usa a largura do stand mais
+    // estreito dela: a letra e a quebra em duas linhas saem iguais pros vizinhos
+    var fila = {};
+    function chave(code){ var r = P.stands[code]; return r[1] + '|' + r[3] + '|' + code.length; }
+    Object.keys(P.stands).forEach(function(code){
+      var k2 = chave(code), w = P.stands[code][2];
+      if (fila[k2] == null || w < fila[k2]) fila[k2] = w;
+    });
     Object.keys(P.stands).forEach(function(code){
       var el = o.tile(code);
       if (!el) return;
       var r = P.stands[code];
       poe(el, r, vao);
       // a letra cabe no stand: o código (3 ou 4 letras) nunca encosta na borda
-      var lw = px(r[2]) - vao, lh = px(r[3]) - vao;
+      var lw = px(fila[chave(code)]) - vao, lh = px(r[3]) - vao;
       var f = Math.min(10, (lw - miolo) / (0.62 * code.length), lh * 0.45);
       if (f < 8 && code.length > 3 && lh > lw * 1.3){
         // estreito e alto (S127–S129, S143–S154): a letra em cima, o número embaixo —
@@ -483,6 +491,7 @@ PLANTA_DEFS_JS = r"""
         el.appendChild(document.createTextNode(code.slice(1)));
         el.style.flexDirection = 'column';
         el.style.lineHeight = '1.05';
+        el.setAttribute('aria-label', code);      // leitor de tela lê "S145", não "S 145"
         f = Math.min(10, (lw - miolo) / (0.62 * (code.length - 1)), (lh - miolo) / 2.1);
       }
       el.style.fontSize = Math.max(6.5, f).toFixed(1) + 'px';
@@ -565,12 +574,14 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   .hero-inner{max-width:1180px;margin:0 auto;}
   /* com a foto da fachada: texto à esquerda, foto à direita; no celular a foto sobe
      pro topo, de ponta a ponta */
-  .hero-inner.com-foto{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,500px);gap:32px;align-items:center;}
+  .hero-inner.com-foto{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,clamp(320px,42vw,500px));gap:32px;align-items:center;}
   .hero-foto{margin:0;border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow);background:#0e0f0a;aspect-ratio:16/9;}
   .hero-foto img{display:block;width:100%;height:100%;object-fit:cover;}
   @media (max-width:860px){
     .hero-inner.com-foto{grid-template-columns:minmax(0,1fr);gap:18px;}
-    .hero-foto{order:-1;}
+    /* tablet em pé e celular deitado: de ponta a ponta a foto ficava maior que a tela
+       e empurrava título e mapa pra fora — limita pela altura da janela */
+    .hero-foto{order:-1;width:100%;max-width:min(100%,560px,calc(55vh*16/9));justify-self:center;}
   }
   .brand{font-size:clamp(34px,7vw,58px);line-height:0.95;margin:0;}
   .brand span{color:var(--mint);}
@@ -797,7 +808,7 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
     {% if vendedor_link %}<div class="info-strip">Atendimento de <b>{{ vendedor_nome or 'seu vendedor' }}</b> — escolha o stand que quiser; a reserva feita aqui fica registrada neste atendimento.</div>{% endif %}
     {% if cfg.whatsapp_numero %}<div class="info-strip">Cotas de patrocínio (Ouro, Prata e Bronze) são negociadas direto com a equipe — chama no WhatsApp.</div>{% endif %}
     </div>
-    {% if fachada %}<figure class="hero-foto"><img src="/estatico/stands/{{ fachada.arquivo }}.jpg" srcset="/estatico/stands/{{ fachada.arquivo }}-800.jpg 800w, /estatico/stands/{{ fachada.arquivo }}.jpg 1600w" sizes="(max-width:860px) 100vw, 500px" width="1600" height="900" alt="{{ fachada.alt }}" decoding="async"></figure>{% endif %}
+    {% if fachada %}<figure class="hero-foto"><img src="/estatico/stands/{{ fachada.arquivo }}.jpg" srcset="/estatico/stands/{{ fachada.arquivo }}-800.jpg 800w, /estatico/stands/{{ fachada.arquivo }}.jpg 1600w" sizes="(max-width:860px) calc(100vw - 34px), 500px" width="1600" height="900" alt="{{ fachada.alt }}" decoding="async"></figure>{% endif %}
   </div>
 </div>
 

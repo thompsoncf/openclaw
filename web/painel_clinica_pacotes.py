@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
 from finance import clinica_agenda as ca
+from finance import clinica_config as cc
 from finance import clinica_pacotes as ckp
 from web.painel_clinica_agenda import _acesso
 from web.portal import _env, _render
@@ -50,12 +51,21 @@ def lista(request: Request):
         marcar = {k["id"] for k in ckp.precisam_marcar(c, conta[0], agora)}
         atrasados = {k["id"] for k in pacotes if k["estado"] == "ativo" and ckp.atrasado(c, conta[0], k, hoje)}
         retornos = ckp.retornos(c, conta[0], agora, dias=14)
+        # o tipo de retorno de cada profissional: o horário marcado daqui fecha o retorno
+        # (só um horário de categoria retorno fecha, clinica_agenda.SQL_HORARIO_DE_RETORNO)
+        tipo_retorno = {}
+        for t in sorted(cc.listar_tipos(c, conta[0]), key=lambda t: t.get("ordem") or 0):
+            if t.get("categoria") != "retorno":
+                continue
+            for pr in cc.listar_profissionais(c, conta[0]):
+                if t["id"] in pr["tipos"]:
+                    tipo_retorno.setdefault(pr["id"], t["id"])
         cfg = ckp.config(c, conta[0])
     ativos = [k for k in pacotes if k["estado"] == "ativo"]
     return _render("clinica_pacotes.html", request, titulo="Pacotes e retornos", **_ctx(request),
                    ativos=ativos, marcar=[k for k in ativos if k["id"] in marcar], marcar_ids=marcar,
                    atrasados=atrasados, outros=[k for k in pacotes if k["estado"] != "ativo"][:30],
-                   retornos=retornos, cfg=cfg, gerencia=gerencia, hoje=hoje,
+                   retornos=retornos, tipo_retorno=tipo_retorno, cfg=cfg, gerencia=gerencia, hoje=hoje,
                    vendidas=sum(k["total"] for k in pacotes if k["estado"] != "encerrado"),
                    usadas=sum(k["usadas"] for k in pacotes if k["estado"] != "encerrado"),
                    devidas=sum(k["saldo"] for k in ativos))
@@ -162,7 +172,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <h3 class="pk-sec">Retornos (próximos 14 dias e vencidos)</h3>
   {% for r in retornos %}<div class="pk-l"><div><b>{{ r.paciente }}</b>{% if r.prof %} · {{ r.prof }}{% endif %}
       {% if r.vencido %}<span class="pk-chip al">venceu {{ r.vence_em.strftime('%d/%m') }}</span>{% else %}<span class="pk-chip">até {{ r.vence_em.strftime('%d/%m') }}</span>{% endif %}</div>
-    <div class="pk-acoes"><a href="/painel/clinica/agenda/novo?{% if r.profissional_id %}prof={{ r.profissional_id }}&{% endif %}lead={{ r.lead or '' }}">Marcar</a>
+    <div class="pk-acoes"><a href="/painel/clinica/agenda/novo?{% if r.profissional_id %}prof={{ r.profissional_id }}&{% endif %}{% if tipo_retorno.get(r.profissional_id) %}tipo={{ tipo_retorno[r.profissional_id] }}&{% endif %}lead={{ r.lead or '' }}">Marcar</a>
       <form method="post" action="/painel/clinica/pacotes/retorno/{{ r.id }}/dispensar"><button class="sec">Tirar da fila</button></form></div></div>
   {% else %}<div class="pk-m">Nenhum retorno chegando.</div>{% endfor %}
 

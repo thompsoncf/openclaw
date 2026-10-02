@@ -19,7 +19,12 @@ _TIMEOUT = 8
 def consultar_cnpj(cnpj: str) -> dict | None:
     """Consulta o CNPJ na BrasilAPI e devolve {nome, endereco, bairro, cep, cidade, uf, email, telefone, ...}.
     None se nao achar ou falhar. nome usa fantasia (mais reconhecivel) com
-    fallback pra razao social."""
+    fallback pra razao social.
+
+    Pra quem precisa do cadastro como a Receita tem (contrato): `razao_social` e
+    `fantasia` SEPARADOS, `endereco_completo` (tipo + logradouro, numero,
+    complemento, bairro) e `representante` (ver `_representante`). As chaves
+    antigas nao mudam de sentido — quem ja usava `nome`/`endereco` segue igual."""
     cnpj = "".join(c for c in (cnpj or "") if c.isdigit())
     if len(cnpj) != 14:
         return None
@@ -59,9 +64,76 @@ def consultar_cnpj(cnpj: str) -> dict | None:
     email = (dados.get("email") or "").strip().lower() or None
     ddd = (dados.get("ddd_telefone_1") or "").strip()
     telefone = _formata_telefone(ddd)
+    # o cadastro como a Receita tem, pro contrato. Tudo por str(): este trecho novo
+    # nao pode derrubar a consulta das telas que ja existiam se vier um tipo estranho.
+    razao = str(dados.get("razao_social") or "").strip() or None
+    fantasia = str(dados.get("nome_fantasia") or "").strip() or None
+    _tipo = str(dados.get("descricao_tipo_de_logradouro") or "").strip()
+    # a BrasilAPI as vezes ja traz o tipo dentro do logradouro ("RUA X"): nao repete
+    _rua = _log if _tipo and _log.upper().startswith(_tipo.upper() + " ")         else " ".join(x for x in (_tipo, _log) if x)
+    _compl = " ".join(str(dados.get("complemento") or "").split())
+    endereco_completo = ", ".join(x for x in (_rua, _num, _compl, bairro) if x) if _log else None
+    try:
+        representante = _representante(dados)
+    except Exception:  # noqa: BLE001 — sugestao; sem ela a consulta segue valendo
+        representante = None
     return {"nome": nome, "endereco": endereco, "bairro": bairro, "cep": cep,
             "cidade": cidade, "uf": uf, "cnae": cnae_desc, "ramo": ramo,
-            "nicho": nicho, "email": email, "telefone": telefone}
+            "nicho": nicho, "email": email, "telefone": telefone,
+            "razao_social": razao, "fantasia": fantasia,
+            "endereco_completo": endereco_completo,
+            "representante": representante}
+
+
+# quem assina pela empresa, em ordem de PRIORIDADE (o quadro da Receita vem em ordem
+# alfabetica: numa S/A o primeiro "Diretor" da lista nao e' quem preside)
+_QUEM_ASSINA = ("administrador", "titular", "presidente", "diretor", "empresario")
+# quem esta' no quadro mas nao assina em nome proprio
+_NAO_ASSINA = ("menor", "incapaz", "judicial", "pessoa juridica")
+_SOCIO_PJ = 1          # identificador_de_socio: 1 = pessoa juridica, 2 = pessoa fisica
+_EMPRESARIO_INDIVIDUAL = 2135
+
+
+def _representante(dados: dict) -> str | None:
+    """O representante legal SUGERIDO pelo quadro de socios da Receita: o socio
+    PESSOA FISICA mais qualificado pra assinar (administrador, titular, presidente,
+    diretor — nesta prioridade); se so ha um socio pessoa fisica, ele. Socio pessoa
+    juridica, menor/incapaz e administrador judicial nao entram. Empresario
+    individual (MEI) nao tem quadro de socios — a razao social E' o nome da pessoa,
+    com o numero do CNPJ na frente (formato novo) ou o CPF no fim (formato antigo):
+    os numeros saem, o CPF nunca vai pro nome de quem assina. E' sugestao: quem
+    preenche confere."""
+    import unicodedata
+
+    def _plano(txt):
+        t = unicodedata.normalize("NFKD", str(txt or "").lower())
+        return "".join(c for c in t if not unicodedata.combining(c))
+
+    qsa = dados.get("qsa")
+    quadro = []                                   # (nome, qualificacao) de quem pode assinar
+    for s in (qsa if isinstance(qsa, list) else []):
+        if not isinstance(s, dict) or not str(s.get("nome_socio") or "").strip():
+            continue
+        q = _plano(s.get("qualificacao_socio"))
+        if s.get("identificador_de_socio") == _SOCIO_PJ or any(k in q for k in _NAO_ASSINA):
+            continue
+        quadro.append((str(s.get("nome_socio")).strip(), q))
+    for k in _QUEM_ASSINA:
+        for nome, q in quadro:
+            if k in q:
+                return nome
+    if len(quadro) == 1:
+        return quadro[0][0]
+    try:
+        individual = int(dados.get("codigo_natureza_juridica") or 0) == _EMPRESARIO_INDIVIDUAL
+    except (TypeError, ValueError):
+        individual = False
+    if individual:
+        import re
+        nome = str(dados.get("razao_social") or "").strip().lstrip("0123456789.-/ ")
+        nome = re.sub(r"[\s\d.\-/*]+$", "", nome)       # CPF no fim (MEI de formato antigo)
+        return nome or None
+    return None
 
 
 def _formata_telefone(bruto: str) -> str | None:

@@ -251,7 +251,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 
   {% if pac_marcar or pac_retornos or pac_resultados %}
   <div class="hj-sec"><h3>Pacotes e retornos</h3><span class="qt">{{ pac_marcar|length + pac_retornos|length + pac_resultados|length }}</span>
-    <span class="ex">Sessão liberada sem marcar e retorno chegando. O Zaq lembra o paciente; aqui é pra quem quiser ligar antes. <a href="/painel/clinica/pacotes">Abrir pacotes</a></span></div>
+    <span class="ex">Sessão liberada sem marcar, retorno chegando e resultado de exame. O Zaq lembra o paciente da sessão e do retorno; o resultado é com a recepção. <a href="/painel/clinica/pacotes">Abrir pacotes</a></span></div>
   <div class="hj-lista">
     {% for k in pac_marcar %}<div class="hj-card quente"><div class="cab"><a class="quem" href="/painel/clinica/pacotes/{{ k.id }}">{{ k.paciente }}</a><span class="chip">{{ k.proxima_n }}ª sessão liberada</span></div></div>{% endfor %}
     {% for r in pac_retornos %}<div class="hj-card {% if r.vencido %}fora{% else %}quente{% endif %}"><div class="cab"><span class="quem">{{ r.paciente }}</span><span class="chip {% if r.vencido %}fora{% endif %}">retorno até {{ r.vence_em.strftime('%d/%m') }}</span></div></div>{% endfor %}

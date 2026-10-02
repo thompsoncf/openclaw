@@ -646,7 +646,9 @@ def card_pela_agenda(c, conta_id: int, evento_id: int, nova: str, *, tratamento:
             if tem_retorno and (pediu or resultado or _pendente(c, conta_id, lead)):
                 destino = "retorno"
                 nota = "Consulta finalizada, sem proposta de tratamento: " + (
-                    "resultado a entregar." if resultado and not pediu else "retorno a fazer.")
+                    "retorno e resultado a fazer." if resultado and pediu else
+                    "resultado a entregar." if resultado else
+                    "retorno a fazer." if pediu else "há retorno ou resultado em aberto.")
             elif "ganho" in chaves:
                 destino = "ganho"
                 nota = "Consulta finalizada, sem proposta de tratamento."
@@ -753,7 +755,7 @@ def card_do_retorno(c, conta_id: int, lead_id: int | None, membro_id: int | None
     if atual == "ganho":
         if not _pendente(c, conta_id, lead_id):
             return None
-        destino, nota = "retorno", "Retorno ou resultado de exame a fazer."
+        destino, nota = "retorno", "Há retorno ou resultado em aberto."
     else:
         try:
             with c.transaction():
@@ -777,7 +779,7 @@ def card_do_retorno(c, conta_id: int, lead_id: int | None, membro_id: int | None
             r_teve, r_aberto = 0, 0
         if not (teve or r_teve) or aberto or r_aberto:
             return None
-        destino, nota = "ganho", "Nada mais a fazer: retorno feito ou fora da fila, resultado entregue."
+        destino, nota = "ganho", "Nada mais em aberto (retorno ou resultado)."
     c.execute("update prospeccao set status=%s, atualizado_em=now() where id=%s and conta_id=%s",
               (destino, lead_id, conta_id))
     fr.registrar_movimento(c, conta_id, lead_id, atual, destino, "retorno", membro_id)

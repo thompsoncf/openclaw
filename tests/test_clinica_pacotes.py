@@ -551,6 +551,39 @@ def test_resultado_que_nasce_com_o_card_concluido_traz_de_volta_pelo_relogio(poo
         assert _card(c, lead) == "ganho"
 
 
+def test_dois_resultados_o_card_espera_os_dois(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", resultado=True)
+        _finalizar(c, _sessao(c, lead, SEG, h=10, tipo="Testes alérgicos"), resultado=True)
+        r1, r2 = ckp.resultados(c, CLINICA, _br(SEG))
+        assert ckp.resultado(c, CLINICA, r1["id"], "entregue")
+        c.commit()
+        assert _card(c, lead) == "retorno"
+        assert ckp.resultado(c, CLINICA, r2["id"], "entregue")
+        c.commit()
+        assert _card(c, lead) == "ganho"
+
+
+def test_resultado_sem_data_passa_a_atrasado_depois_de_15_dias(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", resultado=True)
+        c.execute("update clinica_resultados set criado_em = %s", (_br(date(2026, 9, 28)),))
+        assert not ckp.resultados(c, CLINICA, _br(date(2026, 10, 13)))[0]["atrasado"]
+        assert ckp.resultados(c, CLINICA, _br(date(2026, 10, 14)))[0]["atrasado"]
+
+
+def test_funil_de_antes_o_resultado_vai_pra_fila_e_o_card_fecha(pool, zap):
+    with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=39 and chave in ('consulta','tratamento','retorno')")
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", resultado=True)
+        assert _card(c, lead) == "ganho"
+        assert len(ckp.resultados(c, CLINICA, _br(SEG))) == 1
+        assert ckp.varrer_retorno(c) == 0
+
+
 def test_tela_da_fila_de_resultados(cli, pool, zap):
     with pool.connection() as c:
         lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
@@ -560,7 +593,10 @@ def test_tela_da_fila_de_resultados(cli, pool, zap):
     assert "Resultados a entregar" in html and "esperando o laboratório" in html
     r = cli.post(f"/painel/clinica/pacotes/resultado/{rid}/chegou")
     assert "aviso=res_chegou" in r.headers["location"]
-    assert "chegou: marcar a entrega" in cli.get("/painel/clinica/pacotes").text
+    html = cli.get("/painel/clinica/pacotes").text
+    with pool.connection() as c:
+        retorno = _tipo(c, "Retorno")["id"]
+    assert "chegou: marcar a entrega" in html and f"tipo={retorno}&" in html
     assert "aviso=res_entregue" in cli.post(f"/painel/clinica/pacotes/resultado/{rid}/entregue").headers["location"]
     assert "já não está em aberto" in cli.get(
         cli.post(f"/painel/clinica/pacotes/resultado/{rid}/entregue").headers["location"]).text

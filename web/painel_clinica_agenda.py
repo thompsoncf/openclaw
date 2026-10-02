@@ -391,6 +391,7 @@ def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
                    erro="Valor inválido. Use o formato 1.500,00.")
     previsto = None
     if resultado_em.strip():
+        resultado = "1"                 # a data do laboratório é o pedido do resultado
         try:
             previsto = date.fromisoformat(resultado_em.strip())
         except ValueError:
@@ -671,12 +672,12 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       {% else %}
       <div class="inteira"><span class="mut">O médico propôs tratamento? (o card do paciente anda no funil com a resposta)</span>
         <div class="ag-ops" style="margin-top:.3rem">
-          <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'vai para Retorno, se o médico pediu, ou Concluído' if 'retorno' in funil else 'Fechado' }}</label>
+          <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'vai para Retorno, se o médico pediu ou há resultado a entregar, ou Concluído' if 'retorno' in funil else 'Fechado' }}</label>
           <label><input type="radio" name="tratamento" value="sim" required> Sim — {{ 'fica em Consulta até o plano ser enviado' if 'consulta' in funil else 'Plano de tratamento' }}</label></div></div>
       <label>Valor proposto (se souber)<input name="valor" inputmode="decimal" placeholder="1.500,00"></label>
       {% endif %}
       <label>O médico pediu retorno em quantos dias? (vazio: não pediu)<input name="retorno" inputmode="numeric" value="{{ '' if pacote_vai else volta_padrao }}"></label>
-      <label class="inteira" style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" name="resultado" value="1" style="width:auto"> Resultado a entregar (biópsia, coleta, exame): o paciente só conclui depois da entrega</label>
+      <label class="inteira" style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" name="resultado" value="1" style="width:auto"> Resultado a entregar (biópsia, coleta, exame){{ ': o paciente só conclui depois da entrega' if 'retorno' in funil else '' }}</label>
       <label>Resultado previsto para (se o laboratório disse)<input type="date" name="resultado_em"></label>
       <div class="ag-acoes inteira"><button>Finalizar</button></div>
     </form>

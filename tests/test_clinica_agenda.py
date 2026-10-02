@@ -859,8 +859,8 @@ def test_tela_finalizar_com_resultado_a_entregar(cli, pool):
     r = cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
                  data={"nova": "finalizado", "tratamento": "nao", "resultado": "1", "resultado_em": "31/02"})
     assert "inválida" in cli.get(r.headers["location"]).text
-    cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
-             data={"nova": "finalizado", "tratamento": "nao", "resultado": "1",
+    cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",       # a data sem a caixa vale como pedido
+             data={"nova": "finalizado", "tratamento": "nao",
                    "resultado_em": (seg + timedelta(days=10)).isoformat()})
     with pool.connection() as c:
         assert c.execute("select previsto_em, estado from clinica_resultados where evento_id=%s", (eid,)
@@ -878,7 +878,7 @@ def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
         c.commit()
     html = cli.get(f"/painel/clinica/agenda/evento/{eid}").text
     assert "O médico propôs tratamento?" in html and "Resultado a entregar" in html
-    assert "vai para Retorno, se o médico pediu, ou Concluído" in html and "fica em Consulta" in html
+    assert "vai para Retorno, se o médico pediu ou há resultado a entregar, ou Concluído" in html and "fica em Consulta" in html
     # a conta que ainda não aplicou o modelo lê pra onde o card vai NELA
     with pool.connection() as c:
         guardadas = c.execute("select chave, fase from funil_etapas where conta_id=%s", (CLINICA,)).fetchall()

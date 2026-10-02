@@ -437,6 +437,10 @@ def dispensar_retorno(c, conta_id: int, retorno_id: int) -> bool:
 
 # ------------------------------------------------------------------ resultados a entregar
 
+#: o resultado sem data prevista conta como atrasado depois disto: sem data ele nunca
+#: avisaria, e o card esperaria em Retorno sem ninguém lembrar dele
+RESULTADO_SEM_DATA_DIAS = 15
+
 def pedir_resultado(c, conta_id: int, ev: dict | None, previsto_em: date | None) -> int | None:
     """O resultado a entregar do atendimento (biópsia, coleta, exame). Um por
     atendimento: o segundo pedido não duplica."""
@@ -458,7 +462,7 @@ def resultados(c, conta_id: int, agora: datetime) -> list[dict]:
         with c.transaction():
             rows = c.execute(
                 """select r.id, r.prospeccao_id, r.paciente_nome, r.paciente_fone, r.previsto_em, r.estado,
-                          coalesce(p.nome, ''), r.criado_em
+                          coalesce(p.nome, ''), r.criado_em, r.profissional_id
                      from clinica_resultados r
                      left join clinica_profissionais p on p.id = r.profissional_id and p.conta_id = r.conta_id
                     where r.conta_id=%s and r.estado in ('aguardando','chegou')
@@ -466,8 +470,10 @@ def resultados(c, conta_id: int, agora: datetime) -> list[dict]:
     except Exception:  # noqa: BLE001 — sem a 477
         return []
     return [{"id": r[0], "lead": r[1], "paciente": r[2], "fone": r[3], "previsto_em": r[4], "estado": r[5],
-             "prof": r[6], "criado_em": r[7], "chegou": r[5] == "chegou",
-             "atrasado": r[5] == "aguardando" and r[4] is not None and r[4] < hoje} for r in rows]
+             "prof": r[6], "criado_em": r[7], "profissional_id": r[8], "chegou": r[5] == "chegou",
+             "atrasado": r[5] == "aguardando" and (
+                 r[4] < hoje if r[4] is not None
+                 else ca.local(r[7]).date() + timedelta(days=RESULTADO_SEM_DATA_DIAS) < hoje)} for r in rows]
 
 
 def resultado(c, conta_id: int, resultado_id: int, acao: str, membro_id: int | None = None) -> bool:

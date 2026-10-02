@@ -876,7 +876,11 @@ def _confirmar_pagamento(c, conta_id: int, plano_id: int, membro_id: int | None)
                                    (conta_id, plano_id)).fetchone() is not None
     except Exception:  # noqa: BLE001 — sem a 381
         tem_pacote = False
-    destino = "tratamento" if tem_pacote else ("ganho" if "ganho" in chaves else None)
+    # sem sessões, a venda conclui; mas o resultado de exame ou o retorno a fazer ainda
+    # seguram o paciente na coluna Retorno
+    destino = "tratamento" if tem_pacote else (
+        "retorno" if "retorno" in chaves and ca._pendente(c, conta_id, lead) else
+        "ganho" if "ganho" in chaves else None)
     st = c.execute("select status from prospeccao where id=%s and conta_id=%s for update", (lead, conta_id)).fetchone()
     # de onde o pagamento leva: o que vem antes do tratamento, e o paciente que já
     # tinha concluído e comprou um tratamento novo

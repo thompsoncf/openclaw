@@ -197,7 +197,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <h3 class="pk-sec">Resultados a entregar</h3>
   {% for r in resultados %}<div class="pk-l"><div><b>{{ r.paciente }}</b>{% if r.prof %} · {{ r.prof }}{% endif %}
       {% if r.chegou %}<span class="pk-chip">chegou: marcar a entrega</span>{% elif r.atrasado %}<span class="pk-chip al">previsto {{ r.previsto_em.strftime('%d/%m') }}, ainda não chegou</span>{% elif r.previsto_em %}<span class="pk-chip">previsto {{ r.previsto_em.strftime('%d/%m') }}</span>{% else %}<span class="pk-chip">esperando o laboratório</span>{% endif %}</div>
-    <div class="pk-acoes">{% if r.chegou %}<a href="/painel/clinica/agenda/novo?lead={{ r.lead or '' }}">Marcar entrega</a>{% else %}<form method="post" action="/painel/clinica/pacotes/resultado/{{ r.id }}/chegou"><button>Chegou</button></form>{% endif %}
+    <div class="pk-acoes">{% if r.chegou %}<a href="/painel/clinica/agenda/novo?{% if r.profissional_id %}prof={{ r.profissional_id }}&{% endif %}{% if tipo_retorno.get(r.profissional_id) %}tipo={{ tipo_retorno[r.profissional_id] }}&{% endif %}lead={{ r.lead or '' }}">Marcar entrega</a>{% else %}<form method="post" action="/painel/clinica/pacotes/resultado/{{ r.id }}/chegou"><button>Chegou</button></form>{% endif %}
       <form method="post" action="/painel/clinica/pacotes/resultado/{{ r.id }}/entregue"><button class="sec">Entregue</button></form>
       <form method="post" action="/painel/clinica/pacotes/resultado/{{ r.id }}/dispensar"><button class="sec">Tirar da fila</button></form></div></div>
   {% else %}<div class="pk-m">Nenhum resultado esperando.</div>{% endfor %}

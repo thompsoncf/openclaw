@@ -28,26 +28,38 @@ from core import esquema_runtime
 # dela trouxeram — e nada mais. Não dava pra reusar `vendas` (abriria funil,
 # conversa e cliente) nem `financeiro` (abriria caixa e relatório), então a única
 # saída honesta era uma capacidade própria, estreita de propósito.
+#
+# `campo` é a QUINTA, e nasceu pro mestre de obras (02/10/2026, PR 3 do mapa): ele
+# marca etapa, tira foto e aponta material no app /obra — e não vê dinheiro
+# nenhum. Não dava pra reusar `financeiro` (abriria custo, caixa e relatório) nem
+# `vendas`; de novo, a saída honesta é uma capacidade própria e estreita.
 CAPS = {
-    "dono":       {"vendas": True,  "financeiro": True,  "gerir": True,  "origens": True},
-    "gestor":     {"vendas": True,  "financeiro": True,  "gerir": False, "origens": True},
-    "vendedor":   {"vendas": True,  "financeiro": False, "gerir": False, "origens": False},
-    "financeiro": {"vendas": False, "financeiro": True,  "gerir": False, "origens": False},
+    "dono":       {"vendas": True,  "financeiro": True,  "gerir": True,  "origens": True,  "campo": True},
+    "gestor":     {"vendas": True,  "financeiro": True,  "gerir": False, "origens": True,  "campo": True},
+    "vendedor":   {"vendas": True,  "financeiro": False, "gerir": False, "origens": False, "campo": False},
+    "financeiro": {"vendas": False, "financeiro": True,  "gerir": False, "origens": False, "campo": False},
     # a agência: entra, vê a tela de Origens e mais nada. Não é gente da casa.
-    "convidado":  {"vendas": False, "financeiro": False, "gerir": False, "origens": True},
+    "convidado":  {"vendas": False, "financeiro": False, "gerir": False, "origens": True,  "campo": False},
+    # o mestre de obras: o app /obra e mais nada (só as obras dele, sem valor)
+    "mestre":     {"vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": True},
     # compat com o modelo família (chat): nunca acessam Vendas nem gerem a conta.
-    "membro":     {"vendas": False, "financeiro": True,  "gerir": False, "origens": False},
-    "restrito":   {"vendas": False, "financeiro": False, "gerir": False, "origens": False},
+    "membro":     {"vendas": False, "financeiro": True,  "gerir": False, "origens": False, "campo": False},
+    "restrito":   {"vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": False},
 }
 # papéis que o dono pode atribuir a um membro de equipe (o dono é o titular).
 # `convidado` entra aqui pra reusar o convite por link que já existe: o dono manda
 # o link, a agência cria a própria senha (o dono nunca a vê) e a revogação é a
 # mesma de qualquer membro.
-PAPEIS_PJ = ("gestor", "vendedor", "financeiro", "convidado")
+PAPEIS_PJ = ("gestor", "vendedor", "financeiro", "convidado", "mestre")
+# o papel que só existe num nicho: quem oferece e quem aceita é a tela da equipe
+# (web/painel_equipe.py), que conhece o nicho da conta — este módulo não conhece
+PAPEIS_DO_NICHO = {"mestre": "construcao"}
 _ROTULOS = {"dono": "Dono", "gestor": "Gestor", "vendedor": "Vendedor",
             "financeiro": "Financeiro", "convidado": "Convidado (agência)",
+            "mestre": "Mestre de obras",
             "membro": "Membro", "restrito": "Restrito"}
-_SEM_ACESSO = {"vendas": False, "financeiro": False, "gerir": False, "origens": False}
+_SEM_ACESSO = {"vendas": False, "financeiro": False, "gerir": False, "origens": False,
+               "campo": False}
 
 
 def caps_do_papel(papel: str | None) -> dict:
@@ -86,6 +98,9 @@ def home_do_papel(papel: str | None, membro_id=None) -> str:
     # gate devolve, e ele acabaria no /trocar sem entender por quê
     if papel == "convidado":
         return "/painel/origens"
+    # o mestre de obras vai pro app dele, feito pro celular e pro canteiro
+    if papel == "mestre":
+        return "/obra"
     return "/painel"
 
 
@@ -109,6 +124,8 @@ def destino_barrado(papel: str | None) -> str:
         return "/painel/empresa"
     if caps["origens"]:
         return "/painel/origens"
+    if caps["campo"]:
+        return "/obra"
     return "/trocar"
 
 
@@ -193,6 +210,11 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # `obras` abre), não esta lista — a mesma divisão de Renovações.
     if caps["financeiro"]:
         permitido += ["/painel/obras"]
+    # o app do mestre (/obra) fica FORA do /painel e o gate não o guarda — a rota
+    # confere o papel sozinha (web/app_obra._acesso). Está aqui pra o destino do
+    # mestre barrado (`destino_barrado`) constar da lista dele, como manda o contrato.
+    if caps["campo"]:
+        permitido += ["/obra"]
     if caps["gerir"]:
         permitido += ["/painel/equipe", "/membros"]
     if recebe_novidades(papel):

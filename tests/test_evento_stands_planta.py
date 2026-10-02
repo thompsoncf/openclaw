@@ -136,3 +136,80 @@ def test_no_mapa_3d_o_clique_chega_no_stand():
     # o cenário nunca rouba o toque do stand
     assert "pointer-events:none" in _re.search(r"\.plc\{[^}]*\}", PLANTA_CSS).group(0)
 
+
+
+def test_a_planta_roda_de_verdade_no_node(tmp_path):
+    # Os outros testes leem o TEXTO das constantes; este EXECUTA o desenho num DOM de
+    # mentira: pega erro de sintaxe, stand sem posição e código que não cabe no botão.
+    import shutil
+    import subprocess
+
+    import pytest
+
+    if not shutil.which("node"):
+        pytest.skip("node não instalado")
+    js = "(function(){" + PLANTA_DEFS_JS + r"""
+  function Estilo(){ this.vars = {}; }
+  Estilo.prototype.setProperty = function(k, v){ this.vars[k] = v; };
+  function El(tag){ this.tag = tag; this.style = new Estilo(); this.children = []; this.className = ''; this.textContent = ''; }
+  El.prototype.appendChild = function(c){ this.children.push(c); };
+  global.document = {
+    createElement: function(tag){ return new El(tag); },
+    createTextNode: function(t){ return {texto: t}; }
+  };
+  var out = {n: pavilions.map(function(p){ return plantaCodigos(p).length; }), pav: {}};
+  pavilions.forEach(function(p){
+    var grid = new El('div'), botoes = [];
+    plantaMontar(grid, p, {larg: 794, pad: 20, tile: function(code){
+      var e = new El('button'); e.code = code; e.textContent = code; botoes.push(e); return e;
+    }});
+    out.pav[p.key] = {
+      larg: grid.style.width, alt: grid.style.height, plk: grid.style.vars['--plk'],
+      semPosicao: botoes.filter(function(b){ return !(b.style.left && b.style.top && b.style.width && b.style.height); }).length,
+      menorLetra: Math.min.apply(null, botoes.map(function(b){ return parseFloat(b.style.fontSize); })),
+      duasLinhas: botoes.filter(function(b){ return b.children.length === 3; }).map(function(b){ return b.code; }),
+      cenario: grid.children.length - botoes.length,
+      icones: grid.children.filter(function(c){ return /^<svg /.test(c.innerHTML || ''); }).length
+    };
+  });
+  // stand do banco fora da planta: fila corrida embaixo
+  var g2 = new El('div'), extras = 0;
+  plantaMontar(g2, {key: 'novo', extraCodes: ['X1', 'X2']}, {larg: 794, pad: 0, tile: function(code){ extras++; return new El('button'); }});
+  out.extras = extras;
+  console.log(JSON.stringify(out));
+})();"""
+    arq = tmp_path / "planta.js"
+    arq.write_text(js, encoding="utf-8")
+    # stdin fechado: no Windows o node trava esperando o terminal
+    r = subprocess.run(["node", str(arq)], capture_output=True, text=True, encoding="utf-8",
+                       stdin=subprocess.DEVNULL, timeout=60)
+    assert r.returncode == 0, r.stderr[:800]
+    out = json.loads(r.stdout)
+    assert out["n"] == [74, 80, 8]
+    assert out["extras"] == 2
+    for pav, d in out["pav"].items():
+        assert d["semPosicao"] == 0, pav
+        assert d["larg"] == "794px" and float(d["alt"][:-2]) > 200, pav
+        # na largura do computador (794px) nenhum código cai abaixo de 8px
+        assert d["menorLetra"] >= 8, (pav, d["menorLetra"])
+        assert d["cenario"] > 15, pav
+    # os estreitos e altos do Superior escrevem em duas linhas, como a planta do PDF
+    assert set(out["pav"]["superior"]["duasLinhas"]) == (
+        {f"S{n}" for n in range(127, 130)} | {f"S{n}" for n in range(143, 155)})
+    assert out["pav"]["inferior"]["duasLinhas"] == []
+    # praça de alimentação, carros, motos e palco são ícones desenhados
+    assert out["pav"]["outlet_car"]["icones"] >= 8 + 6 + 7 + 7 + 1
+
+
+def test_a_foto_da_fachada_e_so_da_outlet_chic():
+    import web.loja_stands as pub
+
+    assert set(pub._FACHADAS) == {"outlet-chic"}
+    arq = pub._FACHADAS["outlet-chic"]["arquivo"]
+    assert {arq, arq + "-800"} <= pub._FOTOS_OK
+    for nome in (arq, arq + "-800"):
+        r = pub.foto_stand(nome)
+        assert r.status_code == 200 and r.body[:3] == b"\xff\xd8\xff", nome      # JPEG de verdade
+    assert pub.foto_stand("../segredo").status_code == 404
+    # o topo só ganha a foto quando a página tem fachada
+    assert "{% if fachada %}<figure class=\"hero-foto\">" in pub._TPL

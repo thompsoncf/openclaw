@@ -639,7 +639,7 @@ _CSS = r"""<style>
 /* ---- o mapa (cadastro completo — a MESMA planta da página pública, na
         variação "planta técnica": tiles chapados por status) ---- */
 .es-pag .mapa-outer{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow);margin-bottom:12px}
-.es-pag .mapa-grid{position:relative;--pl-dim:var(--fg-dim);--pl-line:var(--line);--pl-surf:var(--surface-2)}
+.es-pag .mapa-grid{position:relative;--pl-dim:var(--fg-dim);--pl-line:rgba(234,242,237,.2);--pl-surf:var(--surface-2)}
 .es-pag .mapa-grid .stand{
   appearance:none;cursor:pointer;border:1px solid var(--line);border-radius:5px;width:auto;min-height:0;margin:0;
   font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;line-height:1;

@@ -11,10 +11,13 @@ Este teste impede. Ele lê o código (sem rodar nada) e conta, por arquivo:
 
 * `date.today()`, `datetime.today()`, `datetime.utcnow()` e `datetime.now()`
   SEM fuso — em qualquer grafia (`_date.today()`, `dt.date.today()`...);
-* nas strings SQL: `current_date`, `localtimestamp`, `now()::date` e
-  `current_timestamp::date`.
+* nas strings SQL: `current_date`, `localtimestamp`, `now()::date`,
+  `current_timestamp::date` e o corte de um INSTANTE no dia do banco —
+  `coluna_em::date` / `inicio::date` (as colunas timestamptz desta base terminam
+  em `_em`; o jeito certo é `(coluna_em at time zone 'America/Sao_Paulo')::date`).
 
-Comentário e docstring não contam — explicar o bug não é cometê-lo.
+Comentário, docstring e comentário SQL (`--`) não contam — explicar o bug não é
+cometê-lo.
 
 A contagem de HOJE está em `tests/dados/fuso_excecoes.json`. É uma catraca:
 
@@ -33,13 +36,17 @@ o dia do Brasil vem do `relogio` — ou de `at time zone 'America/Sao_Paulo'`.
 """
 import ast
 import json
+import re
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
-PASTAS = ("finance", "web", "core", "services", "db")
+PASTAS = ("finance", "web", "core", "services", "db", "contas")
 EXCECOES = RAIZ / "tests" / "dados" / "fuso_excecoes.json"
 
 _SQL_PROIBIDO = ("current_date", "localtimestamp", "now()::date", "current_timestamp::date")
+#: instante cortado no dia do banco (UTC): `criado_em::date`, `e.inicio::date`
+_SQL_CORTE_UTC = re.compile(r"\b(?:\w+\.)?(?:\w+_em|inicio)::date\b")
+_COMENTARIO_SQL = re.compile(r"--[^\n]*")
 
 
 def _docstrings(arvore) -> set:
@@ -98,9 +105,10 @@ def ocorrencias(fonte: str) -> list[str]:
                (classe == "datetime" and (metodo in ("today", "utcnow") or (metodo == "now" and sem_fuso))):
                 achados.append(f"{no.lineno}: {classe}.{metodo}()")
         elif isinstance(no, ast.Constant) and isinstance(no.value, str) and id(no) not in docs:
-            texto = " ".join(no.value.lower().split())
+            texto = " ".join(_COMENTARIO_SQL.sub("", no.value).lower().split())
             for proibido in _SQL_PROIBIDO:
                 achados += [f"{no.lineno}: {proibido}"] * texto.count(proibido)
+            achados += [f"{no.lineno}: {m}" for m in _SQL_CORTE_UTC.findall(texto)]
     return achados
 
 
@@ -158,11 +166,14 @@ e = dt.datetime.now()
 f = datetime.now(timezone.utc)          # com fuso: pode
 g = "select 1 where dia = current_date and x = now()::date"
 h = "select (criado_em at time zone 'America/Sao_Paulo')::date"   # pode
+i = "select e.inicio::date, cv.criado_em::date, %s::date from x"  # o %s::date pode
+j = "select 1 -- comentário com current_date e criado_em::date não conta"
 '''
     achados = [a.split(": ", 1)[1] for a in ocorrencias(fonte)]
     assert sorted(achados) == sorted([
         "date.today()", "datetime.now()", "datetime.utcnow()", "date.today()",
-        "datetime.now()", "current_date", "now()::date"])
+        "datetime.now()", "current_date", "now()::date", "e.inicio::date",
+        "cv.criado_em::date"])
 
 
 def test_a_conexao_do_app_fixa_utc(monkeypatch, test_db_url):

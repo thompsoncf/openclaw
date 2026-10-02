@@ -36,6 +36,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from finance import relogio
+
 _log = logging.getLogger("openclaw.funil_perda")
 
 #: o mesmo vazio de `funil_modelo.DO_DONO` — "o nome é do dono, não da semente"
@@ -388,8 +390,8 @@ def voltar_os_vencidos(pool, hoje=None) -> int:
     mesmo update que reabre, então rodar duas vezes (2 workers) não reabre duas.
 
     Nunca levanta: roda no ticker de fundo. Devolve quantos voltaram."""
-    from datetime import date, time as _time
-    hoje = hoje or date.today()
+    from datetime import time as _time
+    hoje = hoje or relogio.hoje()
     try:
         with pool.connection() as c:
             if c.execute("""select 1 from information_schema.columns

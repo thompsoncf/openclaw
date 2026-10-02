@@ -87,7 +87,7 @@ def _sql_candidatos() -> str:
                           where io.conta_id = p.conta_id and io.prospeccao_id = p.id
                             and (io.estado = 'conferir'
                                  or (io.bloqueio is not null and io.estado <> 'descartado')))
-         and (p.evento_em is null or p.evento_em >= current_date + 3)
+         and (p.evento_em is null or p.evento_em >= (now() at time zone 'America/Sao_Paulo')::date + 3)
          and not exists (select 1 from eventos_agenda e
                           where e.conta_id = p.conta_id and e.prospeccao_id = p.id
                             and e.inicio >= now() and {vis.sql_conta('e', festa=False)})),

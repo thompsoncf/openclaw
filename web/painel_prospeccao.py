@@ -18,6 +18,8 @@ import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
+
+from finance import relogio
 from urllib.parse import quote
 
 from starlette.concurrency import run_in_threadpool
@@ -7647,11 +7649,10 @@ def _campanhas_dados(c, conta_id, membro_id=None):
 
     membro_id != None restringe às campanhas em que ESSE membro é o responsável
     (visão do vendedor); None = todas as da conta (visão do dono/gestor)."""
-    from datetime import date as _date
     from finance import wa_precos
     _RATE = wa_precos.TARIFA_BRL["marketing"]
     _CIRC = 131.9  # 2*pi*21 — raio do gauge no CSS/SVG
-    _hoje = _date.today()
+    _hoje = relogio.hoje()
     rows = c.execute(
         """select cp.id, cp.nome, cp.status, cp.limite_dia, coalesce(cp.wa_ativo,false),
                   cp.teto_wa, coalesce(cp.enviados_hoje,0), cp.dia_contagem,
@@ -8216,9 +8217,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                     where conta_id=%s and (email_ok or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null) order by atualizado_em desc limit 1""",
                 (ctx["conta_id"],)).fetchone()
     resp = st.get("respondeu", 0)
-    from datetime import date as _date
-    hoje = cp[4] if cp[5] == _date.today() else 0
-    wa_hoje = cp[9] if cp[10] == _date.today() else 0
+    hoje = cp[4] if cp[5] == relogio.hoje() else 0
+    wa_hoje = cp[9] if cp[10] == relogio.hoje() else 0
     with get_pool().connection() as c:
         wa_counts = dict(c.execute(
             "select wa_status, count(*) from campanha_alvos where campanha_id=%s and wa_status is not null group by wa_status",

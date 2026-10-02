@@ -438,7 +438,7 @@ def criar_compra(
         row = c.execute(
             """insert into compras_fornecedor
                  (fornecedor_id, origem_id, data_compra, fonte, chave_nfe)
-               values (%s, %s, coalesce(%s, current_date), %s, %s)
+               values (%s, %s, coalesce(%s, (now() at time zone 'America/Sao_Paulo')::date), %s, %s)
                returning id""",
             (fornecedor_id, origem_id, data_compra, fonte, chave_nfe),
         ).fetchone()

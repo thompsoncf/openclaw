@@ -429,6 +429,9 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
             "categoria": t["categoria"] or "—", "status": status, "status_cor": cor,
             "talvez": talvez, "talvez_cor": "aviso",
             "valor_centavos": t["valor_centavos"],
+            # o MÊS DE REFERÊNCIA (484): o anotado, ou o anterior ao vencimento
+            "referencia": (t["referencia"].strftime("%m/%Y")
+                           if t.get("referencia") else "—"),
         })
     total = _soma(linhas, "valor_centavos")
     vencidas = [r for r in linhas if r["status"] == "Vencida"]
@@ -447,12 +450,16 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
         # a tem. Medido no Chromium: com Status como coluna sobravam 949px pros
         # dois nomes numa janela de 1500 e o fornecedor era cortado em toda linha;
         # sem ela sobram 1.155px e não corta nenhum até 1280.
-        "colunas": [_col("vencimento", "Vencimento", venc=True, extra="prazo"),
-                    _col("descricao", "Descrição", flex=True, parte=55,
-                         extra="talvez"),
-                    _col("contraparte", rotulo_col, flex=True, parte=45),
-                    _col("valor_centavos", "Valor", num=True, brl=True,
-                         zero="— informar")],
+        # A REFERÊNCIA (484, pedido do dono em 02/10/2026) entra logo depois do
+        # vencimento, e só em Contas a pagar: "07/2026" tem largura fixa e curta,
+        # não disputa espaço com os dois nomes.
+        "colunas": [_col("vencimento", "Vencimento", venc=True, extra="prazo")]
+                   + ([_col("referencia", "Ref.")] if tipo == "pagar" else [])
+                   + [_col("descricao", "Descrição", flex=True, parte=55,
+                           extra="talvez"),
+                      _col("contraparte", rotulo_col, flex=True, parte=45),
+                      _col("valor_centavos", "Valor", num=True, brl=True,
+                           zero="— informar")],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total em aberto", _brl(total)),
                      ("Vencidas", f"{len(vencidas)} · {_brl(_soma(vencidas, 'valor_centavos'))}"),
@@ -2248,7 +2255,7 @@ def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str =
     return HTMLResponse(_env.get_template("relatorio_pdf").render(
         dados=dados, tipo=tipo, periodo=periodo,
         periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
-        gerado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
+        gerado_em=_relogio.agora().strftime("%d/%m/%Y %H:%M"),   # a hora de Brasília
         **_letterhead(pool, conta),
     ))
 

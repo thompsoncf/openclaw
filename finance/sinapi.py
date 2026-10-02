@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+from finance import relogio
+
 _log = logging.getLogger("openclaw.sinapi")
 
 _URL = "https://apisidra.ibge.gov.br/values/t/2296/n3/{cod}/v/48,2119,2120/p/last%201"
@@ -131,7 +133,7 @@ def comparar(obra: dict, ref: dict | None) -> dict | None:
 def atualizar(pool, hoje: date | None = None, get=None) -> int:
     """Uma passada do ticker: pra cada UF de conta de construção cujo dado não foi
     buscado hoje, busca no IBGE e guarda. Nunca levanta. Devolve quantas UFs vieram."""
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     try:
         with pool.connection() as c:
             if c.execute("select to_regclass('public.sinapi_referencia')").fetchone()[0] is None:
@@ -140,7 +142,7 @@ def atualizar(pool, hoje: date | None = None, get=None) -> int:
                 """select distinct upper(c.uf) from contas c join nichos n on n.id = c.nicho_id
                     where n.slug = 'construcao' and coalesce(c.uf, '') <> ''
                       and not exists (select 1 from sinapi_referencia s
-                                       where s.uf = upper(c.uf) and s.buscado_em::date >= %s)""",
+                                       where s.uf = upper(c.uf) and (s.buscado_em at time zone 'America/Sao_Paulo')::date >= %s)""",
                 (hoje,)).fetchall()]
     except Exception as e:  # noqa: BLE001
         _log.info("sinapi: não deu pra listar as UFs: %s", e)

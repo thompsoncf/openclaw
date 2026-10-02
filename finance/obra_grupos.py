@@ -65,6 +65,7 @@ def criar_grupo(pool, conta_id: int, nome: str, empreendimento: str = "") -> dic
                            values (%s,%s,%s) returning id""",
                         (conta_id, nome, " ".join((empreendimento or "").split())[:80])).fetchone()[0]
         c.commit()
+    garantir_centro(pool, conta_id, gid)        # o custo comum já nasce com a quadra
     return {"id": gid, "nome": nome}
 
 
@@ -78,6 +79,9 @@ def editar_grupo(pool, conta_id: int, grupo_id: int, nome: str, empreendimento: 
             raise ValueError(f"Já existe “{nome}”.")
         c.execute("update obra_grupos set nome=%s, empreendimento=%s where id=%s and conta_id=%s",
                   (nome, " ".join((empreendimento or "").split())[:80], grupo_id, conta_id))
+        c.execute("""update centros_custo set nome=%s where conta_id=%s
+                       and id = (select centro_custo_id from obra_grupos where id=%s and conta_id=%s)""",
+                  (_nome_centro(nome), conta_id, grupo_id, conta_id))
         c.commit()
 
 
@@ -86,7 +90,17 @@ def apagar_grupo(pool, conta_id: int, grupo_id: int) -> None:
     with pool.connection() as c:
         if c.execute("select 1 from obras where conta_id=%s and grupo_id=%s", (conta_id, grupo_id)).fetchone():
             raise ValueError("Tire as casas dela antes de apagar.")
+        centro = c.execute("select centro_custo_id from obra_grupos where id=%s and conta_id=%s",
+                           (grupo_id, conta_id)).fetchone()
+        if centro and centro[0] and c.execute(
+                "select 1 from lancamentos where conta_id=%s and centro_custo_id=%s limit 1",
+                (conta_id, centro[0])).fetchone():
+            raise ValueError("Ela tem custo comum lançado: tire os lançamentos dela antes de apagar.")
         c.execute("delete from obra_grupos where id=%s and conta_id=%s", (grupo_id, conta_id))
+        if centro and centro[0]:
+            # o centro vazio sai dos selects (inativo), sem sumir do histórico
+            c.execute("update centros_custo set ativo=false where id=%s and conta_id=%s",
+                      (centro[0], conta_id))
         c.commit()
 
 
@@ -291,3 +305,138 @@ def desfazer_ultima(pool, conta_id: int, grupo_id: int) -> dict | None:
             voltaram.append(o["nome"])
             nome = e["nome"]
     return {"etapa": nome or r[1], "voltaram": voltaram}
+
+
+# ── o custo comum da quadra, pelo m² (PR 2; decisão 3 do dono) ────────────
+#
+# Terraplanagem, rede de água e esgoto, poste, muro da quadra: não são de casa
+# nenhuma, mas são de todas. Ficam no CENTRO DE CUSTO da quadra ("Quadra 4 ·
+# comum") e entram no custo de cada casa na proporção da área — a conta é feita
+# na hora de mostrar, como a divisão de nota: o lançamento não é quebrado, e o
+# extrato e a conciliação continuam batendo.
+#
+# O centro nasce no PAINEL (criar a quadra, ou abrir a página dela): o agente não
+# cria centro de custo (regra do dono de 23/09).
+
+def _nome_centro(nome: str) -> str:
+    return f"{nome} · comum"[:80]
+
+
+def centro_da_quadra(pool, conta_id: int, grupo_id: int) -> int | None:
+    with pool.connection() as c:
+        r = c.execute("select centro_custo_id from obra_grupos where id=%s and conta_id=%s",
+                      (grupo_id, conta_id)).fetchone()
+    return r[0] if r else None
+
+
+def garantir_centro(pool, conta_id: int, grupo_id: int) -> int:
+    """O centro de custo da quadra; cria se ainda não tem. Só o painel chama."""
+    with pool.connection() as c:
+        r = c.execute("select centro_custo_id, nome from obra_grupos where id=%s and conta_id=%s",
+                      (grupo_id, conta_id)).fetchone()
+        if not r:
+            raise ValueError("Quadra não encontrada.")
+        if r[0]:
+            return r[0]
+        cid = c.execute("""insert into centros_custo (conta_id, nome, descricao)
+                           values (%s,%s,'custo comum da quadra') returning id""",
+                        (conta_id, _nome_centro(r[1]))).fetchone()[0]
+        c.execute("update obra_grupos set centro_custo_id=%s where id=%s and conta_id=%s",
+                  (cid, grupo_id, conta_id))
+        c.commit()
+    return cid
+
+
+def custo_comum(pool, conta_id: int, grupo_id: int) -> int:
+    """O total lançado no centro da quadra (com a divisão de nota aplicada)."""
+    centro = centro_da_quadra(pool, conta_id, grupo_id)
+    if not centro:
+        return 0
+    with pool.connection() as c:
+        return int(_ob._custos(c, conta_id, [centro])[centro]["total"])
+
+
+def partes_do_comum(obras: list[dict], comum: int) -> dict[int, int]:
+    """{obra_id: parte} — pela área; se alguma casa não tem área, em partes iguais.
+    Os centavos que sobram ficam na primeira casa."""
+    if not obras or not comum:
+        return {o["id"]: 0 for o in obras}
+    areas = [float(o.get("area_m2") or 0) for o in obras]
+    if all(a > 0 for a in areas):
+        partes = [int(comum * a // sum(areas)) for a in areas]
+    else:
+        partes = [comum // len(obras)] * len(obras)
+    partes[0] += comum - sum(partes)
+    return {o["id"]: p for o, p in zip(obras, partes)}
+
+
+def com_comum(pool, conta_id: int, obra: dict) -> dict:
+    """A obra com o custo CHEIO: o lançado nela mais a parte do comum da quadra.
+    Devolve uma cópia (`custos.comum`, `custos.total` somado, `custo_m2` e
+    `pct_previsto` refeitos); sem quadra ou sem comum, `custos.comum` = 0."""
+    o = dict(obra, custos=dict(obra.get("custos") or {}))
+    o["custos"].setdefault("comum", 0)
+    gid = (por_obra(pool, conta_id).get(obra["id"]) or {}).get("grupo_id")
+    if not gid:
+        return o
+    comum = custo_comum(pool, conta_id, gid)
+    if not comum:
+        return o
+    parte = partes_do_comum(casas(pool, conta_id, gid), comum).get(obra["id"], 0)
+    o["custos"]["comum"] = parte
+    o["custos"]["total"] = int(o["custos"].get("total") or 0) + parte
+    if o.get("area_m2"):
+        o["custo_m2"] = int(round(o["custos"]["total"] / float(o["area_m2"])))
+    if o.get("custo_previsto_centavos"):
+        o["pct_previsto"] = int(round(100 * o["custos"]["total"] / o["custo_previsto_centavos"]))
+    return o
+
+
+def por_na_quadra(pool, conta_id: int, lancamento_id: int, grupo_id: int) -> dict:
+    """O lançamento inteiro vai pro custo comum da quadra. Desfaz divisão antiga.
+    ValueError se a quadra ainda não tem centro (ele nasce no painel)."""
+    centro = centro_da_quadra(pool, conta_id, grupo_id)
+    if not centro:
+        raise ValueError("Abra a quadra no painel uma vez pra ela ganhar o custo comum.")
+    with pool.connection() as c:
+        lanc = c.execute("select id, tipo, valor_centavos, natureza from lancamentos "
+                         "where id=%s and conta_id=%s", (lancamento_id, conta_id)).fetchone()
+        if not lanc:
+            raise ValueError("Não achei esse lançamento.")
+        if lanc[3] == "pessoal":
+            raise ValueError("Esse lançamento está marcado como pessoal.")
+        nome = c.execute("select nome from obra_grupos where id=%s", (grupo_id,)).fetchone()[0]
+        c.execute("delete from lancamento_rateio where lancamento_id=%s and conta_id=%s",
+                  (lancamento_id, conta_id))
+        c.execute("""update lancamentos set centro_custo_id=%s, natureza=coalesce(natureza, 'empresa')
+                      where id=%s and conta_id=%s""", (centro, lancamento_id, conta_id))
+        c.commit()
+    return {"quadra": nome, "valor_centavos": int(lanc[2])}
+
+
+# ── o mapa em grade (PR 2; decisão 5 do dono) ─────────────────────────────
+def mapa(pool, conta_id: int, grupo_id: int) -> list[dict]:
+    """Os lotes na ordem da numeração, cada um com a faixa de cor do andamento e o
+    alerta (o que trava a casa pronta, ou o primeiro prazo vencendo)."""
+    out = []
+    try:
+        from . import obra_venda as _ov
+    except Exception:  # noqa: BLE001
+        _ov = None
+    for o in casas(pool, conta_id, grupo_id):
+        alerta = ""
+        if _ov is not None and o["tipo"] == "casa":
+            try:
+                sit = _ov.situacao_da_casa(pool, conta_id, o)
+                if o["pct"] == 100 and sit["trava"] and sit["trava"]["chave"] != "creditado":
+                    alerta = "trava: " + sit["trava"]["nome"].lower()
+                elif sit["alertas"]:
+                    alerta = sit["alertas"][0]
+            except Exception:  # noqa: BLE001 — sem a 353, sem alerta
+                alerta = ""
+        pct = o["pct"]
+        faixa = ("pronta" if pct == 100 else "f3" if pct > 60 else "f2" if pct > 30
+                 else "f1" if pct > 0 else "f0")
+        out.append({"id": o["id"], "lote": o.get("lote") or o["nome"], "pct": pct,
+                    "faixa": faixa, "alerta": alerta})
+    return out

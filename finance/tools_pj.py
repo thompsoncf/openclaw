@@ -579,7 +579,14 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                 sit = ov.situacao_da_casa(pool, conta_id, o)
             except Exception:  # noqa: BLE001 — sem a 353, só o custo
                 sit = None
+        try:
+            from . import obra_grupos as og
+            o = og.com_comum(pool, conta_id, o)        # o custo cheio: o lançado + a parte do comum
+        except Exception:  # noqa: BLE001 — sem a 478
+            pass
         txt = ob.resumo_da_obra(o, venda=sit["venda"] if sit else None)
+        if (o.get("custos") or {}).get("comum"):
+            txt += f" Inclui {ob._brl(o['custos']['comum'])} do custo comum da quadra (pelo m²)."
         if sit:
             txt += " " + ov.resumo_caminho(o, sit)
         try:
@@ -825,6 +832,19 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             txt += f" Sem essa etapa: {', '.join(r['sem_etapa'])}."
         return txt + ' Se errou, é só dizer "desfaz".'
 
+    def por_na_quadra(e: dict) -> str:
+        """"Paguei 8 mil da terraplanagem da quadra 4": o custo comum da quadra."""
+        from . import obra_grupos as og
+        g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
+        if not g:
+            return _sem_quadra(e.get("quadra"))
+        try:
+            r = og.por_na_quadra(pool, conta_id, int(e.get("lancamento_id") or 0), g["id"])
+        except (ValueError, TypeError) as err:
+            return str(err)
+        return (f"Lancei {ob._brl(r['valor_centavos'])} como CUSTO COMUM de {r['quadra']}. Ele entra "
+                "no custo de cada casa pelo m².")
+
     def desfazer_etapa_quadra(e: dict) -> str:
         from . import obra_grupos as og
         g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
@@ -1043,6 +1063,18 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                                                  "description": "só estes lotes (ex: [\"1\", \"2\"]); vazio = as que começaram"}},
                         "required": ["quadra", "etapa"]},
             executar=marcar_etapa_quadra,
+        ),
+        Ferramenta(
+            nome="por_na_quadra",
+            descricao=("Põe um lançamento JÁ REGISTRADO no CUSTO COMUM de uma quadra: o que é "
+                       "de todas as casas e de nenhuma (terraplanagem, rede de água e esgoto, "
+                       "poste, muro da quadra). Entra no custo de cada casa pelo m². Não use pra "
+                       "material que vai pra casas — isso é dividir_entre_obras com quadra."),
+            parametros={"type": "object",
+                        "properties": {"lancamento_id": {"type": "integer"},
+                                       "quadra": {"type": "string"}},
+                        "required": ["lancamento_id", "quadra"]},
+            executar=por_na_quadra,
         ),
         Ferramenta(
             nome="desfazer_etapa_quadra",

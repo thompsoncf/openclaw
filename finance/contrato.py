@@ -230,6 +230,123 @@ def completar_do_cadastro(pool, conta_id: int, orcamento: dict, cliente_id) -> d
     return o
 
 
+def completar_do_lead(pool, conta_id: int, orcamento_id, orcamento: dict) -> dict:
+    """O DOCUMENTO DA FICHA DO LEAD, por último. A ficha do app é onde o vendedor
+    anota o CPF que o cliente manda na conversa (`cockpit.salvar_ficha` grava em
+    `prospeccao`), e o contrato não lia: o nº 47 da Prime saiu com
+    "{cliente.doc}" em 01/10/2026. Mesma regra do cadastro — só tapa buraco; o
+    orçamento e a aba Clientes vencem. Tolerante: sem lead ou sem coluna, segue."""
+    if (orcamento.get("cnpj") or "").strip():
+        return orcamento
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select coalesce(nullif(to_jsonb(p)->>'cpf',''), nullif(p.cnpj,''))
+                     from prospeccao p
+                    where p.conta_id=%s and p.orcamento_id=%s
+                    order by p.id desc limit 1""", (conta_id, orcamento_id)).fetchone()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ler o documento do lead do orçamento %s: %s: %s",
+                     orcamento_id, type(e).__name__, e)
+        return orcamento
+    if r and r[0]:
+        orcamento = {**orcamento, "cnpj": r[0]}
+    return orcamento
+
+
+def pendencias_pra_mandar(pool, conta_id: int, orcamento_id) -> list[str]:
+    """O que falta pra MANDAR a proposta ou o contrato deste orçamento ao cliente.
+
+    Regra do dono (01/10/2026), depois do nº 47 da Prime chegar no cliente com
+    "Campos sem valor: cliente.doc": "não deixar mais mandar nem orçamento e nem
+    contrato sem os dados principais". Os principais, escolhidos por ele:
+
+      * nome do cliente;
+      * CPF ou CNPJ (do orçamento, do cadastro da aba Clientes ou da ficha do lead);
+      * no orçamento de EVENTO: data e horário de início que o sistema entende —
+        sem eles a data não fica segurada na agenda;
+      * a forma de pagamento de cada parcela.
+
+    Uma régua só, lida pelo servidor em TODA porta de envio (painel, app, o
+    "Conferir e mandar" da IA) — a tela avisa, o servidor recusa. A venda de
+    estande (canal `pagina_stands`, Outlet Chic) fica fora: o cadastro dela tem
+    a conferência própria. Devolve [] quando está tudo certo."""
+    return pendencias_em_lote(pool, conta_id, [orcamento_id]).get(int(orcamento_id), [])
+
+
+#: o documento do orçamento, depois o da aba Clientes, depois o da ficha do lead —
+#: a MESMA ordem de `completar_do_cadastro` + `completar_do_lead`, numa consulta só
+_SQL_PENDENCIAS = """
+    select o.id, o.empresa, o.cliente,
+           coalesce(nullif(o.cnpj,''), nullif(to_jsonb(o)->>'cpf',''),
+             (select coalesce(nullif(pe.cpf,''), nullif(pe.cnpj,''))
+                from clientes cl left join pessoas pe on pe.id = cl.pessoa_id
+               where cl.id = o.cliente_id and cl.dono_id = o.conta_id),
+             (select coalesce(nullif(to_jsonb(pr)->>'cpf',''), nullif(pr.cnpj,''))
+                from prospeccao pr
+               where pr.conta_id = o.conta_id and pr.orcamento_id = o.id
+               order by pr.id desc limit 1)),
+           o.evento, o.parcelas, coalesce(o.modo,'recorrente'), to_jsonb(o)->>'canal'
+      from orcamentos o
+     where o.conta_id = %s and o.id = any(%s)"""
+
+
+def pendencias_em_lote(pool, conta_id: int, ids, c=None) -> dict:
+    """{orcamento_id: [o que falta]} — a lista do funil pergunta de uma vez.
+
+    `c` é pra quem acabou de gravar o orçamento na própria transação (o agente):
+    a leitura vai num savepoint dela, sem commit no meio."""
+    ids = [int(i) for i in (ids or []) if i]
+    if not ids:
+        return {}
+    try:
+        if c is not None:
+            with c.transaction():
+                rows = c.execute(_SQL_PENDENCIAS, (conta_id, ids)).fetchall()
+        else:
+            with pool.connection() as c2:
+                rows = c2.execute(_SQL_PENDENCIAS, (conta_id, ids)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra conferir os orçamentos %s antes de mandar: %s: %s",
+                     ids[:5], type(e).__name__, e)
+        return {}
+    return {r[0]: _pendencias(*r[1:]) for r in rows}
+
+
+def _pendencias(empresa, cliente, doc, evento, parcelas, modo, canal) -> list[str]:
+    from finance.agenda import parse_data, _minutos
+    if (canal or "") == "pagina_stands":
+        return []
+    falta = []
+    nome = (empresa or cliente or "").strip()
+    if not nome or nome.replace(" ", "").replace("+", "").isdigit():
+        falta.append("nome do cliente")
+    digitos = "".join(ch for ch in (doc or "") if ch.isdigit())
+    if len(digitos) not in (11, 14):
+        falta.append("CPF ou CNPJ")
+    if (modo or "") == "evento":
+        ev = evento if isinstance(evento, dict) else {}
+        if parse_data(ev.get("data")) is None:
+            falta.append("data do evento")
+        if _minutos(ev.get("inicio")) is None:
+            falta.append("horário de início")
+    pl = []
+    for p in (parcelas if isinstance(parcelas, list) else []):
+        try:
+            if isinstance(p, dict) and int(p.get("valor_centavos") or 0) > 0:
+                pl.append(p)
+        except (TypeError, ValueError):
+            continue
+    if any(not str(p.get("forma") or "").strip() for p in pl):
+        falta.append("forma de pagamento das parcelas")
+    return falta
+
+
+def texto_pendencias(falta: list[str], doc: str = "a proposta") -> str:
+    return (f"Não dá pra mandar {doc} ainda: falta {', '.join(falta)}. "
+            "Preencha e mande de novo.")
+
+
 def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None,
              modo: str = MODO_LOCACAO) -> dict:
     """Monta o que `preencher` vai consultar, um dicionário por grupo.

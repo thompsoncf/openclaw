@@ -2856,7 +2856,27 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
             "setup_centavos": setup_c, "mensal_centavos": mensal_c,
             # o líquido volta pra tela poder confirmar o número que o vendedor viu:
             # se divergir do que ela calculou, quem vale é este.
-            "total_centavos": tot["total"], "desconto_centavos": tot["desconto_total"]}
+            "total_centavos": tot["total"], "desconto_centavos": tot["desconto_total"],
+            # o que falta pra MANDAR (regra do dono, 01/10/2026): a tela troca os
+            # botões de envio pelo aviso, e o servidor recusa do mesmo jeito
+            "pendencias": _pendencias_de(pool, conta_id, oid)}
+
+
+def _pendencias_de(pool, conta_id: int, orc_id) -> list:
+    from finance import contrato as _ctr
+    return _ctr.pendencias_pra_mandar(pool, conta_id, orc_id)
+
+
+def _bloqueio_de_envio(pool, conta_id: int, orc_id, doc: str) -> dict | None:
+    """Os dados principais (regra do dono, 01/10/2026): sem eles nada sai pro
+    cliente — ver `contrato.pendencias_pra_mandar`. None quando pode mandar."""
+    if not orc_id:
+        return None
+    from finance import contrato as _ctr
+    falta = _ctr.pendencias_pra_mandar(pool, conta_id, orc_id)
+    if not falta:
+        return None
+    return {"ok": False, "erro": _ctr.texto_pendencias(falta, doc), "faltam": falta}
 
 
 def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, link: str) -> dict:
@@ -2871,6 +2891,9 @@ def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, 
     rotas que chamam isto passam coisas diferentes (uma tem o id, a outra só o
     link), e resolver aqui dentro faz as duas — e qualquer chamador futuro —
     registrarem sem precisar lembrar."""
+    trava = _bloqueio_de_envio(pool, conta_id, _orc_do_link(pool, conta_id, link), "a proposta")
+    if trava:
+        return trava
     r = enviar_mensagem(pool, conta_id, membro_id, lead_id, f"Olá! Segue sua proposta 👋\n{link}")
     _registrar_envio_proposta(pool, conta_id, link, canal="whatsapp",
                               ok=bool(r.get("ok")), erro=str(r.get("erro") or ""),
@@ -2945,6 +2968,9 @@ def enviar_contrato_conversa(pool, conta_id: int, membro_id: int, lead_id: int,
     ct = contrato_do_orcamento(pool, conta_id, orc_id)
     if not ct:
         return {"ok": False, "erro": "Essa proposta ainda não tem contrato."}
+    trava = _bloqueio_de_envio(pool, conta_id, orc_id, "o contrato")
+    if trava:
+        return trava
     r = enviar_mensagem(pool, conta_id, membro_id, lead_id,
                         "Segue o contrato pra você ler e assinar 📄\n" + ct["link"])
     if r.get("ok"):
@@ -2970,6 +2996,9 @@ def enviar_contrato_email(pool, conta_id: int, orc_id: int,
     ct = contrato_do_orcamento(pool, conta_id, orc_id)
     if not ct:
         return {"ok": False, "erro": "Essa proposta ainda não tem contrato."}
+    trava = _bloqueio_de_envio(pool, conta_id, orc_id, "o contrato")
+    if trava:
+        return trava
 
     with pool.connection() as c:
         titular = (c.execute("select coalesce(nome,'') from contas where id=%s",
@@ -2999,6 +3028,20 @@ def _token_do_link(link: str) -> str:
     if not link or "/proposta/" not in link:
         return ""
     return link.rsplit("/proposta/", 1)[1].split("?")[0].split("#")[0].strip()
+
+
+def _orc_do_link(pool, conta_id: int, link: str):
+    """O id do orçamento a partir do link `.../proposta/<token>` (None se não acha)."""
+    token = _token_do_link(link)
+    if not token:
+        return None
+    try:
+        with pool.connection() as c:
+            r = c.execute("select id from orcamentos where token=%s and conta_id=%s",
+                          (token, conta_id)).fetchone()
+    except Exception:  # noqa: BLE001
+        return None
+    return r[0] if r else None
 
 
 def _registrar_envio_proposta(pool, conta_id: int, link: str, *, canal: str,
@@ -3051,6 +3094,9 @@ def enviar_proposta_email(pool, conta_id: int, orc_id: int, membro_id: int | Non
         return {"ok": False, "erro": f"Esse {_palavra('cliente', conta_id)} não tem e-mail cadastrado."}
     if not o.get("link"):
         return {"ok": False, "erro": "Essa proposta ainda não tem link público."}
+    trava = _bloqueio_de_envio(pool, conta_id, orc_id, "a proposta")
+    if trava:
+        return trava
 
     with pool.connection() as c:
         r = c.execute("select numero, coalesce(modo,'recorrente') from orcamentos "

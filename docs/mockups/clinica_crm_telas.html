@@ -1,0 +1,498 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CRM Pelle, tela por tela</title>
+<style>
+/* Mesmo sistema dos desenhos da clínica (docs/mockups/clinica_prontuario.html): papel cream, navy, dourado; telas em painel escuro. Tema único, de propósito */
+:root{--papel:#EFEBE3;--tinta:#14213D;--tinta-2:#3B4757;--mudo:#8A8475;--ouro:#B8862E;--linha:#DCD5C6;--cartao:#fff;--borda:#E3DDD0;--verde:#1c7a4f;--verde-f:#E8F5EE;--amarelo:#D9932B;--amarelo-f:#FFF6E8;--vermelho:#B4453C;--vermelho-f:#FDECEA;--azul:#2F5D8A;--azul-f:#E9F0F8;
+ --pn:#0F1720;--pn-2:#16212C;--pn-b:#22303C;--pn-t:#DDE4EC;--pn-m:#7B8A99;
+ --fonte:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--papel);color:var(--tinta);font:14px/1.6 var(--fonte);padding-block:26px;padding-inline:16px}
+.wrap{max-width:940px;margin:0 auto}
+h1{font-size:26px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+.lead{font-size:14.5px;color:var(--tinta-2);margin:0 0 22px;line-height:1.65;max-width:70ch}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ouro);font-weight:700;margin:34px 0 4px;padding-top:18px;border-top:2px solid var(--linha)}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 12px;text-wrap:balance}
+h3{font-size:14.5px;margin:18px 0 6px}
+p{margin:0 0 12px;max-width:74ch}
+ul,ol{margin:0 0 12px;padding-left:20px}li{margin-bottom:5px}
+.nota,.alerta,.perigo,.bom{border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65;border:1px solid var(--borda)}
+.nota{background:#FBFAF7;border-left:3px solid var(--ouro)}
+.alerta{background:var(--amarelo-f);border-color:#F0DDBA;border-left:3px solid var(--amarelo);color:#7A4E0C}.alerta b{color:#5C3A06}
+.perigo{background:var(--vermelho-f);border-color:#F5C6C0;border-left:3px solid var(--vermelho);color:#8C332C}.perigo b{color:#6E241E}
+.bom{background:var(--verde-f);border-color:#BFE3D0;border-left:3px solid var(--verde);color:#155c3b}.bom b{color:#0e3d27}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--cartao);border:1px solid var(--borda);border-radius:10px;overflow:hidden}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--mudo);font-weight:700;border-bottom:1px solid var(--borda)}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tg{display:inline-block;font-size:10px;letter-spacing:.04em;border-radius:99px;padding:1px 8px;border:1px solid var(--borda);color:var(--tinta-2);white-space:nowrap;font-weight:600}
+.tg.ex{border-color:#BFE3D0;color:var(--verde);background:var(--verde-f)}
+.tg.aj{border-color:#CFDDEC;color:var(--azul);background:var(--azul-f)}
+.tg.co{border-color:#F0DDBA;color:#7A4E0C;background:var(--amarelo-f)}
+.mz{display:grid;grid-template-columns:130px 1fr 1fr;gap:6px;margin-bottom:14px;min-width:620px}
+.mz .h{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mudo);font-weight:700;padding:6px 4px;display:flex;align-items:center}
+.mz .c{background:var(--cartao);border:1px solid var(--borda);border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.5}
+.mz .c b{display:block;font-size:13.5px;margin-bottom:2px}
+.mz .c i{font-style:normal;color:var(--mudo);font-size:11.5px;display:block;margin-top:4px}
+.seta{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;font-size:12.5px;margin:4px 0 10px}
+.seta span{background:var(--cartao);border:1px solid var(--borda);border-radius:6px;padding:2px 8px}
+.seta i{font-style:normal;color:var(--mudo)}
+.pn{background:var(--pn);border:1px solid var(--pn-b);border-radius:14px;padding:14px 16px;margin-bottom:14px;color:var(--pn-t);overflow-x:auto}
+.pn .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pn .tt{font-size:1.05rem;font-weight:700}
+.pn .mut{color:var(--pn-m);font-size:.78rem}
+.pn .lbl{color:var(--pn-m);font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin:.55rem 0 .2rem}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.3rem .55rem;font-size:.8rem;color:var(--pn-t);display:inline-block;min-width:110px}
+.pn .chip{display:inline-block;background:#0B1219;border:1.5px solid #2A3947;border-radius:16px;padding:2px 10px;font-size:.72rem;color:#B4B2A9;margin:0 4px 5px 0}
+.pn .chip.on{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .bt{display:inline-block;background:#1E6B4E;color:#fff;border-radius:7px;padding:.25rem .6rem;font-size:.74rem;font-weight:600;margin:.2rem .3rem 0 0;white-space:nowrap}
+.pn .bt.sec{background:#22303C;color:var(--pn-t)}
+.pn .bt.red{background:#7A2E28}
+.pn .box{background:var(--pn-2);border:1px solid var(--pn-b);border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .g2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.pn .g3{display:grid;grid-template-columns:1.1fr 1.6fr 1fr;gap:.6rem}
+.pn table{background:var(--pn-2);border-color:var(--pn-b);color:var(--pn-t)}
+.pn th{background:#121B24;color:var(--pn-m);border-color:var(--pn-b)}
+.pn td{border-color:var(--pn-b)}
+.lin{display:flex;align-items:center;gap:8px;background:var(--pn-2);border:1px solid var(--pn-b);border-radius:8px;padding:.4rem .55rem;margin-bottom:.35rem;font-size:.78rem;flex-wrap:wrap}
+.lin .nm{flex:1;min-width:140px}
+.lin .nm small{display:block;color:var(--pn-m);font-size:.7rem}
+.t{display:inline-block;font-size:.62rem;border-radius:99px;padding:1px 7px;border:1px solid #2A3947;color:#B4B2A9;white-space:nowrap}
+.t.g{border-color:#2C6E52;color:#7EE7B8;background:#12281F}
+.t.y{border-color:#6B5320;color:#F4C766;background:#261E0E}
+.t.r{border-color:#6E2E2A;color:#ff8a80;background:#2A1715}
+.t.b{border-color:#2A4A6E;color:#8EC5FF;background:#122033}
+.kb{display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:.45rem;min-width:860px;margin-bottom:.5rem}
+.kc{background:var(--pn-2);border:1px solid var(--pn-b);border-radius:10px;padding:.45rem}
+.kc h5{margin:0 0 .35rem;font-size:.74rem;display:flex;justify-content:space-between;color:var(--pn-t)}
+.kc h5 span{color:var(--pn-m);font-weight:400}
+.kc.nv{border-color:#6B5320}
+.kc.ps{border-color:#2C6E52}
+.cd{background:#0B1219;border:1px solid #2A3947;border-radius:8px;padding:.35rem .45rem;margin-bottom:.3rem;font-size:.72rem;line-height:1.4}
+.cd b{display:block;font-size:.76rem}
+.cd small{color:var(--pn-m)}
+.cd .t{margin-top:3px}
+.kl{font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--pn-m);margin:.5rem 0 .25rem}
+.zap{background:#E9DFD4;border-radius:12px;padding:12px;max-width:430px;margin:0 0 14px}
+.zap .b{background:#fff;border-radius:8px;padding:7px 10px;margin:0 30px 8px 0;font-size:13px;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.08);color:#14213D}
+.zap .b.eu{background:#D9FDD3;margin:0 0 8px 30px}
+.zap .h{font-size:10.5px;color:#667;text-align:right;margin-top:2px}
+.zap .card{border:1px solid #E3DDD0;border-radius:8px;padding:8px 10px;margin-top:6px;background:#FBFAF7;font-size:12.5px}
+.cel{width:300px;max-width:100%;background:var(--pn);border:8px solid #0B1219;border-radius:28px;padding:12px 10px 8px;color:var(--pn-t);margin:0 0 14px}
+.cel .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;border-top:1px solid var(--pn-b);margin-top:8px;padding-top:6px;font-size:.62rem;text-align:center;color:var(--pn-m)}
+.cel .tabs b{color:#7EE7B8;font-weight:600}
+.q{background:var(--cartao);border:1px solid var(--borda);border-left:3px solid var(--tinta);border-radius:8px;padding:12px 16px;margin-bottom:10px}
+.q .qt{font-weight:700;font-size:14px;margin-bottom:3px}
+.q .qo{font-size:13px;color:var(--tinta-2);line-height:1.6}
+.rec{color:var(--verde);font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid var(--linha);font-size:11.5px;color:var(--mudo);line-height:1.6}
+@media (max-width:700px){.pn .g2,.pn .g3{grid-template-columns:1fr}}
+</style>
+</head><body>
+<div class="wrap">
+
+<div class="bom"><b>Aprovado pelo dono em 01/10/2026 (versão 2).</b> Nas decisões da seção 15, valem as sugestões marcadas; as que dependem de informação da clínica continuam em aberto. A regra combinada: implementar uma parte por vez, na ordem da seção 14. Pacientes, conversas e valores das telas são <b>fictícios</b>; os nomes da equipe e das cidades são os da Espaço Pelle. As datas dos exemplos são ilustrativas e não são a rota real.</div>
+<div class="nota"><b>O que mudou da versão 1.</b> Uma revisão conferiu cada tela contra o código e contra o dia a dia de uma clínica. Entraram: a regra do "veio ou faltou" por tipo de horário, o pagamento, o resultado de exame a entregar, remarcar, desmarcar, encaixe e a clínica cancelando a ida a uma cidade, menos mensagens automáticas, e o nome do procedimento fora do quadro e do celular. E uma correção de fato: hoje o plano recusado não marca o cartão como Perdido, ele fica parado na coluna do plano.</div>
+
+<h1>Clínica no Zaq, parte 6: o CRM da recepção, tela por tela</h1>
+<p class="lead">Como fica cada tela do CRM da clínica, da primeira mensagem ao retorno. O desenho segue o plano de fases (pessoa primeiro, ensaio do follow-up, ensaio do resgate, IA por último) e as suas decisões de 01/10: a coluna Consulta segura o cartão, retorno e tratamento são independentes, e procedimento se vende por avaliação ou direto pelo WhatsApp.</p>
+
+<h2><span class="n">01</span>O fluxo</h2>
+<p class="sub">Ao finalizar, o profissional responde três perguntas separadas. O cartão vai para onde ainda há algo pendente</p>
+<div class="tw"><div class="mz">
+  <div class="h"></div><div class="h">Sem retorno</div><div class="h">Com retorno</div>
+  <div class="h">Sem tratamento</div>
+  <div class="c"><b>Concluído</b>Alta. O cartão sai do quadro e o paciente fica em Pacientes.<i>Ex.: consulta de rotina, vacina.</i></div>
+  <div class="c"><b>Retorno</b>Só o retorno está pendente: "a marcar", "marcado" ou "vencido".<i>Ex.: receita e volta em 30 dias; retirada do teste alérgico.</i></div>
+  <div class="h">Com tratamento</div>
+  <div class="c"><b>Consulta › Plano enviado › Em tratamento › Concluído</b>O cartão espera em Consulta até a recepção enviar o plano.<i>Ex.: pacote de sessões, sem reavaliação.</i></div>
+  <div class="c"><b>Consulta › Plano enviado › Em tratamento › Retorno</b>O cartão segue o tratamento com o selo do retorno. Terminou as sessões e o retorno não foi feito: vai para Retorno.<i>Ex.: procedimento com reavaliação.</i></div>
+</div></div>
+<ul>
+  <li><b>A terceira pergunta: há resultado a entregar?</b> Biópsia, coleta e exame não fecham o cartão. Ele ganha o selo "resultado previsto para [data]" e só conclui depois que o profissional entrega o resultado. A recepção só avisa que chegou e marca.</li>
+  <li><b>O retorno é um compromisso do paciente, não uma etapa da venda.</b> Aparece como selo em qualquer cartão que o tenha pendente, e como coluna quando é a única coisa pendente. A tela Hoje junta todos.</li>
+  <li><b>Um retorno só se dá como marcado com um horário do tipo "retorno".</b> Hoje qualquer horário novo do paciente com o mesmo profissional fecha o retorno, então uma sessão de pacote o apagaria. Isso muda.</li>
+</ul>
+
+<h3>"Veio ou faltou" depende do tipo do horário</h3>
+<div class="tw"><table>
+<tr><th>Tipo do horário</th><th>Presente</th><th>Faltou</th></tr>
+<tr><td><b>Primeira consulta ou avaliação</b></td><td>Cartão vai para <b>Consulta</b></td><td>Cartão vai para <b>Follow-up</b>, selo "faltou"</td></tr>
+<tr><td><b>Sessão de pacote</b></td><td>Cartão continua em <b>Em tratamento</b>; a sessão conta ao finalizar</td><td>Continua em Em tratamento, selo "faltou à sessão"; entra em "Sessões a marcar"</td></tr>
+<tr><td><b>Retorno</b></td><td>Cartão continua onde está; ao finalizar, novo desfecho</td><td>O retorno volta para "a marcar"</td></tr>
+<tr><td><b>Ato único</b> (vacina, teste alérgico, coleta)</td><td>Atendido e finalizado com um toque: Concluído, Retorno ou resultado a entregar</td><td>Follow-up, selo "faltou"</td></tr>
+</table></div>
+<p>"Faltou" pode ser desfeito no mesmo dia (o paciente que chega depois da tolerância). A mensagem de remarcar não sai sozinha: fica pronta para a recepção mandar.</p>
+
+<h3>O dinheiro</h3>
+<ul>
+  <li><b>Plano aceito não é plano pago.</b> O cartão fica em Plano enviado com o selo "aceito, aguardando pagamento" e só entra em Em tratamento com o pagamento ou a entrada confirmados.</li>
+  <li><b>Na agenda do dia,</b> cada linha tem o selo "pago" ou "a receber" e o botão Receber. A tela Hoje tem o bloco "A receber".</li>
+  <li><b>Plano que não fecha não perde o paciente.</b> O plano se encerra com o motivo dele (preço, adiou, fez em outra clínica), o cartão vai para Retorno ou Concluído com a marca "plano não fechado", e o valor do cartão volta a ser o da consulta. "Plano fechado" se conta pelo plano aceito e pago, não pela coluna. "Perdido" fica para quem nunca virou paciente. <i>Hoje o cartão simplesmente fica parado na coluna do plano.</i></li>
+</ul>
+
+<h3>Procedimento: as duas portas, e o ato único</h3>
+<p><b>Por avaliação</b> (o que só o profissional indica):</p>
+<div class="seta"><span>Novo</span><i>›</i><span>Em conversa</span><i>›</i><span>Agendado</span><i>›</i><span>Consulta</span><i>›</i><span>Plano enviado</span><i>›</i><span>Em tratamento</span><i>›</i><span>Retorno ou Concluído</span></div>
+<p><b>Pacote vendido direto pelo WhatsApp</b> (o que a clínica liberar): o que se pula é a Consulta, não a agenda. As sessões são marcadas normalmente.</p>
+<div class="seta"><span>Novo</span><i>›</i><span>Em conversa</span><i>›</i><span>Orçamento enviado</span><i>›</i><span>pagou</span><i>›</i><span>Em tratamento</span><i>›</i><span>Retorno ou Concluído</span></div>
+<p><b>Ato único</b> (vacina, teste alérgico, coleta): marca, é atendido, fecha.</p>
+<div class="seta"><span>Novo</span><i>›</i><span>Em conversa</span><i>›</i><span>Agendado</span><i>›</i><span>atendido</span><i>›</i><span>Concluído, Retorno ou resultado a entregar</span></div>
+<p><b>Cirurgia:</b> Consulta, orçamento feito pelo médico, Agendado (cirurgia), retorno de retirada de pontos e, se houve biópsia, resultado a entregar.</p>
+
+<h3>De quem é o cartão</h3>
+<p>Telefone, paciente e cartão são três coisas. Um WhatsApp pode ter a mãe e dois filhos; um paciente em tratamento pode perguntar por outra coisa. A proposta: <b>um cartão por paciente e por interesse, ligado ao telefone</b>. "Para outra pessoa" abre nome, nascimento, parentesco e responsável. Mensagem automática fala com quem é dono do telefone e cita só o primeiro nome do paciente certo. O Zaq já separa o paciente do dono da conversa (a mãe que marca para o filho); o segundo cartão para interesse novo é o que entra.</p>
+
+<h2><span class="n">02</span>O quadro do funil</h2>
+<p class="sub">Dez colunas em duas linhas. O cartão mostra cidade, tipo de atendimento e o que está pendente; nunca o nome do procedimento</p>
+<div class="pn">
+  <div class="top"><span class="tt">Funil · outubro</span><span class="mut"><span class="chip on">todas as cidades</span><span class="chip">Codó</span><span class="chip">Bacabal</span> <span class="chip on">todo tipo</span><span class="chip">consulta</span><span class="chip">procedimento</span><span class="chip">serviço</span> <span class="chip">só os meus</span></span></div>
+  <div class="kl">Antes do dia marcado</div>
+  <div class="kb">
+    <div class="kc"><h5>Novo <span>2</span></h5>
+      <div class="cd"><b>Rafael M.</b><small>sem cidade · chegou há 3 min</small><br><span class="t y">3 min</span> <span class="t">Brenda</span></div>
+      <div class="cd"><b>Dona Francisca</b><small>sem cidade · chegou há 12 min</small><br><span class="t r">12 min</span> <span class="t">Cristiane</span></div></div>
+    <div class="kc"><h5>Em conversa <span>6</span></h5>
+      <div class="cd"><b>Marina Costa</b><small>Codó · consulta · Instagram</small><br><span class="t g">preço enviado</span> <span class="t">Brenda</span></div>
+      <div class="cd"><b>Júlia S.</b><small>Pedreiras · procedimento · rádio</small><br><span class="t y">falta a origem</span> <span class="t">Brenda</span></div>
+      <div class="cd"><b>Paulo Ribeiro</b><small>Bacabal · consulta</small><br><span class="t r">prazo vence amanhã</span> <span class="t">Cristiane</span></div></div>
+    <div class="kc"><h5>Follow-up <span>4</span></h5>
+      <div class="cd"><b>Antônio L.</b><small>Lago da Pedra · consulta</small><br><span class="t r">faltou 30/09</span> <span class="t">Cristiane</span></div>
+      <div class="cd"><b>Carla N.</b><small>Pedreiras · procedimento</small><br><span class="t y">sumiu depois do preço</span></div>
+      <div class="cd"><b>Seu Raimundo</b><small>Timbiras · consulta</small><br><span class="t b">chamar em 15/10</span></div></div>
+    <div class="kc"><h5>Agendado <span>9</span></h5>
+      <div class="cd"><b>Lúcia Ferreira</b><small>Codó · consulta · 15/10 9h</small><br><span class="t g">confirmado</span> <span class="t g">ficha completa</span></div>
+      <div class="cd"><b>Bia (resp.: Sandra)</b><small>Pedreiras · consulta · 02/10 9h</small><br><span class="t y">sem resposta da véspera</span></div>
+      <div class="cd"><b>6 de Timbiras</b><small>a clínica desmarcou 08/10</small><br><span class="t r">a remarcar</span></div></div>
+    <div class="kc nv"><h5>Consulta <span>3</span></h5>
+      <div class="cd"><b>Helena P.</b><small>Pedreiras · na sala agora</small><br><span class="t b">presente 9h12</span></div>
+      <div class="cd"><b>Marcos T.</b><small>Bacabal · consulta de 29/09</small><br><span class="t r">plano a montar há 2 dias</span> <span class="t">Brenda</span></div>
+      <div class="cd"><b>Ivone R.</b><small>Pedreiras · consulta de 30/09</small><br><span class="t y">orçamento do médico pendente</span></div></div>
+  </div>
+  <div class="kl">Depois da consulta</div>
+  <div class="kb">
+    <div class="kc"><h5>Plano ou orçamento enviado <span>5</span></h5>
+      <div class="cd"><b>Vera A.</b><small>Pedreiras · plano · R$ 0.000</small><br><span class="t y">enviado há 3 dias</span> <span class="t b">retorno 20/10</span></div>
+      <div class="cd"><b>Júlio C.</b><small>Pedreiras · orçamento direto</small><br><span class="t g">aceito</span> <span class="t r">aguardando pagamento</span></div></div>
+    <div class="kc nv ps"><h5>Em tratamento <span>7</span></h5>
+      <div class="cd"><b>Patrícia G.</b><small>Pedreiras</small><br><span class="t g">3 de 6 sessões</span> <span class="t">próxima 14/10</span></div>
+      <div class="cd"><b>Renata B.</b><small>Bacabal</small><br><span class="t g">1 de 1</span> <span class="t b">retorno 20/10</span></div>
+      <div class="cd"><b>Diego F.</b><small>Pedreiras</small><br><span class="t y">sessão liberada, sem marcar</span></div></div>
+    <div class="kc nv ps"><h5>Retorno <span>8</span></h5>
+      <div class="cd"><b>Seu José</b><small>Codó · consulta de 17/09</small><br><span class="t g">marcado 15/10</span></div>
+      <div class="cd"><b>Ana Clara</b><small>Pedreiras</small><br><span class="t y">resultado previsto 09/10</span></div>
+      <div class="cd"><b>Tereza M.</b><small>Vitorino Freire</small><br><span class="t r">vencido há 5 dias</span></div></div>
+    <div class="kc ps"><h5>Concluído <span>sai do quadro</span></h5>
+      <div class="cd"><small>31 no mês. Ficam em Pacientes. Marcar consulta nova reabre o cartão em Agendado.</small></div></div>
+    <div class="kc"><h5>Perdido <span>11</span></h5>
+      <div class="cd"><b>Não respondeu</b><small>6</small></div><div class="cd"><b>Preço</b><small>3</small></div><div class="cd"><b>Fez em outra clínica</b><small>2</small></div></div>
+  </div>
+  <span class="mut">Bordas amarelas: colunas novas. Bordas verdes: já contam como venda fechada e não entram na cobrança da vendedora, no follow-up nem no resgate. O cartão em Consulta também fica fora deles: ali quem deve é a clínica.</span>
+</div>
+<div class="nota"><b>Por que o procedimento não aparece.</b> O nome do procedimento ao lado do nome do paciente é dado de saúde. No quadro, na tela Hoje e nos avisos do celular fica só a categoria (consulta, procedimento, serviço) e o que está pendente. O procedimento aparece dentro do plano, do pacote e do horário da agenda, onde a recepção precisa dele para marcar e cobrar.</div>
+
+<h2><span class="n">03</span>O cartão do paciente no funil</h2>
+<div class="pn">
+  <div class="top"><span class="tt">Marina Costa</span><span class="mut">Em conversa · dona: Brenda · chegou 01/10 9h04 pelo anúncio <b>#IG</b></span></div>
+  <div class="g2">
+    <div>
+      <span class="lbl">O paciente</span><span class="chip on">é quem está falando</span><span class="chip">é outra pessoa</span>
+      <span class="mut" style="display:block">outra pessoa abre: nome, nascimento, parentesco, responsável</span>
+      <span class="lbl">Cidade</span><span class="inp">Codó ▾</span> <span class="mut">lista das cidades atendidas + "outra"</span>
+      <span class="lbl">Tipo de atendimento</span><span class="chip on">consulta</span><span class="chip">procedimento</span><span class="chip">serviço (vacina, teste, coleta)</span><span class="chip">outro</span>
+      <span class="lbl">Como chegou</span><span class="chip on">Instagram</span><span class="chip">Google</span><span class="chip">Rádio</span><span class="chip">Indicação</span><span class="chip">Já é paciente</span><span class="chip">WhatsApp direto</span><span class="chip">Telefone</span><span class="chip">Balcão</span>
+    </div>
+    <div>
+      <span class="lbl">Para sair de "Em conversa"</span>
+      <div class="lin"><span class="nm">Cidade</span><span class="t g">ok</span></div>
+      <div class="lin"><span class="nm">Tipo de atendimento</span><span class="t g">ok</span></div>
+      <div class="lin"><span class="nm">Como chegou</span><span class="t g">ok</span></div>
+      <div class="lin"><span class="nm">Preço passado<small>liga o "chamar de novo"</small></span><span class="t g">por escrito 9h11</span></div>
+      <div class="lin"><span class="nm">Próxima ação</span><span class="t y">oferecer data de Codó</span></div>
+      <span class="bt">Marcar na agenda</span><span class="bt sec">Orçamento direto</span><span class="bt sec">Follow-up com data</span><span class="bt sec">Passei o preço por áudio ou ligação</span><span class="bt red">Perdido…</span>
+    </div>
+  </div>
+  <span class="mut">Saem desta ficha na clínica: tipo de festa, data do evento, convidados, CNPJ, sócio, porte. "+ Novo contato" cria o cartão de quem chegou por telefone, balcão ou Instagram.</span>
+</div>
+
+<h2><span class="n">04</span>O dia do atendimento</h2>
+<p class="sub">Veio, faltou, pagou, remarcou, chegou sem marcar. E a clínica cancelando a ida a uma cidade</p>
+<div class="pn">
+  <div class="top"><span class="tt">Hoje na agenda · Codó · quinta 15/10</span><span class="mut">Dr. Manoel · 9 marcados · 6 confirmados · <span class="bt sec">+ Encaixe (chegou sem marcar)</span> <span class="bt red">Cancelar esta passagem</span></span></div>
+  <div class="lin"><span class="nm"><b>09:00 · Lúcia Ferreira</b><small>consulta · confirmou na véspera · ficha completa</small></span><span class="t g">confirmado</span><span class="t y">a receber</span><span class="bt">Presente</span><span class="bt sec">Receber</span><span class="bt sec">Remarcar</span></div>
+  <div class="lin"><span class="nm"><b>09:30 · Seu José</b><small>retorno da consulta de 17/09 · sem custo</small></span><span class="t b">presente 9h21</span><span class="bt sec">Chamar</span></div>
+  <div class="lin"><span class="nm"><b>10:00 · Pedro H.</b><small>consulta · não respondeu a véspera · 15 min de atraso</small></span><span class="t r">atrasado</span><span class="bt">Presente</span><span class="bt red">Faltou</span><span class="bt sec">Ligar</span></div>
+  <div class="lin"><span class="nm"><b>10:30 · Marina Costa</b><small>consulta · 1ª vez · ficha pela metade</small></span><span class="t g">pago</span><span class="bt sec">Balcão (QR)</span><span class="bt">Presente</span><span class="bt sec">Desmarcar</span></div>
+  <span class="mut">"Ligar" registra o resultado (atendeu, não atendeu) e conta como contato. "Atrasado" é só a hora passando; quem decide o Faltou é a recepção.</span>
+</div>
+<div class="tw"><table>
+<tr><th>Situação</th><th>O que acontece</th><th></th></tr>
+<tr><td>Paciente desmarca pelo WhatsApp com antecedência</td><td>"Desmarcar": o cartão vai para Follow-up e a vaga é oferecida a quem está na fila daquela cidade</td><td><span class="tg ex">existe</span> a oferta da vaga por cancelamento</td></tr>
+<tr><td>Paciente quer outro dia</td><td>"Remarcar" abre as próximas passagens pela cidade dele e a opção "atender em Pedreiras"</td><td><span class="tg aj">ajustar</span></td></tr>
+<tr><td>Faltou</td><td>Selo, mensagem de remarcar pronta, e a recepção pode desfazer no mesmo dia. A vaga de quem faltou já passou: não vai para a fila</td><td><span class="tg aj">ajustar</span></td></tr>
+<tr><td>Chegou sem marcar</td><td>"+ Encaixe" cria o paciente e o cartão já em Consulta</td><td><span class="tg co">novo</span></td></tr>
+<tr><td>A clínica cancela a ida à cidade</td><td>"Cancelar esta passagem": todos os marcados (consultas, retornos, sessões) ficam "a remarcar" com o selo "a clínica desmarcou", não conta como falta, a mensagem sai pronta com a próxima data ou a sede, e o prazo do retorno sem custo é estendido</td><td><span class="tg co">novo</span></td></tr>
+</table></div>
+
+<h2><span class="n">05</span>Finalizar: o desfecho</h2>
+<p class="sub">Três perguntas para consulta e avaliação. Um toque para vacina, coleta e sessão</p>
+<div class="pn">
+  <div class="top"><span class="tt">Finalizar atendimento · Marina Costa</span><span class="mut">consulta · Dr. Manoel · Codó · 15/10 10h30</span></div>
+  <div class="g2" style="grid-template-columns:1fr 1fr 1fr">
+    <div class="box">
+      <span class="lbl" style="margin-top:0">1 · Propôs tratamento?</span>
+      <span class="chip">Não</span><span class="chip on">Sim</span>
+      <span class="lbl">O que propôs (do catálogo)</span><span class="chip on">1 item</span><span class="chip">+ adicionar</span>
+      <span class="mut" style="display:block">vira o rascunho do plano</span>
+    </div>
+    <div class="box">
+      <span class="lbl" style="margin-top:0">2 · Retorno?</span>
+      <span class="chip">Sem retorno</span><span class="chip on">Em 30 dias</span><span class="chip">Outro</span>
+      <span class="lbl">Marcar agora · Codó</span>
+      <span class="chip on">12/11 · 9h</span><span class="chip">12/11 · 10h30</span><span class="chip">em Pedreiras</span><span class="chip">depois</span>
+    </div>
+    <div class="box">
+      <span class="lbl" style="margin-top:0">3 · Resultado a entregar?</span>
+      <span class="chip on">Não</span><span class="chip">Sim</span>
+      <span class="mut" style="display:block">sim: data prevista do laboratório</span>
+    </div>
+  </div>
+  <div class="box"><b>O cartão vai para: Consulta · plano a montar</b><br><span class="mut">A recepção vê "montar plano" na tela Hoje. Enviou: Plano enviado. Aceitou e pagou: Em tratamento, com o selo "retorno 12/11".</span></div>
+  <span class="bt">Finalizar</span><span class="bt sec">Paciente não quis o plano…</span><span class="bt sec">Saiu sem ser atendido</span>
+  <span class="mut" style="display:block;margin-top:.4rem">O prazo do retorno já vem sugerido pelo cadastro do atendimento. Consulta sem finalizar até o fim do dia vira aviso para o profissional.</span>
+</div>
+<p><b>As saídas da coluna Consulta,</b> para o cartão nunca ficar preso: a recepção envia o plano; o paciente não quis o plano (com motivo: vai para Retorno ou Concluído); o orçamento depende do médico (o cartão fica com ele como dono); a consulta não foi finalizada (aviso no fim do dia).</p>
+
+<h2><span class="n">06</span>A tela Hoje da recepção</h2>
+<p class="sub">A primeira tela de quem atende. Na fase 0 são cinco blocos; os outros entram depois</p>
+<div class="pn">
+  <div class="top"><span class="tt">Hoje · Brenda</span><span class="mut"><span class="chip on">os meus</span><span class="chip">todos</span> · 14 de 16 novos respondidos em 5 min</span></div>
+  <div class="box" style="border-color:#6E2E2A"><b style="color:#ff8a80">Prioridade</b> <span class="mut">palavra de urgência, paciente que fez procedimento nos últimos 15 dias, ou reclamação. O texto não aparece aqui</span>
+    <div class="lin" style="margin-top:.35rem"><span class="nm"><b>R. S.</b><small>Timbiras · escreveu há 4 min</small></span><span class="t r">urgência</span><span class="bt red">Abrir agora</span></div>
+    <div class="lin"><span class="nm"><b>P. G.</b><small>Pedreiras · fez sessão há 2 dias · escreveu há 9 min</small></span><span class="t y">pós-procedimento</span><span class="bt red">Abrir</span><span class="mut">o profissional foi avisado</span></div></div>
+  <div class="box"><b>1 · Esperando resposta</b> <span class="mut">o mais antigo primeiro; "obrigada" e "ok" não entram</span>
+    <div class="lin" style="margin-top:.35rem"><span class="nm"><b>Dona Francisca</b><small>novo · sem cidade</small></span><span class="t r">12 min</span><span class="bt">Abrir</span></div>
+    <div class="lin"><span class="nm"><b>Rafael M.</b><small>novo · sem cidade</small></span><span class="t y">3 min</span><span class="bt">Abrir</span></div></div>
+  <div class="g2">
+    <div class="box"><b>2 · Agenda de hoje</b> <span class="mut">Presente, Faltou, Receber</span>
+      <div class="lin" style="margin-top:.35rem"><span class="nm"><b>10:00 Pedro H.</b><small>15 min de atraso</small></span><span class="bt">Presente</span><span class="bt red">Faltou</span></div></div>
+    <div class="box"><b>3 · Planos a montar</b> <span class="mut">o profissional propôs, falta enviar</span>
+      <div class="lin" style="margin-top:.35rem"><span class="nm"><b>Marcos T.</b><small>Bacabal · consulta de 29/09</small></span><span class="t r">2 dias</span><span class="bt">Montar</span></div></div>
+  </div>
+  <div class="g2">
+    <div class="box"><b>4 · A marcar</b> <span class="mut">retornos, sessões e resultados que chegaram</span>
+      <div class="lin" style="margin-top:.35rem"><span class="nm"><b>Tereza M.</b><small>retorno · Vitorino Freire</small></span><span class="t r">vencido 5 dias</span><span class="bt">Marcar</span></div>
+      <div class="lin"><span class="nm"><b>Diego F.</b><small>sessão liberada</small></span><span class="bt">Marcar</span></div>
+      <div class="lin"><span class="nm"><b>Ana Clara</b><small>resultado chegou</small></span><span class="bt">Marcar entrega</span></div></div>
+    <div class="box"><b>5 · A receber</b> <span class="mut">aceitou e não pagou; atendido e não pagou</span>
+      <div class="lin" style="margin-top:.35rem"><span class="nm"><b>Júlio C.</b><small>orçamento aceito ontem</small></span><span class="bt">Mandar o Pix</span></div></div>
+  </div>
+  <div class="box"><b>Chamar de novo</b> <span class="mut">entra na fase 1: recebeu o preço e parou; faltou hoje</span>
+    <div class="lin" style="margin-top:.35rem"><span class="nm"><b>Carla N.</b><small>"Oi, Carla! Ficou alguma dúvida sobre a consulta?…"</small></span><span class="bt">Mandar</span><span class="bt sec">Já marcou</span><span class="bt sec">Não chamar</span></div></div>
+</div>
+<div class="tw"><table>
+<tr><th>Bloco</th><th>Hoje no Zaq</th><th></th></tr>
+<tr><td>Esperando resposta</td><td>Existe, mas sem minutos, sem dona, sem o filtro "os meus", e conta "obrigada" como pendência</td><td><span class="tg aj">ajustar</span></td></tr>
+<tr><td>Prioridade</td><td>A detecção de urgência por palavra existe, mas só roda com o agente ligado. Aqui ela roda sobre a última mensagem, sem responder nada ao paciente. Pós-procedimento e reclamação são novos</td><td><span class="tg aj">ajustar</span> <span class="tg co">novo</span></td></tr>
+<tr><td>Planos, pacotes, retornos, chamar de novo</td><td>Existem na tela Hoje. Os retornos passam a mostrar também os vencidos há mais de 7 dias</td><td><span class="tg ex">existe</span></td></tr>
+<tr><td>Agenda de hoje, planos a montar, resultados, a receber</td><td>Não estão na tela Hoje</td><td><span class="tg co">novo</span></td></tr>
+<tr><td>Ser a tela inicial da recepção</td><td>A recepção cai no aplicativo de vendas. A tela inicial passa a depender do tipo da conta: clínica abre em Hoje</td><td><span class="tg aj">ajustar</span></td></tr>
+</table></div>
+<div class="perigo"><b>Fora do horário, nas fases sem IA.</b> Com o agente desligado, quem escreve à noite ou no fim de semana não recebe nada, nem se for urgência. Proposta: uma mensagem fixa, sem IA, já na fase 0: "Recebemos sua mensagem. Nosso atendimento é de segunda a sexta, das 8h às 18h. Se for urgência, procure o pronto atendimento ou ligue 192." Texto aprovado pelo Dr. Manoel.</div>
+
+<h2><span class="n">07</span>A conversa com o roteiro ao lado</h2>
+<div class="pn">
+  <div class="top"><span class="tt">Marina Costa</span><span class="mut">Em conversa · <span class="t y">esperando há 2 min</span></span></div>
+  <div class="g3">
+    <div class="box"><span class="lbl" style="margin-top:0">Roteiro · consulta</span>
+      <div class="lin"><span class="nm">1 · Abertura</span><span class="t g">usado</span></div>
+      <div class="lin"><span class="nm">2 · Cidade, tipo, origem</span><span class="t g">cartão ok</span></div>
+      <div class="lin" style="border-color:#6B5320"><span class="nm"><b>3 · Preço por escrito</b></span><span class="bt">Usar</span></div>
+      <div class="lin"><span class="nm">4 · Duas datas da cidade</span><span class="bt sec">Usar</span></div>
+      <div class="lin"><span class="nm">5 · Confirmação + ficha</span><span class="bt sec">Usar</span></div>
+      <div class="lin"><span class="nm">6 · Próximo passo</span></div>
+      <span class="mut">mais: endereço · pagamento · avaliação · preparo do teste · vacina · remarcar · encerrar · <b>não posso orientar por aqui</b></span></div>
+    <div class="box"><span class="lbl" style="margin-top:0">Conversa</span>
+      <div class="lin"><span class="nm"><small>Marina 9h04</small>Oi, quero marcar consulta</span></div>
+      <div class="lin" style="background:#12281F"><span class="nm"><small>Brenda 9h06</small>Oi, Marina! Aqui é a Brenda, da Espaço Pelle 😊 Para te ajudar rápido, me diz: 1) sua cidade 2) o que você procura 3) se é para você ou outra pessoa</span></div>
+      <div class="lin"><span class="nm"><small>Marina 9h09</small>Codó. Consulta mesmo, pra mim. Quanto é?</span></div>
+      <div class="box" style="margin-top:.4rem"><span class="mut">caixa de resposta</span><br>A consulta com o Dr. Manoel é R$ 000. Pagamento em Pix, dinheiro ou cartão.<br><span class="bt">Enviar</span></div></div>
+    <div class="box"><span class="lbl" style="margin-top:0">Cartão</span>
+      <span class="chip on">Codó</span><span class="chip on">consulta</span><span class="chip on">Instagram</span>
+      <span class="lbl">Próximas passagens por Codó</span><span class="chip on">15/10</span><span class="chip">12/11</span><span class="chip">em Pedreiras</span>
+      <span class="lbl">Livres em 15/10</span><span class="chip">9h</span><span class="chip">10h30</span><span class="chip">14h</span>
+      <span class="bt">Marcar 15/10 10h30</span></div>
+  </div>
+  <span class="mut">"Usar" escreve na caixa, com o nome trocado, e marca o passo como usado; quem envia é a pessoa. O passo 3 também acende sozinho quando sai uma mensagem com preço, e o 5 quando o horário é marcado. Nada disso usa IA.</span>
+</div>
+<p>As respostas prontas já existem no Zaq, com a troca do nome. O que entra: a ordem do roteiro, aparecerem também no painel (hoje só no aplicativo), e a resposta 13, aprovada pelo Dr. Manoel, para quem descreve sintoma ou pergunta se é grave: "Não posso te orientar por aqui. Já avisei o Dr. Manoel. Se piorar, procure o pronto atendimento."</p>
+
+<h2><span class="n">08</span>Venda direta pelo WhatsApp</h2>
+<p class="sub">Para o que a clínica libera vender sem avaliação. Orçamento pelo link, pagamento, e só então as sessões</p>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+<div class="zap" style="flex:1;min-width:280px">
+  <div class="b">Oi, vocês fazem depilação a laser? Quanto é?<div class="h">14:02</div></div>
+  <div class="b eu">Oi, Júlio! Aqui é a Cristiane, da Espaço Pelle 😊 Fazemos sim, na nossa sede em Pedreiras. Me diz sua cidade e se é para você?<div class="h">14:04</div></div>
+  <div class="b">Pedreiras, pra mim<div class="h">14:05</div></div>
+  <div class="b eu">Te mando o orçamento com os valores e as formas de pagamento:<div class="card"><b>Espaço Pelle · Orçamento</b><br>6 sessões · R$ 0.000<br>Pix com 5% · cartão em até 6x · vale até 08/10<br>Antes de pagar: 4 perguntas rápidas de saúde, lidas pelo profissional<br><b>1</b> aceito no Pix · <b>2</b> aceito no cartão · <b>3</b> quero falar antes</div><div class="h">14:07</div></div>
+  <div class="b">1<div class="h">14:15</div></div>
+  <div class="b eu">Combinado, Júlio! Segue o Pix. Assim que cair, eu já marco a primeira sessão com você.<div class="h">14:15</div></div>
+</div>
+<div class="pn" style="flex:1;min-width:300px;margin:0">
+  <div class="top"><span class="tt">Catálogo · cada atendimento</span></div>
+  <span class="lbl" style="margin-top:0">Como se vende</span><span class="chip on">pode vender direto</span><span class="chip">só com avaliação</span><span class="chip">só o médico orça</span>
+  <span class="lbl">A recepção pode passar o preço</span><span class="chip on">sim</span><span class="chip">não</span>
+  <span class="lbl">Exige pedido ou receita</span><span class="chip on">não</span><span class="chip">sim</span>
+  <span class="lbl">Perguntas de saúde antes de pagar</span><span class="chip on">sim, pelo link</span><span class="chip">não</span>
+  <span class="lbl">Onde é feito</span><span class="chip on">só na sede</span><span class="chip">também nas cidades</span>
+  <span class="lbl">Retorno sugerido</span><span class="inp">— dias</span>
+  <span class="mut" style="display:block;margin-top:.4rem">Quem decide é o dono com o Dr. Manoel, item por item. Vale para a recepção agora e para o agente quando a IA entrar.</span>
+</div>
+</div>
+<p>O plano de tratamento que já existe faz quase tudo: link, aceite por 1, 2 ou 3, desconto no Pix, parcelas, validade, cobrança em 1 e 3 dias, e já pode nascer sem consulta. Entram: o botão na conversa, as perguntas de saúde antes de pagar (lidas só pelo profissional), o cartão só ir para Em tratamento com o pagamento, e o orçamento dizer a validade do pacote e a devolução se o profissional contraindicar.</p>
+
+<h2><span class="n">09</span>No celular da recepção</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+<div class="cel">
+  <div class="top" style="display:flex;justify-content:space-between"><b>Hoje</b><span class="t r">2 esperando</span></div>
+  <div class="lin"><span class="nm"><b>Dona Francisca</b><small>novo · sem cidade</small></span><span class="t r">12 min</span></div>
+  <div class="lin"><span class="nm"><b>Rafael M.</b><small>novo</small></span><span class="t y">3 min</span></div>
+  <div class="kl">Agenda de hoje · Codó</div>
+  <div class="lin"><span class="nm"><b>10:00 Pedro H.</b></span><span class="bt" style="background:#1E6B4E">Presente</span></div>
+  <div class="kl">Fazer hoje</div>
+  <div class="lin"><span class="nm">Montar plano · Marcos T.</span></div>
+  <div class="lin"><span class="nm">Retorno vencido · Tereza M.</span></div>
+  <div class="tabs"><b>Hoje</b><span>Conversas</span><span>Agenda</span><span>Pacientes</span></div>
+</div>
+<div style="flex:1;min-width:260px">
+  <ul>
+    <li><b>Quatro abas:</b> Hoje, Conversas, Agenda e Pacientes.</li>
+    <li><b>Na conversa,</b> os atalhos são "Marcar consulta" (na agenda da clínica) e "Plano ou orçamento". Hoje eles criam visita e orçamento de festa.</li>
+    <li><b>Aviso no celular</b> só com iniciais, sem trecho da mensagem: "M. C. esperando há 5 min".</li>
+    <li><b>"Devolver ao agente"</b> some até a fase da IA. Hoje esse botão liga a IA naquela conversa mesmo com a chave geral desligada.</li>
+    <li><b>Na cidade de viagem,</b> é por aqui que quem acompanha o Dr. Manoel marca Presente, Faltou e Receber.</li>
+  </ul>
+</div>
+</div>
+
+<h2><span class="n">10</span>A fila de follow-up da equipe (fase 2)</h2>
+<p class="sub">Para cada cartão em aberto, a próxima ação e a data. Primeiro em ensaio, depois valendo</p>
+<div class="pn">
+  <div class="top"><span class="tt">Follow-up</span><span class="mut"><span class="t y">em ensaio: calcula e mostra, não avisa ninguém</span></span></div>
+  <div class="g2" style="grid-template-columns:repeat(4,1fr)">
+    <div class="box"><b style="font-size:1.3rem">2</b><br><span class="mut">crítico</span></div>
+    <div class="box"><b style="font-size:1.3rem">5</b><br><span class="mut">atrasado</span></div>
+    <div class="box"><b style="font-size:1.3rem">9</b><br><span class="mut">para hoje</span></div>
+    <div class="box"><b style="font-size:1.3rem">0</b><br><span class="mut">sem próxima ação</span></div>
+  </div>
+  <div class="lin"><span class="nm"><b>Paulo Ribeiro</b><small>Bacabal · respondemos há 3 dias, ele sumiu</small></span><span class="t r">atrasado 1 dia</span><span class="t">Cristiane</span><span class="bt">Abrir</span><span class="bt sec">Reagendar</span></div>
+  <div class="lin"><span class="nm"><b>Vera A.</b><small>Pedreiras · plano enviado há 3 dias</small></span><span class="t y">hoje: ligar</span><span class="t">Brenda</span><span class="bt">Abrir</span></div>
+  <div class="lin"><span class="nm"><b>Antônio L.</b><small>Lago da Pedra · faltou em 30/09</small></span><span class="t y">hoje: remarcar</span><span class="t">Cristiane</span><span class="bt">Abrir</span></div>
+</div>
+<p>Essa fila <b>já existe no Zaq</b> e é a que a Prime usa; só está fechada para clínica. O trabalho é abrir e ajustar: as situações da clínica (sumiu depois do preço, faltou, plano parado), a palavra "paciente", e a escalada mais curta para uma equipe de duas pessoas (venceu: avisa a dona; um dia depois: avisa o dono). Consulta, Em tratamento e Retorno não entram: são cuidados pela tela Hoje e pelos lembretes de sessão e de retorno.</p>
+
+<h2><span class="n">11</span>O ensaio do resgate (fase 3)</h2>
+<p class="sub">A IA lê o cartão parado há 7 dias e escreve a retomada. As prévias ficam numa tela do Zaq, com iniciais</p>
+<div class="pn">
+  <div class="top"><span class="tt">Resgate · ensaio</span><span class="mut">3 de 10 hoje · nada foi enviado a paciente</span></div>
+  <div class="box"><b>P. R. · Bacabal · consulta</b> <span class="mut">parado há 8 dias · dona: Cristiane</span><br>
+    <span class="lbl">Eu mandaria</span>"Oi, Paulo! Aqui é da Espaço Pelle. Você tinha perguntado sobre a consulta com o Dr. Manoel. Ele atende em Bacabal no dia 20/10. Quer que eu veja um horário para você? Se preferir que eu não chame mais, é só dizer."<br>
+    <span class="bt">Eu mandaria igual</span><span class="bt sec">Mudaria…</span><span class="bt red">Não chamaria</span></div>
+  <div class="box"><b>C. N. · Pedreiras</b><br><span class="lbl">Eu não chamaria</span>O paciente disse que não tem mais interesse.<br><span class="bt">Concordo</span><span class="bt sec">Discordo</span></div>
+  <span class="mut">O WhatsApp do supervisor recebe só "há 10 prévias para revisar". Conversa com foto, áudio ou descrição de sintoma fica fora do ensaio.</span>
+</div>
+<ul>
+  <li><b>O texto da IA</b> nunca cita sintoma, diagnóstico nem o procedimento; o resumo e o motivo do "não chamaria" passam pelo mesmo filtro.</li>
+  <li><b>Quem revisa:</b> você e o Dr. Manoel. Quem não é profissional de saúde e lê conversa de paciente assina termo de sigilo; o aviso de privacidade da clínica passa a dizer que há uso de IA.</li>
+  <li><b>Hoje</b> o ensaio manda a prévia completa para o WhatsApp do supervisor, com o nome do cliente. Para clínica isso muda para a tela acima.</li>
+  <li><b>Passa a valer</b> depois de 5 dias com 9 de cada 10 prévias marcadas "eu mandaria igual".</li>
+</ul>
+
+<h2><span class="n">12</span>As mensagens automáticas: uma linha do tempo só</h2>
+<p class="sub">Um paciente que perguntou o preço e parou recebe no máximo três mensagens, e pode sair em qualquer uma</p>
+<div class="tw"><table>
+<tr><th>Quando</th><th>O quê</th><th>Quem manda</th></tr>
+<tr><td>no dia</td><td>A recepção responde e passa o preço</td><td>pessoa</td></tr>
+<tr><td>+1 dia útil</td><td>"Chamar de novo" 1</td><td>fase 1: a recepção aperta Mandar · fase 2: sai sozinho</td></tr>
+<tr><td>+4 dias</td><td>"Chamar de novo" 2, com a próxima data na cidade dele</td><td>igual</td></tr>
+<tr><td>+8 dias sem nada nosso</td><td>Resgate: uma retomada escrita pela IA</td><td>fase 3: só prévia · fase 4: sai sozinho</td></tr>
+<tr><td>+10 dias depois da retomada</td><td>Perdido "não respondeu"</td><td>automático, só na fase 4</td></tr>
+</table></div>
+<ul>
+  <li><b>Toda mensagem automática termina com a saída:</b> "Se preferir que eu não chame mais, é só dizer." Quem pede para parar não recebe mais nada, desde a fase 1.</li>
+  <li><b>Uma por paciente por dia,</b> somando chamar de novo, vaga, plano, lembretes e resgate. Nada automático fora do horário de atendimento.</li>
+  <li><b>Enquanto a sequência roda,</b> o prazo da etapa fica parado. O perdido automático só age depois do resgate, e fica em ensaio até o resgate valer.</li>
+  <li><b>Hoje</b> o "chamar de novo" tem quatro toques (+3 horas, +1 dia, +3 dias, +7 dias) e o resgate tem três mensagens. Somados dariam sete para a mesma pessoa.</li>
+</ul>
+<div class="pn">
+  <div class="top"><span class="tt">O que liga em cada fase</span><span class="mut">horário de atendimento: segunda a sexta, 8h às 18h</span></div>
+  <div class="tw" style="margin:0"><table>
+    <tr><th>Chave</th><th>Fase 0</th><th>Fase 1</th><th>Fase 2</th><th>Fase 3</th><th>Fase 4</th></tr>
+    <tr><td>Aviso: novo sem resposta em 5 min; os outros em 15</td><td><span class="t">desligado</span></td><td><span class="t y">ensaio</span> › <span class="t g">ligado</span></td><td><span class="t g">ligado</span></td><td><span class="t g">ligado</span></td><td><span class="t g">ligado</span></td></tr>
+    <tr><td>Cartão anda sozinho na primeira resposta</td><td><span class="t">desligado</span></td><td><span class="t y">ensaio</span> › <span class="t g">ligado</span></td><td><span class="t g">ligado</span></td><td><span class="t g">ligado</span></td><td><span class="t g">ligado</span></td></tr>
+    <tr><td>Temperatura</td><td><span class="t">desligado</span></td><td><span class="t y">ensaio</span> › <span class="t g">ligado</span></td><td><span class="t g">ligado</span></td><td><span class="t g">ligado</span></td><td><span class="t g">ligado</span></td></tr>
+    <tr><td>Chamar de novo depois do preço</td><td><span class="t b">a pessoa manda</span></td><td><span class="t b">a pessoa manda</span></td><td><span class="t g">sai sozinho</span></td><td><span class="t g">sai sozinho</span></td><td><span class="t g">sai sozinho</span></td></tr>
+    <tr><td>Fila de follow-up da equipe</td><td><span class="t">fechada para clínica</span></td><td><span class="t">fechada</span></td><td><span class="t y">ensaio</span> › <span class="t g">ligado</span></td><td><span class="t g">ligado</span></td><td><span class="t g">ligado</span></td></tr>
+    <tr><td>Prazo por etapa</td><td><span class="t">desligado</span></td><td><span class="t">desligado</span></td><td><span class="t y">ensaio</span> › <span class="t g">ligado</span></td><td><span class="t g">ligado</span></td><td><span class="t g">ligado</span></td></tr>
+    <tr><td>Resgate</td><td><span class="t">desligado</span></td><td><span class="t">desligado</span></td><td><span class="t">desligado</span></td><td><span class="t y">ensaio</span></td><td><span class="t g">ligado</span></td></tr>
+    <tr><td>Perdido automático</td><td><span class="t">desligado</span></td><td><span class="t">desligado</span></td><td><span class="t y">ensaio</span></td><td><span class="t y">ensaio</span></td><td><span class="t g">ligado</span></td></tr>
+    <tr><td>Mensagem fixa fora do horário</td><td><span class="t g">ligada</span></td><td><span class="t g">ligada</span></td><td><span class="t g">ligada</span></td><td><span class="t g">ligada</span></td><td><span class="t">o agente assume</span></td></tr>
+    <tr><td>Agente de IA</td><td><span class="t">desligado</span></td><td><span class="t">desligado</span></td><td><span class="t">desligado</span></td><td><span class="t">desligado</span></td><td><span class="t g">fora do horário</span> › <span class="t g">no pico</span></td></tr>
+  </table></div>
+  <span class="mut">A esteira fica desligada em todas as fases: no modo de observação ela já avisa de verdade, e a fila de follow-up cobre.</span>
+</div>
+<p>Passar de fase é pela <b>média da semana</b>, na reunião de segunda, e não por dias seguidos sem falha.</p>
+
+<h2><span class="n">13</span>Os números de segunda</h2>
+<p class="sub">Só totais, sem nome de paciente. Por cidade o caminho; por pessoa a resposta</p>
+<div class="pn">
+  <div class="top"><span class="tt">Semana de 12 a 16/10</span></div>
+  <div class="tw" style="margin:0 0 .6rem"><table>
+    <tr><th>Cidade</th><th>Novos</th><th>Agendaram</th><th>Vieram</th><th>Viraram plano</th><th>Plano pago</th><th>Retornos vencidos</th></tr>
+    <tr><td>Pedreiras</td><td class="num">41</td><td class="num">22</td><td class="num">19 de 22</td><td class="num">8</td><td class="num">5</td><td class="num">3</td></tr>
+    <tr><td>Codó</td><td class="num">18</td><td class="num">11</td><td class="num">8 de 11</td><td class="num">3</td><td class="num">2</td><td class="num">1</td></tr>
+    <tr><td>Bacabal</td><td class="num">15</td><td class="num">6</td><td class="num">6 de 6</td><td class="num">2</td><td class="num">0</td><td class="num">4</td></tr>
+  </table></div>
+  <div class="tw" style="margin:0"><table>
+    <tr><th>Pessoa</th><th>Novos respondidos em 5 min</th><th>Planos a montar parados</th><th>Receberam preço e marcaram</th><th>Sem próxima ação</th></tr>
+    <tr><td>Brenda</td><td class="num">83%</td><td class="num">1</td><td class="num">12 de 20</td><td class="num">0</td></tr>
+    <tr><td>Cristiane</td><td class="num">71%</td><td class="num">0</td><td class="num">9 de 17</td><td class="num">2</td></tr>
+  </table></div>
+  <span class="mut">"Novos" conta pela cidade do cartão. "Vieram" e "retornos vencidos" contam pelo local do atendimento. "Plano pago" conta o plano aceito e pago. O tempo de resposta conta só o horário de atendimento.</span>
+</div>
+
+<h2><span class="n">14</span>A ordem de construção, depois da aprovação</h2>
+<p class="sub">Cada linha é uma entrega pequena, com teste e revisão, como foi no prontuário</p>
+<div class="tw"><table>
+<tr><th>#</th><th>Entrega</th><th>Seções</th><th>Fase</th></tr>
+<tr><td class="num">1</td><td><b>Funil da clínica.</b> Etapas Consulta, Em tratamento e Retorno; a regra por tipo de horário; os desfechos; resultado a entregar; aceite e pagamento levando a Em tratamento; conclusão quando o pacote zera; retorno que só fecha com horário de retorno; cartão concluído que reabre ao marcar. Inclui trocar as listas fixas de etapa que hoje não conhecem as colunas novas (agenda, plano, chamar de novo, relatórios) e levar o funil novo às contas de clínica que já existem.</td><td>01, 02, 05</td><td>0</td></tr>
+<tr><td class="num">2</td><td><b>Agenda do dia.</b> Receber, Remarcar, Desmarcar, desfazer Faltou, Encaixe, Cancelar passagem, finalizar com um toque</td><td>04, 05</td><td>0</td></tr>
+<tr><td class="num">3</td><td><b>Cartão de clínica.</b> Paciente e responsável, cidade em lista, tipo de atendimento, origem única com Rádio, Telefone e Balcão; sem campos de festa; um cartão por paciente e interesse</td><td>01, 03</td><td>0</td></tr>
+<tr><td class="num">4</td><td><b>Tela Hoje.</b> Tela inicial da clínica; os cinco blocos; prioridade sem IA; minutos e dona; mensagem fixa fora do horário</td><td>06, 09</td><td>0</td></tr>
+<tr><td class="num">5</td><td><b>Conversa com roteiro e aplicativo.</b> Respostas em ordem, no painel e no celular; atalhos de clínica; avisos com iniciais; sem "Devolver ao agente"</td><td>07, 09</td><td>0</td></tr>
+<tr><td class="num">6</td><td><b>Venda direta.</b> Campos do catálogo, orçamento da conversa, perguntas de saúde, "chamar de novo" também para preço de procedimento e para preço dito por áudio</td><td>08</td><td>1</td></tr>
+<tr><td class="num">7</td><td><b>Números de segunda</b>, por cidade e por pessoa</td><td>13</td><td>1</td></tr>
+<tr><td class="num">8</td><td><b>Mensagens.</b> Dois toques com a frase de saída; a linha do tempo única; fila de follow-up aberta para clínica, com ensaio</td><td>10, 12</td><td>2</td></tr>
+<tr><td class="num">9</td><td><b>Resgate para clínica.</b> Prévias na tela com iniciais, um número só, filtro de saúde, fora das colunas Consulta, Em tratamento e Retorno, convite pela cidade</td><td>11</td><td>3</td></tr>
+<tr><td class="num">10</td><td><b>Agente.</b> Modo "só fora do horário", pergunta cidade e tipo, respeita "como se vende"</td><td>08, 12</td><td>4</td></tr>
+</table></div>
+<p>Sem código, logo após a aprovação: logins da recepção, rodízio, nomes das etapas, motivos de perda, horário de atendimento, catálogo com preço, respostas prontas, grade por cidade.</p>
+
+<h2><span class="n">15</span>O que falta você decidir</h2>
+<div class="q"><div class="qt">A. Plano que não fecha</div><div class="qo"><span class="rec">Sugestão:</span> o motivo fica no plano e o cartão vai para Retorno ou Concluído. "Perdido" só para quem nunca virou paciente.</div></div>
+<div class="q"><div class="qt">B. Pagamento</div><div class="qo">A consulta é paga na chegada ou na saída? Para segurar horário em cidade de viagem, vocês querem sinal por Pix? <span class="rec">Sugestão:</span> tratamento só começa com pagamento ou entrada.</div></div>
+<div class="q"><div class="qt">C. Retorno sem custo</div><div class="qo">O preço diz "inclui retorno em até 30 dias", mas numa cidade de passagem mensal a próxima ida pode cair depois disso. <span class="rec">Sugestão:</span> "retorno sem custo até a próxima passagem do Dr. Manoel pela sua cidade". E vencido o prazo: retorno pago, ou cortesia autorizada pelo médico?</div></div>
+<div class="q"><div class="qt">D. O que se vende direto</div><div class="qo">Item por item: pode vender direto, só com avaliação, ou só o médico orça; se exige pedido ou receita (vacina e teste alérgico, a confirmar com o Dr. Manoel); e o que só é feito na sede.</div></div>
+<div class="q"><div class="qt">E. Um cartão por paciente e por interesse</div><div class="qo">A mãe com dois filhos vira dois cartões no mesmo telefone; o paciente em tratamento que pergunta por outra coisa ganha um segundo cartão. Confirma?</div></div>
+<div class="q"><div class="qt">F. Quantas mensagens automáticas</div><div class="qo"><span class="rec">Sugestão:</span> duas do "chamar de novo" e uma do resgate, todas com a frase de saída. A outra opção é manter os quatro toques de hoje.</div></div>
+<div class="q"><div class="qt">G. Mensagem fixa fora do horário, já na fase 0</div><div class="qo">Não é IA, é um texto só. Sem ela, quem escreve à noite com uma urgência não recebe nada até a fase 4.</div></div>
+<div class="q"><div class="qt">H. Quem faz o balcão nas cidades de viagem</div><div class="qo">Quem marca Presente, Faltou e Receber quando o Dr. Manoel está em Codó? Se ninguém, o plano vai pelo WhatsApp em até 24 horas, e não "antes de o paciente sair".</div></div>
+<div class="q"><div class="qt">I. O número de WhatsApp da clínica</div><div class="qo">Está ligado por QR ou pela API oficial? Pela API, mensagem automática fora das 24 horas precisa de modelo aprovado; por QR, envio automático em volume arrisca bloqueio.</div></div>
+<div class="q"><div class="qt">J. Menores</div><div class="qo">Tolerância para "Faltou" (sugeri 15 minutos); rodízio simples ou por cidade; e se cada vendedora vê os próprios números.</div></div>
+
+<div class="ftr">Clínica no Zaq, parte 6: o CRM da recepção, tela por tela. Versão 2, aprovada em 01/10/2026. Revisada contra o código (18 achados) e contra a operação de uma clínica (18 achados). Acompanha "CRM Pelle por fases" e "Método ROTA Pelle". Dados das telas: fictícios. Na data da aprovação, nada estava construído.</div>
+</div>
+</body></html>

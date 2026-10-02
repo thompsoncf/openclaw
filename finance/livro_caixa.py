@@ -144,6 +144,11 @@ class LivroCaixa:
         # a imagem da mensagem atual, (bytes, content-type): o webhook do WhatsApp
         # põe aqui pra `guardar_foto_da_obra` guardar a foto que não é nota
         self.midia_atual = None
+        # a escolha com toque (finance/escolhas.py): a ferramenta põe aqui, e o
+        # WhatsApp/Telegram mandam os botões depois da resposta. `canal_interativo`
+        # o webhook liga — sem ele, as opções vão escritas no texto.
+        self.escolha = None
+        self.canal_interativo = False
 
     def lancamento_por_chave(self, chave: str | None, global_: bool = False) -> dict | None:
         """Consulta se ja' existe lancamento com essa chave (NFC-e).

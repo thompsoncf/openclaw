@@ -1126,6 +1126,8 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .respdica{font-size:.7rem;color:var(--text-dim);line-height:1.45;
   border-left:2px solid var(--line);padding-left:.5rem}
 .respdica b{color:var(--text)}
+.assdica{font-size:.78rem;color:var(--text-dim);line-height:1.45;text-align:center;margin:0 0 .55rem}
+.assdica b{color:var(--text)}
 .respbusca{background:var(--surface);border:1px solid var(--line);border-radius:999px;
   color:var(--text);padding:.5rem .85rem;font-family:inherit;font-size:.85rem}
 .resplista{overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:.35rem}
@@ -4254,6 +4256,20 @@ _ORC_JS = r"""
   };
   function pronto(j){
     $("build").style.display="none";$("rodape").style.display="none";
+    // OS DADOS PRINCIPAIS (regra do dono, 01/10/2026): a proposta fica salva, mas
+    // nenhum botão de mandar aparece enquanto faltar algo — o servidor recusa igual.
+    var pend=j.pendencias||[];
+    if(pend.length){
+      var fic=(pend.indexOf("nome do cliente")>=0||pend.indexOf("CPF ou CNPJ")>=0)
+        ?'<a class=btn href="'+O.base+'/lead/'+O.leadId+'/ficha">Preencher na ficha</a>':'';
+      $("pronto").innerHTML='<div class=pronto><div class=big>!</div><h3>Proposta salva — falta pouco</h3>'
+        +'<div class=evaviso style="margin:.6rem 0;text-align:left"><b>Não dá pra mandar ainda: falta '
+        +esc(pend.join(", "))+'.</b>Preencha e mande pela tela do orçamento.</div>'+fic
+        +'<a class="btn ghost" style="margin-top:.5rem" href="'+O.base+'/lead/'+O.leadId+'/orcamento?orc='+j.id+'">Editar o orçamento</a>'
+        +'<a class="btn ghost" style="margin-top:.5rem" href="'+O.base+'/lead/'+O.leadId+'">Voltar pro lead</a></div>';
+      $("pronto").style.display="block";
+      return;
+    }
     // sem o atalho pro WhatsApp (conta que entrega tudo pelo Zaq) o "Enviar na
     // conversa" vira a ação principal — botão fantasma sozinho parece opcional
     var wa=j.zap?'<a class=btn href="'+esc(j.zap)+'" target=_blank rel=noopener>Mandar no WhatsApp</a>':'';
@@ -4632,14 +4648,21 @@ def cockpit_ia_orcamento(request: Request, orc_id: int):
          if ev.get("inicio") else ""),
         (f"{int(ev['convidados'])} convidados" if ev.get("convidados") else "")] if x)
     feito = d["estado"] != "conferir"
+    # OS DADOS PRINCIPAIS (regra do dono, 01/10/2026): a IA monta sem o CPF, e o
+    # orçamento espera na fila até alguém completar — `iao.mandar` recusa igual.
+    from finance import contrato as _ctr_p
+    _pend = [] if feito else _ctr_p.pendencias_pra_mandar(pool, conta_id, orc_id)
+    aviso_pend = _aviso_pendencias(_pend, d, orc_id, "este orçamento") if _pend else ""
     botoes = ("<div class=fonte>Este orçamento já foi "
               + ("mandado." if d["estado"] == "enviado" else "descartado.") + "</div>"
               if feito else
-              "<button class=btn id=iaoMandar type=button>✅ Conferir e mandar</button>"
-              f"<a class='btn ghost' href='{_BASE}/orcamentos/{orc_id}'>Editar</a>"
+              ("<button class=btn type=button disabled>✅ Conferir e mandar</button>" if _pend else
+               "<button class=btn id=iaoMandar type=button>✅ Conferir e mandar</button>")
+              + f"<a class='btn ghost' href='{_BASE}/orcamentos/{orc_id}'>Editar</a>"
               "<button class='btn ghost' id=iaoDescartar type=button>Descartar</button>")
     corpo = (_hdr("Orçamento da IA", d["quem"], voltar=_BASE)
              + "<div class=toast id=toast></div><div class=scroll>"
+             + (f"<div class=secao>{aviso_pend}</div>" if aviso_pend else "")
              + f"<div class=secao><div class=rot>{_P('cliente')}</div><div class=local>"
                f"<div class=nome>{esc(d['quem'])}</div><div class=end>{festa or 'sem dados da festa'}</div></div></div>"
              + f"<div class=secao><div class=rot>O que a IA montou · nº {esc(str(d['numero'] or ''))}</div>"
@@ -5059,6 +5082,23 @@ def cockpit_orcamentos(request: Request, s: str = "", v: str = ""):
     return _page("Propostas", corpo)
 
 
+def _aviso_pendencias(falta: list, o: dict, orc_id: int, doc: str) -> str:
+    """O bloco que entra NO LUGAR dos botões de mandar quando falta dado principal:
+    o que falta e o atalho pra onde se preenche (a ficha pro nome/CPF, o orçamento
+    pro evento e as parcelas)."""
+    atalhos = ""
+    if o.get("lead_id"):
+        if {"nome do cliente", "CPF ou CNPJ"} & set(falta):
+            atalhos += (f" <a href='{_BASE}/lead/{o['lead_id']}/ficha' "
+                        "style='color:var(--neon)'>Preencher na ficha</a>")
+        if set(falta) - {"nome do cliente", "CPF ou CNPJ"}:
+            atalhos += (f" <a href='{_BASE}/lead/{o['lead_id']}/orcamento?orc={orc_id}' "
+                        "style='color:var(--neon)'>Editar o orçamento</a>")
+    return ("<div class=evaviso style='margin:0 0 .5rem'><b>Não dá pra mandar "
+            f"{esc(doc)} ainda: falta {esc(', '.join(falta))}.</b>"
+            f"Preencha e os botões de mandar aparecem.{atalhos}</div>")
+
+
 @router.get("/cockpit/orcamentos/{orc_id}", response_class=HTMLResponse)
 def cockpit_orcamento(request: Request, orc_id: int):
     g = _gerencia(request)
@@ -5091,7 +5131,14 @@ def cockpit_orcamento(request: Request, orc_id: int):
     # assinado pela empresa, e volta pra esta tela com o resultado. Fica em primeiro
     # porque é o caminho que a gente quer ensinar.
     envio = []
-    if not gestao:
+    # OS DADOS PRINCIPAIS (regra do dono, 01/10/2026): sem eles nenhum botão de
+    # mandar aparece — no lugar, o que falta e onde preencher. O servidor recusa
+    # do mesmo jeito (`cockpit._bloqueio_de_envio`).
+    from finance import contrato as _ctr_p
+    _pend = _ctr_p.pendencias_pra_mandar(get_pool(), conta_id, orc_id) if o["status"] != "fechado" else []
+    if _pend:
+        envio.append(_aviso_pendencias(_pend, o, orc_id, "a proposta"))
+    if not gestao and not _pend:
         tem_email = "@" in (o.get("email") or "")
         if tem_email:
             envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/email'>"
@@ -5102,10 +5149,10 @@ def cockpit_orcamento(request: Request, orc_id: int):
             # senão o vendedor fica olhando pra uma tela que mudou e não sabe por quê
             envio.append("<div class=dica style='margin:0 0 .5rem'>Esse " + _p('cliente') + " não tem "
                          "e-mail cadastrado — dá pra mandar na conversa ou copiar o link.</div>")
-    if o["zap"]:
+    if o["zap"] and not _pend:
         envio.append(f"<a class='btn ghost' style='margin-top:.5rem' href='{esc(o['zap'])}' "
                      f"target=_blank rel=noopener>{_ic('zap', 'ic p')} Mandar no WhatsApp</a>")
-    if o["lead_id"] and not gestao:
+    if o["lead_id"] and not gestao and not _pend:
         envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/enviar'>"
                      "<button class='btn ghost' style='margin-top:.5rem' type=submit>"
                      "Enviar na conversa do " + _p('lead') + "</button></form>")
@@ -5116,12 +5163,13 @@ def cockpit_orcamento(request: Request, orc_id: int):
         # andar sozinho. `keepalive` porque quem copia troca de app em seguida, e o
         # `catch` é mudo de propósito: o link JÁ está na área de transferência, e um
         # erro de rede não pode virar aviso dizendo o contrário.
-        envio.append("<div class=copiar><input value='" + esc(o["link"]) + "' readonly "
-                     "onclick='this.select()'><button type=button onclick=\"navigator.clipboard"
-                     ".writeText(this.previousElementSibling.value);this.textContent='Copiado';"
-                     "fetch('" + _BASE + "/orcamentos/" + str(orc_id) + "/link-copiado',"
-                     "{method:'POST',keepalive:true}).catch(function(){})\">"
-                     "Copiar</button></div>")
+        if not _pend:
+            envio.append("<div class=copiar><input value='" + esc(o["link"]) + "' readonly "
+                         "onclick='this.select()'><button type=button onclick=\"navigator.clipboard"
+                         ".writeText(this.previousElementSibling.value);this.textContent='Copiado';"
+                         "fetch('" + _BASE + "/orcamentos/" + str(orc_id) + "/link-copiado',"
+                         "{method:'POST',keepalive:true}).catch(function(){})\">"
+                         "Copiar</button></div>")
 
     fechada = o["status"] == "fechado"
 
@@ -5246,17 +5294,41 @@ def cockpit_orcamento(request: Request, orc_id: int):
                 # com todas as letras em vez de ficar muda como ficava.
                 _estado = "<b style='color:var(--coral)'>Ainda não foi enviado.</b>"
                 _rot = "Mandar na conversa"
+            # O QUE FALTA NO CONTRATO, antes de mandar — a mesma conta da página do
+            # contrato. Até 01/10/2026 quem descobria era o cliente (nº 47 da Prime,
+            # "Campos sem valor: cliente.doc"). Avisa e pergunta; não bloqueia.
+            try:
+                from web.contrato_publico import faltas_do_orcamento
+                _faltas = faltas_do_orcamento(get_pool(), conta_id, orc_id)
+            except Exception:  # noqa: BLE001
+                _faltas = []
+            _ficha = (f" <a href='{_BASE}/lead/{o['lead_id']}/ficha' style='color:var(--neon)'>"
+                      "Preencher na ficha</a>" if o.get("lead_id") else "")
+            _aviso_falta = (
+                "<div class=evaviso style='margin:.5rem 0 0'><b>Falta no contrato: "
+                f"{esc(', '.join(_faltas))}.</b>O {_p('cliente')} vai ver o aviso de campo "
+                f"sem valor e não deveria assinar assim.{_ficha}</div>") if _faltas else ""
+            import json as _json
+            _confirma = (' onsubmit="return confirm('
+                         + esc(_json.dumps(f"O contrato está sem: {', '.join(_faltas)}. "
+                                           "Mandar mesmo assim?", ensure_ascii=False))
+                         + ')"') if _faltas else ""
+            # os DADOS PRINCIPAIS travam (regra do dono, 01/10/2026); os outros
+            # campos vazios do modelo só avisam e perguntam
+            _pend_ct = _ctr_p.pendencias_pra_mandar(get_pool(), conta_id, orc_id)
+            if _pend_ct:
+                _aviso_falta = _aviso_pendencias(_pend_ct, o, orc_id, "o contrato")
             ctr_html = (
                 "<div class=eyebrow>Contrato</div><div class=bloco>"
                 f"<div class=card style='font-size:.84rem;color:var(--text-dim)'>"
                 f"Contrato{esc(_num)} · {_estado}<br>O {_p('cliente')} lê e assina pelo link, "
-                "do celular dele.</div>"
-                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/conversa'>"
+                f"do celular dele.{_aviso_falta}</div>"
+                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/conversa'{_confirma}>"
                    f"<button class=btn type=submit>{esc(_rot)}</button></form>"
-                   if o.get("lead_id") else "")
-                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/email'>"
+                   if o.get("lead_id") and not _pend_ct else "")
+                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/email'{_confirma}>"
                    "<button class='btn ghost' type=submit>Mandar por e-mail</button></form>"
-                   if (o.get("email") or "").strip() else "")
+                   if (o.get("email") or "").strip() and not _pend_ct else "")
                 + f"<a class='btn ghost' href='{esc(_ct['link'])}' target=_blank "
                   "rel=noopener>Abrir o contrato</a></div>")
 
@@ -6824,8 +6896,18 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                  "</div>")
 
     if d["ia"]:
-        acao = (f"<form method=post action='{_BASE}/lead/{lead_id}/assumir'>"
-                "<button class=btn type=submit>Assumir a conversa</button></form>")
+        # o app de ESTANDES (01/10/2026): o "Link de stands" tocado com o agente
+        # atendendo chega aqui com a mensagem no `?texto=`. Ela vai junto no Assumir e
+        # volta pronta pra caixa — antes sumia e o vendedor tinha que tocar de novo.
+        _txt = ""
+        if em_stands:
+            _qp_ia = getattr(request, "query_params", None)
+            _txt = ((_qp_ia.get("texto") if _qp_ia else "") or "")[:300]
+        acao = (f"<form method=post action='{_BASE}/lead/{lead_id}/assumir"
+                + ("?" + esc(_urlencode({"texto": _txt})) if _txt else "") + "'>"
+                + ("<div class=assdica>Toque em <b>Assumir a conversa</b>: a mensagem com "
+                   "o seu link já entra pronta na caixa.</div>" if _txt else "")
+                + "<button class=btn type=submit>Assumir a conversa</button></form>")
     else:
         # `pode_voz` chega de fora (o microfone só existe no canal QR): quem
         # monta a tela não vai buscar sessão nem banco pra decidir isso.
@@ -8755,10 +8837,15 @@ def cockpit_etapa(request: Request, lead_id: int, etapa: str = Form(...)):
 
 
 @router.post("/cockpit/lead/{lead_id}/assumir")
-def cockpit_assumir(request: Request, lead_id: int):
+def cockpit_assumir(request: Request, lead_id: int, texto: str = ""):
+    # app de estandes: a mensagem do "Link de stands" que veio no Assumir volta pra
+    # caixa da conversa. Só no perfil de estandes — nas outras contas, como era.
+    destino = f"{_BASE}/lead/{lead_id}"
+    if texto and _perfil_stands(request.session.get("conta_id")):
+        destino += "?" + _urlencode({"texto": texto[:300]})
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.assumir(p, c, m, l), "msg": "Você assumiu a conversa ✓"},
-                 f"{_BASE}/lead/{lead_id}")
+                 destino)
 
 
 @router.post("/cockpit/lead/{lead_id}/segurar")
@@ -9560,35 +9647,33 @@ _STANDS_CSS = """<style>
   padding:8px 12px;border-radius:999px;border:1px solid var(--line,#1E2A23);
   background:var(--surface,#121A16);color:var(--text-dim,#8FA197);width:auto;min-height:0;margin:0}
 .stpav button.on{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
-.stleg{display:flex;gap:14px;flex-wrap:wrap;padding:.6rem .9rem;font-size:.74rem;color:var(--text-dim,#8FA197)}
-.stleg i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+.stleg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:.6rem .9rem;font-size:.74rem;color:var(--text-dim,#8FA197)}
+.stleg span{display:inline-flex;align-items:center;gap:5px}
+.stleg i{width:18px;height:13px;box-sizing:border-box;border:1px solid transparent;border-radius:4px;display:inline-block;flex:0 0 auto}
 .stleg b{color:var(--text,#EAF2ED);font-family:var(--mono,monospace)}
 .stouter{overflow:hidden;padding:.2rem .4rem 0}
 .ststage{display:flex;justify-content:flex-start}
 .stzoom{transform-origin:0 0}
-.stgrid{position:relative;display:grid;gap:4px;width:max-content;padding:14px;border-radius:14px;
-  background:#0D120F;box-shadow:inset 0 0 0 1px var(--line,#1E2A23)}
-.stgrid .blk{display:flex;flex-direction:column;gap:3px}
-.stgrid .lbl{font-size:7.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;
-  color:var(--text-dim,#8FA197);background:var(--surface,#121A16);border:1px solid var(--line,#1E2A23);
-  border-radius:4px;padding:2px 5px;white-space:nowrap;width:fit-content}
-.stgrid .cel{display:flex;flex-wrap:wrap;align-content:flex-start;gap:3px}
+.stgrid{position:relative;padding:14px;border-radius:14px;
+  background:#0D120F;box-shadow:inset 0 0 0 1px var(--line,#1E2A23);
+  --pl-dim:var(--text-dim,#8FA197);--pl-line:rgba(234,242,237,.2);--pl-surf:var(--surface,#121A16)}
 .stgrid .std{appearance:none;cursor:pointer;border:1px solid var(--line,#1E2A23);border-radius:5px;
   width:auto;min-height:0;margin:0;font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;
   line-height:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;flex:0 0 auto}
-.stgrid .std.livre{background:rgba(37,211,102,.22);color:var(--text,#EAF2ED)}
-.stgrid .std.reservado{background:rgba(224,163,46,.3);color:var(--text,#EAF2ED)}
-.stgrid .std.vendido{background:rgba(224,87,79,.3);color:var(--text-dim,#8FA197)}
-.stgrid .std.sel{outline:2px solid var(--neon,#25D366)}
-.stgrid .dec{display:flex;align-items:center;justify-content:center;text-align:center;border-radius:8px;
-  font-size:8px;font-weight:700;color:var(--text-dim,#8FA197);border:1.5px dashed var(--line,#1E2A23);padding:4px}
-.stgrid .dec.corridor,.stgrid .dec.avenue{writing-mode:vertical-rl;text-orientation:mixed;
-  font-size:7.5px;letter-spacing:.06em;text-transform:uppercase;padding:6px 2px}
-.stgrid .dec.avenue{border:none;opacity:.6;justify-content:flex-start;padding-top:6px}
-.stgrid .dec.gate{border-style:solid}
-.stgrid .dec.wc{border-style:dotted}
-.stgrid .dec.avenueh{border:none;font-size:7.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.6}
-.stgrid .dec.faixa{border:none;background:#CFC8B8;color:#3A362C;font-weight:800;letter-spacing:.06em;font-size:8.5px}
+/* status — mesmo vocabulário do painel e da página pública: LIVRE = cheio e liso ·
+   RESERVADO = cheio com hachura + aro claro · VENDIDO = escuro com contorno (01/10/2026:
+   as tintas a 22–30% eram três tons escuros quase iguais). Borda de 2px e hachura de
+   passo 8px porque o mapa inteiro encolhe (~0,45x) no celular. */
+.stgrid .std.livre,.stleg i.livre{background:#25D366;border-color:#25D366;color:#04150C}
+.stgrid .std.reservado,.stleg i.reservado{
+  background:repeating-linear-gradient(135deg, rgba(26,16,0,.24) 0 4px, rgba(26,16,0,0) 4px 8px), #E0A32E;
+  border-color:#F0C070;color:#1A1000;text-shadow:0 0 2px #E0A32E,0 0 2px #E0A32E,0 0 1px #E0A32E}
+.stgrid .std.vendido,.stleg i.vendido{background:#64201B;border-color:#E0574F;color:#F6E3E0}
+.stgrid .std.livre,.stgrid .std.reservado,.stgrid .std.vendido{border-width:2px}
+/* a legenda não é encolhida: hachura na metade do passo, pra bater com o tile na tela */
+.stleg i.reservado{background:repeating-linear-gradient(135deg, rgba(26,16,0,.24) 0 2px, rgba(26,16,0,0) 2px 4px), #E0A32E}
+/* o anel cabe no vão entre os stands (2px) e fica por cima dos vizinhos */
+.stgrid .std.sel,.stgrid .std:focus-visible{outline:3px solid var(--text,#EAF2ED);outline-offset:0;z-index:3}
 .stdet{margin:.7rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);
   border-radius:12px;background:var(--surface,#121A16)}
 .stdet .cod{font-family:var(--mono,monospace);font-weight:800;font-size:1.05rem;margin-right:.5rem}
@@ -9673,13 +9758,28 @@ _STANDS_CSS = """<style>
 .stdet .sts b{color:var(--text,#EAF2ED)}
 .stvazio{margin:1.2rem .8rem;padding:1rem;border:1px dashed var(--line,#1E2A23);border-radius:12px;
   color:var(--text-dim,#8FA197);font-size:.85rem;line-height:1.5}
+.stdica{margin:.1rem 0 .6rem;background:#10241A;border:1px solid #1E4A3A;border-radius:10px;
+  padding:.6rem .7rem;font-size:.8rem;line-height:1.45;color:#CFEFDC}
+.stdica b{color:#46F58A}
+.clitopo{display:flex;gap:8px;padding:.7rem .8rem 0}
+.clitopo input{flex:1;min-width:0;box-sizing:border-box;background:var(--surface,#121A16);
+  border:1px solid var(--line,#1E2A23);border-radius:10px;color:var(--text,#EAF2ED);font-size:16px;
+  padding:10px 12px;margin:0}
+.clinovo{display:inline-flex;align-items:center;gap:6px;min-height:44px;box-sizing:border-box;
+  padding:0 14px;border-radius:10px;background:var(--neon,#25D366);color:#04150C;font-weight:800;
+  font-size:.88rem;text-decoration:none;white-space:nowrap}
+.cvd.novo{border:1.5px solid #1E4A3A}
+.cvd .tag{font-size:.66rem;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap;
+  background:var(--surface-2,#16201B);border:1px solid var(--line,#1E2A23);color:var(--text-dim,#8FA197)}
+.cvd .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:.6rem}
+.cvd .acts a{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;padding:0 14px;
+  border-radius:10px;font-weight:700;font-size:.85rem;text-decoration:none}
+.cvd .acts .zap{border:1.5px solid var(--neon,#25D366);background:rgba(37,211,102,.12);color:var(--neon,#25D366)}
+.cvd .acts .gh{border:1px solid var(--line,#1E2A23);background:var(--surface-2,#16201B);color:var(--text,#EAF2ED)}
 </style>"""
 
 _STANDS_JS = r"""
   var tamLabel={'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
-  // pegada proporcional (largura=frente, altura=fundo) escalada pra grid de 30px
-  var sizeBase={'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
-  var ESCALA=30/34;
   var pav='inferior', sel=null, editando=false, filtro='', vendendo=false;
   // o que o contrato precisa do cliente (mesma lista do painel do gestor)
   var REQ=[['fantasia','Nome fantasia'],['whats','WhatsApp'],['razao','Razão social'],['doc','CNPJ/CPF'],
@@ -9698,13 +9798,11 @@ _STANDS_JS = r"""
     pavsEl.appendChild(b);
   });
 
-  function tile(code, def){
+  // só o botão: posição e tamanho quem dá é a planta medida (plantaMontar)
+  function tile(code){
     var s=STANDS[code]; if(!s)return null;
     var b=document.createElement('button');
     b.className='std '+s.status+(code===sel?' sel':'')+(filtro&&s.status!==filtro?' apaga':'');
-    var base=sizeBase[s.tamanho]||{w:29,h:23};
-    b.style.width=Math.round(((def&&def.w)||base.w)*ESCALA)+'px';
-    b.style.height=Math.round(((def&&def.h)||base.h)*ESCALA)+'px';
     b.textContent=code;
     b.onclick=function(){sel=code;editando=false;vendendo=false;render();detalhe();
       document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});};
@@ -9714,32 +9812,11 @@ _STANDS_JS = r"""
   function render(){
     var grid=document.getElementById('stgrid');
     var p=pavilions.filter(function(x){return x.key===pav;})[0];
-    grid.style.gridTemplateColumns='repeat(24, 30px)';
-    grid.style.gridTemplateRows='repeat('+p.rows+', 26px)';
-    grid.innerHTML='';
-    p.decor.forEach(function(d){
-      var e=document.createElement('div');
-      e.className='dec'+(d.kind?' '+d.kind:'');
-      e.style.gridColumn=d.col+' / span '+d.cspan;
-      e.style.gridRow=d.row+' / span '+d.rspan;
-      e.textContent=d.label; grid.appendChild(e);
-    });
-    p.defs.forEach(function(d){
-      var blk=document.createElement('div'); blk.className='blk';
-      blk.style.gridColumn=d.col+' / span '+d.cspan;
-      blk.style.gridRow=d.row+' / span '+d.rspan;
-      if(d.label){var l=document.createElement('div');l.className='lbl';l.textContent=d.label;blk.appendChild(l);}
-      var cel=document.createElement('div'); cel.className='cel';
-      for(var n=d.from;n<=d.to;n++){
-        var num=d.prefix==='i'?String(n).padStart(2,'0'):String(n);
-        var t=tile(d.prefix+num, d); if(t)cel.appendChild(t);
-      }
-      blk.appendChild(cel); grid.appendChild(blk);
-    });
+    plantaMontar(grid,p,{larg:812,pad:14,miolo:6,tile:tile});
     escala();
   }
 
-  // celular: a planta (24 col) encolhe pra caber na tela — mesma regra da
+  // celular: a planta (812px) encolhe pra caber na tela — mesma regra da
   // página pública
   function escala(){
     var outer=document.getElementById('stouter'), stage=document.getElementById('ststage'),
@@ -9756,9 +9833,9 @@ _STANDS_JS = r"""
     Object.keys(STANDS).forEach(function(c){ if(STANDS[c].pavilhao!==pav)return;
       t[STANDS[c].status]=(t[STANDS[c].status]||0)+1; });
     document.getElementById('stleg').innerHTML=
-      '<span><i style="background:#25D366"></i>Livre <b>'+(t.livre||0)+'</b></span>'+
-      '<span><i style="background:#E0A32E"></i>Reservado <b>'+(t.reservado||0)+'</b></span>'+
-      '<span><i style="background:#E0574F"></i>Vendido <b>'+(t.vendido||0)+'</b></span>';
+      '<span><i class=livre></i>Livre <b>'+(t.livre||0)+'</b></span>'+
+      '<span><i class=reservado></i>Reservado <b>'+(t.reservado||0)+'</b></span>'+
+      '<span><i class=vendido></i>Vendido <b>'+(t.vendido||0)+'</b></span>';
   }
 
   function detalhe(){
@@ -9795,6 +9872,7 @@ _STANDS_JS = r"""
     return 'Oi! O stand '+code+' está livre no Outlet Chic. Dá pra ver no mapa e reservar com o sinal direto por aqui: '+linkVendas0(code);
   }
   function situacao(s){
+    if(s.status==='reservado'&&s.lista)return s.pode?'Reservado pela lista — aguardando o sinal do cliente. O stand está segurado pra ele.':'Reservado pra outra loja — não prometa este.';
     if(s.status==='reservado')return s.pode?'Aguardando a gestão confirmar o sinal — o stand já está segurado pra ele.':'Comprovante em conferência — não prometa este.';
     if(!s.pode)return 'Já vendido.';
     if(s.aberto>0)return 'Vendido · falta <b>'+reais(s.aberto)+'</b> do saldo'+(SALDO_ATE?' até '+esc(SALDO_ATE):'')+'.';
@@ -9806,7 +9884,10 @@ _STANDS_JS = r"""
     var h='';
     if(s.ct){
       var url=location.origin+'/contrato/'+s.ct;
-      var mct='Olá, '+nome+'! Segue o contrato '+cods+' no Outlet Chic. É só abrir, conferir e assinar pelo celular: '+url;
+      // cadastro incompleto: o cliente completa os dados no próprio link (01/10/2026)
+      var falta=s.cad?faltando(s.cad).length:0;
+      var mct='Olá, '+nome+'! Segue o contrato '+cods+' no Outlet Chic. '+
+        (falta?'Abra o link, complete os dados da empresa e assine pelo celular: ':'É só abrir, conferir e assinar pelo celular: ')+url;
       if(num)h+='<a class=zap href="https://wa.me/'+num+'?text='+encodeURIComponent(mct)+'" target=_blank rel=noopener>'+(s.ct_ok?'Reenviar contrato ✓':'Mandar contrato')+'</a>';
       h+='<button type=button onclick="stCopiarTxt(this,\''+url+'\')">Copiar link do contrato</button>';
     }
@@ -9887,6 +9968,7 @@ _STANDS_JS = r"""
     h+='<div class=stbar><span style="width:'+Math.round(n/REQ.length*100)+'%"></span></div>';
     h+='<div class=stcadt><b id=stn>'+n+'/'+REQ.length+'</b> <span id=stfalta>'+
        (f.length?'faltam pro contrato: '+esc(f.join(', ')):'cadastro completo — o contrato sai com todos os dados')+'</span></div>';
+    if(f.length&&s.ct)h+='<div class=stdica><b>Novo:</b> não precisa esperar. Mande o contrato agora: o cliente completa esses dados no próprio link, antes de assinar.</div>';
     if(!editando){
       h+='<button class=stbtn type=button onclick="stEditar()">'+(f.length?'Completar dados do cliente':'Ver / editar dados do cliente')+'</button>';
     } else {
@@ -9938,15 +10020,13 @@ _STANDS_JS = r"""
     var form=document.getElementById('stform'), msg=document.getElementById('strecmsg');
     var doc=form.elements['doc'].value.trim(); msg.hidden=false;
     if(!doc){msg.textContent='Digite o CNPJ antes.';return;}
+    if(!receitaTrava(btn))return;
     msg.textContent='Consultando a Receita…';
     zapFetch(BASE_STANDS+'/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+      receitaSolta(btn);
       if(!j){msg.textContent='Não consegui consultar agora — digite os dados.';return;}
       if(!j.ok){msg.textContent=j.erro||'Não consegui consultar agora.';return;}
-      if(j.nome)form.elements['razao'].value=j.nome;
-      if(j.email&&!form.elements['email'].value.trim())form.elements['email'].value=j.email;
-      if(j.cidade)form.elements['cidade'].value=j.cidade;
-      if(j.uf)form.elements['uf'].value=j.uf;
-      msg.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      msg.textContent=receitaMsg(receitaPreenche(form,j));
       stProg();
     });
   };
@@ -10015,19 +10095,13 @@ _STANDS_JS = r"""
 """
 
 
-@router.get("/cockpit/stands", response_class=HTMLResponse)
-def cockpit_stands(request: Request, abrir: str = ""):
-    sess = _sessao(request)
-    g = _gerencia(request)
-    conta_id = sess[0] if sess else (g[0] if g else None)
-    meu_id = sess[1] if sess else (g[1] if g else None)
-    if conta_id is None:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    pool = get_pool()
+def _dados_do_mapa(request: Request, pool, conta_id: int, meu_id, g):
+    """O que o mapa de stands do app desenha: um dict por stand (status, cliente e,
+    só pra quem pode mexer na venda, o cadastro, o contrato e o saldo) e a contagem
+    por status. A página e o `/cockpit/stands/estado` (o mapa que se atualiza
+    sozinho) usam a mesma função — o filtro do que cada um pode ver é um só.
+    Devolve (dados, tot, gestao)."""
     from finance import evento_stands as _es
-    cfg = _es.obter_config(pool, conta_id)
-    if not cfg:
-        return RedirectResponse(_BASE, status_code=303)
     stands = _es.listar(pool, conta_id)
 
     # o nome de quem reservou/comprou — o vendedor responde "esse já foi?" na hora —
@@ -10080,6 +10154,9 @@ def cockpit_stands(request: Request, abrir: str = ""):
             "preco": _brl(s["preco_centavos"]) if s["preco_centavos"] else None,
             "cliente": (nomes.get(s["prospeccao_id"]) if s["status"] != "livre" else None),
         }
+        # reserva lançada pela lista da gestão: sem comprovante, o sinal ainda não veio
+        if s["status"] == "pre_reservado" and not s.get("comprovante_url"):
+            dados[s["codigo"]]["lista"] = True
         # o cadastro completo (CNPJ, endereço…) só vai pro aparelho de quem pode
         # mexer nele: a gestão, ou o vendedor dono da venda. Os outros veem só o nome.
         cad = cads.get(s["codigo"])
@@ -10096,6 +10173,67 @@ def cockpit_stands(request: Request, abrir: str = ""):
                 "gcods": grupos.get(s.get("grupo_id")) or [s["codigo"]]})
         if minha and s["status"] != "livre":
             dados[s["codigo"]]["minha"] = True
+    return dados, tot, gestao
+
+
+def _sub_do_mapa(tot: dict) -> str:
+    return (f"{tot['livre']} livres · {tot['pre_reservado']} reservados · "
+            f"{tot['vendido']} vendidos")
+
+
+# O MAPA SE ATUALIZA SOZINHO (01/10/2026, só o app de estandes): a cada 20 s, e na
+# hora em que o vendedor volta pro app (vindo do WhatsApp), a tela pede o estado dos
+# stands e redesenha — "esse ainda está livre?" sem abrir o mapa de novo. O stand
+# aberto não é redesenhado enquanto ele preenche um formulário (cadastro, venda).
+_STANDS_AUTO_JS = r"""
+  (function(){
+    var pedindo=false, ultimo=JSON.stringify(STANDS);
+    function digitando(){
+      if(editando||vendendo)return true;
+      var a=document.activeElement;
+      return !!(a&&a.closest&&a.closest('#stdet')&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+    }
+    function atualizar(){
+      if(pedindo||document.visibilityState==='hidden')return;
+      pedindo=true;
+      // silencioso: quem não foi pedido não avisa (ver web/zap_fetch.py)
+      zapFetch(BASE_STANDS+'/estado',{headers:{'x-cockpit':'1'},cache:'no-store',silencioso:true})
+        .then(function(j){
+          pedindo=false;
+          if(!j||!j.ok||!j.stands)return;
+          var novo=JSON.stringify(j.stands);
+          if(novo===ultimo)return;
+          ultimo=novo; STANDS=j.stands;
+          if(sel&&!STANDS[sel]){sel=null;editando=false;vendendo=false;}
+          render();legenda();minhas();
+          if(!digitando())detalhe();
+          var sub=document.querySelector('.hdr .tt small');
+          if(sub&&j.sub)sub.textContent=j.sub;
+        })
+        .catch(function(){pedindo=false;});
+    }
+    setInterval(atualizar,20000);
+    document.addEventListener('visibilitychange',function(){
+      if(document.visibilityState==='visible')atualizar();});
+    window.addEventListener('pageshow',function(e){if(e.persisted)atualizar();});
+  })();
+"""
+
+
+@router.get("/cockpit/stands", response_class=HTMLResponse)
+def cockpit_stands(request: Request, abrir: str = ""):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    pool = get_pool()
+    from finance import evento_stands as _es
+    cfg = _es.obter_config(pool, conta_id)
+    if not cfg:
+        return RedirectResponse(_BASE, status_code=303)
+    dados, tot, gestao = _dados_do_mapa(request, pool, conta_id, meu_id, g)
 
     # o código ASSINADO do link de vendas de quem está logado (dono sem
     # membro_id não tem: vai o link neutro)
@@ -10107,9 +10245,8 @@ def cockpit_stands(request: Request, abrir: str = ""):
         "<button class=prim type=button onclick=\"stCopiarMeuLink(this)\">"
         "Copiar meu link</button></div>") if meu_cod else ""
 
-    from web.loja_stands import PLANTA_DEFS_JS
-    sub = (f"{tot['livre']} livres · {tot['pre_reservado']} reservados · "
-           f"{tot['vendido']} vendidos")
+    from web.loja_stands import PLANTA_CSS, PLANTA_DEFS_JS
+    sub = _sub_do_mapa(tot)
     # o app de ESTANDES (Outlet Chic): o mapa é a tela inicial — sem seta de voltar e
     # com as abas Stands / Minhas vendas / Perfil. Gestão e as demais contas: como era.
     com_abas = _perfil_stands(conta_id)
@@ -10117,6 +10254,7 @@ def cockpit_stands(request: Request, abrir: str = ""):
         _hdr("Mapa de stands", sub, voltar="" if com_abas else _BASE)
         + _flash(request)
         + _STANDS_CSS
+        + "<style>" + PLANTA_CSS + "</style>"   # cenário da planta: o mesmo das 3 telas
         + "<div class=scroll>"
         + meu_link_html
         + "<div class=stbusca><input id=stq type=search autocomplete=off "
@@ -10145,27 +10283,46 @@ def cockpit_stands(request: Request, abrir: str = ""):
             _es.regras_de_pagamento(cfg)["saldo_ate"].strftime("%d/%m")
             if _es.regras_de_pagamento(cfg)["saldo_ate"] else "") + ";"
         + f"var BASE_STANDS='{_BASE}/stands';</script>"
-        + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS + "})();</script>"
+        + "<script>(function(){" + PLANTA_DEFS_JS + _receita_js() + _STANDS_JS
+        + (_STANDS_AUTO_JS if com_abas else "") + "})();</script>"
     )
     return _page("Mapa de stands", corpo)
+
+
+@router.get("/cockpit/stands/estado")
+def cockpit_stands_estado(request: Request):
+    """O MAPA QUE SE ATUALIZA SOZINHO (pedido de 01/10/2026, só o app de estandes):
+    a tela do mapa pede isto a cada 20 s e quando o vendedor volta pro app, e
+    redesenha os stands, a legenda, "Minhas vendas" e a contagem do topo. São os
+    mesmos dados (e o mesmo filtro do que cada um pode ver) que a página monta.
+    Conta sem o perfil de estandes não tem a rota."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not _perfil_stands(conta_id):
+        return JSONResponse({"ok": False}, status_code=404)
+    pool = get_pool()
+    from finance import evento_stands as _es
+    if not _es.obter_config(pool, conta_id):
+        return JSONResponse({"ok": False}, status_code=404)
+    dados, tot, _gestao = _dados_do_mapa(request, pool, conta_id, meu_id, g)
+    return JSONResponse({"ok": True, "stands": dados, "sub": _sub_do_mapa(tot)},
+                        headers={"Cache-Control": "no-store"})
 
 
 
 @router.get("/cockpit/stands/consulta-cnpj")
 def cockpit_stands_consulta_cnpj(request: Request, doc: str = ""):
-    """"Receita" do formulário do cliente do stand: razão social, e-mail, cidade e
-    UF pelo CNPJ (a mesma consulta da aba Clientes). Endereço e CEP o vendedor digita."""
+    """"Receita" do formulário do cliente do stand e do "+ Novo cliente": o cadastro
+    que o contrato pede, pelo CNPJ (es.receita_do_cnpj) — razão social, nome
+    fantasia, representante, endereço, CEP, cidade, UF e e-mail."""
     if not (_sessao(request) or _gerencia(request)):
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    from finance import cnpj_info, validadoc
-    ok, tipo, d = validadoc.valida(doc)
-    if tipo != "pj" or not ok:
-        return JSONResponse({"ok": False, "erro": "CNPJ inválido"})
-    info = cnpj_info.consultar_cnpj(d)
-    if not info:
-        return JSONResponse({"ok": False, "erro": "CNPJ não encontrado na Receita"})
-    return JSONResponse({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
-                         "cidade": info.get("cidade"), "uf": info.get("uf")})
+    from finance import evento_stands as _es
+    return JSONResponse(_es.receita_do_cnpj(doc))
 
 
 @router.post("/cockpit/stands/{codigo}/cliente")
@@ -10245,7 +10402,10 @@ def cockpit_stands_vendas(request: Request):
         if s["status"] == "pre_reservado":
             aguardando += total
             situacao = "<span class='chip amb'>Aguardando a gestão confirmar o sinal</span>"
-            linha = "Comprovante recebido · o stand está segurado pra ele."
+            # sem comprovante = reserva lançada pela lista da gestão: o sinal ainda não veio
+            linha = ("Comprovante recebido · o stand está segurado pra ele."
+                     if s.get("comprovante_url") else
+                     "Reservado pela lista · aguardando o sinal do cliente.")
         else:
             vendido += total
             recebido += int(f.get("pago", 0))
@@ -10382,22 +10542,174 @@ def cockpit_stands_clientes(request: Request):
             f"<div class=sub>{esc(' · '.join(e['codigos']))}"
             f"{('<br>' + esc(' · '.join(linhas))) if linhas else ''}</div></a>"
             f"<div class=chips>{chip}{botao_zap}</div></div>")
+    com_abas = _perfil_stands(conta_id)
+    # A CARTEIRA DE QUEM AINDA NÃO RESERVOU (01/10/2026): os clientes que ela
+    # cadastrou em "+ Novo cliente", com o link de vendas que já leva o cadastro
+    # (`?c=`) — quando o cliente reserva por ele, a venda nasce completa.
+    pode_cadastrar = bool(com_abas and meu_id)
+    novos = []
+    if pode_cadastrar:
+        from finance import evento_stands as _es
+        from finance.email_sender import _app_url
+        minimo = _es.regras_de_pagamento(cfg)["sinal_minimo_centavos"]
+        novos = [_cartao_cliente_novo(cfg, meu_id, cad, minimo, _app_url())
+                 for cad in _es.clientes_do_vendedor_sem_stand(pool, conta_id, meu_id)]
     vazio = ("<div class=stvazio>Nenhum cliente ainda. Quando alguém comprar pelo seu link, "
              "a empresa aparece aqui.</div>")
-    busca = ("<div style='padding:.7rem .8rem 0'><input id=stbusca type=search placeholder='Buscar cliente' "
-             "autocomplete=off style='width:100%;box-sizing:border-box;background:var(--surface,#121A16);"
-             "border:1px solid var(--line,#1E2A23);border-radius:10px;color:var(--text,#EAF2ED);"
-             "font-size:16px;padding:10px 12px'></div>") if cartoes else ""
+    busca = ("<div class=clitopo><input id=stbusca type=search placeholder='Buscar cliente' "
+             "aria-label='Buscar cliente' autocomplete=off>"
+             + (f"<a class=clinovo href='{_BASE}/stands/clientes/novo'>"
+                "<svg width=16 height=16 viewBox='0 0 24 24' fill=none stroke=currentColor "
+                "stroke-width=2.6 stroke-linecap=round aria-hidden=true><path d='M12 5v14M5 12h14'/>"
+                "</svg>Novo cliente</a>" if pode_cadastrar else "")
+             + "</div>") if (cartoes or novos or pode_cadastrar) else ""
     js = ("<script>(function(){var b=document.getElementById('stbusca');if(!b)return;"
           "b.addEventListener('input',function(){var t=b.value.trim().toLowerCase();"
           "Array.prototype.forEach.call(document.querySelectorAll('.cvd'),function(c){"
           "c.style.display=(t&&c.getAttribute('data-nome').indexOf(t)<0)?'none':'';});});})();</script>")
-    com_abas = _perfil_stands(conta_id)
-    corpo = (_hdr("Clientes", f"{len(cartoes)} empresa{'s' if len(cartoes) != 1 else ''}",
+    n = len(cartoes) + len(novos)
+    corpo = (_hdr("Clientes", f"{n} empresa{'s' if n != 1 else ''}",
                   voltar="" if com_abas else _BASE)
-             + _STANDS_CSS + "<div class=scroll>" + busca + ("".join(cartoes) or vazio) + "</div>"
+             + _flash(request)
+             + _STANDS_CSS + "<div class=scroll>" + busca + ("".join(novos + cartoes) or vazio)
+             + "</div>"
              + (_abas_stands("clientes", gestao=gestao) if com_abas else "") + js)
     return _page("Clientes", corpo)
+
+
+def _cartao_cliente_novo(cfg: dict, meu_id: int, cad: dict, minimo: int, app_url: str) -> str:
+    """O cartão do cliente cadastrado antes da reserva: "Ainda sem stand", o que falta
+    pro contrato e o link de vendas que já leva o cadastro dele (`?v=` + `?c=`)."""
+    from urllib.parse import quote as _quote
+    from finance import evento_stands as _es
+    fantasia = cad.get("fantasia") or "Cliente"
+    zap = "".join(ch for ch in (cad.get("whats") or "") if ch.isdigit())
+    if 10 <= len(zap) <= 11:
+        zap = "55" + zap
+    link = (f"{app_url.rstrip('/')}/e/{cfg['slug']}?v={_es.codigo_vendedor(meu_id)}"
+            f"&c={_es.codigo_cliente(cad['cliente_id'])}")
+    msg = (f"Oi, {fantasia}! Escolha o seu stand direto no mapa e reserve com o sinal de "
+           f"{_brl(minimo)} por stand: {link}")
+    falta = cad.get("faltam") or []
+    chip = (f"<span class='chip amb'>Cadastro {cad.get('n_ok', 0)}/{cad.get('n_total', 7)}</span>"
+            if falta else "<span class='chip ok'>Cadastro completo ✓</span>")
+    linhas = [x for x in (cad.get("razao"), cad.get("doc"),
+                          " · ".join(y for y in (cad.get("cidade"), cad.get("uf")) if y)) if x]
+    acoes = (f"<a class=zap target=_blank rel=noopener "
+             f"href='https://wa.me/{zap}?text={_quote(msg)}'>Mandar link de vendas</a>"
+             f"<a class=gh target=_blank rel=noopener href='https://wa.me/{zap}'>WhatsApp</a>"
+             ) if zap else ""
+    return (f"<div class='cvd novo' data-nome='{esc(fantasia.lower())}'>"
+            f"<div class=topo><span class=nm>{esc(fantasia)}</span>"
+            "<span class=tag>Ainda sem stand</span></div>"
+            + (f"<div class=sub>{esc(' · '.join(linhas))}</div>" if linhas else "")
+            + f"<div class=chips>{chip}</div>"
+            + (f"<div class=acts>{acoes}</div>" if acoes else "") + "</div>")
+
+
+def _receita_js() -> str:
+    """O JS que preenche o formulário com a resposta da Receita — o mesmo do painel e
+    do link do contrato (web/stands_receita)."""
+    from web.stands_receita import RECEITA_JS
+    return RECEITA_JS
+
+
+# O Receita do "Novo cliente": a mesma consulta do formulário do stand
+_CLI_NOVO_JS = r"""<script>
+__RECEITA_JS__
+window.cliReceita=function(){
+  var f=document.getElementById('cliform'), m=document.getElementById('clirecmsg');
+  var doc=(f.elements['doc'].value||'').trim(); m.hidden=false;
+  if(!doc){m.textContent='Digite o CNPJ antes.';return;}
+  var btn=f.querySelector('.strec');
+  if(!receitaTrava(btn))return;
+  m.textContent='Consultando a Receita…';
+  zapFetch('__BASE__/stands/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+    receitaSolta(btn);
+    if(!j){m.textContent='Não consegui consultar agora — digite os dados.';return;}
+    if(!j.ok){m.textContent=j.erro||'Não consegui consultar agora.';return;}
+    m.textContent=receitaMsg(receitaPreenche(f,j));
+  });
+};
+</script>"""
+
+
+def _pagina_cliente_novo(dados: dict, erro: str = "") -> HTMLResponse:
+    """"+ Novo cliente" (aprovado na maquete, 01/10/2026): o cadastro do lojista antes
+    da reserva. Só nome fantasia e WhatsApp são obrigatórios agora."""
+    def campo(k, rot, req=False, extra=""):
+        valor = esc((dados or {}).get(k) or "")
+        return (f"<label class=stfld><span>{rot}{' <i>*</i>' if req else ''}</span>"
+                f"<input name={k} value=\"{valor}\" maxlength=300 {extra}"
+                f"{' required' if req else ''}></label>")
+    form = ("<div class=stcad style='margin:.2rem .8rem 1rem;border-top:0'>"
+            f"<form method=post action='{_BASE}/stands/clientes/novo' id=cliform>"
+            + (f"<div class=sterr>{esc(erro)}</div>" if erro else "")
+            + campo("fantasia", "Nome fantasia", True, "autocomplete=organization")
+            + campo("whats", "WhatsApp", True, "inputmode=tel autocomplete=tel")
+            + "<div class=stlin>"
+            + campo("doc", "CNPJ / CPF", False, "inputmode=numeric placeholder='00.000.000/0000-00'")
+            + "<button class=strec type=button onclick='cliReceita()'>Receita</button></div>"
+            + "<div class=stnota id=clirecmsg hidden></div>"
+            + campo("razao", "Razão social", False, "placeholder='Como sai no contrato'")
+            + campo("rep", "Representante legal", False, "placeholder='Quem assina pelo lojista'")
+            + campo("end", "Endereço", False, "placeholder='Rua, número, bairro'")
+            + "<div class=stlin>" + campo("cep", "CEP", False, "inputmode=numeric")
+            + campo("cidade", "Cidade") + campo("uf", "UF", False, "style='text-transform:uppercase'")
+            + "</div>"
+            + campo("email", "E-mail", False, "inputmode=email")
+            + "<div class=stac><button class=stsalvar type=submit>Salvar cliente</button></div>"
+            + "<div class=stnota>Só nome fantasia e WhatsApp são obrigatórios agora. O que faltar, "
+              "o cliente completa no link do contrato.</div>"
+            + "</form></div>")
+    corpo = (_hdr("Novo cliente", "Quando ele reservar pelo seu link, a venda já nasce completa.",
+                  voltar=f"{_BASE}/stands/clientes")
+             + _STANDS_CSS + "<div class=scroll>" + form + "</div>"
+             + _CLI_NOVO_JS.replace("__RECEITA_JS__", _receita_js()).replace("__BASE__", _BASE))
+    return _page("Novo cliente", corpo)
+
+
+def _vendedora_do_app(request: Request):
+    """(conta_id, membro_id) de quem pode ter carteira no app de estandes — ou None."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    conta_id = sess[0] if sess else (g[0] if g else None)
+    meu_id = sess[1] if sess else (g[1] if g else None)
+    if conta_id is None or not meu_id or not _perfil_stands(conta_id):
+        return None
+    return conta_id, meu_id
+
+
+@router.get("/cockpit/stands/clientes/novo", response_class=HTMLResponse)
+def cockpit_stands_cliente_novo(request: Request):
+    if not (_sessao(request) or _gerencia(request)):
+        return RedirectResponse("/cockpit/login", status_code=303)
+    if not _vendedora_do_app(request):
+        return RedirectResponse(f"{_BASE}/stands/clientes", status_code=303)
+    return _pagina_cliente_novo({})
+
+
+@router.post("/cockpit/stands/clientes/novo")
+def cockpit_stands_cliente_novo_salvar(request: Request, fantasia: str = Form(""),
+                                       whats: str = Form(""), doc: str = Form(""),
+                                       razao: str = Form(""), rep: str = Form(""),
+                                       email: str = Form(""), end: str = Form(""),
+                                       cep: str = Form(""), cidade: str = Form(""),
+                                       uf: str = Form("")):
+    if not (_sessao(request) or _gerencia(request)):
+        return RedirectResponse("/cockpit/login", status_code=303)
+    quem = _vendedora_do_app(request)
+    if not quem:
+        return RedirectResponse(f"{_BASE}/stands/clientes", status_code=303)
+    dados = {"fantasia": fantasia, "whats": whats, "doc": doc, "razao": razao, "rep": rep,
+             "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf}
+    from finance import evento_stands as _es
+    r = _es.cadastrar_cliente_do_vendedor(get_pool(), quem[0], quem[1], dados)
+    if not r.get("ok"):
+        return _pagina_cliente_novo(dados, r.get("erro") or "Não consegui salvar agora.")
+    request.session["ck_ok"] = ("Cliente salvo ✓ Mande o link de vendas pra ele: quando reservar, "
+                                "a venda já nasce com o cadastro.")
+    return RedirectResponse(f"{_BASE}/stands/clientes", status_code=303)
 
 
 @router.post("/cockpit/stands/{codigo}/venda")

@@ -144,3 +144,74 @@ def test_o_funil_olha_o_mes_inteiro_como_a_agenda(monkeypatch):
     with pytest.raises(_Parou):
         rel._dados_funil(None, 1, "mes", "", "", "")
     assert vistos == [True]
+
+
+# ------------------------------------- 01/10/2026: a tela tem que DIZER o intervalo
+# O dono: "quando coloco as datas o sistema não informa os intervalos". A tela
+# dizia só "período: Este mês" — e o mesmo "Este mês" é 01/10 a hoje em Vendas e
+# o mês inteiro na Agenda e no Funil. Agora as datas aparecem no rótulo, em cada
+# opção do seletor e nas caixas do "Período específico…", e saem do MESMO
+# `_intervalo` da consulta: o escrito é o filtrado.
+@pytest.mark.parametrize("tipo", [t for t in rel.TIPOS if t not in SEM_PERIODO])
+@pytest.mark.parametrize("periodo", ["mes", "mes_passado", "90d", "ano"])
+def test_o_rotulo_diz_as_datas_que_a_consulta_usa(tipo, periodo):
+    ini, fim = per.intervalo(periodo, ate_o_fim=(tipo in ("agenda", "funil")))
+    rot = rel._rotulo_periodo(tipo, periodo, "", "")
+    assert rot.endswith(f"{ini:%d/%m/%Y} a {fim:%d/%m/%Y}"), rot
+    assert rot.startswith(per.ROTULO[periodo])
+
+
+def test_este_mes_e_ate_hoje_no_historico_e_o_mes_todo_na_agenda():
+    hoje = per.intervalo("mes")[1]
+    assert rel._rotulo_periodo("vendas", "mes", "", "").endswith(f"a {hoje:%d/%m/%Y}")
+    fim_mes = per.fim_do_mes(hoje)
+    assert rel._rotulo_periodo("agenda", "mes", "", "").endswith(f"a {fim_mes:%d/%m/%Y}")
+
+
+def test_todo_o_periodo_diz_ate_quando():
+    assert rel._rotulo_periodo("vendas", "todos", "", "").startswith("Todo o período · até ")
+
+
+def test_cada_opcao_do_seletor_mostra_o_intervalo():
+    ops = {o["v"]: o for o in rel._periodos_com_datas("vendas")}
+    ini, fim = per.intervalo("mes")
+    assert ops["mes"]["rot"] == f"Este mês ({ini:%d/%m} a {fim:%d/%m})"
+    assert (ops["mes"]["de"], ops["mes"]["ate"]) == (ini.isoformat(), fim.isoformat())
+    assert ops["personalizado"]["rot"] == "Período específico…"
+    assert ops["todos"]["de"] == "", "o 01/01/2000 técnico não vai pra caixa"
+
+
+def test_a_tela_mostra_as_datas_no_seletor_e_preenche_as_caixas():
+    from web.portal import _env
+    dados = {"label": "Vendas", "mock": False, "colunas": [rel._col("descricao", "D")],
+             "linhas": []}
+    html = _env.get_template("relatorios").render(
+        dados=dados, tipo="vendas", periodo="mes",
+        periodo_rotulo=rel._rotulo_periodo("vendas", "mes", "", ""),
+        periodos=rel.periodos_da_aba("vendas"), periodos_datas=rel._periodos_com_datas("vendas"),
+        tem_periodo_livre=True, de="", ate="", tipos=rel.TIPOS, conta=(1, "pj", "X"),
+        caps={"financeiro": True, "vendas": True, "gerir": True},
+        tem_pj=True, papel="dono", request=None)
+    ini, fim = per.intervalo("mes")
+    assert f'data-de="{ini.isoformat()}" data-ate="{fim.isoformat()}"' in html
+    assert f"Este mês ({ini:%d/%m} a {fim:%d/%m})" in html
+    assert f"período: Este mês · {ini:%d/%m/%Y} a {fim:%d/%m/%Y}" in html
+    assert "getAttribute('data-ant')" in html, "o Período específico pega as datas do anterior"
+
+
+def test_contas_em_aberto_nao_tem_seletor_de_periodo_que_nao_filtra():
+    """Contas a pagar/receber mostram tudo que está em aberto: um seletor ali é
+    filtro que não faz nada. Some — e o período segue escondido pras outras abas."""
+    from web.portal import _env
+    dados = {"label": "Contas a pagar", "mock": False, "sem_periodo": True,
+             "colunas": [rel._col("descricao", "D")], "linhas": []}
+    html = _env.get_template("relatorios").render(
+        dados=dados, tipo="contas_pagar", periodo="mes_passado", periodo_rotulo="x",
+        periodos=rel.periodos_da_aba("contas_pagar"),
+        periodos_datas=rel._periodos_com_datas("contas_pagar"),
+        tem_periodo_livre=True, de="", ate="", tipos=rel.TIPOS, conta=(1, "pj", "X"),
+        caps={"financeiro": True, "vendas": True, "gerir": True},
+        tem_pj=True, papel="dono", request=None)
+    assert '<select name="periodo"' not in html
+    assert '<input type="hidden" name="periodo" value="mes_passado">' in html
+    assert 'name="de"' not in html

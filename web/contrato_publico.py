@@ -28,11 +28,12 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from db.conexao import get_pool
 from finance import contrato as ctr, servicos_catalogo as scat
 from web.portal import _env
+from web.stands_receita import RECEITA_JS
 
 router = APIRouter()
 _log = logging.getLogger("contrato.publico")
@@ -66,6 +67,34 @@ def _fone(v: str) -> str:
 
 def _linha_end(*partes) -> str:
     return " · ".join(p for p in (str(x or "").strip() for x in partes) if p)
+
+
+def faltas_do_orcamento(pool, conta_id: int, orcamento_id) -> list[str]:
+    """O que o contrato deste orçamento vai mostrar como "Campos sem valor" — a
+    MESMA conta da página do contrato (`carregar`), pra quem manda saber ANTES do
+    cliente. Em rótulo de gente ("CPF/CNPJ"), não em `cliente.doc`. Contrato já
+    assinado não tem falta: o texto congelou. Tolerante: erro devolve []."""
+    try:
+        ct = ctr.por_orcamento(pool, conta_id, orcamento_id)
+        if ct and ct.get("assinado_em"):
+            return []
+        q = qualificacao(pool, conta_id, orcamento_id)
+        if not q:
+            return []
+        _clausulas, faltas = _montar(pool, conta_id, q)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra conferir o contrato do orçamento %s: %s: %s",
+                     orcamento_id, type(e).__name__, e)
+        return []
+    return [ctr._ROTULO.get(f) or f for f in faltas]
+
+
+def _montar(pool, conta_id: int, q: dict):
+    modelo = ctr.carregar_modelo(pool, conta_id)
+    ctx = ctr.contexto(catalogo=scat.listar(pool, conta_id),
+                       orcamento=q["orcamento"], modelo=modelo,
+                       empresa=q["empresa"], modo=modelo["modo"])
+    return ctr.montar(modelo["clausulas"], ctx)
 
 
 def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
@@ -166,6 +195,7 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
     # mesma coisa — foi de duas leituras do mesmo dado que nasceu o bug do e-mail
     # que mostrava contrato e mandava proposta.
     orcamento = ctr.completar_do_cadastro(pool, conta_id, orcamento, cliente_id)
+    orcamento = ctr.completar_do_lead(pool, conta_id, orcamento_id, orcamento)
     return {
         "empresa": empresa, "orcamento": orcamento, "evento_bruto": evento,
         "total": int(total or 0), "parcelas": parcelas,
@@ -258,16 +288,17 @@ def carregar(token: str, pool=None) -> dict | None:
     if assinado and ct.get("texto"):
         clausulas, faltas = ct["texto"], []
     else:
-        modelo = ctr.carregar_modelo(pool, ct["conta_id"])
-        ctx = ctr.contexto(catalogo=scat.listar(pool, ct["conta_id"]),
-                           orcamento=q["orcamento"], modelo=modelo,
-                           empresa=q["empresa"], modo=modelo["modo"])
-        clausulas, faltas = ctr.montar(modelo["clausulas"], ctx)
+        clausulas, faltas = _montar(pool, ct["conta_id"], q)
     orc_status = q["orc_status"]
     # O DOCUMENTO SEGUE O ORÇAMENTO: contrato de serviço é o do orçamento
     # recorrente. Lido do orçamento e não da conta, porque o assinado não muda
     # de cara se a conta mudar de nicho depois.
     servico = q["modo_orcamento"] != "evento"
+    # O LOJISTA COMPLETA O PRÓPRIO CADASTRO (app de estandes, 01/10/2026): sem os 7
+    # dados que o contrato pede, o link mostra primeiro os que faltam e só libera a
+    # assinatura com tudo preenchido — contrato de stand não sai com a parte em branco.
+    cadastro = (_cadastro_do_estande(pool, ct["conta_id"], ct["orcamento_id"])
+                if q["espaco"] and not assinado else None)
     return {
         "contrato": ct, "clausulas": clausulas, "faltas": faltas, "assinado": assinado,
         "numero": ct["numero"], "token": ct["token"],
@@ -321,7 +352,9 @@ def carregar(token: str, pool=None) -> dict | None:
         # (ver REGRAS_SERVICO_PADRAO): aceitar "{regra.aviso_previo_dias} dias"
         # seria o cliente assinar um aviso prévio que não diz quanto tempo.
         "pode_assinar": (orc_status in ("aprovada", "fechado") and not assinado
-                         and not (servico and faltas)),
+                         and not (servico and faltas)
+                         and not (cadastro and cadastro["faltam"])),
+        "cadastro": cadastro,
         "servico": servico,
         "servicos": q["servicos"], "setup": q["setup"], "mensal": q["mensal"],
         "anual": q["anual"],
@@ -336,6 +369,39 @@ def carregar(token: str, pool=None) -> dict | None:
 # Os dias que o cliente pode escolher. Até 28 porque fevereiro existe — é o mesmo
 # teto que o título recorrente já usa (`empresa._mes_seguinte`).
 DIAS_VENCIMENTO = tuple(range(1, 29))
+
+#: os campos do "Complete os dados da sua empresa" (os do cadastro do stand)
+_CAMPOS_CAD = ("fantasia", "whats", "razao", "doc", "rep", "email", "end", "cep",
+               "cidade", "uf")
+
+
+def _cadastro_do_estande(pool, conta_id: int, orcamento_id) -> dict | None:
+    """O cadastro do lojista pro "Complete os dados da sua empresa". Só no perfil de
+    estandes (o Outlet Chic): nas outras contas o contrato segue exatamente como
+    era. Tolerante: erro = a página sem o bloco, como antes."""
+    try:
+        from finance import evento_stands as _es
+        if not _es.app_de_stands(pool, conta_id):
+            return None
+        return _es.cadastro_do_contrato(pool, conta_id, orcamento_id)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("contrato: sem o cadastro do estande do orçamento %s: %s: %s",
+                     orcamento_id, type(e).__name__, e)
+        return None
+
+
+def _render(d, token: str, *, erro: str = "", ok: str = "", editar: bool = False,
+            erro_dados: str = "", valores: dict | None = None) -> str:
+    """A página do contrato. `fv` = o que vai nos campos do cadastro: o que o
+    lojista acabou de digitar (quando o salvar voltou com erro) ou o cadastro."""
+    fv = {}
+    if d and d.get("cadastro"):
+        cad = d["cadastro"]["cad"]
+        fv = {k: ((valores or {}).get(k, cad.get(k) or "") if valores is not None
+                  else (cad.get(k) or "")) for k in _CAMPOS_CAD}
+        fv["whats"] = _fone(fv.get("whats") or "")
+    return _env.get_template(_TPL_NOME).render(
+        d=d, token=token, erro=erro, ok=ok, editar=editar, erro_dados=erro_dados, fv=fv)
 
 
 def _gravar_dia(pool, conta_id: int, orcamento_id: int, dia: int) -> None:
@@ -358,7 +424,8 @@ def _aditivo_aviso(pool, ct) -> dict | None:
 
 
 @router.get("/contrato/{token}", response_class=HTMLResponse)
-def contrato_publico(request: Request, token: str, erro: str = ""):
+def contrato_publico(request: Request, token: str, erro: str = "", ok: str = "",
+                     editar: str = ""):
     try:
         d = carregar(token)
     except Exception:  # noqa: BLE001
@@ -367,8 +434,53 @@ def contrato_publico(request: Request, token: str, erro: str = ""):
         _log.warning("não deu pra montar o contrato do token %s…",
                      (token or "")[:6], exc_info=True)
         d = None
-    html = _env.get_template(_TPL_NOME).render(d=d, token=token, erro=erro)
+    html = _render(d, token, erro=erro, ok=ok, editar=bool(editar))
     return HTMLResponse(html, status_code=200 if d else 404)
+
+
+@router.post("/contrato/{token}/dados")
+def contrato_dados(request: Request, token: str, fantasia: str = Form(""),
+                   whats: str = Form(""), razao: str = Form(""), doc: str = Form(""),
+                   rep: str = Form(""), email: str = Form(""), end: str = Form(""),
+                   cep: str = Form(""), cidade: str = Form(""), uf: str = Form("")):
+    """"Complete os dados da sua empresa" (app de estandes, 01/10/2026): o lojista
+    preenche no próprio link o que o contrato pede, antes de assinar. Só enquanto o
+    contrato não foi assinado — o assinado é documento congelado. Quando o cadastro
+    fecha os 7 dados, a vendedora é avisada."""
+    pool = get_pool()
+    d = carregar(token, pool)
+    if not d or d["assinado"] or not d.get("cadastro"):
+        return RedirectResponse(f"/contrato/{token}", status_code=303)
+    valores = {"fantasia": fantasia, "whats": whats, "razao": razao, "doc": doc,
+               "rep": rep, "email": email, "end": end, "cep": cep, "cidade": cidade,
+               "uf": uf}
+    valores = {k: (v or "").strip()[:300] for k, v in valores.items()}
+    from finance import evento_stands as _es
+    conta_id, oid = d["contrato"]["conta_id"], d["contrato"]["orcamento_id"]
+    r = _es.salvar_cadastro_do_contrato(pool, conta_id, oid, valores)
+    if not r.get("ok"):
+        erro = r.get("erro") or "Não deu pra salvar agora. Tente de novo."
+        if "outro cliente" in erro:
+            erro = "Esse CPF/CNPJ já está em outro cadastro. Fale com quem te atendeu."
+        return HTMLResponse(_render(d, token, editar=True, erro_dados=erro, valores=valores))
+    if r.get("completou"):
+        _es.avisar_cadastro_completo(pool, conta_id, r.get("prospeccao_id"),
+                                     r.get("codigos") or [], valores["fantasia"])
+    return RedirectResponse(f"/contrato/{token}?ok=dados", status_code=303)
+
+
+@router.get("/contrato/{token}/cnpj")
+def contrato_cnpj(token: str, doc: str = ""):
+    """O botão "Receita" do formulário do lojista: o cadastro que o contrato pede,
+    pelo CNPJ — a mesma consulta do app e do painel (es.receita_do_cnpj). Só pra
+    contrato de estande ainda não assinado: o link é a credencial, como no resto
+    da página."""
+    pool = get_pool()
+    d = carregar(token, pool)
+    if not d or d["assinado"] or not d.get("cadastro"):
+        return JSONResponse({"ok": False, "erro": "Contrato não encontrado."}, status_code=404)
+    from finance import evento_stands as _es
+    return JSONResponse(_es.receita_do_cnpj(doc))
 
 
 @router.post("/contrato/{token}/assinar")
@@ -477,9 +589,31 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .carimbo{margin-top:22px;border:1px dashed #C9BFA8;border-radius:9px;padding:14px 16px;font-size:12.5px;color:#3B4757;line-height:1.6}
 .carimbo b{color:#14213D}
 .ft{margin-top:22px;padding-top:12px;border-top:1px solid #ECE7DC;font-size:10.5px;color:#8A8475;line-height:1.5}
+/* o lojista completa o próprio cadastro (estande, 01/10/2026) */
+.salvo{background:#E8F5EE;border:1px solid #BFE3CF;color:#1D5C3D;border-radius:9px;padding:10px 13px;font-size:13px;line-height:1.45;margin-bottom:12px}
+.cad{display:flex;flex-direction:column;gap:10px;margin-bottom:24px;padding-bottom:22px;border-bottom:1px solid #ECE7DC}
+.cad .eb{margin:0}
+.cadt{font-size:19px;font-weight:700;line-height:1.2;color:#14213D}
+.cadp{font-size:12.5px;color:#5A6678;line-height:1.5}
+.cadbar{display:flex;align-items:center;gap:8px;font-size:12px;color:#5A6678;font-weight:600}
+.cadbar i{flex:1;height:6px;border-radius:3px;background:#ECE7DC;overflow:hidden;display:block}
+.cadbar i b{display:block;height:100%;background:#D9932B}
+.cadid{font-size:12.5px;color:#3B4757;background:#FBFAF7;border:1px solid #ECE7DC;border-radius:8px;padding:8px 10px}
+.cf{display:flex;flex-direction:column;gap:4px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8A8475;font-weight:600}
+.cf input{width:100%;padding:9px 11px;border:1px solid #DCD5C6;border-radius:8px;font-size:14px;font-family:inherit;color:#14213D;background:#fff;letter-spacing:0;text-transform:none}
+.cf.vazio input{border-color:#E0B458}
+.cflin{display:flex;gap:8px;align-items:flex-end}
+.cflin .cf{flex:1;min-width:0}
+.cfgrid{display:grid;grid-template-columns:1.3fr 1.5fr .6fr;gap:8px}
+.cfgrid .cf{min-width:0}
+.cfrec{min-height:40px;padding:0 12px;border-radius:8px;border:1px solid #DCD5C6;background:#FBFAF7;color:#14213D;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer}
+.cfmsg{font-size:12px;color:#5A6678;line-height:1.45}
+.cad .go{margin-top:4px}
+.editar{margin-top:10px;font-size:11.5px;color:#8A8475;line-height:1.5}
+.editar a{color:#14213D;font-weight:700}
 @media print{
   body{background:#fff;padding:0}
-  .bar,.sign{display:none!important}
+  .bar,.sign,.cad,.salvo,.editar{display:none!important}
   .pg{box-shadow:none;border-radius:0}
   .hd{background:#fff;color:#14213D;border-bottom:2px solid #14213D;padding:0 0 14px}
   .hd .sub,.hd .mt,.hd .emit{color:#5A6678}.hd .mt b{color:#B8862E}
@@ -494,6 +628,9 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
     <span class="who">Contrato nº {{ d.numero }} · {{ d.contratada.nome }}</span>
     <button class="dl" onclick="window.print()">⬇ Baixar / imprimir</button>
   </div>
+  {% if d.cadastro and ok == 'dados' and not d.cadastro.faltam %}
+  <div class="salvo"><b>Dados salvos.</b> O contrato já sai com eles. Confira e assine.</div>
+  {% endif %}
   <div class="pg">
     <div class="hd">
       <div class="hdl">
@@ -516,6 +653,43 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       <div class="mt"><b>Contrato</b>nº {{ d.numero }}<br>{{ d.criado_em }}</div>
     </div>
     <div class="bd">
+
+      {% if d.cadastro and (d.cadastro.faltam or editar or erro_dados) %}
+      {# O LOJISTA COMPLETA O PRÓPRIO CADASTRO (estande, 01/10/2026): o que o contrato
+         pede da parte dele vem ANTES de tudo — é o que trava a assinatura. Nome
+         fantasia e WhatsApp já vieram da reserva; o resto ele mesmo preenche. #}
+      <form class="cad" id="dados" method="post" action="/contrato/{{ token }}/dados">
+        <div class="eb">Antes de assinar</div>
+        <div class="cadt">{{ 'Complete os dados da sua empresa' if d.cadastro.faltam else 'Os dados da sua empresa' }}</div>
+        <p class="cadp">São os dados que saem no contrato {{ 'dos stands' if d.cadastro.codigos|length > 1 else 'do stand' }}
+          <b>{{ d.cadastro.codigos|join(' + ') }}</b>. A assinatura é liberada quando os {{ d.cadastro.n_total }} estiverem preenchidos.</p>
+        <div class="cadbar"><i><b style="width:{{ ((100 * d.cadastro.n_ok) / d.cadastro.n_total)|round|int }}%"></b></i>{{ d.cadastro.n_ok }} de {{ d.cadastro.n_total }}</div>
+        {% if erro_dados %}<div class="err">{{ erro_dados }}</div>{% endif %}
+        {% if fv.fantasia and fv.whats %}
+        <div class="cadid">{{ fv.fantasia }} · {{ fv.whats }}</div>
+        <input type="hidden" name="fantasia" value="{{ fv.fantasia }}">
+        <input type="hidden" name="whats" value="{{ fv.whats }}">
+        {% else %}
+        <label class="cf{% if not fv.fantasia %} vazio{% endif %}">Nome fantasia *<input type="text" name="fantasia" value="{{ fv.fantasia }}" required maxlength="200"></label>
+        <label class="cf{% if not fv.whats %} vazio{% endif %}">WhatsApp *<input type="tel" name="whats" value="{{ fv.whats }}" required maxlength="40"></label>
+        {% endif %}
+        <label class="cf{% if not fv.razao %} vazio{% endif %}">Razão social *<input type="text" name="razao" value="{{ fv.razao }}" placeholder="Como sai no contrato" required maxlength="300"></label>
+        <div class="cflin">
+          <label class="cf{% if not fv.doc %} vazio{% endif %}">CNPJ / CPF *<input type="text" name="doc" value="{{ fv.doc }}" placeholder="00.000.000/0000-00" inputmode="numeric" required maxlength="30"></label>
+          <button type="button" class="cfrec" id="cfrec">Receita</button>
+        </div>
+        <div class="cfmsg" id="cfmsg" hidden></div>
+        <label class="cf{% if not fv.rep %} vazio{% endif %}">Representante legal *<input type="text" name="rep" value="{{ fv.rep }}" placeholder="Quem assina pela empresa" required maxlength="200"></label>
+        <label class="cf{% if not fv.end %} vazio{% endif %}">Endereço *<input type="text" name="end" value="{{ fv.end }}" placeholder="Rua, número, bairro" required maxlength="300"></label>
+        <div class="cfgrid">
+          <label class="cf">CEP<input type="text" name="cep" value="{{ fv.cep }}" inputmode="numeric" maxlength="12"></label>
+          <label class="cf{% if not fv.cidade %} vazio{% endif %}">Cidade *<input type="text" name="cidade" value="{{ fv.cidade }}" required maxlength="120"></label>
+          <label class="cf">UF<input type="text" name="uf" value="{{ fv.uf }}" maxlength="2"></label>
+        </div>
+        <label class="cf">E-mail<input type="email" name="email" value="{{ fv.email }}" maxlength="200"></label>
+        <button class="go" type="submit">Salvar e ver o contrato</button>
+      </form>
+      {% endif %}
 
       {% if d.aditivo %}
       {# O contrato assinado NÃO é reescrito — é o congelamento que dá valor a ele.
@@ -543,6 +717,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         <div class="parte">
           <div class="p">{{ 'Contratante' if d.servico else 'Contratante (locatário)' }}</div>
           <b>{{ d.contratante.nome }}</b>
+          {% if d.espaco and d.cadastro and d.cadastro.cad.fantasia and d.cadastro.cad.fantasia != d.contratante.nome %}<small>{{ d.cadastro.cad.fantasia }}</small>{% endif %}
           {% if d.contratante.doc %}<small>CPF/CNPJ {{ d.contratante.doc }}</small>{% endif %}
           {% if d.servico and d.contratante.responsavel %}<small>A/C {{ d.contratante.responsavel }}</small>{% endif %}
           {% if not d.servico and d.contratante.representante %}<small>Representante legal: {{ d.contratante.representante }}</small>{% endif %}
@@ -606,7 +781,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       {% endif %}
 
       <div class="eb">Cláusulas</div>
-      {% if d.faltas %}
+      {% if d.faltas and not (d.cadastro and d.cadastro.faltam) %}
       <div class="falta">⚠️ Campos sem valor neste contrato: {{ d.faltas|join(', ') }}.
         {% if d.servico %}A assinatura fica liberada quando a {{ d.contratada.nome }} completar esses dados.
         {% else %}Avise a {{ d.contratada.nome }} antes de assinar.{% endif %}</div>
@@ -628,7 +803,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
          (o sinal deixou de ser porteiro em 01/09/2026), ou — só no de serviço —
          falta número no texto. #}
       <div class="carimbo">Você já pode ler o contrato inteiro.
-        {% if d.servico and d.faltas and d.aprovada %}<b>A assinatura é liberada</b> quando os dados acima estiverem completos.
+        {% if d.cadastro and d.cadastro.faltam %}<b>A assinatura é liberada</b> quando os dados da sua empresa estiverem completos — <a href="#dados">complete no topo da página</a>.
+        {% elif d.servico and d.faltas and d.aprovada %}<b>A assinatura é liberada</b> quando os dados acima estiverem completos.
         {% else %}<b>A assinatura é liberada</b> quando o orçamento for aprovado.{% endif %}</div>
       {% else %}
       <form class="sign" method="post" action="/contrato/{{ token }}/assinar">
@@ -675,6 +851,10 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
           <span>Li e concordo com todas as cláusulas deste contrato.</span></label>
         <button class="go" type="submit">✓ Assinar contrato</button>
       </form>
+      {% if d.cadastro %}
+      <div class="editar">Se algum dado estiver errado, dá pra corrigir antes de assinar:
+        <a href="/contrato/{{ token }}?editar=1#dados">editar os dados da empresa</a>.</div>
+      {% endif %}
       {% endif %}
 
       <div class="ft">Assinatura eletrônica registrada com nome, documento, data/hora e IP —
@@ -682,7 +862,31 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       nº {{ d.orcamento_numero or '—' }} e com ele forma o acordo entre as partes.</div>
     </div>
   </div>
-</div></body></html>
+</div>
+{% if d.cadastro %}{% raw %}<script>
+""" + RECEITA_JS + r"""
+// o botão "Receita" do formulário do lojista: traz o cadastro que o contrato pede
+(function(){
+  var b=document.getElementById('cfrec'), f=document.getElementById('dados'),
+      m=document.getElementById('cfmsg');
+  if(!b||!f||!m)return;
+  b.addEventListener('click',function(){
+    var doc=(f.elements['doc'].value||'').trim(); m.hidden=false;
+    if(!doc){m.textContent='Digite o CNPJ antes.';return;}
+    if(!receitaTrava(b))return;
+    m.textContent='Consultando a Receita…';
+    fetch(f.getAttribute('action').replace(/\/dados$/,'/cnpj')+'?doc='+encodeURIComponent(doc))
+      .then(function(r){return r.json();})
+      .then(function(j){
+        receitaSolta(b);
+        if(!j||!j.ok){m.textContent=(j&&j.erro)||'Não consegui consultar agora — digite os dados.';return;}
+        m.textContent=receitaMsg(receitaPreenche(f,j));
+      })
+      .catch(function(){receitaSolta(b);m.textContent='Não consegui consultar agora — digite os dados.';});
+  });
+})();
+</script>{% endraw %}{% endif %}
+</body></html>
 {% endif %}"""
 
 # O NOME TERMINA EM .html DE PROPÓSITO, e é a única coisa que liga o autoescape.

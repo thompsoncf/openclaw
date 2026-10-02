@@ -356,4 +356,10 @@ def retorno_depois_de_finalizar(c, conta_id: int, cliente_id: int, evo_id: int) 
     if not ev or ev["situacao"] != "finalizado" or ev["profissional_id"] != e["profissional_id"]:
         return
     from finance import clinica_pacotes as ckp
-    ckp.agendar_retorno(c, conta_id, ev, e["retorno_dias"])
+    if ckp.agendar_retorno(c, conta_id, ev, e["retorno_dias"]):
+        try:
+            with c.transaction():
+                # a recepção finalizou sem retorno e o card foi pra Concluído: agora há um
+                ca.card_do_retorno(c, conta_id, ev.get("lead"))
+        except Exception:  # noqa: BLE001 — assinar é o pedido; o card é consequência
+            _log.warning("prontuário: card do retorno não andou (evento %s)", e["evento_id"], exc_info=True)

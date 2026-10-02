@@ -28,6 +28,7 @@ from contas import contas as ct
 from contas.permissoes import pode_financas
 from finance.livro_caixa import LivroCaixa
 from finance.lista_compras import ListaCompras
+from finance import relogio as _relogio
 
 router = APIRouter()
 
@@ -4621,6 +4622,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         link pra ficha. -#}{% if t.contraparte and t.contraparte|lower|trim != (t.cliente_nome or '')|lower|trim %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}
         {% if t.aprovacao=='aguardando' %} <span class="selo esp">aguardando {{ 'você' if pode_liberar else 'o dono' }}</span>{% elif t.aprovacao=='recusado' %} <span class="selo rec">recusado</span>{% endif %}
         {% if t.periodicidade %} <span class="selo rep">🔁 {{ RITMO_SELO[t.periodicidade] }}</span>{% endif %}
+        {% if t.folha_parte %} <span class="selo rep" title="gerada pela folha (Equipe e folha › Datas de pagamento): o valor acompanha a folha, e a baixa entra no holerite sozinha">📅 folha · {{ t.folha_parte }}</span>{% endif %}
         {% if not t.valor_centavos %} <span class="selo falta">falta o valor</span>{% endif %}
         {% if t.sem_fornecedor %} <span class="selo falta">sem fornecedor</span>{% endif %}</div>
       <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
@@ -5396,13 +5398,14 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
 
 </div>
 </div>
-<details class="card larga sec-pc" id="folha"{% if folha.itens or erro %} open{% endif %}>
+<details class="card larga sec-pc" id="folha"{% if folha.itens or erro or folha_aviso %} open{% endif %}>
   <summary><span><strong>Equipe e folha</strong>
     {% if folha.itens %}<span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · FGTS do mês {{ folha.total_fgts_centavos|brl }} · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span>{% else %}<span class="mut" style="font-size:.76rem;font-weight:400">· nenhum funcionário cadastrado</span>{% endif %}</span><span class="chev">▾</span></summary>
   {# recusa do excluir (e qualquer outro aviso da aba) — fora do {% if folha.itens %}
      de propósito: excluir o último funcionário esvazia a lista, e a mensagem
      explicando por que a exclusão NÃO aconteceu não pode sumir junto. #}
   {% if erro %}<div style="background:#241313;border:1px solid #5a2b2b;color:#f0b3ad;font-size:.78rem;line-height:1.6;padding:.6rem .8rem;border-radius:9px;margin:.7rem 0">{{ erro }}</div>{% endif %}
+  {% if folha_aviso %}<div class="ok" style="margin:.7rem 0">{{ folha_aviso }}</div>{% endif %}
   <form method="post" action="/painel/empresa/funcionario" class="emp-form" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
@@ -5479,6 +5482,18 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .fa-aviso{font-size:.7rem;color:var(--txt-mut);line-height:1.6;margin-top:.55rem}
     .sal-hist{list-style:none;margin:.55rem 0 0;font-size:.72rem;color:var(--txt-mut)}
     .sal-hist li{display:flex;justify-content:space-between;gap:10px;padding:.28rem 0;border-top:1px solid var(--card-2)}
+    /* as DATAS DE PAGAMENTO (482): adiantamento e saldo do mês, cada um numa linha */
+    .folha-ag{margin-top:.55rem;display:flex;flex-direction:column;gap:.25rem}
+    .ag-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .55rem;font-size:.76rem}
+    .ag-rot{color:var(--txt-mut);min-width:96px}
+    .ag-lin b{font-variant-numeric:tabular-nums}
+    .ag-st{font-size:.66rem;padding:.06rem .42rem;border-radius:5px;background:#1d1d20;color:var(--txt-mut)}
+    .ag-st.ag-pago{background:#14301f;color:var(--verde-claro)}
+    .ag-st.ag-aberto{background:#3a2f14;color:#f0c05a}
+    .ag-lin.ag-ant .ag-rot{color:#f0c05a}
+    .ag-regra{font-size:.68rem;color:var(--txt-mut)}
+    .fp-op{display:inline-flex !important;align-items:center;gap:.3rem;font-size:.74rem !important;color:var(--txt) !important;cursor:pointer}
+    .fp-op input{width:auto !important;margin:0 !important}
   </style>
   <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)"><span>Funcionário</span><span>A pagar (líquido)</span></div>
   {% for f in folha.itens %}<details class="folha-lin">
@@ -5507,6 +5522,22 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         {% if f.pro_labore %} <span class="mut">(pró-labore não desconta INSS CLT)</span>{% endif %}
         <span class="mut">· custo real {{ f.custo_real_centavos|brl }}</span>
       </div>
+      {#- AS DATAS DE PAGAMENTO (482): só aparece pra quem configurou — a folha de
+          quem paga num dia só continua igual. "previsto" é o que a regra diz sem
+          conta a pagar; o saldo do mês passado entra enquanto estiver aberto,
+          porque no começo do mês é ele o pagamento da vez. -#}
+      {% set ag = f.agenda %}
+      {% if ag and (ag.configurado or ag.saldo_anterior) %}
+      <div class="folha-ag">
+        {% if ag.saldo_anterior %}{% set p = ag.saldo_anterior %}
+        <div class="ag-lin ag-ant"><span class="ag-rot">📅 Saldo de {{ p.mes }}</span><span>vence {{ p.vencimento.strftime('%d/%m') }}</span><b>{{ p.valor|brl }}</b><span class="ag-st ag-aberto">em aberto nas contas a pagar{% if p.aprovacao == 'aguardando' %} · aguardando liberação{% endif %}</span></div>
+        {% endif %}
+        {% for parte, rot in (('adiantamento', 'Adiantamento'), ('saldo', 'Saldo')) %}{% set p = ag.partes.get(parte) %}
+        {% if p %}<div class="ag-lin"><span class="ag-rot">📅 {{ rot }}</span><span>{% if p.situacao == 'pago' %}pago em {{ (p.pago_em or p.vencimento).strftime('%d/%m') }}{% else %}vence {{ p.vencimento.strftime('%d/%m') }}{% endif %}</span><b>{{ p.valor|brl }}</b><span class="ag-st ag-{{ p.situacao }}">{% if p.situacao == 'pago' %}pago ✓{% elif p.situacao == 'aberto' %}conta a pagar{% if p.aprovacao == 'aguardando' %} · aguardando liberação{% endif %}{% if p.mexido %} · valor mudado à mão{% endif %}{% else %}previsto{% endif %}</span></div>{% endif %}
+        {% endfor %}
+        <div class="ag-regra">{% if ag.regra.adiantamento %}adiantamento {{ ag.regra.adiantamento }} · {% endif %}saldo no {{ ag.regra.saldo }} · contas a pagar {{ 'geradas sozinhas' if ag.gera_titulos else 'desligadas' }}</div>
+      </div>
+      {% endif %}
 
     <div class="fa">
       {% if not f.pro_labore %}
@@ -5515,6 +5546,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         <form class="fa-row" method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" title="Adiantamento salarial — dinheiro adiantado ao funcionário; desconta no fechamento.">
           <span class="lbl">Adiantamento salarial</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00"><button class="amb">+ adiantar</button>
         </form>
+        {% if f.agenda and f.agenda.gera_titulos and f.agenda.cfg.adiantamento_dia %}<div class="fa-aviso" style="margin:.2rem 0 .3rem">O adiantamento do dia {{ f.agenda.cfg.adiantamento_dia }} já está nas contas a pagar — dê baixa lá. Este botão é pra um adiantamento a mais.</div>{% endif %}
         <form class="fa-row" method="post" action="/painel/empresa/funcionario/{{ f.id }}/beneficio" title="Vale-refeição/alimentação — benefício (custo da empresa); NÃO desconta do funcionário.">
           <span class="lbl">Vale-refeição / alim.</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00"><button class="add">+ benefício</button>
         </form>
@@ -5539,6 +5571,25 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
           <div class="fa-row"><span class="lbl"></span><button>salvar</button></div>
         </form>
       </div>
+
+      {# ── 📅 DATAS DE PAGAMENTO (482, pedido do dono em 02/10/2026) ──────────
+         Adiantamento num dia (percentual OU valor fixo, por pessoa) e o saldo no
+         dia de sempre ou no 5º dia útil do mês seguinte. Formulário próprio, e
+         não o ✎ Editar: os forms de lá mandam os campos em hidden. #}
+      {% set ag = f.agenda or {} %}{% set cf = ag.cfg or {} %}
+      <details class="fa-ed">
+        <summary>📅 Datas de pagamento{% if ag.configurado %} · {% if ag.regra.adiantamento %}adiantamento {{ ag.regra.adiantamento }} · {% endif %}saldo no {{ ag.regra.saldo }}{% endif %}</summary>
+        <div class="fa-grp" style="border-top-left-radius:0;border-top-right-radius:0">
+          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/pagamento">
+            <div class="fa-row"><span class="lbl">Adiantamento no dia</span><input class="org" type="number" name="adiant_dia" min="1" max="28" value="{{ cf.adiantamento_dia or '' }}" placeholder="—"><span class="ag-regra">vazio = sem adiantamento</span></div>
+            <div class="fa-row"><span class="lbl">Quanto adiantar</span><label class="fp-op"><input type="radio" name="adiant_modo" value="pct"{% if not cf.adiantamento_centavos %} checked{% endif %}> % do salário</label><input class="org" name="adiant_pct" inputmode="decimal" value="{{ ag.pct_txt or '' }}" placeholder="40"><label class="fp-op"><input type="radio" name="adiant_modo" value="fixo"{% if cf.adiantamento_centavos %} checked{% endif %}> valor fixo</label><input class="money" name="adiant_valor" inputmode="decimal" value="{{ cf.adiantamento_centavos|brl if cf.adiantamento_centavos else '' }}" placeholder="R$ 0,00"></div>
+            <div class="fa-row"><span class="lbl">Saldo do salário</span><label class="fp-op"><input type="radio" name="saldo_regra" value="quinto_util"{% if cf.saldo_regra == 'quinto_util' %} checked{% endif %}> 5º dia útil do mês seguinte</label><label class="fp-op"><input type="radio" name="saldo_regra" value="dia"{% if cf.saldo_regra != 'quinto_util' %} checked{% endif %}> dia</label><input class="org" type="number" name="dia" min="1" max="28" value="{{ f.dia_pagamento }}"><span class="ag-regra">do mês seguinte</span></div>
+            <div class="fa-row"><span class="lbl">Contas a pagar</span><label class="fp-op"><input type="checkbox" name="gerar" value="1"{% if cf.titulos_folha_desde %} checked{% endif %}> gerar sozinho o adiantamento e o saldo</label></div>
+            <div class="fa-row"><span class="lbl"></span><button class="add">salvar</button></div>
+          </form>
+          <div class="fa-aviso">O 5º dia útil conta o sábado e pula domingo e feriado nacional, como manda a regra do Ministério do Trabalho. Com as contas a pagar ligadas, o adiantamento e o saldo nascem em Contas a pagar aguardando a sua liberação; o saldo acompanha a folha (extra, desconto, aumento) e, ao dar baixa, o pagamento entra aqui sozinho — sem lançar o caixa duas vezes. Começa no mês de hoje: mês que já passou não ganha conta.</div>
+        </div>
+      </details>
 
       {# ── ✎ EDITAR ─────────────────────────────────────────────────────────
          Nome, cargo, CBO e dia de pagamento não tinham COMO ser alterados depois
@@ -5609,7 +5660,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         {% for ev in f.eventos %}
         <div class="fa-ev">
           <span><span class="ev-tag ev-{{ ev.tipo }}">{{ ev.rotulo }}</span>{{ ev.valor_centavos|brl }}{% if ev.data %} · {{ ev.data.strftime('%d/%m') }}{% endif %}{% if ev.descricao %} · {{ ev.descricao }}{% endif %}</span>
-          <form method="post" action="/painel/empresa/evento/remover" onsubmit="return confirm('Remover este lançamento? Se tiver ido pro caixa, é revertido junto.')"><input type="hidden" name="evento_id" value="{{ ev.id }}"><button class="ev-rm">✕ remover</button></form>
+          {% if ev.do_titulo %}<span class="ag-regra" title="foi pago pela conta a pagar da folha — pra desfazer, é lá">pago na conta a pagar</span>{% else %}<form method="post" action="/painel/empresa/evento/remover" onsubmit="return confirm('Remover este lançamento? Se tiver ido pro caixa, é revertido junto.')"><input type="hidden" name="evento_id" value="{{ ev.id }}"><button class="ev-rm">✕ remover</button></form>{% endif %}
         </div>
         {% endfor %}
       </details>
@@ -7843,16 +7894,31 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {# Escolher "Período específico" NÃO envia o formulário: enviaria com as
        duas datas vazias e o resultado voltaria como mês corrente, parecendo que
        o filtro não funciona. Nesse caso só revela as caixas e espera o Filtrar. #}
-    <select name="periodo" onchange="var p=this.value==='personalizado',
+    {#- Contas a pagar/receber são fotografia do que está EM ABERTO: o período não
+        filtra (a nota ao lado diz isso). Um seletor ali era filtro que não faz
+        nada — some, e o período escolhido segue escondido pra quando voltar às
+        outras abas. -#}
+    {% if dados.sem_periodo %}<input type="hidden" name="periodo" value="{{ periodo }}">{% else %}
+    {#- Ao escolher o "Período específico…" as caixas já vêm com as datas do que
+        estava escolhido (data-de/data-ate de cada opção) — antes abriam vazias e
+        o intervalo de partida não aparecia em lugar nenhum. -#}
+    <select name="periodo" data-ant="{{ periodo }}" onchange="var p=this.value==='personalizado',
       c=document.getElementById('rel-datas');
       if(c)c.style.display=p?'':'none';
-      if(!p)this.form.submit();">
-      {% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+      if(p){var d=this.form.elements['de'],t=this.form.elements['ate'];
+        for(var i=0;i<this.options.length;i++){var o=this.options[i];
+          if(o.value===this.getAttribute('data-ant')){
+            if(d&&!d.value)d.value=o.getAttribute('data-de')||'';
+            if(t&&!t.value)t.value=o.getAttribute('data-ate')||'';}}}
+      else this.form.submit();">
+      {% if periodos_datas %}{% for o in periodos_datas %}<option value="{{ o.v }}" data-de="{{ o.de }}" data-ate="{{ o.ate }}" {% if o.v==periodo %}selected{% endif %}>{{ o.rot }}</option>{% endfor %}
+      {% else %}{% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}{% endif %}
     </select>
+    {% endif %}
     {# As duas caixas só existem no período específico — escondidas, a barra não
        cresce à toa nas outras seis opções. O navegador mostra dd/mm/aaaa em
        aparelho brasileiro e manda AAAA-MM-DD no formulário; quem formata é ele. #}
-    {% if tem_periodo_livre %}
+    {% if tem_periodo_livre and not dados.sem_periodo %}
     <span class="rel-datas" id="rel-datas" {% if periodo != 'personalizado' %}style="display:none"{% endif %}>
       <span>de</span><input type="date" name="de" value="{{ de|e }}">
       <span>até</span><input type="date" name="ate" value="{{ ate|e }}">
@@ -11894,7 +11960,7 @@ def painel_empresa(request: Request, mes: str = ""):
         return _render("empresa_dados", request, dados=d, tem_pj=True, erro="",
                        nichos_lista=_nichos.lista_nichos(), eh_fornecedor=bool(conta[8]),
                        identidade=emp.obter_identidade(pool, conta[0]), margem_alvo=60.0)
-    hoje = relogio.hoje()
+    hoje = _relogio.hoje()   # o mês de Brasília: às 22h do dia 30 ainda é este mês
     # O SELETOR DE MÊS DO DRE (pedido do dono em 29/09/2026, depois da Iris
     # reparar que só dava pra ver o mês atual): só o card do DRE (e o "ver por
     # centro de custo" dentro dele) olha pro mês escolhido — o resto da aba
@@ -12074,8 +12140,13 @@ def painel_empresa(request: Request, mes: str = ""):
     folha = emp.folha_do_mes(pool, conta[0], hoje.year, hoje.month)
     # anexa os lançamentos do mês a cada funcionário (pro histórico "corrigir")
     _evs = emp.eventos_folha_do_mes(pool, conta[0], hoje.year, hoje.month)
+    # e as DATAS DE PAGAMENTO (482): adiantamento e saldo deste mês, com o valor e
+    # a situação de cada um, e o saldo do mês passado enquanto estiver aberto
+    from finance import folha_titulos as _ft
+    _agenda = _ft.agenda(pool, conta[0], folha["itens"], hoje=hoje)
     for _it in folha["itens"]:
         _it["eventos"] = _evs.get(_it["id"], [])
+        _it["agenda"] = _agenda.get(_it["id"])
     from finance import clientes as _cli   # _nichos já é import de módulo (topo)
     # os dois papéis não são exclusivos — quem é as duas coisas aparece nas duas listas.
     clientes_lista = _cli.listar_clientes(pool, conta[0], papel="cliente")
@@ -12121,7 +12192,8 @@ def painel_empresa(request: Request, mes: str = ""):
                    centros_ativos=centros_ativos,
                    # linha do tempo de salário por funcionário (uma consulta só)
                    hist_salarios=emp.historicos_salarios(pool, conta[0]),
-                   hoje_iso=relogio.hoje().isoformat(),
+                   hoje_iso=hoje.isoformat(),
+                   folha_aviso=request.session.pop("folha_aviso", None),
                    # a recusa do excluir precisa chegar na tela: sem isto a rota
                    # gravava na sessão e ninguém mostrava (o erro vazaria pra
                    # outra página que faz pop)
@@ -13263,6 +13335,58 @@ def empresa_funcionario_editar(request: Request, funcionario_id: int,
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
+@router.post("/painel/empresa/funcionario/{funcionario_id}/pagamento")
+def empresa_funcionario_pagamento(request: Request, funcionario_id: int,
+                                  adiant_dia: str = Form(""), adiant_modo: str = Form("pct"),
+                                  adiant_pct: str = Form(""), adiant_valor: str = Form(""),
+                                  saldo_regra: str = Form("dia"), dia: str = Form(""),
+                                  gerar: str = Form("")):
+    """As DATAS DE PAGAMENTO de uma pessoa (02/10/2026, pedido do dono): o
+    adiantamento (dia + percentual do salário OU valor fixo) e o saldo (dia fixo
+    ou 5º dia útil do mês seguinte), e se isso vira conta a pagar sozinho.
+
+    Rota própria, e não o /editar: os formulários do /editar mandam os campos
+    deles em `hidden`, e um campo novo ali seria apagado por quem salva o
+    depto/setor sem saber que ele existe. A regra mora em finance/folha_titulos."""
+    from finance import folha_titulos as ft
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    try:
+        dia_a = int(adiant_dia) if adiant_dia.strip() else None
+    except ValueError:
+        dia_a = None
+    try:
+        dia_s = int(dia) if dia.strip() else None
+    except ValueError:
+        dia_s = None
+    # quem preencheu só um dos dois campos quis aquele, qualquer que seja o
+    # botão marcado — o rádio esquecido no "%" não pode recusar o valor digitado
+    modo = adiant_modo
+    if modo != "fixo" and not adiant_pct.strip() and adiant_valor.strip():
+        modo = "fixo"
+    elif modo == "fixo" and not adiant_valor.strip() and adiant_pct.strip():
+        modo = "pct"
+    fixo = _reais_para_centavos(adiant_valor) if modo == "fixo" else None
+    r = ft.configurar(pool, conta[0], funcionario_id, adiantamento_dia=dia_a,
+                      adiantamento_pct=(adiant_pct if modo != "fixo" else None),
+                      adiantamento_centavos=fixo, saldo_regra=saldo_regra,
+                      dia_pagamento=dia_s, gerar_titulos=bool(gerar))
+    if not r["ok"]:
+        request.session["erro"] = r["erro"]
+    else:
+        feito = [f"{r[k]} {rot}" for k, rot in (("criados", "criada(s)"),
+                                                ("atualizados", "ajustada(s)"),
+                                                ("cancelados", "cancelada(s)")) if r[k]]
+        # o aviso mora DENTRO da seção da folha (folha_aviso), não no topo da
+        # página: a volta cai em #folha, e um "salvo ✓" lá em cima ninguém via
+        request.session["folha_aviso"] = (
+            "Datas de pagamento salvas ✓"
+            + (f" — contas a pagar da folha: {', '.join(feito)}." if feito else "."))
+    return RedirectResponse("/painel/empresa#folha", status_code=303)
+
+
 @router.post("/painel/empresa/funcionario/{funcionario_id}/salario")
 def empresa_funcionario_salario(request: Request, funcionario_id: int,
                                 valor: str = Form(""), vigencia: str = Form(""),
@@ -13285,7 +13409,7 @@ def empresa_funcionario_salario(request: Request, funcionario_id: int,
             emp.corrigir_salario_atual(pool, conta[0], funcionario_id, cent)
         else:
             emp.definir_salario(pool, conta[0], funcionario_id, cent,
-                                _data_iso(vigencia) or relogio.hoje().replace(day=1))
+                                _data_iso(vigencia) or _relogio.hoje().replace(day=1))
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
@@ -13349,7 +13473,7 @@ def empresa_folha_pagar(request: Request, funcionario_id: str = Form("")):
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    hoje = relogio.hoje()
+    hoje = _relogio.hoje()   # a folha do mês de Brasília, não o de UTC
     fid = int(funcionario_id) if funcionario_id.strip().isdigit() else None
     emp.pagar_folha(pool, conta[0], hoje.year, hoje.month, funcionario_id=fid)
     return RedirectResponse("/painel/empresa", status_code=303)
@@ -13364,7 +13488,7 @@ def empresa_holerite(request: Request, funcionario_id: int, ano: int = 0, mes: i
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    hoje = relogio.hoje()
+    hoje = _relogio.hoje()
     ano = ano or hoje.year
     mes = mes if 1 <= mes <= 12 else hoje.month
     h = emp.holerite_funcionario(pool, conta[0], funcionario_id, ano, mes)

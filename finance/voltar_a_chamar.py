@@ -401,20 +401,21 @@ _SQL_FATOS_BASE = """
      and """ + _FORA_DA_EQUIPE
 _SQL_FATOS = _SQL_FATOS_BASE + " and " + _NAO_BLOQUEADO
 
-# "Marcou" pelo que está na conversa ou no card. As chaves `qualificado` e
-# `proposta` são "Consulta agendada" e "Plano de tratamento" no funil da clínica.
+# "Marcou" pelo que está na conversa ou no card. As chaves `qualificado`, `consulta`
+# e `proposta` são "Agendado", "Consulta" e "Plano ou orçamento enviado" no funil da
+# clínica; Em tratamento e Retorno entram por `sql_fechadas` (fase 'pos').
 def _marcou_sql(conv: str, mid: str, lead: str) -> str:
     return ("""(
    exists (select 1 from mensagens mm where mm.conversa_id = """ + conv + """ and mm.direcao = 'out'
             and """ + _depois("mm", mid) + """ and mm.texto ~* %(re_marcou)s)
    or exists (select 1 from prospeccao pp where pp.conta_id = %(conta)s and pp.id = """ + lead + """
-               and (pp.status in ('qualificado','proposta') or pp.status in """
+               and (pp.status in ('qualificado','consulta','proposta') or pp.status in """
             + fr.sql_fechadas("pp") + ")))")
 
 
 # Card em aberto — ou nenhum card. Conversa sem card é paciente que ninguém pôs no
 # funil (o histórico importado ao conectar o WhatsApp), não paciente resolvido.
-_EM_ABERTO = ("(p.id is null or (p.status not in ('qualificado','proposta') and "
+_EM_ABERTO = ("(p.id is null or (p.status not in ('qualificado','consulta','proposta') and "
               + fr.sql_encerradas_nao("p") + "))")
 
 

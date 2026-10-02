@@ -56,7 +56,8 @@ from db.conexao import get_pool
 from finance import comprovantes as comprov
 from finance import contrato as ctr
 from finance import evento_stands as es
-from web.loja_stands import PLANTA_DEFS_JS
+from web.loja_stands import PLANTA_CSS, PLANTA_DEFS_JS
+from web.stands_receita import RECEITA_JS
 from web.portal import _env, _render, brl, conta_logada, nicho_da_conta
 
 router = APIRouter()
@@ -241,8 +242,12 @@ def painel_eventos_stands(request: Request):
         lider = s["codigo"] == g[0]["codigo"]
         destino = None
         if s["status"] == "pre_reservado":
-            item["resumo"] = ("Comprovante recebido · sinal de " + brl(item["sinal_inf"])
-                              + " aguardando confirmação")
+            # sem comprovante = reserva lançada pela lista da gestão (01/10/2026):
+            # o sinal ainda não foi pago, e dizer "comprovante recebido" mentiria
+            item["resumo"] = (("Comprovante recebido · sinal de " + brl(item["sinal_inf"])
+                               + " aguardando confirmação") if s.get("comprovante_url") else
+                              ("Reservado pela lista · aguardando o sinal de "
+                               + brl(item["sinal_inf"])))
             item["pend"] = [("Confirmar sinal", "coral")] + cad_badge
             if item["contrato"] and not item["contrato"]["assinado_em"]:
                 item["pend"].append(("Contrato na mão do lojista", "azul"))
@@ -267,7 +272,10 @@ def painel_eventos_stands(request: Request):
         todos_itens[s["codigo"]] = item
         if lider:
             funil[destino].append(item)
-    funil["precisa_de_mim"].sort(key=lambda s: s["pre_reserva_ate"] or "")
+    # quem vence primeiro, primeiro; reserva SEM prazo (a da lista) vai pro fim.
+    # Antes a chave misturava data e "" e o funil quebrava com as duas ao mesmo tempo.
+    funil["precisa_de_mim"].sort(
+        key=lambda s: (0, s["pre_reserva_ate"]) if s.get("pre_reserva_ate") else (1,))
 
     # o vínculo (interessado/proposta/contrato) POR CÓDIGO, pra lista completa
     # não repetir as consultas do funil
@@ -410,24 +418,17 @@ def registrar_saldo(request: Request, codigo: str, valor: str = Form("")):
 
 @router.get("/painel/eventos/estandes/consulta-cnpj")
 def consulta_cnpj(request: Request, doc: str = ""):
-    """"Buscar na Receita" do formulário Dados do cliente. É a MESMA consulta da
-    aba Clientes (finance.cnpj_info, BrasilAPI) — mas numa rota daqui porque o
-    gate de papéis só libera ao gestor o prefixo /painel/eventos/estandes; a de
-    Clientes é do dono. Devolve razão social, e-mail, cidade e UF (o que a
-    consulta traz; endereço e CEP o gestor digita)."""
+    """"Buscar na Receita" do formulário Dados do cliente. A consulta é a da
+    BrasilAPI (finance.cnpj_info) — numa rota daqui porque o gate de papéis só
+    libera ao gestor o prefixo /painel/eventos/estandes; a de Clientes é do dono.
+    Devolve o cadastro que o contrato pede (es.receita_do_cnpj): razão social,
+    nome fantasia, representante, endereço, CEP, cidade, UF e e-mail."""
     from fastapi.responses import JSONResponse as _J
-    from finance import cnpj_info, validadoc
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
-        return _J({"ok": False, "erro": "login"}, status_code=401)
-    ok, tipo, d = validadoc.valida(doc)
-    if tipo != "pj" or not ok:
-        return _J({"ok": False, "erro": "CNPJ inválido"})
-    info = cnpj_info.consultar_cnpj(d)
-    if not info:
-        return _J({"ok": False, "erro": "CNPJ não encontrado na Receita"})
-    return _J({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
-               "cidade": info.get("cidade"), "uf": info.get("uf")})
+        return _J({"ok": False, "erro": "Sua sessão expirou — entre de novo e repita a busca."},
+                  status_code=401)
+    return _J(es.receita_do_cnpj(doc))
 
 
 @router.post("/painel/eventos/estandes/{codigo}/cliente")
@@ -632,33 +633,35 @@ _CSS = r"""<style>
 /* ---- o mapa (cadastro completo — a MESMA planta da página pública, na
         variação "planta técnica": tiles chapados por status) ---- */
 .es-pag .mapa-outer{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow);margin-bottom:12px}
-.es-pag .mapa-grid{position:relative;display:grid;gap:4px;width:max-content}
-.es-pag .mapa-grid .map-block{display:flex;flex-direction:column;gap:3px}
-.es-pag .mapa-grid .block-label{font-size:7.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.03em;color:var(--fg-dim);background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:2px 5px;white-space:nowrap;width:fit-content}
-.es-pag .mapa-grid .cells{display:flex;flex-wrap:wrap;align-content:flex-start;gap:3px}
+.es-pag .mapa-grid{position:relative;--pl-dim:var(--fg-dim);--pl-line:rgba(234,242,237,.2);--pl-surf:var(--surface-2)}
 .es-pag .mapa-grid .stand{
   appearance:none;cursor:pointer;border:1px solid var(--line);border-radius:5px;width:auto;min-height:0;margin:0;
   font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;line-height:1;
   display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;flex:0 0 auto;
 }
-.es-pag .mapa-grid .stand.st-livre{background:color-mix(in srgb, var(--mint) 20%, var(--surface));color:var(--fg)}
-.es-pag .mapa-grid .stand.st-reservado{background:color-mix(in srgb, var(--gold) 30%, var(--surface));color:var(--fg)}
-.es-pag .mapa-grid .stand.st-vendido{background:color-mix(in srgb, var(--coral) 32%, var(--surface));color:var(--fg-dim)}
-.es-pag .mapa-grid .stand:hover{box-shadow:0 0 0 2px var(--fg) inset}
-.es-pag .mapa-grid .stand.is-selected{outline:2px solid var(--mint)}
-.es-pag .mapa-grid .decor{
-  display:flex;align-items:center;justify-content:center;text-align:center;border-radius:8px;
-  font-size:8.5px;font-weight:700;color:var(--fg-dim);letter-spacing:0.02em;
-  border:1.5px dashed var(--line);padding:4px;
-}
-.es-pag .mapa-grid .decor.gate{border-style:solid}
-.es-pag .mapa-grid .decor.corridor{writing-mode:vertical-rl;text-orientation:mixed;font-size:7.5px;letter-spacing:0.06em;text-transform:uppercase;padding:6px 2px}
-.es-pag .mapa-grid .decor.wc{border-style:dotted}
-.es-pag .mapa-grid .decor.avenue{writing-mode:vertical-rl;text-orientation:mixed;border:none;font-size:8px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;opacity:0.6;justify-content:flex-start;padding-top:6px}
-.es-pag .mapa-grid .decor.avenueh{border:none;font-size:8px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;opacity:0.6}
-.es-pag .mapa-grid .decor.faixa{border:none;background:#CFC8B8;color:#3A362C;font-weight:800;letter-spacing:0.06em;font-size:9px}
-.es-pag .legend-mapa{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;font-size:12px;color:var(--fg-dim)}
-.es-pag .legend-mapa i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+/* status do mapa — o MESMO vocabulário nas 3 telas (painel, página pública, app):
+   LIVRE = cheio e liso · RESERVADO = cheio com hachura diagonal + aro claro ·
+   VENDIDO = escuro com contorno. Quem diz o status é a luz + a forma, não só a cor
+   (01/10/2026: as tintas a 20–30% eram três tons escuros quase iguais).
+   A legenda (.legend-mapa i) usa as MESMAS declarações do tile. */
+.es-pag .mapa-grid .stand.st-livre,
+.es-pag .legend-mapa i.st-livre{background:var(--mint);border-color:var(--mint);color:var(--mint-fg)}
+.es-pag .mapa-grid .stand.st-reservado,
+.es-pag .legend-mapa i.st-reservado{
+  background:repeating-linear-gradient(135deg, rgba(26,16,0,.24) 0 3px, rgba(26,16,0,0) 3px 6px), var(--gold);
+  border-color:var(--gold-strong);color:#1A1000;text-shadow:0 0 2px var(--gold),0 0 2px var(--gold),0 0 1px var(--gold)}
+.es-pag .mapa-grid .stand.st-vendido,
+.es-pag .legend-mapa i.st-vendido{background:#64201B;border-color:var(--coral);color:#F6E3E0}
+/* hover e selecionado: anel claro por FORA do tile — aparece em cima de qualquer
+   status (anel verde em volta de tile verde sumia) */
+.es-pag .mapa-grid .stand:hover{outline:1px solid var(--fg);outline-offset:1px;z-index:2}
+.es-pag .mapa-grid .stand.is-selected,
+.es-pag .mapa-grid .stand:focus-visible{outline:2px solid var(--fg);outline-offset:1px;z-index:3}
+/* o cenário da planta (paredes, rótulos, ícones) é o mesmo nas 3 telas */
+""" + PLANTA_CSS + r"""/* a amostra da legenda é um mini-tile; a cor vem das regras de status acima */
+.es-pag .legend-mapa{display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:0 0 10px;font-size:12px;color:var(--fg-dim)}
+.es-pag .legend-mapa span{display:inline-flex;align-items:center;gap:6px}
+.es-pag .legend-mapa i{width:20px;height:14px;box-sizing:border-box;border:1px solid transparent;border-radius:4px;display:inline-block;flex:0 0 auto}
 .es-pag .legend-mapa b{color:var(--fg);font-family:var(--mono,monospace)}
 .es-pag .mapa-detalhe{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);margin-bottom:18px}
 .es-pag .mapa-detalhe .md-topo{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -1189,22 +1192,13 @@ var MEU_COD = {{ meu_cod|tojson }};
 (function(){
 """ + PLANTA_DEFS_JS + r"""
   var tamLabel = {'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
-  // mesma pegada proporcional da página pública (largura=frente, altura=fundo),
-  // escalada pra grid compacta do painel (colunas de 30px vs 34px da maquete)
-  var sizeBase = {'2x2':{w:24,h:16},'3x2':{w:34,h:16},'3x3':{w:34,h:22},'4x2':{w:24,h:28},'4x3':{w:34,h:28},'tenda':{w:24,h:28},'personalizado':{w:28,h:28}};
-  var ESCALA = 30/34;
 
   var pavAtual = 'inferior';
   var selecionado = null;
 
   // pavilhões extras (stand do banco fora da planta desenhada) viram aba própria
   var usados = {};
-  pavilions.forEach(function(p){ p.defs.forEach(function(d){
-    for (var n=d.from; n<=d.to; n++){
-      var num = d.prefix === 'i' ? String(n).padStart(2,'0') : String(n);
-      usados[d.prefix + num] = p.key;
-    }
-  }); });
+  pavilions.forEach(function(p){ plantaCodigos(p).forEach(function(code){ usados[code] = p.key; }); });
   var extras = {};
   Object.keys(MAPA).forEach(function(code){
     if (usados[code]) return;
@@ -1214,10 +1208,9 @@ var MEU_COD = {{ meu_cod|tojson }};
   Object.keys(extras).forEach(function(pk){
     var pav = pavilions.filter(function(p){ return p.key === pk; })[0];
     if (!pav){
-      pav = { key:pk, label:pk.replace(/_/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}),
-              sub:'', defs:[], decor:[], rows:1, extraRow:1 };
+      pav = { key:pk, label:pk.replace(/_/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}), sub:'' };
       pavilions.push(pav);
-    } else { pav.extraRow = pav.rows + 1; }
+    }
     pav.extraCodes = extras[pk].sort();
   });
 
@@ -1233,66 +1226,33 @@ var MEU_COD = {{ meu_cod|tojson }};
     pavsEl.appendChild(b);
   });
 
-  function standTile(code, def){
+  // só o botão: posição e tamanho quem dá é a planta medida (plantaMontar)
+  function standTile(code){
     var s = MAPA[code];
     if (!s) return null;
     var btn = document.createElement('button');
     btn.className = 'stand st-' + s.status + (code === selecionado ? ' is-selected' : '');
-    // o def da planta pode sobrescrever a pegada padrão (stand "em pé"/"deitado")
-    var base = sizeBase[s.tamanho] || {w:29,h:23};
-    btn.style.width = Math.round(((def && def.w) || base.w) * ESCALA) + 'px';
-    btn.style.height = Math.round(((def && def.h) || base.h) * ESCALA) + 'px';
     btn.textContent = code;
     btn.title = code + ' · ' + (tamLabel[s.tamanho] || s.tamanho) + ' · ' + s.status;
     btn.onclick = function(){ selecionado = code; renderMapa(); renderDetalhe(); };
     return btn;
   }
 
+  // a planta ocupa a largura do quadro (até 1080px): stand maior, código mais legível
+  var largMapa = 0;
+  function larguraMapa(){
+    var o = document.querySelector('.mapa-outer');
+    var w = o ? o.clientWidth : 0;
+    return w ? Math.max(700, Math.min(1080, w - 34)) : 812;
+  }
+  window.addEventListener('resize', function(){ if (larguraMapa() !== largMapa) renderMapa(); });
+
   function renderMapa(){
     var grid = document.getElementById('mapa-grid');
     var pav = pavilions.filter(function(p){ return p.key === pavAtual; })[0];
-    grid.style.gridTemplateColumns = 'repeat(24, 30px)';
-    grid.style.gridTemplateRows = 'repeat(' + pav.rows + ', 26px)';
-    grid.innerHTML = '';
-    pav.decor.forEach(function(d){
-      var el = document.createElement('div');
-      el.className = 'decor' + (d.kind ? ' ' + d.kind : '');
-      el.style.gridColumn = d.col + ' / span ' + d.cspan;
-      el.style.gridRow = d.row + ' / span ' + d.rspan;
-      el.textContent = d.label;
-      grid.appendChild(el);
-    });
-    pav.defs.forEach(function(d){
-      var block = document.createElement('div');
-      block.className = 'map-block';
-      block.style.gridColumn = d.col + ' / span ' + d.cspan;
-      block.style.gridRow = d.row + ' / span ' + d.rspan;
-      if (d.label){
-        var lab = document.createElement('div');
-        lab.className = 'block-label';
-        lab.textContent = d.label;
-        block.appendChild(lab);
-      }
-      var cells = document.createElement('div');
-      cells.className = 'cells';
-      for (var n=d.from; n<=d.to; n++){
-        var num = d.prefix === 'i' ? String(n).padStart(2,'0') : String(n);
-        var t = standTile(d.prefix + num, d);
-        if (t) cells.appendChild(t);
-      }
-      block.appendChild(cells);
-      grid.appendChild(block);
-    });
-    if (pav.extraCodes && pav.extraCodes.length){
-      var bl = document.createElement('div');
-      bl.className = 'map-block';
-      bl.style.gridColumn = '1 / span 23';
-      bl.style.gridRow = String(pav.extraRow || 1);
-      var cs = document.createElement('div'); cs.className = 'cells';
-      pav.extraCodes.forEach(function(code){ var t = standTile(code); if (t) cs.appendChild(t); });
-      bl.appendChild(cs);
-      grid.appendChild(bl);
-    }
+    // a MESMA planta da página pública, na largura do quadro do painel
+    largMapa = larguraMapa();
+    plantaMontar(grid, pav, {larg: largMapa, pad: 0, tile: standTile});
   }
 
   function renderLegenda(){
@@ -1302,9 +1262,9 @@ var MEU_COD = {{ meu_cod|tojson }};
       tot[MAPA[code].status] = (tot[MAPA[code].status] || 0) + 1;
     });
     document.getElementById('mapa-legenda').innerHTML =
-      '<span><i style="background:var(--mint)"></i>Livre <b>' + (tot.livre||0) + '</b></span>' +
-      '<span><i style="background:var(--gold)"></i>Reservado <b>' + (tot.reservado||0) + '</b></span>' +
-      '<span><i style="background:var(--coral)"></i>Vendido <b>' + (tot.vendido||0) + '</b></span>';
+      '<span><i class="st-livre"></i>Livre <b>' + (tot.livre||0) + '</b></span>' +
+      '<span><i class="st-reservado"></i>Reservado <b>' + (tot.reservado||0) + '</b></span>' +
+      '<span><i class="st-vendido"></i>Vendido <b>' + (tot.vendido||0) + '</b></span>';
   }
 
   function esc(t){
@@ -1411,25 +1371,24 @@ function esCadProg(form){
     if (faltam.length) b.textContent = 'Cadastro ' + ok + '/' + reqs.length; else b.remove();
   });
 }
+""" + RECEITA_JS + r"""
 function esReceita(btn){
   var form = btn.closest('form');
   var msg = form.querySelector('.cad-receita');
   var doc = form.elements['doc'].value.trim();
   msg.hidden = false;
   if (!doc){ msg.textContent = 'Digite o CNPJ antes de buscar.'; return; }
+  if (!receitaTrava(btn)) return;
   msg.textContent = 'Consultando a Receita…';
   fetch('/painel/eventos/estandes/consulta-cnpj?doc=' + encodeURIComponent(doc), {headers:{'x-requested-with':'fetch'}})
     .then(function(r){ return r.json(); })
     .then(function(j){
+      receitaSolta(btn);
       if (!j.ok){ msg.textContent = j.erro || 'Não consegui consultar agora.'; return; }
-      if (j.nome) form.elements['razao'].value = j.nome;
-      if (j.email && !form.elements['email'].value.trim()) form.elements['email'].value = j.email;
-      if (j.cidade) form.elements['cidade'].value = j.cidade;
-      if (j.uf) form.elements['uf'].value = j.uf;
-      msg.textContent = '✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      msg.textContent = receitaMsg(receitaPreenche(form, j));
       esCadProg(form);
     })
-    .catch(function(){ msg.textContent = 'Não consegui consultar agora — digite os dados.'; });
+    .catch(function(){ receitaSolta(btn); msg.textContent = 'Não consegui consultar agora — digite os dados.'; });
 }
 function esIrCadastro(btn){
   var detail = btn.closest('.oc-detail');

@@ -2002,14 +2002,45 @@ TIPOS = {
 }
 
 
+#: as abas que olham o período INTEIRO (inclusive o que ainda vai acontecer)
+_ATE_O_FIM = ("agenda", "funil")
+
+
 def _rotulo_periodo(tipo: str, periodo: str, de, ate) -> str:
-    """O que aparece como "período: ..." no topo e no PDF. Em período específico
-    o rótulo genérico não serve de nada — quem escolheu 01/12 a 31/12 quer ver
-    isso escrito, não "Período específico…"."""
+    """O que aparece como "período: ..." no topo e no PDF — SEMPRE com as datas.
+
+    Até 01/10/2026 dizia só "Este mês", e o dono reclamou que o sistema não
+    informava o intervalo: o mesmo "Este mês" é 01/10 a hoje em Vendas e 01/10 a
+    31/10 na Agenda, e nada na tela contava isso. As datas saem do MESMO
+    `_intervalo` que a consulta usa — o que está escrito é o que foi filtrado."""
+    i, f = _intervalo(periodo, de, ate, ate_o_fim=(tipo in _ATE_O_FIM))
     if periodo == "personalizado":
-        i, f = _intervalo(periodo, de, ate, ate_o_fim=(tipo in ("agenda", "funil")))
         return f"{_fmt(i)} a {_fmt(f)}"
-    return _PERIODO_ROTULO.get(periodo, periodo)
+    nome = _PERIODO_ROTULO.get(periodo, periodo)
+    if periodo == "todos":
+        return f"{nome} · até {_fmt(f)}"
+    return f"{nome} · {_fmt(i)} a {_fmt(f)}"
+
+
+def _periodos_com_datas(tipo: str) -> list[dict]:
+    """As opções do seletor com o intervalo de cada uma — quem abre a lista vê
+    "Este mês (01/10 a 01/10)" antes de escolher. `de`/`ate` (ISO) vão junto pra
+    tela preencher as caixas do "Período específico…" a partir do que estava
+    escolhido, em vez de abrir vazias."""
+    saida = []
+    for v, rot in periodos_da_aba(tipo):
+        if v == "personalizado":
+            saida.append({"v": v, "rot": rot, "de": "", "ate": ""})
+            continue
+        i, f = _intervalo(v, ate_o_fim=(tipo in _ATE_O_FIM))
+        curto = (f"até {f:%d/%m/%Y}" if v == "todos"
+                 else f"{i:%d/%m} a {f:%d/%m}" if i.year == f.year
+                 else f"{i:%d/%m/%Y} a {f:%d/%m/%Y}")
+        # "Todo o período" começa num 01/01/2000 técnico: preencher a caixa com
+        # ele confundiria mais que ajudaria — vai só o "até"
+        saida.append({"v": v, "rot": f"{rot} ({curto})",
+                      "de": "" if v == "todos" else i.isoformat(), "ate": f.isoformat()})
+    return saida
 
 
 def _contexto(conta_id: int, tipo: str, periodo: str, status: str = "",
@@ -2176,6 +2207,7 @@ def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "me
         dados.pop("selecao")
     return _render("relatorios", request, tipos=TIPOS, tipo=tipo, periodo=periodo,
                    periodos=periodos_da_aba(tipo),
+                   periodos_datas=_periodos_com_datas(tipo),
                    periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
                    tem_periodo_livre=any(v == "personalizado"
                                          for v, _ in periodos_da_aba(tipo)),

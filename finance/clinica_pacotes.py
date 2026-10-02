@@ -372,8 +372,9 @@ def retornos(c, conta_id: int, agora: datetime, dias: int = 14) -> list[dict]:
 
 
 def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
-    """Marcou com o profissional depois do pedido → 'marcado'; 30 dias depois do prazo
-    sem marcar → 'vencido' (sai da fila)."""
+    """Marcou um horário DE RETORNO com o profissional depois do pedido → 'marcado' (a
+    sessão do pacote não fecha o retorno: `clinica_agenda.SQL_HORARIO_DE_RETORNO`); 30
+    dias depois do prazo sem marcar → 'vencido' (sai da fila)."""
     n = 0
     try:
         with c.transaction():
@@ -385,6 +386,7 @@ def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
                                                    and e.situacao not in ('cancelou','faltou') and e.status='ativo'
                                                    and e.inicio > (select o.inicio from eventos_agenda o
                                                                     where o.id = r.evento_id and o.conta_id = r.conta_id)
+                                                   and """ + ca.SQL_HORARIO_DE_RETORNO + r"""
                                                    and (e.prospeccao_id = r.prospeccao_id
                                                         or (length(regexp_replace(r.paciente_fone, '\D', '', 'g')) >= 8
                                                             and right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8)
@@ -397,6 +399,7 @@ def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
                                       and e.situacao not in ('cancelou','faltou') and e.status='ativo'
                                       and e.inicio > (select o.inicio from eventos_agenda o
                                                        where o.id = r.evento_id and o.conta_id = r.conta_id)
+                                      and """ + ca.SQL_HORARIO_DE_RETORNO + r"""
                                       and (e.prospeccao_id = r.prospeccao_id
                                            or (length(regexp_replace(r.paciente_fone, '\D', '', 'g')) >= 8
                                                and right(regexp_replace(coalesce(e.paciente_fone,''), '\D', '', 'g'), 8)
@@ -420,8 +423,80 @@ def fechar_retornos(c, conta_id: int, agora: datetime) -> int:
 
 def dispensar_retorno(c, conta_id: int, retorno_id: int) -> bool:
     r = c.execute("""update clinica_retornos set estado='dispensado', atualizado_em=now()
-                      where id=%s and conta_id=%s and estado='aguardando' returning id""",
+                      where id=%s and conta_id=%s and estado='aguardando' returning id, prospeccao_id""",
                   (retorno_id, conta_id)).fetchone()
+    if r and r[1]:
+        try:
+            with c.transaction():
+                # saiu da fila: o card não fica esperando em Retorno um retorno que não vem
+                ca.card_do_retorno(c, conta_id, r[1])
+        except Exception:  # noqa: BLE001 — dispensar é o pedido; o card é consequência
+            _log.warning("pacotes: card do retorno não andou (retorno %s)", retorno_id, exc_info=True)
+    return r is not None
+
+
+# ------------------------------------------------------------------ resultados a entregar
+
+#: o resultado sem data prevista conta como atrasado depois disto: sem data ele nunca
+#: avisaria, e o card esperaria em Retorno sem ninguém lembrar dele
+RESULTADO_SEM_DATA_DIAS = 15
+
+def pedir_resultado(c, conta_id: int, ev: dict | None, previsto_em: date | None) -> int | None:
+    """O resultado a entregar do atendimento (biópsia, coleta, exame). Um por
+    atendimento: o segundo pedido não duplica."""
+    if not ev:
+        return None
+    r = c.execute("""insert into clinica_resultados (conta_id, prospeccao_id, evento_id, profissional_id,
+                                                     paciente_nome, paciente_fone, previsto_em)
+                     values (%s,%s,%s,%s,%s,%s,%s) on conflict (evento_id) do nothing returning id""",
+                  (conta_id, ev.get("lead"), ev["id"], ev.get("profissional_id"), ev.get("paciente") or "",
+                   ev.get("fone") or "", previsto_em)).fetchone()
+    return r[0] if r else None
+
+
+def resultados(c, conta_id: int, agora: datetime) -> list[dict]:
+    """Os resultados em aberto: os que chegaram (falta entregar) primeiro, depois os que
+    esperam o laboratório, pela data prevista."""
+    hoje = ca.hoje_br(agora)
+    try:
+        with c.transaction():
+            rows = c.execute(
+                """select r.id, r.prospeccao_id, r.paciente_nome, r.paciente_fone, r.previsto_em, r.estado,
+                          coalesce(p.nome, ''), r.criado_em, r.profissional_id
+                     from clinica_resultados r
+                     left join clinica_profissionais p on p.id = r.profissional_id and p.conta_id = r.conta_id
+                    where r.conta_id=%s and r.estado in ('aguardando','chegou')
+                    order by r.estado <> 'chegou', r.previsto_em nulls last, r.id""", (conta_id,)).fetchall()
+    except Exception:  # noqa: BLE001 — sem a 490
+        return []
+    return [{"id": r[0], "lead": r[1], "paciente": r[2], "fone": r[3], "previsto_em": r[4], "estado": r[5],
+             "prof": r[6], "criado_em": r[7], "profissional_id": r[8], "chegou": r[5] == "chegou",
+             "atrasado": r[5] == "aguardando" and (
+                 r[4] < hoje if r[4] is not None
+                 else ca.local(r[7]).date() + timedelta(days=RESULTADO_SEM_DATA_DIAS) < hoje)} for r in rows]
+
+
+def resultado(c, conta_id: int, resultado_id: int, acao: str, membro_id: int | None = None) -> bool:
+    """A recepção anda com o resultado: `chegou` (o laboratório devolveu; falta marcar a
+    entrega), `entregue` ou `dispensar`. Entregue ou fora da fila, o card que só
+    esperava isso sai de Retorno (`clinica_agenda.card_do_retorno`)."""
+    if acao == "chegou":
+        r = c.execute("""update clinica_resultados set estado='chegou', chegou_em=now(), atualizado_em=now()
+                          where id=%s and conta_id=%s and estado='aguardando' returning prospeccao_id""",
+                      (resultado_id, conta_id)).fetchone()
+        return r is not None
+    if acao not in ("entregue", "dispensar"):
+        return False
+    r = c.execute("""update clinica_resultados set estado=%s, atualizado_em=now(),
+                            entregue_em = case when %s = 'entregue' then now() else entregue_em end
+                      where id=%s and conta_id=%s and estado in ('aguardando','chegou') returning prospeccao_id""",
+                  ("entregue" if acao == "entregue" else "dispensado", acao, resultado_id, conta_id)).fetchone()
+    if r and r[0]:
+        try:
+            with c.transaction():
+                ca.card_do_retorno(c, conta_id, r[0], membro_id)
+        except Exception:  # noqa: BLE001 — o resultado andou; o card é consequência
+            _log.warning("pacotes: card não andou com o resultado (resultado %s)", resultado_id, exc_info=True)
     return r is not None
 
 
@@ -515,7 +590,20 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
                                      texto_lembrete("retorno", r["paciente"], prof=profs.get(r["profissional_id"], ""),
                                                     vence=r["vence_em"]), agora):
             out["retorno"] += 1
+    # PLANO ACEITO NÃO É PLANO PAGO (funil novo, entrega 1b): o pacote do plano ainda não
+    # pago não chama o paciente pra marcar sessão nem avisa que a validade está acabando
+    a_pagar: set[int] = set()
+    if "tratamento" in ca._chaves_do_funil(c, conta_id):
+        try:
+            with c.transaction():
+                a_pagar = {r[0] for r in c.execute(
+                    "select id from clinica_planos where conta_id=%s and status='aceito' and pago_em is null",
+                    (conta_id,)).fetchall()}
+        except Exception:  # noqa: BLE001 — sem a 474
+            a_pagar = set()
     for k in precisam_marcar(c, conta_id, agora):
+        if k.get("plano_id") in a_pagar:
+            continue
         if k["proxima"] > hoje or k["usadas"] == 0 and k["criado_em"] > agora - timedelta(days=2):
             continue                        # ainda não liberou; o plano acabou de ser aceito
         if _ja_lembrou(c, conta_id, "sessao", k["id"], agora - timedelta(days=RELEMBRAR_DIAS)):
@@ -526,6 +614,8 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
             out["sessao"] += 1
     for k in listar(c, conta_id, hoje):
         if k["estado"] != "ativo" or not k["vence_logo"] or _ja_lembrou(c, conta_id, "validade", k["id"]):
+            continue
+        if k.get("plano_id") in a_pagar:
             continue
         if k["criado_em"] > agora - timedelta(days=2) or _tem_futuro(c, conta_id, k, agora):
             continue                        # acabou de comprar, ou já marcou as próximas
@@ -540,9 +630,88 @@ def lembrar(c, conta_id: int, agora: datetime) -> dict:
 
 # ------------------------------------------------------------------ o poller
 
+def varrer_tratamento(c) -> int:
+    """O card em Em tratamento cujo saldo acabou FORA do Finalizar (pacote vencido,
+    encerrado pela recepção): vai pra Retorno ou Concluído, como no Finalizar
+    (`clinica_agenda.card_do_tratamento`). Só olha contas que têm a coluna."""
+    n = 0
+    try:
+        with c.transaction():
+            leads = c.execute(
+                """select p.conta_id, p.id from prospeccao p
+                    where p.status = 'tratamento'
+                      and p.conta_id in (select conta_id from funil_etapas
+                                          where chave = 'tratamento' and fase = 'pos')
+                      and exists (select 1 from clinica_pacotes k
+                                   where k.conta_id = p.conta_id and k.prospeccao_id = p.id)
+                      and not exists (select 1 from clinica_pacotes k
+                                       where k.conta_id = p.conta_id and k.prospeccao_id = p.id
+                                         and k.estado = 'ativo' and k.sessoes_usadas < k.sessoes_total)
+                    limit 200""").fetchall()
+    except Exception:  # noqa: BLE001 — sem a régua ou sem a 381
+        return 0
+    for conta_id, lead in leads:
+        try:
+            with c.transaction():
+                n += 1 if ca.card_do_tratamento(c, conta_id, lead) else 0
+        except Exception:  # noqa: BLE001
+            _log.warning("pacotes: card do tratamento não andou (lead %s)", lead, exc_info=True)
+    c.commit()
+    return n
+
+
+def varrer_retorno(c) -> int:
+    """A coluna Retorno acompanha a fila de retornos (`clinica_agenda.card_do_retorno`):
+    o card em Concluído cujo retorno nasceu ou reabriu depois do Finalizar vai pra
+    Retorno; o card em Retorno cujo retorno venceu ou foi tirado da fila vai pra
+    Concluído. Só olha contas que têm a coluna, como pós-venda."""
+    n = 0
+    try:
+        with c.transaction():
+            leads = c.execute(
+                """select p.conta_id, p.id from prospeccao p
+                    where p.status in ('ganho', 'retorno')
+                      and p.conta_id in (select conta_id from funil_etapas
+                                          where chave = 'retorno' and fase = 'pos')
+                      and ((p.status = 'ganho' and (exists (
+                                select 1 from clinica_retornos r
+                                 where r.conta_id = p.conta_id and r.prospeccao_id = p.id
+                                   and r.estado = 'aguardando') or exists (
+                                select 1 from clinica_resultados s
+                                 where s.conta_id = p.conta_id and s.prospeccao_id = p.id
+                                   and s.estado in ('aguardando','chegou'))))
+                        or (p.status = 'retorno'
+                            and (exists (select 1 from clinica_retornos r
+                                          where r.conta_id = p.conta_id and r.prospeccao_id = p.id)
+                                 or exists (select 1 from clinica_resultados s
+                                             where s.conta_id = p.conta_id and s.prospeccao_id = p.id))
+                            and not exists (select 1 from clinica_resultados s
+                                             where s.conta_id = p.conta_id and s.prospeccao_id = p.id
+                                               and s.estado in ('aguardando','chegou'))
+                            and not exists (
+                                select 1 from clinica_retornos r
+                                 where r.conta_id = p.conta_id and r.prospeccao_id = p.id
+                                   and (r.estado = 'aguardando' or (r.estado = 'marcado' and exists (
+                                        select 1 from eventos_agenda e
+                                         where e.id = r.marcado_evento_id and e.conta_id = r.conta_id
+                                           and coalesce(e.situacao, '') <> 'finalizado'))))))
+                    limit 200""").fetchall()
+    except Exception:  # noqa: BLE001 — sem a régua ou sem a 381
+        return 0
+    for conta_id, lead in leads:
+        try:
+            with c.transaction():
+                n += 1 if ca.card_do_retorno(c, conta_id, lead) else 0
+        except Exception:  # noqa: BLE001
+            _log.warning("pacotes: card do retorno não andou (lead %s)", lead, exc_info=True)
+    c.commit()
+    return n
+
+
 def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
-    total = {"contas": 0, "sessao": 0, "retorno": 0, "validade": 0, "vencidos": 0}
+    total = {"contas": 0, "sessao": 0, "retorno": 0, "validade": 0, "vencidos": 0, "concluidos": 0,
+             "cards_retorno": 0}
     with pool.connection() as lockc:
         if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
             return total
@@ -551,8 +720,11 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                 try:
                     with c.transaction():
                         contas = [r[0] for r in c.execute(
+                            # 'marcado' também: o horário que fechou o retorno pode ter sido
+                            # cancelado, e é `fechar_retornos` que o devolve pra fila
                             """select conta_id from clinica_pacotes where estado='ativo'
-                               union select conta_id from clinica_retornos where estado='aguardando'""").fetchall()]
+                               union select conta_id from clinica_retornos
+                                      where estado in ('aguardando', 'marcado')""").fetchall()]
                 except Exception:  # noqa: BLE001 — sem a 381
                     contas = []
                 for conta_id in contas:
@@ -564,6 +736,8 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                     except Exception:  # noqa: BLE001
                         c.rollback()
                         _log.warning("pacotes: conta %s falhou", conta_id, exc_info=True)
+                total["concluidos"] = varrer_tratamento(c)
+                total["cards_retorno"] = varrer_retorno(c)
         finally:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
     return total

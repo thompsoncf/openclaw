@@ -356,11 +356,15 @@ def vista(pool, conta_id: int, mapa_id: int) -> dict:
             })
             if _omat is not None:
                 linhas = mats.get(o["id"]) or []
-                d["mat"] = " · ".join(f"{_omat.rotulo(r['saldo'], r['unidade'])} de {r['nome']}"
-                                      for r in linhas[:3])
+                # só o que TEM na obra: "0 barras" é ruído, e o saldo negativo
+                # já vira o alerta de furo logo abaixo
+                d["mat"] = " · ".join([f"{_omat.rotulo(r['saldo'], r['unidade'])} de {r['nome']}"
+                                       for r in linhas if r["saldo"] > 0][:3])
                 fur = _omat.furos(linhas)
-                d["mat_alerta"] = (_omat.alerta_irmas(pool, conta_id, o, quadros=mats,
-                                                      grupos=grupos, obras=por_grupo)
-                                   or (fur[0] if fur else ""))
+                # o furo primeiro: uso maior que entrada é material sumindo (ou nota
+                # faltando) — mais grave que gastar acima das irmãs
+                d["mat_alerta"] = ((fur[0] if fur else "")
+                                   or _omat.alerta_irmas(pool, conta_id, o, quadros=mats,
+                                                         grupos=grupos, obras=por_grupo))
         out.append(d)
     return {"mapa": m, "lotes": out}

@@ -391,12 +391,23 @@ def furos(linhas: list[dict]) -> list[str]:
             for r in linhas if r["saldo"] < 0]
 
 
+# a "mesma altura": a diferença de andamento até onde o consumo ainda é comparável
+ALTURA_PCT = 10
+
+
 def alerta_irmas(pool, conta_id: int, obra: dict, *, quadros=None, obras=None,
                  grupos=None) -> str:
-    """O consumo da casa contra a média das irmãs da quadra que estão NA MESMA
-    ALTURA OU ALÉM (pct >=), material-chave por material-chave. Usa o USO quando
-    a casa aponta; sem apontamento, compara a COMPRA (o que entrou) — o desvio
-    grosso aparece sem esforço nenhum (decisão 2 do dono)."""
+    """O consumo da casa contra a média das irmãs da quadra NA MESMA ALTURA
+    (andamento a até ALTURA_PCT pontos), material-chave por material-chave.
+
+    NA MESMA ALTURA, e não "ou além": a casa mais adiantada já gastou mais
+    cimento por estar mais adiantada, e puxaria a média pra cima — a casa
+    gastona nunca seria acusada (achado na demonstração de 02/10/2026).
+
+    NA MESMA RÉGUA: compara USO com uso quando a casa e todas as irmãs apontam
+    uso daquele material; senão, COMPRA com compra (o que entrou) — sem
+    apontamento nenhum, o desvio grosso aparece do mesmo jeito (decisão 2 do
+    dono). Misturar as duas réguas acusaria quem aponta."""
     try:
         from . import obra_grupos as og
         # `grupos` ({obra_id: {grupo_id}}) e `obras` ({grupo_id: [obras]}) vêm
@@ -407,34 +418,47 @@ def alerta_irmas(pool, conta_id: int, obra: dict, *, quadros=None, obras=None,
         if not gid:
             return ""
         da_quadra = obras.get(gid, []) if obras is not None else og.casas(pool, conta_id, gid)
-        irmas = [o for o in da_quadra if o["id"] != obra["id"] and o["pct"] >= obra["pct"]]
-        if len(irmas) < 2:
+        irmas = [o for o in da_quadra if o["id"] != obra["id"]
+                 and abs(o["pct"] - obra["pct"]) <= ALTURA_PCT]
+        if not irmas:
             return ""
         qs = quadros if quadros is not None else por_obra(pool, conta_id)
 
-        def consumo(oid: int) -> dict[str, Decimal]:
-            out: dict[str, Decimal] = {}
+        def linhas(oid: int) -> dict[str, dict]:
+            out: dict[str, dict] = {}
             for r in qs.get(oid, []):
                 if r["chave"]:
                     k = _ob._norm(r["nome"])
-                    out[k] = out.get(k, Decimal(0)) + (r["usado"] if r["usado"] > 0 else r["entrou"])
+                    acc = out.setdefault(k, {"entrou": Decimal(0), "usado": Decimal(0)})
+                    acc["entrou"] += r["entrou"]
+                    acc["usado"] += r["usado"]
             return out
 
-        meu = consumo(obra["id"])
-        das_irmas = [consumo(o["id"]) for o in irmas]
+        meu = linhas(obra["id"])
+        das_irmas = [linhas(o["id"]) for o in irmas]
         for r in _ordenado(qs.get(obra["id"], [])):
             if not r["chave"]:
                 continue
             k = _ob._norm(r["nome"])
-            valores = [c[k] for c in das_irmas if c.get(k, Decimal(0)) > 0]
-            if len(valores) < 2 or meu.get(k, Decimal(0)) <= 0:
+            eu = meu.get(k)
+            elas = [c[k] for c in das_irmas if k in c and c[k]["entrou"] > 0]
+            if not eu or not elas:
                 continue
+            uso = eu["usado"] > 0 and all(e["usado"] > 0 for e in elas)
+            campo = "usado" if uso else "entrou"
+            mine = eu[campo]
+            valores = [e[campo] for e in elas]
             media = sum(valores) / len(valores)
-            if media > 0 and meu[k] > media * Decimal("1.2"):
-                acima = int(round(100 * (meu[k] - media) / media))
-                return (f"{r['nome']} {acima}% acima das irmãs: já foram "
-                        f"{rotulo(meu[k], r['unidade'])} nesta casa; as {len(valores)} irmãs "
-                        f"na mesma altura ou além usaram {_qtd(media.quantize(Decimal('0.1')))} em média.")
+            if mine <= 0 or media <= 0 or mine <= media * Decimal("1.2"):
+                continue
+            acima = int(round(100 * (mine - media) / media))
+            verbo, verbos = ("usou", "usaram") if uso else ("comprou", "compraram")
+            quem = "a irmã" if len(valores) == 1 else f"as {len(valores)} irmãs"
+            return (f"{r['nome']} {acima}% acima das irmãs na mesma altura: esta casa já "
+                    f"{verbo} {rotulo(mine, r['unidade'])}; {quem} "
+                    f"{verbo if len(valores) == 1 else verbos} "
+                    f"{_qtd(media.quantize(Decimal('0.1')))}"
+                    + (" em média." if len(valores) > 1 else "."))
         return ""
     except Exception:  # noqa: BLE001
         return ""

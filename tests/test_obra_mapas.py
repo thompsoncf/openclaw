@@ -291,3 +291,20 @@ def test_outra_conta_nao_ve_o_mapa(pool, conta, monkeypatch):
     r = cli.post(f"/painel/obras/mapa/{m['id']}/lotes", data={"dados": "[]"})
     assert "erro=" in r.headers["location"]
     assert om.lotes(pool, conta, m["id"])          # o desenho do dono continua lá
+
+
+def test_alerta_vira_selo_e_a_cor_continua_sendo_o_andamento(pool, conta):
+    # obra começada há 40 dias sem CNO: tem alerta de documento (obra_venda)
+    from datetime import date, timedelta
+    m = om.criar(pool, conta, "Área Selo")
+    o = ob.criar_obra(pool, conta, "Casa Selo", "casa")
+    ob.salvar_etapas(pool, conta, o["id"], [(None, "Fundação", 40), (None, "Cobertura", 60)])
+    o = ob.obter_obra(pool, conta, o["id"])
+    ob.marcar_etapa(pool, conta, o["id"], o["etapas"][0]["id"], concluida=True)
+    with pool.connection() as c:
+        c.execute("update obras set inicio_em=%s where id=%s", (date.today() - timedelta(days=40), o["id"]))
+        c.commit()
+    om.salvar_lotes(pool, conta, m["id"], [_lote("1", 0, 0, obra_id=o["id"])])
+    lote = om.vista(pool, conta, m["id"])["lotes"][0]
+    assert lote["alerta"]                       # o alerta continua lá, pro selo
+    assert lote["st"] == "f2"                   # e a cor é a do andamento (40%), não âmbar

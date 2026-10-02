@@ -210,7 +210,8 @@ def test_painel_mapa_comum_e_custo_cheio(pool, conta, monkeypatch):
     r = c.post("/painel/obras/lancamento", data={"lancamento_id": str(lid), "obra_id": f"q{g['id']}"})
     assert "erro" not in r.headers["location"]
     html = c.get(f"/painel/obras/quadra/{g['id']}").text
-    assert "O mapa" in html and "qm-alerta" in html and "CNO atrasado" in html
+    assert "O mapa" in html and "qm-selo" in html and "CNO atrasado" in html
+    assert "qm-alerta" not in html          # a cor é o andamento; o alerta é o selo
     assert "Custo comum · R$ 9.000,00" in html and "R$ 6.000,00" in html and "R$ 3.000,00" in html
     ficha = c.get(f"/painel/obras/{pequena}").text
     assert "Custo comum da Quadra 9 (pelo m²): <b>R$ 3.000,00</b>" in ficha

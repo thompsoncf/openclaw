@@ -1340,7 +1340,9 @@ _TPL_QUADRA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 .qm-txt{display:block;max-height:2.4em;overflow:hidden}
 .qm-pct{position:absolute;right:7px;bottom:5px;font-weight:800;font-size:.9rem}
 .qm-f0{background:#c3cfc9;color:#14211c}.qm-f1{background:#8fd9bd;color:#14211c}.qm-f2{background:#3ec997}
-.qm-f3{background:#12a07a}.qm-pronta{background:#0f5f4a}.qm-alerta{background:#f2a33a}
+.qm-f3{background:#12a07a}.qm-pronta{background:#0f5f4a}
+/* o alerta é um SELO no canto; a cor continua sendo o andamento (pedido do dono, 02/10) */
+.qm-selo{position:absolute;top:-6px;right:-6px;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;font-size:.7rem;background:#f2a33a;box-shadow:0 0 0 2px var(--card),0 2px 4px rgba(0,0,0,.35)}
 .qm-lote.qm-f0,.qm-lote.qm-f1{color:#14211c}
 </style>
 <div class="ob-pag">
@@ -1359,9 +1361,9 @@ _TPL_QUADRA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 </div>
 
 {% if mapa %}<h3 class="ob-sec">O mapa</h3>
-<div class="qm-grade">{% for l in mapa %}<a class="qm-lote qm-{{ 'alerta' if l.alerta else l.faixa }}" href="/painel/obras/{{ l.id }}" title="{{ l.alerta|e }}">
+<div class="qm-grade">{% for l in mapa %}<a class="qm-lote qm-{{ l.faixa }}" href="/painel/obras/{{ l.id }}" title="{{ l.alerta|e }}">{% if l.alerta %}<i class="qm-selo">⚠️</i>{% endif %}
   <b>{{ ('Lt ' ~ l.lote) if l.lote|string|length <= 4 else l.lote|e }}</b><span class="qm-txt">{{ l.alerta|e if l.alerta else ('pronta' if l.faixa == 'pronta' else '') }}</span><span class="qm-pct">{{ l.pct }}</span></a>{% endfor %}</div>
-<div class="qd-leg"><span><i class="qm-f0"></i>não começou</span><span><i class="qm-f1"></i>até 30%</span><span><i class="qm-f2"></i>até 60%</span><span><i class="qm-f3"></i>mais de 60%</span><span><i class="qm-pronta"></i>pronta</span><span><i class="qm-alerta"></i>alerta</span></div>
+<div class="qd-leg"><span><i class="qm-f0"></i>não começou</span><span><i class="qm-f1"></i>até 30%</span><span><i class="qm-f2"></i>até 60%</span><span><i class="qm-f3"></i>mais de 60%</span><span><i class="qm-pronta"></i>pronta</span><span>⚠️ alerta (passe o dedo ou o mouse)</span></div>
 <p class="ob-mut">Os lotes em grade pela numeração. Um toque abre a casa.</p>{% endif %}
 
 <h3 class="ob-sec" id="quadro">Quadro de etapas</h3>

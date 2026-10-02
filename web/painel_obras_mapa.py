@@ -227,7 +227,12 @@ _CSS_MAPA = r"""<style>
     repeating-linear-gradient(90deg, transparent 0 7px, rgba(0,0,0,.12) 7px 8px),
     linear-gradient(155deg,#15735a,var(--pronta));
   box-shadow:0 var(--ext) 0 var(--prontas), 0 calc(var(--ext) + 5px) 12px rgba(0,0,0,.38)}
-.lote3d.s-alerta{background:linear-gradient(155deg,#f6b65c,var(--alerta));box-shadow:0 var(--ext) 0 var(--alertas), 0 calc(var(--ext) + 5px) 12px rgba(0,0,0,.38)}
+/* o alerta é um SELO no canto, e a cor do lote continua sendo o andamento: ⚠️ da
+   obra (documento, prazo, casa pronta travada) e 🧱 do material (furo, irmãs) */
+.lote3d .selos{position:absolute;left:-5px;top:-7px;display:flex;gap:2px;pointer-events:none}
+.lote3d .selo{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;
+  font-size:10px;line-height:1;background:var(--alerta);box-shadow:0 0 0 2px #10201a, 0 2px 4px rgba(0,0,0,.45)}
+.lote3d .selo.mat{background:#e8eef0}
 .lote3d.s-vago{background:transparent;color:#9fc0b2;box-shadow:inset 0 0 0 1.5px #3f6a59;--ext:1px}
 .lote3d.s-terceiro{background:repeating-linear-gradient(135deg, rgba(255,255,255,.14) 0 3px, transparent 3px 8px), var(--terc);
   color:#39413d;box-shadow:0 2px 0 var(--tercs);--ext:2px;cursor:default}
@@ -306,7 +311,7 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
     <span><i style="background:var(--f0)"></i>não começou</span><span><i style="background:var(--f1)"></i>até 30%</span>
     <span><i style="background:var(--f2)"></i>até 60%</span><span><i style="background:var(--f3)"></i>mais de 60%</span>
     <span><i style="background:linear-gradient(180deg,#c96f4a 0 30%,var(--pronta) 30%)"></i>pronta</span>
-    <span><i style="background:var(--alerta)"></i>alerta</span>
+    <span>⚠️ alerta da obra</span><span>🧱 alerta de material</span>
     <span><i style="box-shadow:inset 0 0 0 1.5px #3f6a59"></i>vago</span>
     <span><i style="background:repeating-linear-gradient(135deg,rgba(255,255,255,.4) 0 2px,var(--terc) 2px 5px)"></i>de terceiro</span>
   </div>
@@ -384,6 +389,14 @@ function montar(){
     b.innerHTML = (l.st === 'terceiro' ? '<span style="font-size:10px;font-weight:600">terceiro</span>'
                    : l.st === 'vago' ? 'Lt ' + r + '<span class="pc">vago</span>'
                    : 'Lt ' + r + '<span class="pc">' + l.pct + '</span>');
+    if (l.alerta || l.mat_alerta){
+      var sl = document.createElement('span');
+      sl.className = 'selos';
+      if (l.alerta) sl.innerHTML += '<i class="selo">⚠️</i>';
+      if (l.mat_alerta) sl.innerHTML += '<i class="selo mat">🧱</i>';
+      b.appendChild(sl);
+      b.title = [l.alerta, l.mat_alerta].filter(Boolean).join(' · ');
+    }
     if (l.st !== 'terceiro') b.onclick = function(){ sel = i; montar(); perfil(l); };
     chao.appendChild(b);
   });

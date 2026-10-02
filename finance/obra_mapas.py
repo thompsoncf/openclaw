@@ -317,6 +317,11 @@ def vista(pool, conta_id: int, mapa_id: int) -> dict:
         raise ValueError("Área não encontrada.")
     # com as arquivadas: a casa entregue continua no mapa, pronta
     por_id = {o["id"]: o for o in _ob.listar_obras(pool, conta_id, incluir_arquivadas=True)}
+    try:                                    # o material no perfil (migração 484)
+        from . import obra_material as _omat
+        mats = _omat.por_obra(pool, conta_id)
+    except Exception:  # noqa: BLE001
+        _omat, mats = None, {}
     out = []
     for l in lotes(pool, conta_id, mapa_id):
         o = por_id.get(l["obra_id"]) if l["obra_id"] else None
@@ -339,5 +344,12 @@ def vista(pool, conta_id: int, mapa_id: int) -> dict:
                 "n_etapas": f"{feitas} de {len(o['etapas'])} etapas",
                 "etapas": [[e["nome"], bool(e["concluida_em"])] for e in o["etapas"]],
             })
+            if _omat is not None:
+                linhas = mats.get(o["id"]) or []
+                d["mat"] = " · ".join(f"{_omat.rotulo(r['saldo'], r['unidade'])} de {r['nome']}"
+                                      for r in linhas[:3])
+                fur = _omat.furos(linhas)
+                d["mat_alerta"] = (_omat.alerta_irmas(pool, conta_id, o, quadros=mats)
+                                   or (fur[0] if fur else ""))
         out.append(d)
     return {"mapa": m, "lotes": out}

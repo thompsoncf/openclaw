@@ -3,6 +3,7 @@
 Cada ferramenta e' ligada ao livro-caixa de UM usuario. O agente chama elas
 quando voce pede ("lanca 50 de mercado") ou quando le uma nota por foto.
 """
+import logging
 from datetime import date, datetime
 
 from core.agent import Ferramenta
@@ -352,7 +353,17 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "Pode mandar o proximo lote / a proxima parte do cupom.")
         sufixo = (" Manda o proximo lote que eu continuo anexando." if anexar
                   else " Agora da' pra perguntar coisas tipo 'quanto gastei em X'.")
-        return f"Salvei {n} itens do cupom.{sufixo}"
+        # o gancho pós-itens (hoje só a construção liga, em tools_pj: os itens da
+        # nota viram o controle de material). Nunca derruba o registro do cupom.
+        extra = ""
+        gancho = getattr(livro, "apos_itens", None)
+        if gancho is not None:
+            try:
+                extra = gancho(int(lanc_id)) or ""
+            except Exception:  # noqa: BLE001
+                logging.getLogger("openclaw.tools").exception(
+                    "gancho apos_itens falhou (lanc %s)", lanc_id)
+        return f"Salvei {n} itens do cupom.{sufixo}" + (f" {extra}" if extra else "")
 
     def buscar_itens(entrada: dict) -> str:
         termo = (entrada.get("termo") or "").strip()

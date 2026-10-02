@@ -149,6 +149,10 @@ class LivroCaixa:
         # o webhook liga — sem ele, as opções vão escritas no texto.
         self.escolha = None
         self.canal_interativo = False
+        # o gancho pós-itens do cupom: a construção liga (finance/tools_pj.py) pra
+        # os itens virarem o controle de material (finance/obra_material.py).
+        # Recebe o lancamento_id e devolve a frase pra resposta ('' se nada).
+        self.apos_itens = None
 
     def lancamento_por_chave(self, chave: str | None, global_: bool = False) -> dict | None:
         """Consulta se ja' existe lancamento com essa chave (NFC-e).

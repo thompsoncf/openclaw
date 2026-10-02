@@ -32,6 +32,8 @@ _AVISOS = {
     "sem_mensagem": "A mensagem não saiu (sem WhatsApp conectado ou número inválido).",
     "salvo": "Configuração salva.",
     "vendido": "Venda registrada: o estoque baixou e a receita está no Financeiro.",
+    "recebido": "Pagamento registrado: a receita está no Financeiro.",
+    "fica": "Anotado: fica a receber. O título está em Financeiro › A receber.",
 }
 
 
@@ -84,11 +86,16 @@ def _ir(request: Request, url: str, aviso: str = "", erro: str = "") -> Redirect
     return RedirectResponse(url, status_code=303)
 
 
+def _brl(cent) -> str:
+    return ("R$ " + f"{(cent or 0) / 100:,.2f}").replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def _ctx_base(request: Request) -> dict:
+    from finance import clinica_recebimentos as crb
     q = request.query_params
     return {"aviso": _AVISOS.get(q.get("aviso") or "", ""),
             "erro": request.session.pop("agenda_erro", ""), "secao_ativa": "agenda",
-            "SIT": ca.SITUACOES, "SIT_D": ca.SIT_D}
+            "SIT": ca.SITUACOES, "SIT_D": ca.SIT_D, "SELO_PGTO": crb.SELO, "brl": _brl}
 
 
 # ------------------------------------------------------------------ dia e semana
@@ -325,6 +332,9 @@ def ver_evento(request: Request, evento_id: int):
         assin_feito = cas.do_evento(c, conta_id, evento_id) if ev["situacao"] == "finalizado" else None
         if assin_vai:
             pacote_vai = None                      # a sessão do mês da assinatura cobre
+        from finance import clinica_recebimentos as crb
+        crb.anotar(c, conta_id, [ev])
+        recebido = crb.do_evento(c, conta_id, evento_id)
         tipo_ev = next((t for t in cc.listar_tipos(c, conta_id, so_ativos=False) if t["id"] == ev["servico_id"]), None)
         volta_padrao = (tipo_ev or {}).get("volta_dias") or ""
         funil = ca._chaves_do_funil(c, conta_id)   # o texto do Finalizar diz pra onde o card VAI nesta conta
@@ -368,6 +378,7 @@ def ver_evento(request: Request, evento_id: int):
                     "vendas": cpr.vendas_do_evento(c, conta_id, evento_id), "pagamentos": cpr.PAGAMENTOS}
     return _render("clinica_agenda_evento.html", request, titulo="Agendamento", **_ctx_base(request),
                    pacote_feito=pacote_feito, pacote_vai=pacote_vai, assin_vai=assin_vai, assin_feito=assin_feito, volta_padrao=volta_padrao, retorno=retorno,
+                   recebido=recebido, formas_pgto=crb.FORMAS,
                    funil=funil,
                    pac_cfg=pac_cfg, prod=prod, ficha_kid=kid, ficha=ficha, ficha_txt=_cfl.falta_txt(ficha), pre=pre,
                    abre_prontuario=abre_prontuario, rascunho=rascunho,
@@ -406,6 +417,20 @@ def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
         # o médico propôs tratamento: a recepção monta o plano agora, com o paciente na frente
         return RedirectResponse(f"/painel/clinica/planos/novo?evento={evento_id}", status_code=303)
     return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", "" if erro else "situacao", erro or "")
+
+
+@router.post("/painel/clinica/agenda/evento/{evento_id}/receber")
+def evento_receber(request: Request, evento_id: int, valor: str = Form(""), forma: str = Form("")):
+    """O pagamento do atendimento, a qualquer hora do dia (decisão B do dono, 02/10/2026)."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    from finance import clinica_recebimentos as crb
+    from finance.clinica_config import centavos
+    erro = crb.receber(get_pool(), conta[0], evento_id, valor_centavos=centavos(valor) if valor.strip() else None,
+                       forma=forma, membro_id=request.session.get("membro_id"))
+    return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}",
+               "" if erro else ("fica" if forma == "fiado" else "recebido"), erro or "")
 
 
 @router.post("/painel/clinica/agenda/evento/{evento_id}/remarcar")
@@ -552,6 +577,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     {% if vista == 'dia' %}<div class="ag-kpi"><b>{{ d.confirmados }} de {{ d.a_confirmar }}</b><span>confirmados (ou já chegaram)</span></div>
     {% else %}<div class="ag-kpi"><b>{{ d.livres }}</b><span>horários livres de meia hora</span></div>{% endif %}
     <div class="ag-kpi"><b>{{ d.faltas }}</b><span>faltas</span></div>
+    {% if vista == 'dia' %}<div class="ag-kpi"><b>{{ d.a_receber }}</b><span>a receber</span></div>{% endif %}
   </div>
 
   {% if vista == 'dia' and d.remarcar %}
@@ -566,7 +592,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <thead><tr><th></th>{% for col in d.colunas %}<th>{% if vista == 'dia' %}<span style="color:{{ col.prof.cor }}">●</span> {{ col.prof.nome }}<small>{{ col.prof.funcao }}</small>{% else %}{{ col.rotulo }}{% if col.hoje %} · hoje{% endif %}<small>{% if col.ocupacao is not none %}{{ col.ocupacao }}% ocupado{% else %}não atende{% endif %}</small>{% endif %}</th>{% endfor %}</tr></thead>
     <tbody>{% for h in d.linhas %}{% set i = loop.index0 %}<tr><td class="h">{{ '%02d:%02d'|format(h.hour, h.minute) }}</td>
       {% for col in d.colunas %}{% set cel = col.celulas[i] %}
-        {% if cel.tipo == 'ev' %}<td>{% for e in cel.evs %}<a class="ev s-{{ e.situacao }}" style="border-left-color:{{ e.cor }}" href="/painel/clinica/agenda/evento/{{ e.id }}"><b>{{ e.paciente }}</b><span>{{ e.tipo }} · {{ e.hora }}–{{ e.fim_txt }}{% if e.encaixe %} · encaixe{% endif %}</span><span>{{ SIT_D[e.situacao] }}{% if e.pede_remarcar_em %} · quer remarcar{% endif %}</span>{% if e.ficha and e.situacao not in ('finalizado','cancelou','faltou') %}<span title="{{ e.ficha_txt }}">{% if e.ficha.completa %}✓ ficha completa{% else %}📝 ficha {{ e.ficha.pct }}%{% endif %}{% if e.ficha.alergia %} · ⚠ alergia{% endif %}</span>{% endif %}</a>{% endfor %}</td>
+        {% if cel.tipo == 'ev' %}<td>{% for e in cel.evs %}<a class="ev s-{{ e.situacao }}" style="border-left-color:{{ e.cor }}" href="/painel/clinica/agenda/evento/{{ e.id }}"><b>{{ e.paciente }}</b><span>{{ e.tipo }} · {{ e.hora }}–{{ e.fim_txt }}{% if e.encaixe %} · encaixe{% endif %}</span><span>{{ SIT_D[e.situacao] }}{% if e.pede_remarcar_em %} · quer remarcar{% endif %}{% if e.pgto %} · {% if e.pgto == 'a_receber' %}<b>a receber</b>{% else %}{{ SELO_PGTO[e.pgto] }}{% endif %}{% endif %}</span>{% if e.ficha and e.situacao not in ('finalizado','cancelou','faltou') %}<span title="{{ e.ficha_txt }}">{% if e.ficha.completa %}✓ ficha completa{% else %}📝 ficha {{ e.ficha.pct }}%{% endif %}{% if e.ficha.alergia %} · ⚠ alergia{% endif %}</span>{% endif %}</a>{% endfor %}</td>
         {% elif cel.tipo == 'livre' and ((vista == 'dia' and col.marca) or (vista == 'semana' and prof_marca)) %}<td><a class="livre" href="/painel/clinica/agenda/novo?prof={{ col.prof.id if vista == 'dia' else prof_id }}&data={{ (col.dia if vista == 'semana' else d.data).isoformat() }}&hora={{ '%02d:%02d'|format(h.hour, h.minute) }}">+ livre</a></td>
         {% elif cel.tipo == 'livre' %}<td class="continua"></td>
         {% elif cel.tipo == 'continua' %}<td class="continua"></td>
@@ -696,6 +722,20 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="ag-caixa"><b>Pré-consulta</b> <span class="mut">contado pelo {{ 'responsável' if pre.por == 'responsavel' else 'paciente' }} em {{ pre.quando.strftime('%d/%m') }}{% if pre.curta %} · retorno{% endif %}</span>
     {% for pergunta, resposta in pre.linhas %}<div style="margin-top:.4rem"><div class="mut">{{ pergunta }}</div><div>{{ resposta }}</div></div>{% endfor %}
     <div class="mut" style="margin-top:.5rem">Só os profissionais de saúde da clínica veem. Confira na consulta.</div></div>
+  {% endif %}
+
+  {% if ev.pgto %}
+  <div class="ag-caixa"><b>Pagamento</b>
+    {% if recebido %}<div class="ok" style="margin-top:.4rem">{% if recebido.forma == 'fiado' %}Fica a receber: {{ brl(recebido.valor) }} (título em Financeiro › A receber){% else %}Pago: {{ brl(recebido.valor) }} · {{ recebido.forma_d }}{% endif %}</div>
+    {% elif ev.pgto == 'pacote' %}<div class="mut" style="margin-top:.4rem">Coberto pelo pacote ou pela assinatura: nada a receber aqui.</div>
+    {% elif ev.pgto == 'sem_custo' %}<div class="mut" style="margin-top:.4rem">Retorno sem custo.</div>
+    {% else %}
+    <form class="ag-form" method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/receber" style="margin-top:.4rem">
+      <label>Valor{% if not ev.preco %} (sem preço no catálogo: digite){% endif %}<input name="valor" inputmode="decimal" required placeholder="150,00" value="{{ ('%.2f'|format(ev.preco / 100) | replace('.', ',')) if ev.preco else '' }}"></label>
+      <label>Forma<select name="forma">{% for k, v in formas_pgto.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+      <div class="ag-acoes inteira"><button onclick="this.disabled=true;this.form.submit()">Receber</button><span class="mut">a receita vai pro Financeiro; "fica a receber" vira um título do paciente</span></div>
+    </form>{% endif %}
+  </div>
   {% endif %}
 
   {% if remarcar %}

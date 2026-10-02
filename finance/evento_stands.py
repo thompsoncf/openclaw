@@ -1154,8 +1154,8 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
                 alvo, vend_alvo = int(achado["id"]), achado.get("vendedor_id")
                 if vend_alvo is None:
                     with pool.connection() as c:
-                        r = c.execute("select vendedor_id from clientes where id=%s",
-                                      (alvo,)).fetchone()
+                        r = c.execute("select vendedor_id from clientes where id=%s and dono_id=%s",
+                                      (alvo, conta_id)).fetchone()
                     vend_alvo = r[0] if r else None
 
         if alvo and alvo != cid:

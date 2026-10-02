@@ -146,7 +146,10 @@ def test_a_largura_e_desta_tela_e_as_duas_colunas_so_quando_cabem():
 
 
 def test_a_folha_vazia_vira_uma_linha():
-    assert '<details class="card larga sec-pc" id="folha"{% if folha.itens or erro %} open{% endif %}>' in TPL
+    # abre sozinha só com gente cadastrada, ou com um aviso pra mostrar (a recusa
+    # do excluir, o "datas de pagamento salvas ✓")
+    assert ('<details class="card larga sec-pc" id="folha"'
+            '{% if folha.itens or erro or folha_aviso %} open{% endif %}>') in TPL
     assert "nenhum funcionário cadastrado" in TPL
 
 

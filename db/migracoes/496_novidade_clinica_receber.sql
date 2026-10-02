@@ -21,7 +21,7 @@ COMO FUNCIONA
 - No agendamento, o bloco Pagamento traz o valor do catálogo (dá pra mudar) e a forma: Pix, crédito, débito, dinheiro ou "fica a receber".
 - Receber lança a receita no Financeiro, ligada à ficha do paciente. "Fica a receber" vira um título a receber, com vencimento em 30 dias.
 - Recebe-se a qualquer hora do dia: na chegada ou na saída.
-- Sessão de pacote e sessão inclusa da assinatura não têm Receber: já foram pagas no plano. Atendimento sem preço no catálogo (retorno sem custo, cortesia) aparece como sem custo.
+- Sessão coberta pelo pacote ou pela assinatura não tem Receber: já foi paga no plano. Retorno sem preço no catálogo (Retorno, Cortesia, Retirada de teste) aparece como sem custo; os outros atendimentos sem preço no catálogo pedem o valor na hora.
 
 No Financeiro, a receita diz só "Atendimento · nome (categoria)", nunca o procedimento.$txt$,
  timestamptz '2026-10-02 18:00:00+00')

@@ -726,12 +726,12 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 
   {% if ev.pgto %}
   <div class="ag-caixa"><b>Pagamento</b>
-    {% if recebido %}<div class="ok" style="margin-top:.4rem">{{ 'Fica a receber' if recebido.forma == 'fiado' else 'Pago' }}: {{ brl(recebido.valor) }} · {{ recebido.forma_d }}</div>
-    {% elif ev.pgto == 'pacote' or pacote_vai or pacote_feito or assin_vai or assin_feito %}<div class="mut" style="margin-top:.4rem">Coberto pelo pacote ou pela assinatura: nada a receber aqui.</div>
-    {% elif ev.pgto == 'sem_custo' %}<div class="mut" style="margin-top:.4rem">Sem custo (o atendimento não tem preço no catálogo).</div>
+    {% if recebido %}<div class="ok" style="margin-top:.4rem">{% if recebido.forma == 'fiado' %}Fica a receber: {{ brl(recebido.valor) }} (título em Financeiro › A receber){% else %}Pago: {{ brl(recebido.valor) }} · {{ recebido.forma_d }}{% endif %}</div>
+    {% elif ev.pgto == 'pacote' %}<div class="mut" style="margin-top:.4rem">Coberto pelo pacote ou pela assinatura: nada a receber aqui.</div>
+    {% elif ev.pgto == 'sem_custo' %}<div class="mut" style="margin-top:.4rem">Retorno sem custo.</div>
     {% else %}
     <form class="ag-form" method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/receber" style="margin-top:.4rem">
-      <label>Valor<input name="valor" inputmode="decimal" value="{{ '%.2f'|format(ev.preco / 100) | replace('.', ',') }}"></label>
+      <label>Valor{% if not ev.preco %} (sem preço no catálogo: digite){% endif %}<input name="valor" inputmode="decimal" required placeholder="150,00" value="{{ ('%.2f'|format(ev.preco / 100) | replace('.', ',')) if ev.preco else '' }}"></label>
       <label>Forma<select name="forma">{% for k, v in formas_pgto.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
       <div class="ag-acoes inteira"><button onclick="this.disabled=true;this.form.submit()">Receber</button><span class="mut">a receita vai pro Financeiro; "fica a receber" vira um título do paciente</span></div>
     </form>{% endif %}

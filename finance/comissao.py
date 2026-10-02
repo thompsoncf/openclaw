@@ -40,6 +40,27 @@ _BASE_SQL = """
 """
 
 
+# APP DE ESTANDES (02/10/2026, pedido do dono da Outlet Chic): lá o recebimento
+# nasce da baixa do título SEM membro — a proposta vem da página dos stands, não de
+# um vendedor logado — e quem vendeu está na RESERVA do stand (`prospeccao.
+# vendedor_id`, o link da vendedora). O recebimento sem membro passa a ser dela.
+# Só a conta com o app de estandes; as demais seguem pela `lancamentos.membro_id`.
+_VENDEDOR_DO_ESTANDE = """(select pr.vendedor_id from titulos t
+        join evento_stands s on s.orcamento_id = t.orcamento_id and s.conta_id = t.conta_id
+        join prospeccao pr on pr.id = s.prospeccao_id and pr.conta_id = s.conta_id
+        join membros mv on mv.id = pr.vendedor_id and mv.conta_id = s.conta_id
+       where t.lancamento_id = l.id and t.conta_id = l.conta_id
+       order by s.codigo limit 1)"""
+
+
+def _tem_estande(pool, conta_id: int) -> bool:
+    try:
+        from . import evento_stands as _es
+        return _es.app_de_stands(pool, conta_id)
+    except Exception:  # noqa: BLE001 — sem a resposta, a conta de sempre
+        return False
+
+
 def _pct(v) -> float:
     return float(v) if v is not None else 0.0
 
@@ -52,12 +73,24 @@ def por_vendedor(pool, conta_id: int, ini, fim) -> list[dict]:
     Vendas sem vendedor atribuído caem numa linha própria (`membro_id` nulo):
     é o sintoma de atribuição faltando, e some da tela se a operação estiver certa.
     """
+    if _tem_estande(pool, conta_id):
+        sql = ("select v.mid, coalesce(nullif(m.nome,''), m.email), m.comissao_pct, "
+               "sum(v.valor), count(*) from (select coalesce(l.membro_id, "
+               + _VENDEDOR_DO_ESTANDE + ") as mid, l.valor_centavos as valor "
+               "from lancamentos l where l.conta_id=%s and l.tipo='receita' "
+               "and l.natureza='empresa' and l.data >= %s and l.data <= %s) v "
+               "left join membros m on m.id = v.mid and m.conta_id = %s "
+               "group by v.mid, m.nome, m.email, m.comissao_pct "
+               "order by sum(v.valor) desc")
+        params = (conta_id, ini, fim, conta_id)
+    else:
+        sql = ("select l.membro_id, coalesce(nullif(m.nome,''), m.email), m.comissao_pct, "
+               "sum(l.valor_centavos), count(*) " + _BASE_SQL +
+               " group by l.membro_id, m.nome, m.email, m.comissao_pct "
+               "order by sum(l.valor_centavos) desc")
+        params = (conta_id, ini, fim)
     with pool.connection() as c:
-        rows = c.execute(
-            "select l.membro_id, coalesce(nullif(m.nome,''), m.email), m.comissao_pct, "
-            "sum(l.valor_centavos), count(*) " + _BASE_SQL +
-            " group by l.membro_id, m.nome, m.email, m.comissao_pct "
-            "order by sum(l.valor_centavos) desc", (conta_id, ini, fim)).fetchall()
+        rows = c.execute(sql, params).fetchall()
     out = []
     for membro_id, nome, pct_raw, total, n in rows:
         pct = _pct(pct_raw)

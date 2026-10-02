@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from finance import relogio
+
 from core.agent import Ferramenta
 from . import empresa as emp
 from .models import formatar_brl
@@ -33,7 +35,7 @@ def bloco_persona_pj(pool, conta_id: int, empresa_nome: str = "") -> str:
     """Contexto empresarial pro prompt: quem é a empresa + o que está aberto.
     Molda ao NICHO/CNAE da empresa: anexa o bloco de persona do ramo (o
     'sentimento') quando houver, pra o bot falar/ajudar como aquele negócio."""
-    hoje = date.today().strftime("%d/%m/%Y")
+    hoje = relogio.hoje().strftime("%d/%m/%Y")
     try:
         res = emp.resumo_titulos(pool, conta_id)
         funcs = emp.listar_funcionarios(pool, conta_id, so_ativos=True)
@@ -151,7 +153,7 @@ REGRAS:
 def _parse_data_pj(s: str | None) -> date:
     s = (s or "").strip()
     if not s:
-        return date.today()
+        return relogio.hoje()
     for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
         try:
             return datetime.strptime(s, fmt).date()
@@ -160,14 +162,14 @@ def _parse_data_pj(s: str | None) -> date:
     # "dia 15" / "15"
     dig = "".join(ch for ch in s if ch.isdigit())
     if dig:
-        hoje = date.today()
+        hoje = relogio.hoje()
         dia = min(int(dig[:2]), 28)
         venc = date(hoje.year, hoje.month, dia)
         if venc < hoje:  # "dia 15" que já passou → rola pro mês seguinte
             ano, mes = (hoje.year + 1, 1) if hoje.month == 12 else (hoje.year, hoje.month + 1)
             venc = date(ano, mes, dia)
         return venc
-    return date.today()
+    return relogio.hoje()
 
 
 def _acha_funcionario(pool, conta_id: int, nome: str):
@@ -305,7 +307,7 @@ def construir_ferramentas_pj(pool, conta_id: int,
                                        membro_id=membro_id)
         if not r.get("ok"):
             return f"Não consegui: {r.get('erro')}"
-        hoje = date.today()
+        hoje = relogio.hoje()
         folha = emp.folha_do_mes(pool, conta_id, hoje.year, hoje.month)
         item = next((i for i in folha["itens"] if i["id"] == f["id"]), None)
         resta = formatar_brl(item["a_pagar_centavos"]) if item else "?"
@@ -314,7 +316,7 @@ def construir_ferramentas_pj(pool, conta_id: int,
                 f"na folha de {hoje.month:02d}/{hoje.year}.")
 
     def consultar_empresa(e: dict) -> str:
-        hoje = date.today()
+        hoje = relogio.hoje()
         res = emp.resumo_titulos(pool, conta_id)
         folha = emp.folha_do_mes(pool, conta_id, hoje.year, hoje.month)
         fluxo = emp.fluxo_projetado(pool, conta_id)
@@ -355,9 +357,8 @@ def construir_ferramentas_pj(pool, conta_id: int,
         return f"Marquei como {rot}. ✅"
 
     def relatorio_separado(e: dict) -> str:
-        from datetime import date as _date
         from .livro_caixa import LivroCaixa
-        hoje = _date.today()
+        hoje = relogio.hoje()
         mes = int(e.get("mes") or hoje.month)
         ano = int(e.get("ano") or hoje.year)
         liv = LivroCaixa(pool, conta_id)

@@ -22,6 +22,8 @@ status. Esta função respeita isso (não retorna custo).
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+
+from finance import relogio
 from typing import Any
 
 
@@ -45,7 +47,7 @@ def _intervalo_do_periodo(periodo: str | None) -> tuple[date | None, date | None
     """
     if not periodo:
         return None, None
-    hoje = date.today()
+    hoje = relogio.hoje()
     # weekday: segunda=0 ... domingo=6
     dias_ate_domingo = 6 - hoje.weekday()
     if periodo == "proxima":
@@ -178,7 +180,7 @@ def contar_por_status(pool, fornecedor_id: int) -> dict[str, int]:
         select status, count(*)
           from cesta_semana
          where fornecedor_id = %s
-           and (data_entrega is null or data_entrega >= current_date - interval '60 days')
+           and (data_entrega is null or data_entrega >= (now() at time zone 'America/Sao_Paulo')::date - 60)
          group by status
     """
     out: dict[str, int] = {s: 0 for s in _STATUS_VALIDOS}

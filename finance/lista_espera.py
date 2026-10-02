@@ -34,6 +34,8 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from finance import relogio
+
 from finance.agenda import BRT
 
 _log = logging.getLogger("finance.lista_espera")
@@ -194,7 +196,7 @@ def datas_livres_perto(pool, conta_id: int, dia: date | None, quantas: int = SUG
     limite = festas_por_dia(pool, conta_id)
     if not dia or limite is None:
         return []
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     de, ate = max(hoje, dia - timedelta(days=JANELA_SUGESTAO)), dia + timedelta(days=JANELA_SUGESTAO)
     if de > ate:
         return []
@@ -271,7 +273,7 @@ def sincronizar(pool, conta_id: int, hoje: date | None = None) -> dict:
     dia, por exemplo — aí ele já pode ter a data e não é mais espera)."""
     if festas_por_dia(pool, conta_id) is None:
         return {"entraram": 0, "sairam": 0}
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     limite = festas_por_dia(pool, conta_id)
     entraram = saíram = 0
     try:
@@ -373,7 +375,7 @@ def por_data(pool, conta_id: int, hoje: date | None = None, limite_datas: int = 
     quem, se a data está tomada ou já abriu, e as livres perto."""
     if festas_por_dia(pool, conta_id) is None:
         return []
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     limite = festas_por_dia(pool, conta_id)
     try:
         with pool.connection() as c:
@@ -433,7 +435,7 @@ def datas_que_abriram(pool, conta_id: int, hoje: date | None = None) -> list[dic
     caem todos no mesmo caminho, sem três gatilhos pra manter."""
     if festas_por_dia(pool, conta_id) is None:
         return []
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     limite = festas_por_dia(pool, conta_id)
     try:
         with pool.connection() as c:
@@ -598,7 +600,7 @@ def fora_da_espera(pool, conta_id: int, hoje: date | None = None) -> int:
     apagada) e não há fila dele pra data nova. Sem isto ele ficaria preso na coluna
     pra sempre — nenhum gatilho anda pra trás. Volta pra Proposta, com a nota."""
     from finance import funil_regua as fr
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     n = 0
     try:
         with pool.connection() as c:
@@ -736,7 +738,7 @@ def data_passou(pool, conta_id: int, hoje: date | None = None) -> int:
     mesma porta e o mesmo histórico do perdido de sempre."""
     from finance import funil_perda as _perda
     from finance import funil_regua as fr
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     n = 0
     try:
         with pool.connection() as c:
@@ -767,7 +769,7 @@ def selos(c, conta_id: int, cards: list[dict], hoje: date | None = None) -> dict
 
     `cards` são os do quadro ({id, status, evento_em}). Sem a conta usar a lista, ou
     sem as tabelas, nenhum selo."""
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     try:
         with c.transaction():
             r = c.execute("select festas_por_dia from contas where id=%s", (conta_id,)).fetchone()

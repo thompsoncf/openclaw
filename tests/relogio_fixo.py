@@ -27,7 +27,7 @@ O que NÃO é fixado: o relógio do Postgres (`now()`, `current_date`). Por isso
 regra continua sendo passar o dia de Brasília como parâmetro, e não confiar no
 `current_date` do banco — que também está em UTC.
 """
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
@@ -95,3 +95,33 @@ def servidor_as_23h(monkeypatch):
     assert relogio.hoje() == HOJE
     assert relogio.agora() == AGORA
     return AGORA
+
+
+# ------------------------------------------------------------ a suíte inteira na virada
+#
+# `SIMULA_VIRADA=1 pytest` roda TODOS os testes como se fosse entre 21h e meia-noite
+# de Brasília: `date.today()` (o dia do servidor, em UTC) responde AMANHÃ, e o
+# `relogio.hoje()` continua no dia de Brasília. É a única hora em que os dois
+# discordam — e era preciso esperar a noite (ou o CI cair nela) pra ver o que
+# quebrava. Teste que falha só com isto ligado compara o "hoje" do código com o
+# dia do servidor: use `HOJE` (deste arquivo) ou `relogio.hoje()`.
+#
+# Só o `date.today()` muda; o relógio do Postgres e o `datetime.now()` ficam como
+# estão, pra não acusar diferença de hora que não existe.
+
+class _DateDaVirada(date, metaclass=_MetaDate):
+    @classmethod
+    def today(cls):
+        return relogio.hoje() + timedelta(days=1)
+
+
+_RAIZES_SIMULADAS = ("finance.", "web.", "core.", "contas.", "services.", "db.", "tests.")
+
+
+def simular_virada(monkeypatch) -> None:
+    import sys
+    for nome, mod in list(sys.modules.items()):
+        if mod is None or not nome.startswith(_RAIZES_SIMULADAS) or nome == "finance.relogio":
+            continue
+        if getattr(mod, "date", None) is date:
+            monkeypatch.setattr(mod, "date", _DateDaVirada)

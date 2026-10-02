@@ -355,7 +355,7 @@ def _sql_leads(festa: bool) -> str:
          and not (p.status = 'perdido' and coalesce(p.perda_motivo,'') = any(%(nao_chama)s))
          and not (p.status = 'perdido' and coalesce(p.perda_motivo,'') = '{MOTIVO_DATA}'
                   and (p.evento_em is null
-                       or p.evento_em < current_date + {int(DATA_INDISPONIVEL_DIAS)}))
+                       or p.evento_em < (now() at time zone 'America/Sao_Paulo')::date + {int(DATA_INDISPONIVEL_DIAS)}))
          -- a IA leu a conversa e viu que acabou (fechou com outro, pediu pra não
          -- chamar): descartado uma vez, descartado pra sempre
          and not exists (select 1 from resgate_envios d
@@ -1362,7 +1362,7 @@ def _sql_toque_ok() -> str:
     return f"""
               and p.vendedor_id = r.membro_id and cv.agente_ativo and cv.status <> 'pendente'
               and p.status not in {fr.sql_fechadas('p')} and {fr.sql_nao_cobra('p')}
-              and (p.evento_em is null or p.evento_em >= current_date + {int(FESTA_MIN_DIAS)})
+              and (p.evento_em is null or p.evento_em >= (now() at time zone 'America/Sao_Paulo')::date + {int(FESTA_MIN_DIAS)})
               and not exists (select 1 from mensagens mi where mi.conversa_id = r.conversa_id
                                  and mi.direcao = 'in' and mi.criado_em > r.entrou_em)
               and not exists (select 1 from eventos_agenda e

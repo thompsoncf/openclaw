@@ -17,6 +17,8 @@ import re
 import unicodedata
 from datetime import date, timedelta
 
+from finance import relogio
+
 
 # ---------- normalizacao de descricao (casar "ARROZ T1 5KG" com "arroz") ----------
 
@@ -161,7 +163,7 @@ class BancoPrecos:
     def _precos_de_brutos(self, descricao: str, primeira: str,
                           regiao: str | None, dias: int) -> list[dict]:
         """Fallback: le das observacoes brutas (comportamento original)."""
-        corte = date.today() - timedelta(days=dias)
+        corte = relogio.hoje() - timedelta(days=dias)
         sql = """select po.mercado, po.valor_unitario_centavos, po.descricao_original,
                         po.data_compra, po.descricao_norm,
                         l.endereco, l.cidade, l.uf, po.unidade,
@@ -256,7 +258,7 @@ class BancoPrecos:
                 out.add(f"{v}{un}")
             return out
 
-        corte = date.today() - timedelta(days=dias)
+        corte = relogio.hoje() - timedelta(days=dias)
         col_fonte = "po.fonte" if self._coluna_fonte_existe() else "'cupom' as fonte"
         sel = f"""select po.mercado, po.valor_unitario_centavos, po.descricao_original,
                          po.data_compra, po.descricao_norm, po.unidade,
@@ -291,7 +293,7 @@ class BancoPrecos:
         alvo = tokens(descricao) if not modo_lojas else set()
         alvo_tam = tam(descricao) if not modo_lojas else set()
         need = max(2, (2 * len(alvo) + 2) // 3) if alvo else 0
-        hoje = date.today()
+        hoje = relogio.hoje()
 
         regs: list[dict] = []
         for (merc, vu, orig, dt, norm, unidade, fonte, loja_id,
@@ -394,7 +396,7 @@ class BancoPrecos:
           - data_compra = hoje => sempre a ÚLTIMA data de atualização.
         Nunca toca em preço de cupom (filtra fonte='catalogo'). Sem migração.
         Devolve quantas linhas inseriu."""
-        data_compra = data_compra or date.today()
+        data_compra = data_compra or relogio.hoje()
         linhas = []
         mercados: set[str] = set()
         for r in registros:
@@ -446,7 +448,7 @@ class BancoPrecos:
         q0 = nuc.split()[0] if nuc else ""
         if not q0:
             return None
-        corte = date.today() - timedelta(days=dias)
+        corte = relogio.hoje() - timedelta(days=dias)
         sql = ("select valor_unitario_centavos, descricao_original, descricao_norm, "
                "mercado, data_compra from precos_observados "
                "where fonte = 'catalogo' and descricao_norm like %s and data_compra >= %s")
@@ -457,7 +459,7 @@ class BancoPrecos:
         with self.pool.connection() as c:
             rows = c.execute(sql, params).fetchall()
         alvo = tokens(descricao)
-        hoje = date.today()
+        hoje = relogio.hoje()
         melhor = None
         for vu, orig, norm, merc, dt in rows:
             ws = (norm or "").split()

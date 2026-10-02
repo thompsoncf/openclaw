@@ -12,6 +12,8 @@ custo (teto de mensagens/dia POR CONTA), auditoria e mascaramento LGPD.
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from finance import relogio
+
 URL_CADASTRO = "https://app.zaq-ia.com/cadastro"
 
 
@@ -87,14 +89,14 @@ def acesso_liberado(conta: Conta, beta_ativo: bool = False) -> bool:
         return False
     if beta_ativo:
         return True
-    if conta.vencimento is not None and conta.vencimento < date.today():
+    if conta.vencimento is not None and conta.vencimento < relogio.hoje():
         return False
     return conta.status in ("trial", "ativa", "inadimplente")
 
 
 def ativar(pool, conta_id: int, dias: int = 30, plano: str | None = None) -> date:
     """Pagamento confirmado: ativa e estende a validade. Registra auditoria."""
-    venc = date.today() + timedelta(days=dias)
+    venc = relogio.hoje() + timedelta(days=dias)
     with pool.connection() as conn:
         if plano:
             conn.execute("update contas set status='ativa', vencimento=%s, plano=%s where id=%s",
@@ -130,7 +132,7 @@ def checar_e_registrar_uso(pool, conta: Conta, tem_midia: bool = False) -> tuple
     conta no limite SEPARADO de mídia; senao conta no limite de mensagens de texto.
     Tipo do documento (cupom vs comprovante) é decidido pelo agente — aqui só
     importa se tem mídia (custo). Retorna (liberado, restante) do contador relevante."""
-    hoje = date.today()
+    hoje = relogio.hoje()
     coluna = "cupons" if tem_midia else "mensagens"
     limite = conta.limite_cupons_dia if tem_midia else conta.limite_mensagens_dia
     with pool.connection() as conn:
@@ -182,7 +184,7 @@ def criar_conta(pool, tipo: str, nome: str, plano: str | None = None,
                 limite_cupons_dia: int = 5, conn=None) -> int:
     """Cria conta (completa, numa transação). Se conn passado, usa ela; senão abre uma."""
     if vencimento is None and status == "trial":
-        vencimento = date.today() + timedelta(days=7)
+        vencimento = relogio.hoje() + timedelta(days=7)
 
     def _ins(c):
         return c.execute(

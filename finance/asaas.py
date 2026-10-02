@@ -18,6 +18,8 @@ no portal, comando no chat) são do Claude Code (ver SPEC).
 """
 from __future__ import annotations
 
+from finance import relogio
+
 import os
 import httpx
 
@@ -212,7 +214,7 @@ def criar_assinatura_recorrente(
     Retorna o JSON do Asaas (campo 'id' = subscription id).
     O webhook recebe os PAYMENT_RECEIVED de cada cobrança, com o externalReference.
     """
-    from datetime import date as _date, timedelta as _td
+    from datetime import timedelta as _td
 
     # mapeia o ciclo pro formato do Asaas
     cycle_map = {
@@ -223,7 +225,7 @@ def criar_assinatura_recorrente(
     cycle = cycle_map.get((ciclo or "mensal").lower(), "MONTHLY")
 
     if primeira_cobranca is None:
-        primeira_cobranca = _date.today() + _td(days=3)  # prazo pro 1º pagamento
+        primeira_cobranca = relogio.hoje() + _td(days=3)  # prazo pro 1º pagamento
     next_due = (primeira_cobranca.isoformat()
                 if hasattr(primeira_cobranca, "isoformat") else str(primeira_cobranca))
 

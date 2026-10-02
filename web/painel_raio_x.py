@@ -12,6 +12,8 @@ dele no app, na aba Raio-X; o papel financeiro não vende.
 """
 from __future__ import annotations
 
+from finance import relogio
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -96,8 +98,8 @@ def painel_raio_x(request: Request):
         comp["propostas"] = _delta_txt(rxd.delta(p["propostas"], ant["propostas"]))
         comp["contratos"] = _delta_txt(rxd.delta(p["contratos"], ant["contratos"]))
     # os meses do filtro "mês da festa": os 12 a partir do corrente
-    from datetime import date, timedelta
-    hoje = date.today()
+    from datetime import timedelta
+    hoje = relogio.hoje()
     m = hoje.replace(day=1)
     meses = []
     for _ in range(12):

@@ -33,6 +33,6 @@
  "web/painel_prospeccao.py": 3,
  "web/painel_raio_x.py": 1,
  "web/painel_relatorios.py": 1,
- "web/portal.py": 13,
+ "web/portal.py": 8,
  "web/proposta.py": 1
 }

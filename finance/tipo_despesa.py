@@ -24,6 +24,8 @@ from __future__ import annotations
 import unicodedata
 from datetime import date
 
+from finance import relogio
+
 TIPOS = ("fixa", "eventual", "investimento")
 ROTULOS = {"fixa": "Fixa", "eventual": "Eventual", "investimento": "Investimento"}
 
@@ -78,7 +80,7 @@ def por_mes(pool, conta_id: int, meses: int = 2, hoje: date | None = None) -> li
     `pct_com_tipo` é pelo VALOR, não pela quantidade — é o dinheiro que o
     relatório explica. Mês sem despesa nenhuma sai com total zero, e a tela
     decide não mostrar."""
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     lista = _meses_ate(hoje, meses)
     ini = date(lista[0][0], lista[0][1], 1)
     a, m = hoje.year, hoje.month

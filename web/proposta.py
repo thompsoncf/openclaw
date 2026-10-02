@@ -10,7 +10,9 @@ conta — quem tem o link vê aquela proposta e só ela.
 """
 import json
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
+
+from finance import relogio
 
 from fastapi import APIRouter, BackgroundTasks, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -492,7 +494,7 @@ def _carregar(token: str, pool=None):
                           cli_end, cli_cep, cli_cidade, cli_uf))
     itens = _lista(itens)
     evento = _dic(evento)
-    criado = criado_em.date() if criado_em else date.today()
+    criado = criado_em.date() if criado_em else relogio.hoje()
     # Evento: a validade natural é a data da festa (depois dela o orçamento não
     # serve pra nada). Fora do evento, segue os 15 dias de sempre.
     dia_evento = ag.parse_data(evento.get("data")) if evento else None

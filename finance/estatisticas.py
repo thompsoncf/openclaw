@@ -282,7 +282,7 @@ def estatisticas_funil(pool) -> dict:
         for cid, nome, plano, venc in conn.execute(
             """select id, nome, plano, vencimento from contas
                where status = 'trial'
-                 and vencimento between current_date and current_date + 3
+                 and vencimento between (now() at time zone 'America/Sao_Paulo')::date and (now() at time zone 'America/Sao_Paulo')::date + 3
                  and nome <> '__degustacao_visitantes__'
                order by vencimento"""
         ).fetchall():
@@ -326,10 +326,11 @@ def estatisticas_custo(pool, desde_iso: str | None = None, ate_iso: str | None =
             return out
 
         if desde_iso and ate_iso:
-            filtro = "u.criado_em::date between %s and %s"
+            filtro = "(u.criado_em at time zone 'America/Sao_Paulo')::date between %s and %s"
             args = (desde_iso, ate_iso)
         else:
-            filtro = "date_trunc('month', u.criado_em) = date_trunc('month', current_date)"
+            filtro = ("date_trunc('month', u.criado_em at time zone 'America/Sao_Paulo') = "
+                      "date_trunc('month', now() at time zone 'America/Sao_Paulo')")
             args = ()
         out["periodo"] = {"desde": desde_iso or "(início do mês)", "ate": ate_iso or "hoje"}
 

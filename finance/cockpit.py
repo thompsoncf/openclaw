@@ -31,6 +31,8 @@ _FECHADO_T = "status in " + _fr.sql_fechadas("prospeccao")
 
 from datetime import date as _date, datetime, timedelta, timezone
 
+from finance import relogio
+
 _log = logging.getLogger(__name__)
 
 _TTL_MIN = 15                      # o link mágico vale 15 min (depois some sozinho)
@@ -1790,7 +1792,7 @@ def _data_nascimento(texto: str):
         return None, "Data de nascimento inválida (use dia/mês/ano)."
     # 1900 corta o dedo escorregado no ano (0002, 0202) sem inventar idade mínima;
     # o futuro é sempre engano — ninguém nasce depois de hoje.
-    if d.year < 1900 or d > _date.today():
+    if d.year < 1900 or d > relogio.hoje():
         return None, "Data de nascimento fora do intervalo."
     return d, None
 

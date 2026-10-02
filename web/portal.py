@@ -16,7 +16,8 @@ from fastapi.concurrency import run_in_threadpool
 from jinja2 import Environment, DictLoader, select_autoescape
 from datetime import date as _date
 
-from datetime import date
+from finance import relogio
+
 
 log = logging.getLogger("zaq.portal")
 
@@ -8600,7 +8601,7 @@ def _plano_aviso(conta_row, beta_ativo, avisar=True) -> dict | None:
                 "cortado": True}
     if not hasattr(venc, "toordinal"):  # sem data valida -> nada a avisar
         return None
-    dias = (venc - _date.today()).days
+    dias = (venc - relogio.hoje()).days
     if dias < 0:
         # Venceu por data: so' esta REALMENTE cortado se o beta estiver desligado.
         return {"nivel": "vencido", "status": status, "vencimento": venc,
@@ -9357,7 +9358,7 @@ def _painel_dashboard(pool, conta, vende_servico=False):
     puro não roda a query nem vê a pizza — `tem_funil` fica False.
     """
     from finance import empresa as emp
-    hoje = _date.today()
+    hoje = relogio.hoje()
     res = emp.resumo_titulos(pool, conta[0], dias=30)
     fluxo = emp.fluxo_projetado(pool, conta[0], semanas=4)
     dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
@@ -11727,7 +11728,7 @@ def painel_pdv(request: Request, add: int = 0):
                               from clientes c left join pessoas p on p.id = c.pessoa_id) cc
                         on cc.cid = l.cliente_id
                 where l.conta_id=%s and l.origem='balcao' and l.tipo='receita'
-                      and l.data = current_date
+                      and l.data = (now() at time zone 'America/Sao_Paulo')::date
                 order by l.criado_em desc""",
             (conta[0],),
         ).fetchall()
@@ -11744,7 +11745,7 @@ def painel_pdv(request: Request, add: int = 0):
                               from clientes c left join pessoas p on p.id = c.pessoa_id) cc
                         on cc.cid = t.cliente_id
                 where t.conta_id=%s and t.tipo='receber' and t.status='aberto'
-                      and t.criado_em::date = current_date
+                      and (t.criado_em at time zone 'America/Sao_Paulo')::date = (now() at time zone 'America/Sao_Paulo')::date
                       and t.descricao like 'Venda de balcao%%'
                 order by t.criado_em desc""",
             (conta[0],),
@@ -13506,7 +13507,7 @@ def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    hoje = _date.today()
+    hoje = relogio.hoje()
     ano = ano or hoje.year
     mes = mes or hoje.month
     csv = emp.csv_contador(pool, conta[0], ano, mes)
@@ -13542,7 +13543,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     if not pode_financas(_papel_logado(request, conta[0])):
         return RedirectResponse("/painel/compras", status_code=303)
     pool = get_pool()
-    hoje = date.today()
+    hoje = relogio.hoje()
     # Gate PJ ÚNICO: usa modulo_pj_ativo (mesma verdade da aba Empresa e do bot).
     # Cobre plano PJ + status válido E o override por cortesia (conta_modulos).
     # Chamado uma vez só por request — não pesa pra conta PF (retorna False).
@@ -13785,14 +13786,13 @@ def _fmt_comparacao(r: dict, cidade: str | None = None) -> dict:
     """Formata o resultado do comparador pra JSON amigavel ao front (com BRL). Cada
     produto leva dias (recencia) e fonte='cupom'. Itens SEM cupom ganham referencia de
     catalogo (fora do total)."""
-    from datetime import date
     rotulos = {"mercado": "🏪 Mercado", "farmacia": "💊 Farmácia", "outro": "🏪 Mercado"}
     grupos = {}
     itens_detalhe = {item["descricao"]: item for item in r.get("itens", [])}
 
     def _dias(dt):
         try:
-            return (date.today() - dt).days
+            return (relogio.hoje() - dt).days
         except Exception:  # noqa: BLE001
             return None
 
@@ -14088,8 +14088,7 @@ def listar_a_definir(request: Request, mes: str = "", membro: str = ""):
     if not conta:
         return JSONResponse({"ok": False}, status_code=401)
     from finance.livro_caixa import LivroCaixa
-    from datetime import date as _date
-    hoje = _date.today()
+    hoje = relogio.hoje()
     try:
         ano_sel, mes_num = (int(x) for x in mes.split("-")) if mes else (hoje.year, hoje.month)
     except ValueError:

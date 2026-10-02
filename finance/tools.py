@@ -6,6 +6,8 @@ quando voce pede ("lanca 50 de mercado") ou quando le uma nota por foto.
 import logging
 from datetime import date, datetime
 
+from finance import relogio
+
 from core.agent import Ferramenta
 from contas.permissoes import pode_financas, pode_lista
 from .livro_caixa import LivroCaixa
@@ -17,13 +19,13 @@ from .models import (
 
 def _parse_data(s: str | None) -> date:
     if not s:
-        return date.today()
+        return relogio.hoje()
     for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"):
         try:
             return datetime.strptime(s, fmt).date()
         except ValueError:
             continue
-    return date.today()
+    return relogio.hoje()
 
 
 def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
@@ -268,7 +270,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
 
     def relatorio_mes(entrada: dict) -> str:
         livro.materializar_parcelas_devidas()  # parcelas do mes entram no relatorio
-        hoje = date.today()
+        hoje = relogio.hoje()
         ano = int(entrada.get("ano") or hoje.year)
         mes = int(entrada.get("mes") or hoje.month)
         desp = livro.total_por_categoria(Tipo.DESPESA, mes=mes, ano=ano)

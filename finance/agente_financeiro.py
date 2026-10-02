@@ -1,5 +1,6 @@
 """Monta o agente financeiro a partir da Fabrica."""
-from datetime import date
+
+from finance import relogio
 
 from core.agent import criar_agente, Agente
 from core.brain import Brain
@@ -10,7 +11,7 @@ from .models import CATEGORIAS_DESPESA, CATEGORIAS_RECEITA
 
 
 def _persona(papel: str = "dono") -> str:
-    hoje = date.today().strftime("%d/%m/%Y")
+    hoje = relogio.hoje().strftime("%d/%m/%Y")
     if papel == "restrito":
         return f"""Voce e' o assistente de LISTA DE COMPRAS da casa. Hoje e' {hoje}.
 

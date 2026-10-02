@@ -45,6 +45,8 @@ import logging
 import secrets
 from datetime import date
 
+from finance import relogio
+
 _log = logging.getLogger("recibo")
 
 MESES = ("janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
@@ -223,7 +225,7 @@ def montar(pool, conta_id: int, titulo_id: int) -> dict | None:
             restante = "Com este pagamento, não resta nada em aberto deste orçamento."
 
     cidade = _cidade(emp[2] if emp else "")
-    quando = pago_em or date.today()
+    quando = pago_em or relogio.hoje()
     return {
         "empresa": {"nome": (emp[0] if emp else "") or "", "doc": _doc(emp[1] if emp else ""),
                     "cidade": cidade, "uf": ((emp[3] if emp else "") or "").upper(),

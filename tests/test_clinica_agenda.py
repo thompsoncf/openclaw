@@ -33,7 +33,10 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   valor_estimado_centavos bigint not null default 0,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint, membro_id bigint,
-  tipo text, resultado text, descricao text default '', criado_em timestamptz default now());
+  tipo text, resultado text, descricao text default '', criado_em timestamptz default now(),
+  -- o CHECK de produção (migração 075): o Ligar quebrou com valor fora dele
+  constraint prospeccao_atividades_resultado_check check (resultado in
+    ('sem_resposta','retornar','interessado','sem_interesse','agendado','fechado')));
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, contato_nome text,
   ultima_msg_em timestamptz default now());
@@ -419,7 +422,7 @@ def test_reabrir_falta_so_se_o_horario_continua_livre(pool):
         eid, _ = _marcar(c)
         assert ca.mudar_situacao(c, CLINICA, eid, "faltou") is None
         _marcar(c, nome="Outra", fone="99 97777-0061")               # alguém pegou as 08:00
-        assert "ocupado" in ca.mudar_situacao(c, CLINICA, eid, "agendado")
+        assert "ocupado" in ca.mudar_situacao(c, CLINICA, eid, "agendado", agora=MESMO_DIA)
 
 
 def test_mesmo_celular_nome_digitado_e_em_bacabal(pool):
@@ -472,6 +475,9 @@ def _status(c, eid):
                          join eventos_agenda e on e.prospeccao_id = p.id where e.id=%s""", (eid,)).fetchone()
 
 
+MESMO_DIA = ca.utc(SEG, time(10))                  # a falta das 08:00 desfeita no mesmo dia
+
+
 def test_faltou_volta_pro_follow_up_e_reabrir_devolve(pool):
     with pool.connection() as c:
         eid, _ = _marcar(c)
@@ -480,9 +486,56 @@ def test_faltou_volta_pro_follow_up_e_reabrir_devolve(pool):
         assert _status(c, eid)[0] == "follow_up"
         nota = c.execute("select descricao from prospeccao_atividades order by id desc limit 1").fetchone()[0]
         assert nota.startswith("Faltou à consulta de 28/09 08:00")
-        assert ca.mudar_situacao(c, CLINICA, eid, "agendado") is None
+        assert ca.mudar_situacao(c, CLINICA, eid, "agendado", agora=MESMO_DIA) is None
         assert _status(c, eid)[0] == "qualificado"
         assert [r[0] for r in c.execute("select motivo from funil_movimentos").fetchall()] == ["agenda"] * 3
+
+
+def test_falta_so_depois_da_tolerancia_e_desfeita_so_no_dia(pool):
+    """Decisão J do dono (02/10/2026): o Faltou aparece 15 minutos depois do horário; e
+    a falta se desfaz só no mesmo dia (para outro dia, Remarcar)."""
+    with pool.connection() as c:
+        eid, _ = _marcar(c)                                         # 28/09 08:00
+        assert "tolerância" in ca.mudar_situacao(c, CLINICA, eid, "faltou", agora=ca.utc(SEG, time(8, 14)))
+        assert ca.mudar_situacao(c, CLINICA, eid, "faltou", agora=ca.utc(SEG, time(8, 15))) is None
+        assert "mesmo dia" in ca.mudar_situacao(c, CLINICA, eid, "agendado", agora=ca.utc(SEG + timedelta(days=1), time(9)))
+        assert ca.mudar_situacao(c, CLINICA, eid, "agendado", agora=ca.utc(SEG, time(17))) is None
+
+
+def test_atrasado_aparece_depois_da_tolerancia(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        ev = ca.evento(c, CLINICA, eid)
+        assert ca.atrasado_min(ev, ca.utc(SEG, time(8, 10))) is None
+        assert ca.atrasado_min(ev, ca.utc(SEG, time(8, 20))) == 20
+        assert ca.atrasado_min(ev, ca.utc(SEG + timedelta(days=1), time(8))) is None   # outro dia: não é atraso
+        d = ca.dia(c, CLINICA, SEG, ca.utc(SEG, time(8, 30)))
+        evs = [e for col in d["colunas"] for cel in col["celulas"] for e in cel.get("evs", [])]
+        assert [e["atrasado_min"] for e in evs if e["id"] == eid] == [30]
+
+
+def test_ligar_registra_o_contato_no_card(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        assert ca.ligar(c, CLINICA, eid, "talvez", 51) == "Escolha como foi a ligação."
+        assert ca.ligar(c, CLINICA, eid, "nao_atendeu", 51) is None
+        r = c.execute("""select tipo, resultado, descricao from prospeccao_atividades
+                          order by id desc limit 1""").fetchone()
+        assert r == ("ligacao", "sem_resposta", "Ligação sobre o horário de seg 28/09 08:00: não atendeu.")
+        assert ca.ligar(c, CLINICA, eid, "atendeu", 51) is None
+        assert c.execute("select resultado from prospeccao_atividades order by id desc limit 1").fetchone() == (None,)
+        _ate_atendimento(c, eid)
+        assert "quem ainda vai vir" in ca.ligar(c, CLINICA, eid, "atendeu", 51)
+
+
+def test_remarcar_pelas_proximas_passagens_e_a_sede(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        ev = ca.evento(c, CLINICA, eid)
+        grupos = ca.opcoes_remarcar(c, CLINICA, ev, AGORA, _manoel(c)["id"])
+        assert grupos and all(g["horarios"] for g in grupos)
+        assert grupos[0]["local_id"] == ev["local_id"]          # a cidade do paciente primeiro
+        assert ev["inicio"].isoformat() not in [h["valor"] for g in grupos for h in g["horarios"]]
 
 
 def test_cancelou_tambem_volta_pro_follow_up(pool):

@@ -45,6 +45,15 @@ PROXIMOS = {
     "cancelou": (),
 }
 NAO_OCUPA = ("cancelou", "faltou")
+#: a tolerância do Faltou (decisão J do dono, 02/10/2026): "atrasado" aparece depois
+#: disto, e só então a agenda oferece o Faltou. Quem decide a falta é a recepção.
+TOLERANCIA_FALTOU_MIN = 15
+#: o resultado de "Ligar" (conta como contato na linha do tempo do card)
+LIGACAO = {"atendeu": "atendeu", "nao_atendeu": "não atendeu", "recado": "deixei recado"}
+#: ...gravado no `resultado` que o banco aceita (o CHECK da migração 075: sem_resposta,
+#: retornar, interessado...). O texto exato vai na descrição; "atendeu" não tem
+#: equivalente e fica sem resultado (revisão de 02/10/2026: o valor novo dava erro)
+_LIGACAO_RESULTADO = {"atendeu": None, "nao_atendeu": "sem_resposta", "recado": "sem_resposta"}
 ORIGENS = ("Instagram", "Indicação", "Google", "Já é paciente", "Outro")
 _SEMANA = {1: "seg", 2: "ter", 3: "qua", 4: "qui", 5: "sex", 6: "sáb", 7: "dom"}
 # A RESPOSTA É A MENSAGEM INTEIRA (o número sozinho) ou começa pela palavra: "15h",
@@ -204,6 +213,8 @@ def dia(c, conta_id: int, data: date, agora: datetime, local_id: int | None = No
     # a ficha de cada paciente do dia: a recepção vê o que falta antes da consulta
     from finance import clinica_ficha_link as cfl
     cfl.dos_eventos(c, conta_id, evs, agora)
+    for e in evs:
+        e["atrasado_min"] = atrasado_min(e, agora)
     # pago ou a receber, em cada linha (entrega 2a do CRM: o Receber da agenda)
     from finance import clinica_recebimentos as crb
     crb.anotar(c, conta_id, evs)
@@ -225,6 +236,76 @@ def dia(c, conta_id: int, data: date, agora: datetime, local_id: int | None = No
             "faltas": sum(1 for e in evs if e["situacao"] == "faltou"),
             "a_receber": sum(1 for e in evs if e.get("pgto") == "a_receber"),
             "remarcar": pediram_remarcar(c, conta_id, agora)}
+
+
+def atrasado_min(ev: dict, agora: datetime) -> int | None:
+    """Minutos de atraso de quem ainda não chegou, passada a tolerância; None se não."""
+    if ev.get("situacao") not in ("agendado", "confirmado"):
+        return None
+    m = int((agora - ev["inicio"]).total_seconds() // 60)
+    return m if m >= TOLERANCIA_FALTOU_MIN and local(ev["inicio"]).date() == hoje_br(agora) else None
+
+
+def libera_faltou(ev: dict, agora: datetime) -> bool:
+    """O Faltou só depois da tolerância (antes, o paciente ainda pode estar chegando)."""
+    return agora >= ev["inicio"] + timedelta(minutes=TOLERANCIA_FALTOU_MIN)
+
+
+def opcoes_remarcar(c, conta_id: int, ev: dict, agora: datetime, prof_id: int) -> list[dict]:
+    """REMARCAR PELAS PRÓXIMAS PASSAGENS (desenho de 01/10/2026, seção 04): os próximos
+    dias em que o profissional atende na cidade do paciente e, à parte, na sede.
+    [{titulo, horarios: [{valor, txt}]}], a cidade do paciente primeiro."""
+    if not ev.get("servico_id"):
+        return []
+    locais = {x["id"]: x for x in cc.listar_locais(c, conta_id, so_ativos=False)}
+    sede = next((x["id"] for x in locais.values() if x["tipo"] == "sede"), None)
+    passagens: dict[tuple, list] = {}
+    # SEM LIMITE DE HORÁRIOS: os da sede (14 por dia útil) gastavam o limite antes das
+    # viagens, e a passagem a mais de ~40 dias não aparecia (revisão de 02/10/2026)
+    for x in livres(c, conta_id, prof_id, ev["servico_id"], hoje_br(agora), dias=75, agora=agora,
+                    ignorar=ev["id"]):
+        if x["inicio"] == ev["inicio"]:
+            continue                        # o horário de agora não é opção
+        passagens.setdefault((local(x["inicio"]).date(), x["local_id"]), []).append(x)
+    def _grupo(chave):
+        dia, loc = chave
+        nome = (locais.get(loc) or {}).get("cidade") or (locais.get(loc) or {}).get("nome") or "agenda"
+        rot = f"{nome}{' (sede)' if loc == sede and loc != ev.get('local_id') else ''} · {dia_txt(passagens[chave][0]['inicio'])}"
+        return {"titulo": rot, "local_id": loc, "sede": loc == sede and loc != ev.get("local_id"),
+                "horarios": [{"valor": x["inicio"].isoformat(), "txt": hora_txt(x["inicio"])}
+                             for x in passagens[chave][:8]]}
+    chaves = sorted(passagens)
+    da_cidade = [k for k in chaves if k[1] == ev.get("local_id")][:4]
+    da_sede = [k for k in chaves if k[1] == sede and k[1] != ev.get("local_id")][:2]
+    outras = [k for k in chaves if k not in da_cidade and k not in da_sede and k[1] != sede][:2] \
+        if not da_cidade else []
+    # a cidade (ou, sem passagem por ela, os outros lugares) primeiro, em ordem de data; a sede à parte
+    return [_grupo(k) for k in sorted(da_cidade + outras)] + [_grupo(k) for k in da_sede]
+
+
+def ligar(c, conta_id: int, evento_id: int, resultado: str, membro_id: int | None) -> str | None:
+    """"Ligar" registra o resultado da ligação na linha do tempo do card: conta como
+    contato (desenho de 01/10/2026, seção 04). Devolve o erro, ou None."""
+    if resultado not in LIGACAO:
+        return "Escolha como foi a ligação."
+    ev = evento(c, conta_id, evento_id)
+    if not ev or not ev.get("lead"):
+        return "Agendamento sem card: não há onde registrar."
+    if ev["situacao"] not in ("agendado", "confirmado", "faltou"):
+        return "A ligação é pra quem ainda vai vir (ou faltou)."
+    c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
+                 values (%s,%s,'ligacao',%s,%s)""",
+              (ev["lead"], membro_id, _LIGACAO_RESULTADO[resultado],
+               f"Ligação sobre o horário de {dia_txt(ev['inicio'])} {ev['hora']}: {LIGACAO[resultado]}."))
+    try:
+        with c.transaction():
+            # CONTA COMO CONTATO onde o produto mede contato (o "registrar contato" do
+            # funil grava o mesmo campo; é o que o painel do dono lê)
+            c.execute("update prospeccao set ultimo_contato_em=now(), atualizado_em=now() where id=%s and conta_id=%s",
+                      (ev["lead"], conta_id))
+    except Exception:  # noqa: BLE001 — banco sem a coluna
+        c.execute("update prospeccao set atualizado_em=now() where id=%s and conta_id=%s", (ev["lead"], conta_id))
+    return None
 
 
 def pediram_remarcar(c, conta_id: int, agora: datetime) -> list[dict]:
@@ -794,7 +875,7 @@ def card_do_retorno(c, conta_id: int, lead_id: int | None, membro_id: int | None
 def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: str | None = None,
                    valor_centavos: int | None = None, membro_id: int | None = None,
                    retorno_dias: int | None = None, resultado: bool = False,
-                   resultado_em: date | None = None) -> str | None:
+                   resultado_em: date | None = None, agora: datetime | None = None) -> str | None:
     """Muda o status e, junto, o card do funil (`card_pela_agenda`). Finalizado: baixa
     a sessão do pacote e agenda o retorno pedido (clinica_pacotes, fase 6)."""
     ev = c.execute("""select case when status = 'cancelado' then 'cancelou' else situacao end,
@@ -805,6 +886,12 @@ def mudar_situacao(c, conta_id: int, evento_id: int, nova: str, *, tratamento: s
         return "Agendamento não encontrado."
     if nova not in PROXIMOS.get(ev[0], ()):
         return f"De {SIT_D.get(ev[0], ev[0])} não dá pra ir pra {SIT_D.get(nova, nova)}."
+    agora = agora or datetime.now(timezone.utc)
+    if nova == "faltou" and not libera_faltou({"inicio": ev[2]}, agora):
+        return (f"Ainda dentro da tolerância: o Faltou fica disponível {TOLERANCIA_FALTOU_MIN} minutos "
+                "depois do horário.")
+    if ev[0] == "faltou" and nova == "agendado" and local(ev[2]).date() != hoje_br(agora):
+        return "A falta só se desfaz no mesmo dia. Para outro dia, use Remarcar."
     if nova == "finalizado" and tratamento not in (None, "sim", "nao"):
         return "Resposta inválida sobre o tratamento."
     erro = _gravar_situacao(c, conta_id, evento_id, ev, nova)

@@ -5142,6 +5142,9 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   .plj-banco button{width:auto;background:none;border:1px solid var(--borda);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;color:var(--txt)}
   .plj-banco button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
   .plj-banco button.tira{color:#c98080}
+  .plj-banco label.neg{display:inline-flex;align-items:center;gap:.25rem;margin:0;font-size:.74rem;color:var(--txt-mut);cursor:pointer;white-space:nowrap}
+  .plj-banco label.neg input{width:auto;flex:none;margin:0;padding:0}
+  .plj-banco label.neg:has(input:checked){color:#e07a5f}
   .plj-banco.novo input[name=banco]{flex:1 1 9rem}
   .plj-edita{margin-top:.7rem}
   .plj-edita>summary{cursor:pointer;color:var(--verde-claro);font-size:.78rem}
@@ -5174,14 +5177,19 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       <input type="hidden" name="banco" value="{{ s.banco|e }}">
       <span class="nome">{{ s.banco|e }}</span>
       <span class="idade">{% if s.dias <= 0 %}informado hoje, {{ s.informado_em.strftime('%H:%M') }}{% elif s.dias == 1 %}informado ontem{% else %}informado há {{ s.dias }} dias{% endif %}{% if s.velho %} — atualize{% endif %}</span>
-      <input name="valor" inputmode="decimal" value="{{ (s.valor_centavos/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
+      {#- O NEGATIVO numa caixa (02/10/2026): o teclado numérico do iPhone não
+         tem o sinal de menos. O campo mostra o valor sem sinal e a caixa diz se
+         está no vermelho; digitar o "-" continua valendo. -#}
+      <input name="valor" inputmode="decimal" value="{{ ((s.valor_centavos|abs)/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
+      <label class="neg" title="saldo negativo — cheque especial, conta no vermelho"><input type="checkbox" name="negativo" value="1"{% if s.valor_centavos < 0 %} checked{% endif %}> negativo</label>
       <button class="pr">atualizar</button>
       <button class="tira" formaction="/painel/empresa/saldo/arquivar" data-msg="Tirar {{ s.banco|e }} da soma? O histórico dele fica guardado, e informar de novo traz ele de volta." onclick="return confirm(this.dataset.msg)">tirar ✕</button>
     </form>
     {% endfor %}
     <form method="post" action="/painel/empresa/saldo" class="plj-banco novo">
       <input name="banco" required maxlength="60" placeholder="{{ 'Outro banco' if planej.saldos else 'Banco (ex: Sicoob)' }}">
-      <input name="valor" required inputmode="decimal" placeholder="saldo R$ (pode ser negativo)">
+      <input name="valor" required inputmode="decimal" placeholder="saldo R$">
+      <label class="neg" title="saldo negativo — cheque especial, conta no vermelho"><input type="checkbox" name="negativo" value="1"> negativo</label>
       <button class="pr">+ informar</button>
     </form>
   </div>
@@ -12801,21 +12809,31 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
 
 @router.post("/painel/empresa/saldo")
 def empresa_saldo_informar(request: Request, banco: str = Form(""),
-                           valor: str = Form("")):
+                           valor: str = Form(""), negativo: str = Form("")):
     """O dono informa o saldo de um banco (etapa A do pedido 3, 23/09/2026).
 
-    Valor COM SINAL: cheque especial é saldo de verdade, e é por isso que o
-    conversor é o do acréscimo, que aceita o menos. Campo sem nenhum dígito é
-    recusado — "0" é saldo legítimo, texto em branco não."""
+    Valor COM SINAL: cheque especial é saldo de verdade. Campo sem número é
+    recusado — "0" é saldo legítimo, texto em branco não.
+
+    O NEGATIVO tem botão próprio desde 02/10/2026 (queixa da Prime: "não
+    consegue colocar saldo negativo"). O campo abre o teclado numérico do
+    celular, e o do iPhone não tem o sinal de menos: não havia como digitar. A
+    caixa "negativo" resolve sem trocar o teclado. E o que não der pra entender
+    é recusado com aviso (`si.ler_valor`), em vez de virar R$ 0,00 calado."""
     from finance import saldo_informado as si
     g = _guard_pj(request)
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    if not any(ch.isdigit() for ch in (valor or "")):
-        request.session["emp_aviso"] = "Informe o valor do saldo (pode ser 0 ou negativo)."
+    cent = si.ler_valor(valor)
+    if cent is None:
+        request.session["emp_aviso"] = (
+            "Não entendi o valor do saldo. Escreva só o número (ex.: 2.400,00) e, "
+            "se estiver no vermelho, marque \"negativo\".")
     else:
-        r = si.informar(pool, conta[0], banco, _acrescimo_para_centavos(valor),
+        if negativo in ("1", "on", "true"):
+            cent = -abs(cent)
+        r = si.informar(pool, conta[0], banco, cent,
                         membro_id=request.session.get("membro_id"))
         if not r.get("ok"):
             request.session["emp_aviso"] = r.get("erro")

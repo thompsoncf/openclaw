@@ -70,6 +70,53 @@ def atuais(pool, conta_id: int, agora: datetime | None = None) -> list[dict]:
     return out
 
 
+def ler_valor(texto) -> int | None:
+    """O saldo digitado -> centavos COM SINAL; o que não der pra entender -> None.
+
+    Nasceu de uma queixa da Prime em 02/10/2026: "não consegue colocar saldo
+    negativo". O conversor de antes dava ZERO, calado, pra tudo que não
+    entendia — "2.400,00-" (o jeito do extrato), "(2.400,00)", o travessão
+    "–2400" — e o zero era gravado como saldo. Em 25/09 o BNB dela foi gravado
+    -2.400,00 e, 27 segundos depois, 0,00. Saldo errado em silêncio é pior que
+    saldo recusado: a "sobra da semana" sai inteira dele.
+
+    Negativo vale de qualquer jeito que o banco escreve: "-2.400,00",
+    "2.400,00-", "(2.400,00)", "2.400,00 D", com hífen, menos ou travessão.
+    "2400.50" (ponto como decimal, de quem copia de planilha) também é lido."""
+    t = str(texto or "").strip().upper()
+    for traco in ("\u2212", "\u2013", "\u2014"):     # menos, travessões
+        t = t.replace(traco, "-")
+    t = t.replace("R$", "").replace(" ", "")
+    neg = False
+    if t.startswith("(") and t.endswith(")"):
+        neg, t = True, t[1:-1]
+    if t.endswith("D"):                 # extrato: "2.400,00 D" é débito
+        neg, t = True, t[:-1]
+    elif t.endswith("C"):               # "C" é crédito: positivo
+        t = t[:-1]
+    if t.endswith("-"):
+        neg, t = True, t[:-1]
+    if t.startswith("-"):
+        neg, t = True, t[1:]
+    elif t.startswith("+"):
+        t = t[1:]
+    if not t or any(ch not in "0123456789.," for ch in t) \
+            or not any(ch.isdigit() for ch in t):
+        return None
+    if "," in t:
+        inteiro, _, dec = t.rpartition(",")
+        inteiro = inteiro.replace(".", "")
+    elif t.count(".") == 1 and len(t.split(".")[1]) in (1, 2):
+        inteiro, dec = t.split(".")
+    else:
+        inteiro, dec = t.replace(".", ""), ""
+    if (inteiro and not inteiro.isdigit()) or (dec and not dec.isdigit()) \
+            or len(dec) > 2:
+        return None
+    centavos = int(inteiro or "0") * 100 + int((dec + "00")[:2])
+    return -centavos if neg else centavos
+
+
 def informar(pool, conta_id: int, banco: str, valor_centavos: int,
              membro_id: int | None = None) -> dict:
     """Grava um informe novo. O nome do banco vem normalizado nos espaços, e um

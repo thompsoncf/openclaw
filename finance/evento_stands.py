@@ -1243,10 +1243,12 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
             # no mesmo CNPJ não passam juntos do máximo por empresa. Conta a EMPRESA (a
             # pessoa): stands de um cadastro dela arquivado, ou de outro cadastro dela
             # nesta conta, também contam — "1 CNPJ só pode 2 stands"
-            c.execute("select id from clientes where id=%s and dono_id=%s for update",
-                      (cid, conta_id))
+            # pessoa ANTES do cadastro: a mesma ordem de `clientes.atualizar_cliente`
+            # (update pessoas, depois clientes) — na ordem inversa as duas se travavam
             c.execute("select id from pessoas where id=(select pessoa_id from clientes "
                       "where id=%s and dono_id=%s) for update", (cid, conta_id))
+            c.execute("select id from clientes where id=%s and dono_id=%s for update",
+                      (cid, conta_id))
             n = c.execute(
                 "select count(*) from evento_stands where conta_id=%s and status <> 'livre' "
                 "and (cliente_id=%s or cliente_id in (select id from clientes where dono_id=%s "

@@ -5,9 +5,10 @@ com beta ligado, o acesso continua como cortesia — mas suspensa/cancelada
 (decisões explícitas do admin) continuam bloqueadas mesmo no beta.
 Função pura: sem banco.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 
 from contas.contas import Conta, acesso_liberado
+from tests.relogio_fixo import HOJE
 
 
 def _conta(status, vencimento):
@@ -18,8 +19,12 @@ def _conta(status, vencimento):
     )
 
 
-ONTEM = date.today() - timedelta(days=1)
-AMANHA = date.today() + timedelta(days=1)
+# Do `HOJE` de Brasília (tests/relogio_fixo.py), e não do `date.today()` do
+# import: das 21h à meia-noite o "ontem" do servidor é o hoje de Brasília, e a
+# conta "vencida" deixa de estar vencida no dia em que a regra passar a ler o
+# `relogio.hoje()`. Contado daqui, o dia de folga vale nos dois relógios.
+ONTEM = HOJE - timedelta(days=1)
+AMANHA = HOJE + timedelta(days=1)
 
 
 def test_ativa_em_dia_libera():

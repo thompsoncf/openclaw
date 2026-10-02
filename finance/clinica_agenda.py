@@ -91,7 +91,7 @@ def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int
                   coalesce(e.paciente_nome, e.titulo), e.paciente_fone, e.servico_id,
                   s.nome, s.cor, s.categoria, e.clinica_local_id, e.encaixe, e.origem,
                   e.confirmacao_enviada_em, e.confirmado_em, e.pede_remarcar_em, e.prospeccao_id,
-                  coalesce(e.observacao_interna, ''), coalesce(e.marcado_por, '')
+                  coalesce(e.observacao_interna, ''), coalesce(e.marcado_por, ''), coalesce(s.setup_centavos, 0)
              from eventos_agenda e
              left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
             where e.conta_id = %s and e.situacao is not null
@@ -103,7 +103,7 @@ def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int
              "tipo": r[8] or "Atendimento", "cor": r[9] or cc.CORES[0], "categoria": r[10] or "",
              "local_id": r[11], "encaixe": r[12], "origem": r[13] or "",
              "confirmacao_enviada_em": r[14], "confirmado_em": r[15], "pede_remarcar_em": r[16],
-             "lead": r[17], "observacao": r[18], "marcado_por": r[19],
+             "lead": r[17], "observacao": r[18], "marcado_por": r[19], "preco": r[20],
              "hora": hora_txt(r[2]), "fim_txt": hora_txt(r[3]),
              "sit_txt": SIT_D.get(r[4], r[4])} for r in rows]
 
@@ -204,6 +204,9 @@ def dia(c, conta_id: int, data: date, agora: datetime, local_id: int | None = No
     # a ficha de cada paciente do dia: a recepção vê o que falta antes da consulta
     from finance import clinica_ficha_link as cfl
     cfl.dos_eventos(c, conta_id, evs, agora)
+    # pago ou a receber, em cada linha (entrega 2a do CRM: o Receber da agenda)
+    from finance import clinica_recebimentos as crb
+    crb.anotar(c, conta_id, evs)
     # só aparece coluna de quem atende hoje (ou tem agendamento hoje)
     colunas = [p for p in profs if faixas[p["id"]] or any(e["profissional_id"] == p["id"] for e in evs)]
     linhas = _linhas({p["id"]: faixas[p["id"]] for p in colunas}, evs)
@@ -220,6 +223,7 @@ def dia(c, conta_id: int, data: date, agora: datetime, local_id: int | None = No
             "confirmados": sum(1 for e in vivos if e["situacao"] != "agendado"),
             "a_confirmar": len(vivos),
             "faltas": sum(1 for e in evs if e["situacao"] == "faltou"),
+            "a_receber": sum(1 for e in evs if e.get("pgto") == "a_receber"),
             "remarcar": pediram_remarcar(c, conta_id, agora)}
 
 

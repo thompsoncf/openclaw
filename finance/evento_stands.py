@@ -779,13 +779,15 @@ def _vincular_cliente_da_reserva(pool, conta_id: int, codigos: list[str], orcame
         _log.warning("evento_stands: não deu pra ligar a reserva %s ao cliente %s: %s: %s",
                      codigos, cliente_id, type(e).__name__, e)
         return None
+    fora = False
     try:
+        fora = bool(_clientes_de_outra_conta(pool, conta_id, {cliente_id: cli}))
         novo = {}
         if (nome or "").strip() and (nome or "").strip() != (cli.get("nome") or "").strip():
             novo["nome"] = nome.strip()
         if digitos_de(zap) and digitos_de(zap) != digitos_de(cli.get("telefone")):
             novo["telefone"] = zap
-        if novo and _clientes_de_outra_conta(pool, conta_id, {cliente_id: cli}):
+        if novo and fora:
             # a pessoa também é cliente de OUTRA conta: nome e WhatsApp dela são o que a
             # outra conta registrou (a identidade é única no sistema). Os desta reserva
             # já ficam na prospecção
@@ -804,6 +806,11 @@ def _vincular_cliente_da_reserva(pool, conta_id: int, codigos: list[str], orcame
                   "email": g("email"), "endereco": g("endereco"), "cep": g("cep"),
                   "cidade": g("cidade"), "uf": g("uf"), "obs": g("obs"),
                   "razao_social": g("razao_social"), "representante": g("representante")}
+        if fora:
+            # contato que a OUTRA conta registrou não vai pro contrato desta: vai o que o
+            # lojista confirmou na página (a mesma regra de `_campos_da_proposta`)
+            campos.update(nome=(nome or "").strip() or campos["nome"],
+                          telefone=(zap or "").strip(), email="")
         _espelhar_no_orcamento(pool, conta_id, orcamento_id, cliente_id, campos,
                                tipo if tipo in ("pf", "pj") else None, digitos, False)
     except Exception as e:  # noqa: BLE001
@@ -1143,6 +1150,12 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
                     # o link público: digitando um CPF/CNPJ ninguém puxa pra esta conta
                     # quem é cliente de outra (ou tem o cadastro daqui arquivado)
                     return {"ok": False, "erro": _pode_juntar("nunca", None, None, [], None)}
+                elif juntar != "sempre" and not _pessoa_de_outra_conta(pool, conta_id,
+                                                                     dono["pessoa_id"]):
+                    # o cadastro dela AQUI foi arquivado pela gestão (podia ser da
+                    # carteira de outra vendedora, e ter stands): a gestão traz de volta
+                    return {"ok": False, "erro": "Esse CPF/CNPJ é de um cadastro arquivado "
+                            "em Clientes — peça à gestão pra ligar este stand a ele."}
                 else:
                     # a pessoa existe mas não tem cadastro ativo AQUI (é cliente de outra
                     # conta, ou o daqui foi arquivado): nasce o cadastro desta conta pra
@@ -1183,7 +1196,7 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
             outras = _outras_reservas(pool, conta_id, alvo, oid, codigo)
             cli_alvo = _cli.obter_cliente(pool, conta_id, alvo) or {}
             erro = (_pode_juntar(juntar, vendedor_id, vend_alvo, outras,
-                                 cli_alvo.get("nome"))
+                                 cli_alvo.get("nome"), pelo_zap=not digitos)
                     or _cabe_na_empresa(pool, conta_id, outras, oid, codigo))
             if erro:
                 return {"ok": False, "erro": erro}
@@ -1325,6 +1338,12 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
             "faltam": cad["faltam"], "congelado": congelado, "juntou": juntou}
 
 
+def _pessoa_de_outra_conta(pool, conta_id: int, pessoa_id) -> bool:
+    with pool.connection() as c:
+        return bool(c.execute("select 1 from clientes where pessoa_id=%s and dono_id <> %s "
+                              "limit 1", (pessoa_id, conta_id)).fetchone())
+
+
 def _so_digitos(s) -> str:
     return "".join(ch for ch in str(s or "") if ch.isdigit())
 
@@ -1405,7 +1424,7 @@ def _cabe_na_empresa(pool, conta_id: int, outras: list[dict], orcamento_id, codi
 
 
 def _pode_juntar(juntar: str, vendedor_id, vendedor_do_cadastro, outras: list[dict],
-                 nome_cadastro) -> str | None:
+                 nome_cadastro, pelo_zap: bool = False) -> str | None:
     """None se o stand pode entrar no cadastro que já existe; senão, a frase pra quem
     está salvando (ver `salvar_cadastro_stand`)."""
     if juntar == "sempre":
@@ -1413,9 +1432,11 @@ def _pode_juntar(juntar: str, vendedor_id, vendedor_do_cadastro, outras: list[di
     if juntar == "do_vendedor" and vendedor_id:
         meu = int(vendedor_id)
         # as outras reservas são vendas dela; e cadastro sem stand nenhum (um da aba
-        # Clientes, de fornecedor, da gestão) só se for da carteira dela
+        # Clientes, de fornecedor, da gestão) só se for da carteira dela — ou se ela
+        # chegou nele pelo WhatsApp do próprio lojista (o caminho de sempre da main)
         if (all(o["vendedor_id"] == meu for o in outras)
-                and (vendedor_do_cadastro == meu or (vendedor_do_cadastro is None and outras))):
+                and (vendedor_do_cadastro == meu
+                     or (vendedor_do_cadastro is None and (outras or pelo_zap)))):
             return None
         nome = nome_cadastro or "outra loja"
         onde = f" ({', '.join(o['codigo'] for o in outras)})" if outras else ""

@@ -2041,7 +2041,13 @@ def test_cnpj_de_cadastro_arquivado_so_completa_e_o_link_publico_nao_puxa(pool, 
     # pelo link público, digitar o CNPJ não puxa a empresa arquivada
     r = es.salvar_cadastro_do_contrato(pool, conta_id, o2, _so_cnpj())
     assert r["ok"] is False and "fale com o seu vendedor" in r["erro"]
-    # pelo app: o stand ganha o cadastro da empresa, mas a identidade não muda
+    # a vendedora pelo app também não: o cadastro arquivado é coisa da gestão
+    cass = _membro(pool, conta_id, "Cassandra")
+    _dono_da_venda(pool, conta_id, "S97", cass)
+    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj(), juntar="do_vendedor",
+                                 vendedor_id=cass)
+    assert r["ok"] is False and "arquivado" in r["erro"] and "gestão" in r["erro"]
+    # pela gestão: o stand ganha o cadastro da empresa, mas a identidade não muda
     r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())
     assert r["ok"] and r["acao"] == "criado", r
     assert _pessoa(pool) == antes == ("EM ESSENCE", "86911110001", "fin@emessence.com")
@@ -2069,6 +2075,13 @@ def test_a_reserva_pelo_link_do_cliente_nao_troca_a_identidade_de_outra_conta(po
     dele = cli.obter_cliente(pool, outra, la)
     assert (dele["nome"], dele["telefone"]) == ("Loja na Prime", "86955550005")
     assert es.buscar(pool, conta_id, "S97")["cliente_id"] == cid
+    # e o contrato desta reserva leva o contato que o lojista confirmou, não o da Prime
+    with pool.connection() as c:
+        zap, email = c.execute("select whatsapp, email from orcamentos where id=%s",
+                               (o2,)).fetchone()
+    assert zap == "86977776666" and not email
+    cad = _cads(pool, conta_id, "S97")["S97"]
+    assert "86955550005" not in str(cad) and "financeiro@loja.com" not in str(cad)
 
 
 def test_salvar_recusado_pelo_limite_nao_completa_a_empresa(pool, conta_id, monkeypatch):
@@ -2138,3 +2151,14 @@ def test_o_app_puxa_o_mapa_depois_de_todo_salvar_e_mostra_a_frase():
     assert "if(j.juntou&&window.stAtualizar)" not in pc._STANDS_JS
     assert "m.scrollIntoView(" in pc._STANDS_JS
     assert "if(pedindo)denovo=true;else atualizar();" in pc._STANDS_AUTO_JS
+
+
+def test_pelo_whatsapp_do_lojista_a_vendedora_salva_num_cadastro_sem_dono(pool, conta_id):
+    cass = _membro(pool, conta_id, "Cassandra")
+    joao = cli.salvar_cliente(pool, conta_id, "LOJA DO JOAO", telefone="86922220002")["id"]
+    _venda(pool, conta_id, "S97", nome="OCEAN BEACH", zap="86922220002")
+    _dono_da_venda(pool, conta_id, "S97", cass)
+    assert es.buscar(pool, conta_id, "S97")["cliente_id"] is None
+    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(
+        fantasia="OCEAN BEACH", doc="", whats="86922220002"), juntar="do_vendedor", vendedor_id=cass)
+    assert r["ok"] and r["cliente_id"] == joao, r

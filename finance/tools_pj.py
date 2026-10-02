@@ -6,6 +6,7 @@ lista. As ferramentas executam de verdade (o dono autorizou execução direta).
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 
 from finance import relogio
@@ -890,19 +891,35 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
 
     # ── o material (docs/mockups/obras_mapa_3d.html, seção 3) ─────────────
     def _destinos_do_material(ref: str) -> tuple[list[dict], str]:
-        """A obra dita — ou a QUADRA inteira, que divide entre as casas que
-        começaram (a mesma regra da marcação em lote)."""
+        """A obra dita — ou a QUADRA inteira, que divide entre as casas em obra
+        que começaram (a mesma regra da marcação em lote).
+
+        A quadra só entra quando a pessoa FALOU de quadra ("quadra 5", "Q5", o
+        nome do grupo): "casa 5" ambígua não pode cair na Quadra 5 pelo número
+        e espalhar material por casas erradas — aí a resposta é perguntar."""
         o = ob.obra_por_nome(pool, conta_id, ref)
         if o:
             return [o], ""
         try:
             from . import obra_grupos as og
-            g = og.grupo_por_nome(pool, conta_id, ref)
+            alvo = ob._norm(ref)
+            rot = ob._norm(og.rotulo(pool, conta_id))
+            falou_grupo = bool(re.search(r"\b(quadra|setor|bloco)\b", alvo)
+                               or (rot and re.search(rf"\b{re.escape(rot)}\b", alvo))
+                               or re.fullmatch(r"q\s*\d+", alvo)
+                               or any(ob._norm(g["nome"]) == alvo
+                                      for g in og.listar_grupos(pool, conta_id)))
+            g = og.grupo_por_nome(pool, conta_id, ref) if falou_grupo else None
             if g:
                 casas = og.casas(pool, conta_id, g["id"])
-                comecaram = [x for x in casas if og.comecou(x)] or casas
-                if not comecaram:
+                if not casas:
                     return [], f"A {g['nome']} ainda não tem casas."
+                em_obra = [x for x in casas if x["pct"] < 100
+                           and x["status"] not in ("pronta", "vendida", "entregue", "arquivada")]
+                comecaram = [x for x in em_obra if og.comecou(x)]
+                if not comecaram:
+                    return [], (f"Nenhuma casa da {g['nome']} está em obra agora — diga a "
+                                "casa, ou deixe no depósito.")
                 return comecaram, ""
         except Exception:  # noqa: BLE001 — sem a 478
             pass
@@ -932,6 +949,8 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             return "De qual obra? (pode ser a quadra inteira também)"
         ref = (e.get("material") or "").strip()
         p = omat.achar_produto(pool, conta_id, ref)
+        if p is not None and "ambiguo" in p:
+            return f"Qual deles? {' · '.join(p['ambiguo'])}. Não registrei nada ainda."
         if p is None:
             if acao == "chegou" and ref:
                 with pool.connection() as c:
@@ -998,7 +1017,8 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
         if not linhas:
             onde = f"em {o['nome']}" if ref_obra else "no depósito"
             return (f"Não tem material registrado {onde}. A foto da nota já guarda os "
-                    "itens sozinha; 'chegou 60 sacos de cimento' também entra.")
+                    "itens sozinha; material que chegou SEM nota entra com 'chegou 60 "
+                    "sacos de cimento'.")
         corpo = "\n".join(
             f"• {r['nome']}: entrou {omat.rotulo(r['entrou'], r['unidade'])}, "
             f"usados {omat._qtd(r['usado'])}, "
@@ -1256,9 +1276,11 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             nome="apontar_material",
             descricao=("Registra MATERIAL em quantidade (não mexe em dinheiro): acao 'usei' "
                        "(consumiu na obra), 'levei' (do depósito pra obra) ou 'chegou' "
-                       "(entrou no depósito, ou na obra se dita). Em 'obra' também vale a "
-                       "QUADRA — divide entre as casas que começaram. Apontar é opcional: "
-                       "use quando a pessoa disser, nunca cobre."),
+                       "(entrou no depósito, ou na obra se dita). 'chegou' é SÓ pra material "
+                       "SEM NOTA (sobra de outra obra, doação, compra sem nota): a foto da "
+                       "nota já dá entrada sozinha, e apontar as duas coisas conta em dobro. "
+                       "Em 'obra' também vale a QUADRA — divide entre as casas em obra. "
+                       "Apontar é opcional: use quando a pessoa disser, nunca cobre."),
             parametros={"type": "object",
                         "properties": {"acao": {"type": "string",
                                                 "enum": ["usei", "levei", "chegou"]},

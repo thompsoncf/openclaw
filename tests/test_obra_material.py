@@ -334,3 +334,142 @@ def test_mapa_perfil_leva_o_material(pool, conta, monkeypatch):
     c = _painel(pool, conta, monkeypatch)
     html = c.get(f"/painel/obras/mapa?m={m['id']}").text
     assert "pf-mat" in html and "12 sacos de CIMENTO" in html
+
+
+# ── as correções da revisão do PR (cada uma com o cenário que quebrava) ──────
+def test_apagar_a_nota_leva_o_material_e_relancar_nao_dobra(pool, conta):
+    o = _obra(pool, conta, "Casa R1")
+    lid = _lanc(pool, conta, centro=o["centro_custo_id"])
+    _itens(pool, lid, [("CIMENTO CP II 50KG", 60, "sc")])
+    omat.absorver_lancamento(pool, conta, lid)
+    p = omat.achar_produto(pool, conta, "cimento cp ii")
+    omat.mover(pool, conta, acao="usei", produto_id=p["id"], quantidade=5, obra_id=o["id"])
+    assert LivroCaixa(pool, conta).apagar_lancamento(lid)      # "apaga e lança de novo"
+    lid2 = _lanc(pool, conta, centro=o["centro_custo_id"])
+    _itens(pool, lid2, [("CIMENTO CP II 50KG", 60, "sc")])
+    omat.absorver_lancamento(pool, conta, lid2)
+    # 60 da nota nova − 5 usados; a nota apagada não deixou 60 órfãos
+    assert omat.saldo_local(pool, conta, p["id"], o["id"]) == Decimal(55)
+
+
+def test_cupom_pessoal_e_de_mercado_nao_viram_material(pool, conta):
+    o = _obra(pool, conta, "Casa R2")
+    with pool.connection() as c:
+        pessoal = c.execute("""insert into lancamentos (conta_id, tipo, valor_centavos, categoria,
+                                   descricao, data, natureza)
+                               values (%s,'despesa',5000,'Insumos','mercado de casa',%s,'pessoal')
+                               returning id""", (conta, HOJE)).fetchone()[0]
+        mercado = c.execute("""insert into lancamentos (conta_id, tipo, valor_centavos, categoria,
+                                   descricao, data, natureza, centro_custo_id)
+                               values (%s,'despesa',5000,'Mercado','café da equipe',%s,'empresa',%s)
+                               returning id""", (conta, HOJE, o["centro_custo_id"])).fetchone()[0]
+        c.commit()
+    _itens(pool, pessoal, [("ARROZ 5KG", 2, "un")])
+    _itens(pool, mercado, [("CAFE 500G", 3, "un")])
+    assert omat.absorver_lancamento(pool, conta, pessoal) == ""
+    assert omat.absorver_lancamento(pool, conta, mercado) == ""
+    assert not omat.quadro_da_obra(pool, conta, o["id"])
+    assert not [r for r in omat.deposito(pool, conta) if r["nome"] in ("ARROZ 5KG", "CAFE 500G")]
+
+
+def test_dividir_devolve_o_material_ao_deposito(pool, conta):
+    a, b = _obra(pool, conta, "Casa R3a"), _obra(pool, conta, "Casa R3b")
+    lid = _lanc(pool, conta, centro=a["centro_custo_id"])
+    _itens(pool, lid, [("BRITA 1", 4, "m3")])
+    omat.absorver_lancamento(pool, conta, lid)
+    ob.dividir(pool, conta, lid, [a["id"], b["id"]])
+    assert not [r for r in omat.quadro_da_obra(pool, conta, a["id"]) if r["saldo"] != 0]
+    assert any(r["nome"] == "BRITA 1" and r["saldo"] == Decimal(4)
+               for r in omat.deposito(pool, conta))
+
+
+def test_realocar_so_leva_o_que_esta_livre(pool, conta):
+    a, b = _obra(pool, conta, "Casa R4a"), _obra(pool, conta, "Casa R4b")
+    lid = _lanc(pool, conta, centro=a["centro_custo_id"])
+    _itens(pool, lid, [("TELHA CERAMICA", 60, "un")])
+    omat.absorver_lancamento(pool, conta, lid)
+    p = omat.achar_produto(pool, conta, "telha")
+    omat.mover(pool, conta, acao="usei", produto_id=p["id"], quantidade=10, obra_id=a["id"])
+    ob.por_na_obra(pool, conta, lid, b["id"])        # a nota era da outra casa
+    # os 10 usados ficam usados na A (sem saldo negativo); os 50 livres vão pra B
+    assert omat.saldo_local(pool, conta, p["id"], a["id"]) == Decimal(0)
+    assert omat.saldo_local(pool, conta, p["id"], b["id"]) == Decimal(50)
+
+
+def test_nota_nao_junta_material_diferente_nem_unidade_diferente(pool, conta):
+    o = _obra(pool, conta, "Casa R5")
+    lid = _lanc(pool, conta, centro=o["centro_custo_id"])
+    _itens(pool, lid, [("CIMENTO", 10, "sc"), ("COLA CIMENTO PVC 75G", 2, "un"),
+                       ("AREIA", 3, "sc"), ("AREIA", 2, "m3")])
+    omat.absorver_lancamento(pool, conta, lid)
+    nomes = sorted((r["nome"], r["unidade"]) for r in omat.quadro_da_obra(pool, conta, o["id"]))
+    assert nomes == [("AREIA", "m³"), ("AREIA", "saco"), ("CIMENTO", "saco"),
+                     ("COLA CIMENTO PVC 75G", "unidade")]
+    # o produto do catálogo de VENDA da mesma conta nunca recebe nota de obra
+    with pool.connection() as c:
+        venda = c.execute("""insert into catalogo_produtos (fornecedor_id, nome, unidade, categoria)
+                             values (%s,'Tijolo','milheiro','construcao') returning id""",
+                          (conta,)).fetchone()[0]
+        c.commit()
+    lid2 = _lanc(pool, conta, centro=o["centro_custo_id"])
+    _itens(pool, lid2, [("Tijolo", 1, "milheiro")])
+    omat.absorver_lancamento(pool, conta, lid2)
+    with pool.connection() as c:
+        assert c.execute("select count(*) from estoque_mov where produto_id=%s",
+                         (venda,)).fetchone()[0] == 0
+
+
+def test_material_ambiguo_pergunta_e_nao_grava(pool, conta):
+    o = _obra(pool, conta, "Casa R6")
+    lid = _lanc(pool, conta, centro=o["centro_custo_id"])
+    _itens(pool, lid, [("CIMENTO CP II 50KG", 10, "sc"), ("CIMENTO BRANCO 1KG", 4, "un")])
+    omat.absorver_lancamento(pool, conta, lid)
+    r = _fs(pool, conta)["apontar_material"].executar(
+        {"acao": "usei", "material": "cimento", "quantidade": 2, "obra": "Casa R6"})
+    assert "Qual deles?" in r and "CIMENTO BRANCO 1KG" in r and "Não registrei" in r
+    with pool.connection() as c:
+        assert c.execute("select count(*) from estoque_mov where fornecedor_id=%s and tipo='saida'",
+                         (conta,)).fetchone()[0] == 0
+
+
+def test_casa_ambigua_nao_cai_na_quadra_e_quadra_pula_as_prontas(pool, conta):
+    g = og.criar_grupo(pool, conta, "Quadra 5")
+    casas = []
+    for n in (1, 2, 3):
+        o = _obra(pool, conta, f"Q5 casa {n}")
+        og.definir(pool, conta, o["id"], g["id"], str(n))
+        with pool.connection() as c:
+            c.execute("update obras set inicio_em=%s where id=%s", (HOJE - timedelta(days=9), o["id"]))
+            c.commit()
+        casas.append(o)
+    with pool.connection() as c:
+        c.execute("update obras set status='entregue' where id=%s", (casas[2]["id"],))
+        c.commit()
+    _obra(pool, conta, "Casa 5 da Rua A")
+    _obra(pool, conta, "Casa 5 da Rua B")
+    fs = _fs(pool, conta)
+    fs["apontar_material"].executar({"acao": "chegou", "material": "Bloco de concreto",
+                                     "quantidade": 100, "unidade": "un"})
+    # "casa 5" é ambígua: pergunta, e NÃO espalha pela Quadra 5
+    r = fs["apontar_material"].executar({"acao": "levei", "material": "bloco",
+                                         "quantidade": 20, "obra": "casa 5"})
+    assert "Não achei a obra" in r and "Apontei" not in r
+    # a quadra dita divide só entre as casas em obra (a entregue fica de fora)
+    r = fs["apontar_material"].executar({"acao": "levei", "material": "bloco",
+                                         "quantidade": 20, "obra": "quadra 5"})
+    assert "2 casas" in r and "Q5 casa 3" not in r
+
+
+def test_gancho_completa_absorcao_nos_caminhos_ja_salvos(pool, conta):
+    o = _obra(pool, conta, "Casa R8")
+    livro = LivroCaixa(pool, conta)
+    base = {f.nome: f for f in construir_ferramentas(livro)}
+    lid = _lanc(pool, conta, centro=o["centro_custo_id"])
+    item = {"descricao": "Ferro 8mm", "quantidade": 30, "valor_unitario": 40.0,
+            "valor_total": 1200.0, "unidade": "barra"}
+    base["registrar_itens_cupom"].executar({"lancamento_id": lid, "itens": [item]})
+    assert not omat.quadro_da_obra(pool, conta, o["id"])        # sem gancho ainda
+    construir_ferramentas_obras(pool, conta, livro=livro)       # agora liga
+    r = base["registrar_itens_cupom"].executar({"lancamento_id": lid, "itens": [item]})
+    assert "tem itens salvos" in r and "🧱" in r                 # o -1 completa a absorção
+    assert omat.quadro_da_obra(pool, conta, o["id"])[0]["entrou"] == Decimal(30)

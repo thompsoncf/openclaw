@@ -19,17 +19,24 @@
 --
 -- O CUSTO NÃO MUDA DE LUGAR: o dinheiro continua no lançamento, como sempre.
 -- As entradas de obra entram SEM custo unitário (o CMP do fornecedor não é
--- tocado) — material é régua de QUANTIDADE; dinheiro é outra régua.
+-- tocado) — material é régua de QUANTIDADE; dinheiro é outra régua. E o cache
+-- `catalogo_produtos.saldo` também não: o saldo de material é por LOCAL, e sai
+-- sempre da soma de estoque_mov (um cache só da conta inteira mentiria, e o
+-- cascade acima não teria como acertá-lo).
 --
 -- Aditiva e idempotente.
 
 alter table public.estoque_mov add column if not exists obra_id bigint
     references public.obras(id) on delete set null;
 alter table public.estoque_mov add column if not exists transf_id text;
+-- CASCADE, e não set null: a entrada É da nota. Apagar o lançamento (o "apaga e
+-- lança de novo" que o agente ensina) ou trocar os itens ("substituir") leva o
+-- material junto — senão os 60 sacos ficariam contados pra sempre, e a nota
+-- lançada de novo somaria mais 60. Uso e transferência não têm nota: ficam.
 alter table public.estoque_mov add column if not exists lancamento_id bigint
-    references public.lancamentos(id) on delete set null;
+    references public.lancamentos(id) on delete cascade;
 alter table public.estoque_mov add column if not exists item_id bigint
-    references public.itens_lancamento(id) on delete set null;
+    references public.itens_lancamento(id) on delete cascade;
 
 create unique index if not exists ux_estoque_mov_item
     on public.estoque_mov (item_id) where item_id is not null;

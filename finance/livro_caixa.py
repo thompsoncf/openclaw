@@ -763,7 +763,13 @@ class LivroCaixa:
                 conn.execute("delete from lancamento_rateio where lancamento_id = %s "
                              "and conta_id = %s", (lancamento_id, self.conta_id))
             conn.commit()
-            return cur.rowcount > 0
+            mudou = cur.rowcount > 0
+        if mudou:
+            # o material da nota vai pra onde o dinheiro foi (migração 484). Só
+            # mexe em conta que tem material; nunca derruba a troca de centro.
+            from . import obra_material as _omat
+            _omat.realocar_do_lancamento(self.pool, self.conta_id, lancamento_id)
+        return mudou
 
     def ids_por_natureza(self, ano: int, mes: int, membro_id: int | None = None,
                          natureza: str | None = None) -> list[int]:

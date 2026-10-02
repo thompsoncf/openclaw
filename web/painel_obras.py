@@ -931,13 +931,13 @@ ou divida entre as obras em andamento, quando for de todas.</p>
 {% if deposito %}{% set baixos = deposito|selectattr('abaixo')|list %}
 <details class="ob-box" id="deposito" style="margin-top:1.4rem"{% if baixos %} open{% endif %}>
 <summary>Depósito de material · {{ deposito|length }}{% if baixos %} · ⚠️ {{ baixos|length }} abaixo do mínimo{% endif %}</summary>
-{% for r in baixos %}<div class="ob-alertas">⚠️ {{ r.nome|e }} abaixo do mínimo: {{ rotulo_mat(r.saldo, r.unidade) }} (mínimo {{ rotulo_mat(r.minimo, r.unidade) }})</div>{% endfor %}
+{% for r in baixos %}<div class="ob-alertas">⚠️ {{ r.nome|e }} abaixo do mínimo: {{ rotulo_mat(r.saldo, r.unidade)|e }} (mínimo {{ rotulo_mat(r.minimo, r.unidade)|e }})</div>{% endfor %}
 <form method="post" action="/painel/obras/deposito-minimo">
 <div class="ob-rolo"><table class="ob-tab">
 <tr><th>Material</th><th style="text-align:right">Entrou</th><th style="text-align:right">Saiu</th><th style="text-align:right">No depósito</th><th style="text-align:right">Mínimo</th></tr>
 {% for r in deposito %}<tr><td{% if r.chave %} style="font-weight:600"{% endif %}>{{ r.nome|e }}</td>
-  <td class="v">{{ rotulo_mat(r.entrou, r.unidade) }}</td><td class="v">{{ '%g'|format(r.usado) }}</td>
-  <td class="v"><b>{{ rotulo_mat(r.saldo, r.unidade) }}</b>{% if r.abaixo %} ⚠️{% endif %}</td>
+  <td class="v">{{ rotulo_mat(r.entrou, r.unidade)|e }}</td><td class="v">{{ '%g'|format(r.usado) }}</td>
+  <td class="v"><b>{{ rotulo_mat(r.saldo, r.unidade)|e }}</b>{% if r.abaixo %} ⚠️{% endif %}</td>
   <td class="v"><input type="hidden" name="produto" value="{{ r.produto_id }}">
     <input name="minimo" value="{{ '%g'|format(r.minimo) if r.minimo else '' }}" inputmode="decimal" style="max-width:5.5rem;text-align:right" placeholder="—"></td></tr>{% endfor %}
 </table></div>
@@ -1159,8 +1159,8 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
 <div class="ob-rolo"><table class="ob-tab">
 <tr><th>Material</th><th style="text-align:right">Entrou</th><th style="text-align:right">Usado</th><th style="text-align:right">Na obra</th></tr>
 {% for r in material.linhas %}<tr><td{% if r.chave %} style="font-weight:600"{% endif %}>{{ r.nome|e }}</td>
-  <td class="v">{{ material.rotulo(r.entrou, r.unidade) }}</td><td class="v">{{ material.qtd(r.usado) }}</td>
-  <td class="v"><b>{{ material.rotulo(r.saldo, r.unidade) }}</b></td></tr>{% endfor %}
+  <td class="v">{{ material.rotulo(r.entrou, r.unidade)|e }}</td><td class="v">{{ material.qtd(r.usado) }}</td>
+  <td class="v"><b>{{ material.rotulo(r.saldo, r.unidade)|e }}</b></td></tr>{% endfor %}
 </table></div>
 <p class="ob-mut">A foto da nota já entra aqui sozinha, item a item. Pelo WhatsApp: “usei 15 sacos na {{ o.nome|lower|e }}”, “levei 10 do depósito”. O dinheiro continua em custos — isto é quantidade.</p>
 {% endif %}

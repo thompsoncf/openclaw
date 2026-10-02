@@ -220,7 +220,8 @@ def _titulos_da_competencia(c, conta_id: int, comp: date,
     """{funcionario_id: {parte: {"vivo": linha|None, "cancelado": bool}}}.
     'vivo' é a conta não cancelada (o índice único garante no máximo uma)."""
     sql = """select id, folha_funcionario_id, folha_parte, status, valor_centavos,
-                    folha_valor_calculado, vencimento, aprovacao, pago_em
+                    folha_valor_calculado, vencimento, aprovacao, pago_em,
+                    coalesce((to_jsonb(titulos)->>'vencimento_manual')::boolean, false)
                from titulos
               where conta_id=%s and folha_competencia=%s and folha_parte is not null
                 and folha_funcionario_id is not null"""
@@ -236,7 +237,8 @@ def _titulos_da_competencia(c, conta_id: int, comp: date,
         else:
             parte["vivo"] = {"id": int(r[0]), "status": r[3], "valor": int(r[4] or 0),
                              "calculado": (int(r[5]) if r[5] is not None else None),
-                             "vencimento": r[6], "aprovacao": r[7], "pago_em": r[8]}
+                             "vencimento": r[6], "aprovacao": r[7], "pago_em": r[8],
+                             "venc_manual": bool(r[9])}
     return out
 
 
@@ -266,9 +268,9 @@ def plano(restante: int, salario: int, cfg: dict, comp: date, tits: dict, *,
     'saldo'; `True` = as duas). Só nelas o valor volta por cima do que foi mexido
     à mão, e só nelas uma parte cancelada pode nascer de novo — salvar o
     formulário pra trocar o dia do saldo não ressuscita o adiantamento que ele
-    cancelou. A DATA segue a regra sempre (quem é elegível): nenhuma tela muda o
-    vencimento de um título, então não há mão do dono a respeitar ali — e mudar o
-    dia de pagamento tem que mover a conta que já está aberta.
+    cancelou. A DATA segue a regra (quem é elegível) — mudar o dia de pagamento
+    tem que mover a conta que já está aberta —, MENOS quando o dono mudou o
+    vencimento daquela conta à mão (`vencimento_manual`, 484): aí a data é dele.
 
     Devolve ações: ('criar', parte, valor, vencimento) · ('atualizar', id, valor,
     calculado, vencimento_ou_None) · ('cancelar', id).
@@ -292,7 +294,8 @@ def plano(restante: int, salario: int, cfg: dict, comp: date, tits: dict, *,
                 alvo = calc = min(cfg_a, restante)
             else:
                 alvo, calc = min(va["valor"], restante), va["calculado"]
-            novo_venc = venc_a if venc_a and venc_a != va["vencimento"] else None
+            novo_venc = (venc_a if venc_a and venc_a != va["vencimento"]
+                         and not va.get("venc_manual") else None)
             if alvo != va["valor"] or calc != va["calculado"] or novo_venc:
                 acoes.append(("atualizar", va["id"], alvo, calc, novo_venc))
             a_aberto = alvo
@@ -316,7 +319,8 @@ def plano(restante: int, salario: int, cfg: dict, comp: date, tits: dict, *,
                 alvo = calc = calc_s
             else:
                 alvo, calc = min(vs["valor"], calc_s), vs["calculado"]
-            novo_venc = venc_s if venc_s and venc_s != vs["vencimento"] else None
+            novo_venc = (venc_s if venc_s and venc_s != vs["vencimento"]
+                         and not vs.get("venc_manual") else None)
             if alvo != vs["valor"] or calc != vs["calculado"] or novo_venc:
                 acoes.append(("atualizar", vs["id"], alvo, calc, novo_venc))
     elif (vs is None and elegivel and calc_s > 0 and venc_s and venc_s >= hoje
@@ -409,12 +413,15 @@ def _aplicar(c, conta_id: int, fid: int, cfg: dict, comp: date, acao: tuple,
                  (conta_id, tipo, descricao, contraparte, valor_centavos, vencimento,
                   categoria, recorrente, aprovacao, plano_conta_id, tipo_despesa,
                   folha_funcionario_id, folha_competencia, folha_parte,
-                  folha_valor_calculado)
+                  folha_valor_calculado, mes_referencia)
                values (%s,'pagar',%s,%s,%s,%s,%s,false,'aguardando',%s,'fixa',
-                       %s,%s,%s,%s)
+                       %s,%s,%s,%s,%s)
                on conflict do nothing returning id""",
+            # a referência é a COMPETÊNCIA: o adiantamento do dia 20/10 é do
+            # salário de outubro, e o padrão (mês anterior ao vencimento) diria
+            # setembro
             (conta_id, _descricao(parte, comp, cfg["pro_labore"]), cfg["nome"], valor,
-             venc, CAT_PESSOAL, plano_id, fid, comp, parte, valor)).fetchone()
+             venc, CAT_PESSOAL, plano_id, fid, comp, parte, valor, comp)).fetchone()
         if r:
             resumo["criados"] += 1
     elif acao[0] == "atualizar":

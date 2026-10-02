@@ -119,12 +119,16 @@ def loja_stands(request: Request, slug: str):
     # SÓ o que é público vai pro JS (nunca comprovante_url/prospeccao_id/etc):
     # é este objeto que abastece mapa e painel de detalhe. Status traduzido pro
     # vocabulário da maquete (pre_reservado -> 'reservado', classes .st-*).
-    # o nome da empresa só aparece pra stand vendido COM contrato assinado
+    # o nome da empresa só aparece pra stand vendido COM contrato assinado — salvo
+    # nas páginas de `_NOME_DOS_OCUPADOS`, que mostram a marca de todo stand
+    # reservado ou vendido (`confirmados` continua dizendo quem assinou)
     try:
-        expositores = es.expositores_publicos(pool, conta_id, stands)
+        confirmados = es.expositores_publicos(pool, conta_id, stands)
+        expositores = (es.expositores_publicos(pool, conta_id, stands, reservados_tambem=True)
+                       if cfg.get("slug") in _NOME_DOS_OCUPADOS else confirmados)
     except Exception as e:  # noqa: BLE001 — sem o nome a página continua servindo
         _log.info("loja_stands: sem os nomes dos expositores: %s: %s", type(e).__name__, e)
-        expositores = {}
+        confirmados, expositores = {}, {}
     stands_json = json.dumps({
         s["codigo"]: {
             "pavilhao": s["pavilhao"], "zona": s["zona"] or "",
@@ -133,6 +137,7 @@ def loja_stands(request: Request, slug: str):
             "preco": brl(s["preco_centavos"]) if s["preco_centavos"] else None,
             "dias": _dias_restantes(s["pre_reserva_ate"]) if s["status"] == "pre_reservado" else None,
             "expositor": expositores.get(s["codigo"]),
+            "confirmado": s["codigo"] in confirmados,
             "preco_centavos": s["preco_centavos"],
         }
         for s in stands
@@ -293,6 +298,11 @@ _FOTOS_OK = {"2x2", "3x2", "3x3", "4x2", "4x3",
 # A foto do topo da página (01/10/2026, pedido do dono): a fachada do local com o
 # pórtico do evento, pág. 2 do PDF oficial. É arte DESTE evento — entra pelo slug
 # da página, nunca pra todas as contas que vendem stand.
+# O NOME de quem está no stand reservado ou vendido, no clique (02/10/2026, pedido
+# do dono — "só Outlet Chic"): as outras páginas seguem mostrando só o vendido com
+# contrato assinado. Só a marca (nome fantasia), nunca razão social nem contato.
+_NOME_DOS_OCUPADOS = {"outlet-chic"}
+
 _FACHADAS = {
     "outlet-chic": {"arquivo": "fachada-outlet-chic",
                     "alt": "Fachada do Centro de Convenções de Teresina com o pórtico do Outlet Chic"},
@@ -913,7 +923,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
       if (!sv) return;
       usados[code] = true;
       stands.push({ code:code, zone:sv.zona, pavilion:p.key, size:sv.tamanho,
-                    preco:sv.preco, precoC:sv.preco_centavos || 0, status:sv.status, dias:sv.dias, expositor:sv.expositor });
+                    preco:sv.preco, precoC:sv.preco_centavos || 0, status:sv.status, dias:sv.dias, expositor:sv.expositor, confirmado:sv.confirmado });
     });
   });
   // Estandes do banco fora da planta desenhada (código novo, ou outra conta):
@@ -926,7 +936,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     var pk = sv.pavilhao || 'outros';
     (extras[pk] = extras[pk] || []).push(code);
     stands.push({ code:code, zone:sv.zona, pavilion:pk, size:sv.tamanho,
-                  preco:sv.preco, precoC:sv.preco_centavos || 0, status:sv.status, dias:sv.dias, expositor:sv.expositor });
+                  preco:sv.preco, precoC:sv.preco_centavos || 0, status:sv.status, dias:sv.dias, expositor:sv.expositor, confirmado:sv.confirmado });
   });
   Object.keys(extras).forEach(function(pk){
     var pav = pavilions.filter(function(p){ return p.key === pk; })[0];
@@ -1204,7 +1214,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
     }
     html += '<div class="panel-code">' + esc(s.code) + '</div>';
     html += '<span class="status-badge st-' + s.status + '">' + statusText + '</span>';
-    if (s.status === 'vendido' && s.expositor) html += '<div class="panel-expositor"><span>Expositor</span><b>' + esc(s.expositor) + '</b></div>';
+    if (s.status !== 'livre' && s.expositor) html += '<div class="panel-expositor"><span>' + (s.status === 'vendido' ? 'Expositor' : 'Reservado por') + '</span><b>' + esc(s.expositor) + '</b></div>';
     if (s.zone) html += '<div class="panel-row"><span>Zona</span><b>' + esc(s.zone) + '</b></div>';
     html += '<div class="panel-row"><span>Pavilhão</span><b>' + esc(pav ? pav.label : s.pavilion) + '</b></div>';
     html += '<div class="panel-row"><span>Tamanho</span><b>' + esc(sizeLabel[s.size] || s.size) + '</b></div>';
@@ -1288,7 +1298,7 @@ var SEM_STORAGE = {{ 'true' if sem_storage else 'false' }};
         html += '<a class="whatsapp-secondary" href="' + waLink(msg2) + '" target="_blank" rel="noopener">Entrar na fila de espera</a>';
       }
     } else {
-      html += '<p class="panel-empty" style="margin-top:14px;">' + (s.expositor ? 'Stand confirmado: pagamento feito e contrato assinado. Você encontra a marca aqui na feira.' : 'Este stand já foi confirmado e não está mais disponível.') + '</p>';
+      html += '<p class="panel-empty" style="margin-top:14px;">' + (s.confirmado ? 'Stand confirmado: pagamento feito e contrato assinado. Você encontra a marca aqui na feira.' : 'Este stand já foi confirmado e não está mais disponível.') + '</p>';
     }
     panel.innerHTML = html;
   }

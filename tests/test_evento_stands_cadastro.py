@@ -2171,3 +2171,20 @@ def test_pelo_whatsapp_do_lojista_a_vendedora_salva_num_cadastro_sem_dono(pool, 
     r = es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(
         fantasia="OCEAN BEACH", doc="", whats="86922220002"), juntar="do_vendedor", vendedor_id=cass)
     assert r["ok"] and r["cliente_id"] == joao, r
+
+
+def test_o_limite_de_2_conta_a_empresa_mesmo_com_o_cadastro_arquivado(pool, conta_id):
+    # "1 CNPJ só pode 2 stands": a gestão arquivou o cadastro da empresa, que ainda tem
+    # o i04 e o S97 — um 3º stand com o mesmo CNPJ não passa
+    _config_evento(pool, conta_id)
+    empresa, _prov, _o1, _o2 = _duas_lojas(pool, conta_id)
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())["ok"]       # 2 de 2
+    assert cli.arquivar_cliente(pool, conta_id, empresa)
+    _venda(pool, conta_id, "G61", nome="TERCEIRA", zap="86933330003")
+    assert es.salvar_cadastro_stand(pool, conta_id, "G61", _dados(
+        fantasia="TERCEIRA", doc="", whats="86933330003"))["ok"]
+    for quem in ("sempre", "do_vendedor"):
+        r = es.salvar_cadastro_stand(pool, conta_id, "G61", _so_cnpj("TERCEIRA"),
+                                     juntar=quem, vendedor_id=None)
+        assert r["ok"] is False and "máximo é 2" in r["erro"], (quem, r)
+    assert _cads(pool, conta_id, "G61")["G61"]["doc"] == ""

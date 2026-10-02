@@ -1090,7 +1090,7 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
         identidade nunca são gravados daqui (ficam na prospecção e na proposta).
     `juntar` diz quem pode entrar no cadastro de outra reserva:
         "sempre"       gestão (painel, ou dono/gestor no app)
-        "do_vendedor"  a vendedora, se as outras reservas do cadastro são vendas dela
+        "do_vendedor"  a vendedora (de qualquer venda: a única regra é o limite)
         "nunca"        o link público do contrato — ninguém entra no cadastro de
                        outra loja (nem vê os dados dela) digitando um CPF/CNPJ"""
     from . import clientes as _cli
@@ -1240,14 +1240,20 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
     with pool.connection() as c:
         if entrou:
             # trava o cadastro e confere o limite de novo: dois salvares ao mesmo tempo
-            # no mesmo CNPJ não passam juntos do máximo por empresa
+            # no mesmo CNPJ não passam juntos do máximo por empresa. Conta a EMPRESA (a
+            # pessoa): stands de um cadastro dela arquivado, ou de outro cadastro dela
+            # nesta conta, também contam — "1 CNPJ só pode 2 stands"
             c.execute("select id from clientes where id=%s and dono_id=%s for update",
                       (cid, conta_id))
+            c.execute("select id from pessoas where id=(select pessoa_id from clientes "
+                      "where id=%s and dono_id=%s) for update", (cid, conta_id))
             n = c.execute(
-                "select count(*) from evento_stands where conta_id=%s and cliente_id=%s "
-                "and status <> 'livre' and codigo <> %s and (%s::bigint is null "
+                "select count(*) from evento_stands where conta_id=%s and status <> 'livre' "
+                "and (cliente_id=%s or cliente_id in (select id from clientes where dono_id=%s "
+                "and pessoa_id=(select pessoa_id from clientes where id=%s and dono_id=%s))) "
+                "and codigo <> %s and (%s::bigint is null "
                 "or orcamento_id is distinct from %s::bigint)",
-                (conta_id, cid, codigo, oid, oid)).fetchone()[0]
+                (conta_id, cid, conta_id, cid, conta_id, codigo, oid, oid)).fetchone()[0]
             desta = c.execute(
                 "select count(*) from evento_stands where conta_id=%s and status <> 'livre' "
                 "and (codigo=%s or (%s::bigint is not null and orcamento_id=%s::bigint))",

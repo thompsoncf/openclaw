@@ -1,4 +1,4 @@
--- 476_obra_quadras.sql
+-- 478_obra_quadras.sql
 -- As obras agrupadas por quadra (ou setor, bloco — a empresa escolhe o nome).
 -- Desenho aprovado pelo dono em 01/10/2026: docs/mockups/obras_por_quadra.html
 -- ("segue as recomendações"). PR 1 de 2: a quadra, a lista agrupada, o quadro de

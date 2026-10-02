@@ -633,7 +633,7 @@ def _bloco_das_quadras(pool, conta_id: int) -> list[str]:
         for g in grupos:
             n = sum(1 for v in mapa.values() if v["grupo_id"] == g["id"])
             partes.append(f"{g['nome']} ({n} casa{'s' if n != 1 else ''})")
-    except Exception:  # noqa: BLE001 — sem a 476
+    except Exception:  # noqa: BLE001 — sem a 478
         return []
     return [f"- {rot.upper()}S (a empresa chama o grupo de casas de \"{rot}\"): " + "; ".join(partes) + ".",
             f"- \"terminei a fundação da {rot.lower()} 5\" -> marcar_etapa_quadra (marca nas casas que "

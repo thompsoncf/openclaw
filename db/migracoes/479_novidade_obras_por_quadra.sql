@@ -1,6 +1,6 @@
--- 477_novidade_obras_por_quadra.sql
+-- 479_novidade_obras_por_quadra.sql
 -- O aviso das obras por quadra, seguindo a seção 5 do CLAUDE.md: PR que muda tela
--- leva o aviso, no mesmo PR. Precisa da 476 e da 350 (o portão `construcao`).
+-- leva o aviso, no mesmo PR. Precisa da 478 e da 350 (o portão `construcao`).
 -- Desenho aprovado pelo dono em 01/10/2026: docs/mockups/obras_por_quadra.html.
 --
 -- PRA QUEM: dono e gestor — quem abre a aba Obras.

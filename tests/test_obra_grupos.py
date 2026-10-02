@@ -1,4 +1,4 @@
-"""As obras por quadra (finance/obra_grupos.py, migração 476). Desenho aprovado
+"""As obras por quadra (finance/obra_grupos.py, migração 478). Desenho aprovado
 em 01/10/2026: docs/mockups/obras_por_quadra.html.
 
 Os testes que mais importam:
@@ -41,7 +41,7 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "336_plano_fardamentos.sql", "349_plano_obras.sql", "351_obras.sql",
               "353_obra_venda_documentos.sql", "355_reforma_orcamento.sql",
               "367_pix_da_empresa.sql", "369_obra_fotos.sql", "371_obra_etapa_pagamentos.sql",
-              "476_obra_quadras.sql")
+              "478_obra_quadras.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 ONTEM = date.today() - timedelta(days=1)
 

@@ -1,4 +1,4 @@
-"""As obras agrupadas por quadra — ou setor, bloco: a empresa escolhe (migração 476).
+"""As obras agrupadas por quadra — ou setor, bloco: a empresa escolhe (migração 478).
 
 Desenho aprovado pelo dono em 01/10/2026 (docs/mockups/obras_por_quadra.html,
 "segue as recomendações"):
@@ -11,7 +11,7 @@ Desenho aprovado pelo dono em 01/10/2026 (docs/mockups/obras_por_quadra.html,
 
 A CASA CONTINUA SENDO A OBRA. A quadra só junta: casa sem quadra não muda nada, e
 a quadra e o lote são lidos à parte (`por_obra`) — a lista de colunas da obra
-(`obras._COLS`) é lida em todo canto e não pode depender da 476.
+(`obras._COLS`) é lida em todo canto e não pode depender da 478.
 
 QUEM ENTRA NA MARCAÇÃO EM LOTE: as casas da quadra que já começaram (têm data de
 início até hoje, ou alguma etapa feita). A casa que nem começou fica de fora e é
@@ -39,7 +39,7 @@ def rotulo(pool, conta_id: int) -> str:
         with pool.connection() as c:
             r = c.execute("select obras_rotulo_grupo from contas where id=%s", (conta_id,)).fetchone()
         return ((r[0] if r else "") or "").strip() or ROTULO_PADRAO
-    except Exception:  # noqa: BLE001 — sem a 476
+    except Exception:  # noqa: BLE001 — sem a 478
         return ROTULO_PADRAO
 
 
@@ -103,7 +103,7 @@ def listar_grupos(pool, conta_id: int) -> list[dict]:
 
 
 def por_obra(pool, conta_id: int) -> dict[int, dict]:
-    """{obra_id: {grupo_id, lote}} — vazio sem a 476."""
+    """{obra_id: {grupo_id, lote}} — vazio sem a 478."""
     try:
         with pool.connection() as c:
             if not _tem_tabela(c):

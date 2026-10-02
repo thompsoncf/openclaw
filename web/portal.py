@@ -392,7 +392,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
     </form>
   </span>
 </div>{% endif %}
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol><symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol></defs></svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol><symbol id="ic-mapa" viewBox="0 0 24 24"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></symbol><symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol></defs></svg>
 <div id="navprog"></div>
 {% macro navi(sec, href, ic, label) -%}
 <a href="{{ href }}" class="nav-i{% if secao_ativa==sec and sec %} on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-{{ ic }}"/></svg><span>{{ label }}</span></a>
@@ -451,7 +451,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
-  {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{{ navi('obras_mapa','/painel/obras/mapa','mapa','Mapa das obras') }}{% endif %}
   {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
      público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
      _render(), não é todo mundo do nicho que vende espaço numerado. #}
@@ -517,7 +517,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
-  {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{{ navi('obras_mapa','/painel/obras/mapa','mapa','Mapa das obras') }}{% endif %}
   {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
      público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
      _render(), não é todo mundo do nicho que vende espaço numerado. #}
@@ -5142,6 +5142,9 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   .plj-banco button{width:auto;background:none;border:1px solid var(--borda);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;color:var(--txt)}
   .plj-banco button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
   .plj-banco button.tira{color:#c98080}
+  .plj-banco label.neg{display:inline-flex;align-items:center;gap:.25rem;margin:0;font-size:.74rem;color:var(--txt-mut);cursor:pointer;white-space:nowrap}
+  .plj-banco label.neg input{width:auto;flex:none;margin:0;padding:0}
+  .plj-banco label.neg:has(input:checked){color:#e07a5f}
   .plj-banco.novo input[name=banco]{flex:1 1 9rem}
   .plj-edita{margin-top:.7rem}
   .plj-edita>summary{cursor:pointer;color:var(--verde-claro);font-size:.78rem}
@@ -5174,14 +5177,19 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       <input type="hidden" name="banco" value="{{ s.banco|e }}">
       <span class="nome">{{ s.banco|e }}</span>
       <span class="idade">{% if s.dias <= 0 %}informado hoje, {{ s.informado_em.strftime('%H:%M') }}{% elif s.dias == 1 %}informado ontem{% else %}informado há {{ s.dias }} dias{% endif %}{% if s.velho %} — atualize{% endif %}</span>
-      <input name="valor" inputmode="decimal" value="{{ (s.valor_centavos/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
+      {#- O NEGATIVO numa caixa (02/10/2026): o teclado numérico do iPhone não
+         tem o sinal de menos. O campo mostra o valor sem sinal e a caixa diz se
+         está no vermelho; digitar o "-" continua valendo. -#}
+      <input name="valor" inputmode="decimal" value="{{ ((s.valor_centavos|abs)/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
+      <label class="neg" title="saldo negativo — cheque especial, conta no vermelho"><input type="checkbox" name="negativo" value="1"{% if s.valor_centavos < 0 %} checked{% endif %}> negativo</label>
       <button class="pr">atualizar</button>
       <button class="tira" formaction="/painel/empresa/saldo/arquivar" data-msg="Tirar {{ s.banco|e }} da soma? O histórico dele fica guardado, e informar de novo traz ele de volta." onclick="return confirm(this.dataset.msg)">tirar ✕</button>
     </form>
     {% endfor %}
     <form method="post" action="/painel/empresa/saldo" class="plj-banco novo">
       <input name="banco" required maxlength="60" placeholder="{{ 'Outro banco' if planej.saldos else 'Banco (ex: Sicoob)' }}">
-      <input name="valor" required inputmode="decimal" placeholder="saldo R$ (pode ser negativo)">
+      <input name="valor" required inputmode="decimal" placeholder="saldo R$">
+      <label class="neg" title="saldo negativo — cheque especial, conta no vermelho"><input type="checkbox" name="negativo" value="1"> negativo</label>
       <button class="pr">+ informar</button>
     </form>
   </div>
@@ -8656,6 +8664,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("renovacoes", "/painel/renovacoes"),
                  ("hoje", "/painel/hoje"),
                  ("clinica", "/painel/clinica"),
+                 ("obras_mapa", "/painel/obras/mapa"),   # antes de "obras": é prefixo dela
                  ("obras", "/painel/obras"),
                  ("estandes", "/painel/eventos/estandes"),
                  ("follow_up", "/painel/follow-up"),
@@ -12801,21 +12810,31 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
 
 @router.post("/painel/empresa/saldo")
 def empresa_saldo_informar(request: Request, banco: str = Form(""),
-                           valor: str = Form("")):
+                           valor: str = Form(""), negativo: str = Form("")):
     """O dono informa o saldo de um banco (etapa A do pedido 3, 23/09/2026).
 
-    Valor COM SINAL: cheque especial é saldo de verdade, e é por isso que o
-    conversor é o do acréscimo, que aceita o menos. Campo sem nenhum dígito é
-    recusado — "0" é saldo legítimo, texto em branco não."""
+    Valor COM SINAL: cheque especial é saldo de verdade. Campo sem número é
+    recusado — "0" é saldo legítimo, texto em branco não.
+
+    O NEGATIVO tem botão próprio desde 02/10/2026 (queixa da Prime: "não
+    consegue colocar saldo negativo"). O campo abre o teclado numérico do
+    celular, e o do iPhone não tem o sinal de menos: não havia como digitar. A
+    caixa "negativo" resolve sem trocar o teclado. E o que não der pra entender
+    é recusado com aviso (`si.ler_valor`), em vez de virar R$ 0,00 calado."""
     from finance import saldo_informado as si
     g = _guard_pj(request)
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    if not any(ch.isdigit() for ch in (valor or "")):
-        request.session["emp_aviso"] = "Informe o valor do saldo (pode ser 0 ou negativo)."
+    cent = si.ler_valor(valor)
+    if cent is None:
+        request.session["emp_aviso"] = (
+            "Não entendi o valor do saldo. Escreva só o número (ex.: 2.400,00) e, "
+            "se estiver no vermelho, marque \"negativo\".")
     else:
-        r = si.informar(pool, conta[0], banco, _acrescimo_para_centavos(valor),
+        if negativo in ("1", "on", "true"):
+            cent = -abs(cent)
+        r = si.informar(pool, conta[0], banco, cent,
                         membro_id=request.session.get("membro_id"))
         if not r.get("ok"):
             request.session["emp_aviso"] = r.get("erro")

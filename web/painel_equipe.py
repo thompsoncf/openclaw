@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
 from contas import equipe as eq
-from web.portal import _render, _env, conta_logada
+from web.portal import _render, _env, conta_logada, nicho_da_conta
 
 router = APIRouter()
 
@@ -23,6 +23,14 @@ def _dono(request: Request):
     if request.session.get("papel", "dono") != "dono":
         return None, RedirectResponse("/painel", status_code=303)
     return conta, None
+
+
+def _papeis_da_conta(conta) -> tuple:
+    """Os papéis que ESTA conta pode dar: o de nicho (o mestre de obras) só na
+    construção — numa clínica, "Mestre de obras" seria um papel sem tela."""
+    nicho = (nicho_da_conta(conta) or "").strip().lower()
+    return tuple(p for p in eq.PAPEIS_PJ
+                 if eq.PAPEIS_DO_NICHO.get(p) in (None, nicho))
 
 
 def _link(token: str) -> str:
@@ -77,7 +85,7 @@ def painel_equipe(request: Request):
                    # aqui que o problema tem que aparecer. Best-effort: a Equipe é
                    # a tela que dá acesso a todo mundo e não pode deixar de abrir.
                    sem_aviso=_sem_aviso(pool, conta[0]),
-                   papeis=[(p, eq.rotulo(p)) for p in eq.PAPEIS_PJ],
+                   papeis=[(p, eq.rotulo(p)) for p in _papeis_da_conta(conta)],
                    novo_link=request.session.pop("equipe_link", None),
                    novo_link_cap=request.session.pop("equipe_link_cap", None),
                    senha_temp=request.session.pop("equipe_senha_temp", None),
@@ -172,6 +180,9 @@ def painel_equipe_convidar(request: Request, nome: str = Form(""),
     conta, redir = _dono(request)
     if redir is not None:
         return redir
+    if papel not in _papeis_da_conta(conta):
+        request.session["equipe_erro"] = "Esse papel não existe nesta empresa."
+        return RedirectResponse("/painel/equipe", status_code=303)
     r = eq.convidar(get_pool(), conta[0], nome, email, papel, whatsapp)
     if r.get("ok") and r.get("ja_tem_login"):
         request.session["equipe_aviso"] = ("Essa pessoa já tem login no Zaq — foi adicionada "
@@ -197,6 +208,9 @@ def painel_equipe_papel(request: Request, membro_id: int = Form(...), papel: str
     conta, redir = _dono(request)
     if redir is not None:
         return redir
+    if papel not in _papeis_da_conta(conta):
+        request.session["equipe_erro"] = "Esse papel não existe nesta empresa."
+        return RedirectResponse("/painel/equipe", status_code=303)
     eq.atualizar_papel(get_pool(), conta[0], membro_id, papel)
     return RedirectResponse("/painel/equipe", status_code=303)
 

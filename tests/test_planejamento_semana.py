@@ -324,3 +324,48 @@ def test_nome_de_banco_nao_quebra_a_pagina():
     bancos = c.split('class="plj-bancos"')[1]
     assert 'Banco "X" <b>' not in bancos, "o nome saiu cru dentro do HTML"
     assert bancos.count("Banco &#34;X&#34; &lt;b&gt;") == 4   # value, nome, aria, confirm
+
+
+# ───────────────────────── o saldo NEGATIVO (queixa da Prime, 02/10/2026) ─────
+# "não consegue colocar saldo negativo": o campo abre o teclado numérico do
+# celular, e o do iPhone não tem o sinal de menos. E o conversor de antes dava
+# R$ 0,00, calado, pra "2.400,00-", "(2.400,00)" e "–2400" — e gravava o zero.
+@pytest.mark.parametrize("texto,centavos", [
+    ("-2.400,00", -240000), ("2.400,00-", -240000), ("(2.400,00)", -240000),
+    ("–" + "2400", -240000), ("−" + "2.400,00", -240000),
+    ("2.400,00 D", -240000), ("2.400,00 C", 240000), ("R$ -2.400,00", -240000),
+    ("5.459,62", 545962), ("2400.50", 240050), ("0", 0), ("0,00", 0),
+])
+def test_o_saldo_negativo_de_qualquer_jeito_que_o_banco_escreve(texto, centavos):
+    assert si.ler_valor(texto) == centavos
+
+
+@pytest.mark.parametrize("texto", ["", "-", "abc", "12,345", "dois mil"])
+def test_o_que_nao_e_numero_e_recusado_e_nao_vira_zero(texto):
+    assert si.ler_valor(texto) is None
+
+
+def test_cada_banco_tem_a_caixa_negativo_e_ela_vem_marcada_no_vermelho():
+    c = _card(_empresa(_pl(
+        saldos=[{"banco": "BNB", "valor_centavos": -240000, "informado_em": datetime.now(),
+                 "dias": 0, "velho": False},
+                {"banco": "Sicoob", "valor_centavos": 163716, "informado_em": datetime.now(),
+                 "dias": 0, "velho": False}],
+        saldo_centavos=-76284, sobra_centavos=-76284)))
+    bancos = c.split('class="plj-bancos"')[1]
+    # 2 bancos + o "Outro banco"
+    assert bancos.count('name="negativo" value="1"') == 3
+    assert bancos.count('name="negativo" value="1" checked') == 1
+    # o campo mostra o valor SEM sinal; quem diz o vermelho é a caixa
+    assert 'value="2.400,00"' in bancos and 'value="-2.400,00"' not in bancos
+
+
+def test_a_rota_le_o_valor_e_a_caixa():
+    """A rota usa o leitor que recusa (e não o conversor que dava zero) e a
+    caixa vira o sinal."""
+    import inspect
+
+    import web.portal as pt
+    fonte = inspect.getsource(pt.empresa_saldo_informar)
+    assert "si.ler_valor(valor)" in fonte and "_acrescimo_para_centavos" not in fonte
+    assert "cent = -abs(cent)" in fonte

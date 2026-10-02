@@ -51,13 +51,26 @@ def mapa(request: Request):
         return redir
     pool = get_pool()
     mapas = om.listar(pool, conta[0])
+    # o EXEMPLO (decisão do dono em 02/10): um loteamento inventado na hora, sem
+    # gravar nada — pra quem ainda não riscou a planta ver o que a aba entrega
+    exemplo = request.query_params.get("exemplo") == "1"
     pedido = request.query_params.get("m") or ""
     m_id = int(pedido) if pedido.isdigit() else (mapas[0]["id"] if mapas else None)
-    v = None
-    if m_id and any(x["id"] == m_id for x in mapas):
+    v, deposito_baixo = None, []
+    if exemplo:
+        v = om.vista_exemplo()
+        deposito_baixo = v["deposito_baixo"]
+    elif m_id and any(x["id"] == m_id for x in mapas):
         v = om.vista(pool, conta[0], m_id)
-    return _render("obras_mapa", request, titulo="Mapa das obras", secao_ativa="obras",
-                   mapas=mapas, v=v,
+        try:
+            from finance import obra_material as omat
+            deposito_baixo = [{"nome": r["nome"], "saldo": omat.rotulo(r["saldo"], r["unidade"]),
+                               "minimo": omat.rotulo(r["minimo"], r["unidade"])}
+                              for r in omat.deposito(pool, conta[0]) if r.get("abaixo")]
+        except Exception:  # noqa: BLE001 — sem a 484
+            deposito_baixo = []
+    return _render("obras_mapa", request, titulo="Mapa das obras", secao_ativa="obras_mapa",
+                   mapas=mapas, v=v, exemplo=exemplo, deposito_baixo=deposito_baixo,
                    dados=_json_pra_tela({"altura": v["mapa"]["altura"],
                                          "tem_planta": v["mapa"]["tem_planta"],
                                          "id": v["mapa"]["id"],
@@ -142,7 +155,7 @@ def editor(request: Request, mapa_id: int):
              for o in ob.listar_obras(pool, conta[0], com_custos=False)
              if o["status"] != "arquivada"]
     return _render("obras_mapa_editor", request, titulo=f"Riscar · {m['nome']}",
-                   secao_ativa="obras", m=m,
+                   secao_ativa="obras_mapa", m=m,
                    dados=_json_pra_tela({"altura": m["altura"], "tem_planta": m["tem_planta"],
                                          "id": m["id"],
                                          "lotes": om.lotes(pool, conta[0], mapa_id),
@@ -227,7 +240,12 @@ _CSS_MAPA = r"""<style>
     repeating-linear-gradient(90deg, transparent 0 7px, rgba(0,0,0,.12) 7px 8px),
     linear-gradient(155deg,#15735a,var(--pronta));
   box-shadow:0 var(--ext) 0 var(--prontas), 0 calc(var(--ext) + 5px) 12px rgba(0,0,0,.38)}
-.lote3d.s-alerta{background:linear-gradient(155deg,#f6b65c,var(--alerta));box-shadow:0 var(--ext) 0 var(--alertas), 0 calc(var(--ext) + 5px) 12px rgba(0,0,0,.38)}
+/* o alerta é um SELO no canto, e a cor do lote continua sendo o andamento: ⚠️ da
+   obra (documento, prazo, casa pronta travada) e 🧱 do material (furo, irmãs) */
+.lote3d .selos{position:absolute;left:-5px;top:-7px;display:flex;gap:2px;pointer-events:none}
+.lote3d .selo{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;
+  font-size:10px;line-height:1;background:var(--alerta);box-shadow:0 0 0 2px #10201a, 0 2px 4px rgba(0,0,0,.45)}
+.lote3d .selo.mat{background:#e8eef0}
 .lote3d.s-vago{background:transparent;color:#9fc0b2;box-shadow:inset 0 0 0 1.5px #3f6a59;--ext:1px}
 .lote3d.s-terceiro{background:repeating-linear-gradient(135deg, rgba(255,255,255,.14) 0 3px, transparent 3px 8px), var(--terc);
   color:#39413d;box-shadow:0 2px 0 var(--tercs);--ext:2px;cursor:default}
@@ -265,6 +283,30 @@ _CSS_MAPA = r"""<style>
 .pf-alerta{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:9px;
   padding:.5rem .7rem;margin:.4rem 0;font-size:.84rem;color:#F0DCA6}
 .matlinha{background:var(--borda);border-radius:8px;padding:7px 11px;font-size:13px;margin-top:8px}
+/* a aba (02/10): o resumo da área, o mapa com a lista "precisa de atenção" ao
+   lado, e o perfil com a tabela de material e as fotos */
+.om-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.5rem;margin-top:.8rem}
+.om-kpi{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.5rem .7rem}
+.om-kpi .r{font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut);display:block}
+.om-kpi .v{font-size:1.25rem;font-weight:700;line-height:1.25;display:block}
+.om-kpi.alerta{background:var(--ambar-fundo);border-color:var(--ambar-borda)}
+.om-dupla{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:.8rem;align-items:start}
+@media (max-width:900px){.om-dupla{grid-template-columns:1fr}}
+.om-aten{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.7rem .8rem;margin-top:.8rem}
+.om-aten > b{display:block;margin-bottom:.4rem}
+.om-aten a{display:block;padding:.4rem .5rem;border-radius:8px;border:1px solid var(--borda);margin-bottom:.35rem;
+  text-decoration:none;color:inherit;font-size:.82rem;line-height:1.3;cursor:pointer}
+.om-aten a:hover{border-color:var(--verde)}
+.om-aten a small{display:block;color:var(--txt-mut)}
+.om-exemplo{background:#16342a;border:1px dashed #3ec997;border-radius:11px;padding:.6rem .8rem;margin-top:.8rem;font-size:.88rem;color:#d7ebe2}
+.om-exemplo a{color:#8fd9bd}
+.pf-mattab{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+.pf-mattab th,.pf-mattab td{padding:4px 6px;border-bottom:1px solid var(--borda);text-align:left}
+.pf-mattab th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut)}
+.pf-mattab td.v{text-align:right;white-space:nowrap}
+.pf-mattab tr.furo td{color:#F0DCA6}
+.pf-fotos{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.pf-fotos img{width:84px;height:64px;object-fit:cover;border-radius:7px;border:1px solid var(--borda)}
 </style>"""
 
 _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
@@ -273,8 +315,10 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
 <div class="om-topo" style="margin-top:.4rem"><div><h2>Mapa das obras</h2>
   <div class="om-sub">A sua planta com os lotes por cima: a altura de cada bloco é o andamento da obra. Um toque abre a casa.</div></div></div>
 {% if erro %}<div class="om-erro">{{ erro|e }}</div>{% endif %}
+{% if exemplo %}<div class="om-exemplo">👀 <b>Exemplo</b> — um loteamento inventado pra mostrar o que esta aba entrega. Nada aqui é seu, e nada fica gravado.
+  {% if mapas %}<a href="/painel/obras/mapa">Voltar pras minhas áreas ›</a>{% else %}<a href="/painel/obras/mapa">Criar a minha área ›</a>{% endif %}</div>{% endif %}
 
-{% if not mapas %}
+{% if not mapas and not exemplo %}
 <div class="om-box">
   <b>Crie a primeira área de obras</b>
   <p class="om-mut" style="margin:.4rem 0 .6rem">A área é o empreendimento — o loteamento, a quadra de casas, o condomínio. Pode ter várias. Depois de criar, suba a planta (PDF ou foto) e risque os lotes por cima.</p>
@@ -283,30 +327,41 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
     <div><label>Cidade (opcional)</label><input name="cidade" placeholder="Paço do Lumiar"></div>
     <div><label>&nbsp;</label><button class="om-bt prim">Criar e riscar os lotes</button></div>
   </form>
+  <p class="om-mut" style="margin:.7rem 0 0">Quer ver como fica antes? <a href="/painel/obras/mapa?exemplo=1">Ver um exemplo pronto ›</a></p>
 </div>
 {% else %}
+{% if v and v.lotes %}<div class="om-kpis">
+  <div class="om-kpi"><span class="r">Casas no mapa</span><span class="v">{{ v.resumo.casas }}</span></div>
+  <div class="om-kpi"><span class="r">Andamento médio</span><span class="v">{{ v.resumo.pct }}%</span></div>
+  <div class="om-kpi"><span class="r">Prontas</span><span class="v">{{ v.resumo.prontas }} de {{ v.resumo.casas }}</span></div>
+  <div class="om-kpi"><span class="r">Gasto nas casas</span><span class="v">{{ v.resumo.gasto }}</span></div>
+  <div class="om-kpi{{ ' alerta' if v.resumo.alerta_obra }}"><span class="r">⚠️ Alerta da obra</span><span class="v">{{ v.resumo.alerta_obra }}</span></div>
+  <div class="om-kpi{{ ' alerta' if v.resumo.alerta_mat }}"><span class="r">🧱 Alerta de material</span><span class="v">{{ v.resumo.alerta_mat }}</span></div>
+</div>{% endif %}
+<div class="om-dupla"><div>
 <div class="mapa-caixa">
   <div class="mapa-barra">
     <div class="emp-sel">
-      {% for x in mapas %}<a class="emp{{ ' on' if v and v.mapa.id == x.id }}" href="/painel/obras/mapa?m={{ x.id }}">{{ x.nome|e }}</a>{% endfor %}
-      <a class="emp mais" href="#nova-area">+ nova área</a>
+      {% for x in mapas %}<a class="emp{{ ' on' if v and not exemplo and v.mapa.id == x.id }}" href="/painel/obras/mapa?m={{ x.id }}">{{ x.nome|e }}</a>{% endfor %}
+      {% if exemplo %}<a class="emp on" href="/painel/obras/mapa?exemplo=1">👀 Residencial Exemplo</a>
+      {% else %}<a class="emp mais" href="#nova-area">+ nova área</a><a class="emp mais" href="/painel/obras/mapa?exemplo=1">👀 exemplo</a>{% endif %}
     </div>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
       <button class="mb" id="bt2d" onclick="setVista('2d')">Planta</button>
       <button class="mb on" id="bt3d" onclick="setVista('3d')">3D</button>
-      {% if v %}<a class="mb" href="/painel/obras/mapa/{{ v.mapa.id }}/editar">✏️ Riscar os lotes</a>{% endif %}
+      {% if v and not exemplo %}<a class="mb" href="/painel/obras/mapa/{{ v.mapa.id }}/editar">✏️ Riscar os lotes</a>{% endif %}
     </div>
   </div>
   {% if v %}
   <div class="mapa-rolo"><div class="palco"><div class="chao is-3d" id="chao">
-    {% if v.mapa.tem_planta %}<img class="planta-img" id="planta" src="/painel/obras/mapa/{{ v.mapa.id }}/planta" alt="">
+    {% if v.mapa.tem_planta and not exemplo %}<img class="planta-img" id="planta" src="/painel/obras/mapa/{{ v.mapa.id }}/planta" alt="">
     {% else %}<div class="planta-fundo"></div>{% endif %}
   </div></div></div>
   <div class="mapa-leg">
     <span><i style="background:var(--f0)"></i>não começou</span><span><i style="background:var(--f1)"></i>até 30%</span>
     <span><i style="background:var(--f2)"></i>até 60%</span><span><i style="background:var(--f3)"></i>mais de 60%</span>
     <span><i style="background:linear-gradient(180deg,#c96f4a 0 30%,var(--pronta) 30%)"></i>pronta</span>
-    <span><i style="background:var(--alerta)"></i>alerta</span>
+    <span>⚠️ alerta da obra</span><span>🧱 alerta de material</span>
     <span><i style="box-shadow:inset 0 0 0 1.5px #3f6a59"></i>vago</span>
     <span><i style="background:repeating-linear-gradient(135deg,rgba(255,255,255,.4) 0 2px,var(--terc) 2px 5px)"></i>de terceiro</span>
   </div>
@@ -314,6 +369,11 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
     <a style="color:#d7ebe2" href="/painel/obras/mapa/{{ v.mapa.id }}/editar">Suba a planta e risque os lotes ›</a></p>{% endif %}
   {% endif %}
 </div>
+</div><div>
+  <div class="om-aten" id="atencao"><b>Precisa de atenção</b><div id="aten-lista"></div></div>
+  {% if deposito_baixo %}<div class="om-aten"><b>Depósito abaixo do mínimo</b>
+    {% for d in deposito_baixo %}<a href="/painel/obras#deposito">{{ d.nome|e }}<small>{{ d.saldo|e }} — mínimo {{ d.minimo|e }}</small></a>{% endfor %}</div>{% endif %}
+</div></div>
 
 <div class="om-box" id="perfilbox" style="display:none">
   <div style="display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap;align-items:baseline">
@@ -326,11 +386,13 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
       <div class="pf-alerta" id="pf-alerta" style="display:none"></div>
       <div class="etlist" id="pf-etapas"></div>
       <div class="matlinha" id="pf-mat" style="display:none"></div>
+      <table class="pf-mattab" id="pf-mattab" style="display:none"></table>
+      <div class="pf-fotos" id="pf-fotos"></div>
     </div>
   </div>
 </div>
 
-{% if v %}
+{% if v and not exemplo %}
 <details class="om-box" id="nova-area"><summary>Dados da área · {{ v.mapa.nome|e }}</summary>
   <form method="post" action="/painel/obras/mapa/{{ v.mapa.id }}/dados" class="om-grid" style="margin-top:.5rem">
     <div><label>Nome</label><input name="nome" value="{{ v.mapa.nome|e }}" required></div>
@@ -384,6 +446,14 @@ function montar(){
     b.innerHTML = (l.st === 'terceiro' ? '<span style="font-size:10px;font-weight:600">terceiro</span>'
                    : l.st === 'vago' ? 'Lt ' + r + '<span class="pc">vago</span>'
                    : 'Lt ' + r + '<span class="pc">' + l.pct + '</span>');
+    if (l.alerta || l.mat_alerta){
+      var sl = document.createElement('span');
+      sl.className = 'selos';
+      if (l.alerta) sl.innerHTML += '<i class="selo">⚠️</i>';
+      if (l.mat_alerta) sl.innerHTML += '<i class="selo mat">🧱</i>';
+      b.appendChild(sl);
+      b.title = [l.alerta, l.mat_alerta].filter(Boolean).join(' · ');
+    }
     if (l.st !== 'terceiro') b.onclick = function(){ sel = i; montar(); perfil(l); };
     chao.appendChild(b);
   });
@@ -437,7 +507,7 @@ function perfil(l){
     vago ? ('Lote ' + r + ' — vago (sem obra ligada)')
          : ('Lote ' + r + ' · ' + l.obra_nome + ' — ' + l.pct + '% da obra');
   var ficha = document.getElementById('pf-ficha');
-  ficha.style.display = vago ? 'none' : '';
+  ficha.style.display = (vago || l.obra_id < 0) ? 'none' : '';     // o exemplo não tem ficha
   if (!vago) ficha.href = '/painel/obras/' + l.obra_id;
   document.getElementById('mundo').innerHTML = casaHtml(vago ? null : l.casa);
   var fases = [];
@@ -455,14 +525,47 @@ function perfil(l){
     return '<div class="' + (e[1] ? 'fez' : 'nao') + '">' + (e[1] ? '✓' : '○') + ' ' + esc(e[0]) + '</div>';
   }).join('');
   var mt = document.getElementById('pf-mat');
-  if (!vago && (l.mat || l.mat_alerta)){
+  if (!vago && l.mat_alerta){
     mt.style.display = '';
-    mt.innerHTML = '🧱 <b>Material na obra:</b> ' + esc(l.mat || 'nada no saldo') +
-      (l.mat_alerta ? ' — <b>⚠️ ' + esc(l.mat_alerta) + '</b>' : '');
+    mt.innerHTML = '🧱 <b>' + esc(l.mat_alerta) + '</b>';
   } else mt.style.display = 'none';
+  // a tabela inteira de material (entrou / usado / na obra), como na ficha
+  var tb = document.getElementById('pf-mattab');
+  if (!vago && l.mat_linhas && l.mat_linhas.length){
+    tb.style.display = '';
+    tb.innerHTML = '<tr><th>Material</th><th class="v">Entrou</th><th class="v">Usado</th><th class="v">Na obra</th></tr>' +
+      l.mat_linhas.map(function(r){
+        return '<tr' + (r[5] ? ' class="furo"' : '') + '><td' + (r[4] ? ' style="font-weight:600"' : '') + '>' + esc(r[0]) +
+          '</td><td class="v">' + esc(r[1]) + '</td><td class="v">' + esc(r[2]) + '</td><td class="v"><b>' + esc(r[3]) + '</b></td></tr>';
+      }).join('');
+  } else tb.style.display = 'none';
+  document.getElementById('pf-fotos').innerHTML = (!vago && l.fotos) ? l.fotos.map(function(u){
+    return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" alt="foto da obra" loading="lazy"></a>';
+  }).join('') : '';
   if (window.innerWidth < 700) box.scrollIntoView({behavior:'smooth'});
 }
+/* "precisa de atenção": os lotes com selo, o mais grave primeiro (obra, depois
+   material); um toque escolhe o lote no mapa e abre o perfil */
+function atencao(){
+  var caixa = document.getElementById('aten-lista');
+  if (!caixa || !DADOS) return;
+  var itens = [];
+  DADOS.lotes.forEach(function(l, i){
+    if (l.alerta) itens.push([0, i, '⚠️', l.alerta]);
+    if (l.mat_alerta) itens.push([1, i, '🧱', l.mat_alerta]);
+  });
+  itens.sort(function(a, b){ return a[0] - b[0]; });
+  caixa.innerHTML = itens.length ? '' : '<span class="om-mut">Nenhum alerta agora. ✅</span>';
+  itens.forEach(function(it){
+    var l = DADOS.lotes[it[1]];
+    var a = document.createElement('a');
+    a.innerHTML = it[2] + ' <b>Lote ' + esc(l.rotulo || '·') + '</b> · ' + esc(l.obra_nome || '') + '<small>' + esc(it[3]) + '</small>';
+    a.onclick = function(){ sel = it[1]; montar(); perfil(l); document.getElementById('perfilbox').scrollIntoView({behavior:'smooth'}); };
+    caixa.appendChild(a);
+  });
+}
 montar();
+atencao();
 window.addEventListener('resize', montar);
 </script>
 {% endblock %}"""

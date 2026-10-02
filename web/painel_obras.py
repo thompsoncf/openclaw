@@ -138,9 +138,11 @@ def painel_obras(request: Request):
         rotulo_mat = omat.rotulo
     except Exception:  # noqa: BLE001 — sem a 484
         deposito, rotulo_mat = [], None
+    from finance import obra_campo as oc
+    do_campo = oc.recentes(pool, conta[0], limite=12)
     return _render(
         "obras", request, titulo="Obras", secao_ativa="obras", brl=_brl,
-        deposito=deposito, rotulo_mat=rotulo_mat,
+        deposito=deposito, rotulo_mat=rotulo_mat, do_campo=do_campo,
         grupos=grupos, grupos_view=grupos_view, soltas=soltas, rotulo=og.rotulo(pool, conta[0]),
         obras=abertas, arquivadas=[o for o in obras if o["status"] == "arquivada"],
         n_andamento=len(andamento),
@@ -221,6 +223,7 @@ def ficha(request: Request, obra_id: int):
                    cheio=_cheio,
                    sou_dono=request.session.get("papel", "dono") == "dono",
                    fotos=_fotos_da_ficha(conta[0], o),
+                   campo=_campo_da_ficha(conta[0], o),
                    material=_material_da_ficha(conta[0], o),
                    empreita=_empreita_da_ficha(conta[0], o),
                    quadra=_quadra_da_ficha(conta[0], o),
@@ -296,7 +299,8 @@ def editar(request: Request, obra_id: int, nome: str = Form(""), tipo: str = For
            custo_previsto: str = Form(""), valor: str = Form(""),
            status: str = Form("em_obra"), inicio_em: str = Form(""),
            previsao_em: str = Form(""), obs: str = Form(""),
-           grupo_id: str | None = Form(None), lote: str | None = Form(None)):
+           grupo_id: str | None = Form(None), lote: str | None = Form(None),
+           mestre_id: str | None = Form(None)):
     conta, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -310,6 +314,11 @@ def editar(request: Request, obra_id: int, nome: str = Form(""), tipo: str = For
         if grupo_id is not None:
             og.definir(get_pool(), conta[0], obra_id,
                        int(grupo_id) if grupo_id.isdigit() else None, lote or "")
+        # o mestre de obras (migração 550): o campo só vem quando a conta tem mestre
+        if mestre_id is not None:
+            from finance import obra_campo as oc
+            oc.definir_mestre(get_pool(), conta[0], obra_id,
+                              int(mestre_id) if mestre_id.isdigit() else None)
     except ValueError as e:
         return _volta(f"/painel/obras/{obra_id}", str(e))
     return RedirectResponse(f"/painel/obras/{obra_id}", status_code=303)
@@ -506,6 +515,16 @@ def _material_da_ficha(conta_id: int, o: dict) -> dict:
         return {"linhas": [], "furos": [], "alerta": "", "rotulo": None, "qtd": None}
 
 
+def _campo_da_ficha(conta_id: int, o: dict) -> dict:
+    """O mestre de obras da casa (migração 550): quem pode ser e quem é."""
+    try:
+        from finance import obra_campo as oc
+        return {"mestres": oc.mestres(get_pool(), conta_id),
+                "mestre_id": oc.mestre_da_obra(get_pool(), conta_id, o["id"])}
+    except Exception:  # noqa: BLE001
+        return {"mestres": [], "mestre_id": None}
+
+
 def _fotos_da_ficha(conta_id: int, o: dict) -> dict:
     """As fotos da ficha por etapa. Sem a 369, a seção abre vazia."""
     try:
@@ -605,6 +624,20 @@ def rotulo_grupo(request: Request, rotulo: str = Form("")):
         return redir
     og.salvar_rotulo(get_pool(), conta[0], rotulo)
     return RedirectResponse("/painel/obras", status_code=303)
+
+
+@router.post("/painel/obras/campo/{evento_id}/desfazer")
+def campo_desfazer(request: Request, evento_id: int):
+    """O dono desfaz qualquer gesto do campo (o mestre, só os dele, pelo app)."""
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    from finance import obra_campo as oc
+    try:
+        oc.desfazer(get_pool(), conta[0], evento_id)
+    except ValueError as e:
+        return _volta("/painel/obras#do-campo", str(e))
+    return RedirectResponse("/painel/obras#do-campo", status_code=303)
 
 
 @router.post("/painel/obras/deposito-minimo")
@@ -928,18 +961,28 @@ ou divida entre as obras em andamento, quando for de todas.</p>
 {% if sem.n > sem.itens|length %}<p class="ob-mut">Mostrando os {{ sem.itens|length }} mais recentes.</p>{% endif %}
 {% else %}<p class="ob-mut">Nenhum gasto de obra sem obra. ✅</p>{% endif %}
 
+{% if do_campo %}<h3 class="ob-sec" id="do-campo">Do campo</h3>
+<p class="ob-mut">O que o mestre de obras fez pelo app — já conta no andamento, no mapa e no material. Errou? Desfaz aqui.</p>
+<div class="ob-box" style="padding:.3rem .8rem">{% for f in do_campo %}<div class="ob-doc"{% if f.desfeito %} style="opacity:.5;text-decoration:line-through"{% endif %}>
+  <span class="nm">{{ {'etapa': '✅', 'foto': '📷', 'material': '🧱'}.get(f.tipo, '•') }} <b>{{ f.quem|e }}</b> · <a href="/painel/obras/{{ f.obra_id }}">{{ f.obra|e }}</a> — {{ f.descricao|e }}
+    <span class="ob-mut"> · {{ f.quando.strftime('%d/%m %H:%M') }}</span></span>
+  {% if not f.desfeito %}<form method="post" action="/painel/obras/campo/{{ f.id }}/desfazer"><button class="ob-bt">Desfazer</button></form>{% endif %}
+</div>{% endfor %}</div>{% endif %}
+
 {% if deposito %}{% set baixos = deposito|selectattr('abaixo')|list %}
 <details class="ob-box" id="deposito" style="margin-top:1.4rem"{% if baixos %} open{% endif %}>
 <summary>Depósito de material · {{ deposito|length }}{% if baixos %} · ⚠️ {{ baixos|length }} abaixo do mínimo{% endif %}</summary>
 {% for r in baixos %}<div class="ob-alertas">⚠️ {{ r.nome|e }} abaixo do mínimo: {{ rotulo_mat(r.saldo, r.unidade)|e }} (mínimo {{ rotulo_mat(r.minimo, r.unidade)|e }})</div>{% endfor %}
 <form method="post" action="/painel/obras/deposito-minimo">
 <div class="ob-rolo"><table class="ob-tab">
-<tr><th>Material</th><th style="text-align:right">Entrou</th><th style="text-align:right">Saiu</th><th style="text-align:right">No depósito</th><th style="text-align:right">Mínimo</th></tr>
+{# o saldo e o mínimo (editável) logo depois do nome: no celular a tabela rola de
+   lado, e o que se mexe não pode ficar escondido no fim #}
+<tr><th>Material</th><th style="text-align:right">No depósito</th><th style="text-align:right">Mínimo</th><th style="text-align:right">Entrou</th><th style="text-align:right">Saiu</th></tr>
 {% for r in deposito %}<tr><td{% if r.chave %} style="font-weight:600"{% endif %}>{{ r.nome|e }}</td>
-  <td class="v">{{ rotulo_mat(r.entrou, r.unidade)|e }}</td><td class="v">{{ '%g'|format(r.usado) }}</td>
   <td class="v"><b>{{ rotulo_mat(r.saldo, r.unidade)|e }}</b>{% if r.abaixo %} ⚠️{% endif %}</td>
   <td class="v"><input type="hidden" name="produto" value="{{ r.produto_id }}">
-    <input name="minimo" value="{{ '%g'|format(r.minimo) if r.minimo else '' }}" inputmode="decimal" style="max-width:5.5rem;text-align:right" placeholder="—"></td></tr>{% endfor %}
+    <input name="minimo" value="{{ '%g'|format(r.minimo) if r.minimo else '' }}" inputmode="decimal" style="max-width:4.5rem;text-align:right" placeholder="—"></td>
+  <td class="v">{{ rotulo_mat(r.entrou, r.unidade)|e }}</td><td class="v">{{ '%g'|format(r.usado) }}</td></tr>{% endfor %}
 </table></div>
 <div class="ob-acoes" style="margin-top:.5rem"><button class="ob-bt">Salvar mínimos</button>
 <span class="ob-mut">A nota sem obra entra aqui; “levei 10 sacos pra casa 2” transfere. Mínimo avisa quando o depósito baixar.</span></div>
@@ -1234,6 +1277,7 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
     <div><label>Previsão de término</label><input type="date" name="previsao_em" value="{{ o.previsao_em or '' }}"></div>
     {% if quadra.grupos %}<div><label>{{ quadra.rotulo }}</label><select name="grupo_id"><option value="">sem {{ quadra.rotulo|lower }}</option>{% for g in quadra.grupos %}<option value="{{ g.id }}"{{ ' selected' if quadra.grupo and quadra.grupo.id == g.id }}>{{ g.nome|e }}</option>{% endfor %}</select></div>
     <div><label>Lote</label><input name="lote" value="{{ quadra.lote|e }}"></div>{% endif %}
+    {% if campo.mestres %}<div><label>Mestre de obras</label><select name="mestre_id"><option value="">ninguém</option>{% for m in campo.mestres %}<option value="{{ m.id }}"{{ ' selected' if campo.mestre_id == m.id }}>{{ m.nome|e }}</option>{% endfor %}</select></div>{% endif %}
   </div>
   <div style="margin-top:.6rem"><label>Observação</label><textarea name="obs" rows="2">{{ o.obs|e }}</textarea></div>
   <p class="ob-mut" style="margin:.6rem 0">Mudar o nome muda o centro de custo junto. Arquivar tira a obra das listas sem
@@ -1338,7 +1382,9 @@ _TPL_QUADRA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 .qm-txt{display:block;max-height:2.4em;overflow:hidden}
 .qm-pct{position:absolute;right:7px;bottom:5px;font-weight:800;font-size:.9rem}
 .qm-f0{background:#c3cfc9;color:#14211c}.qm-f1{background:#8fd9bd;color:#14211c}.qm-f2{background:#3ec997}
-.qm-f3{background:#12a07a}.qm-pronta{background:#0f5f4a}.qm-alerta{background:#f2a33a}
+.qm-f3{background:#12a07a}.qm-pronta{background:#0f5f4a}
+/* o alerta é um SELO no canto; a cor continua sendo o andamento (pedido do dono, 02/10) */
+.qm-selo{position:absolute;top:-6px;right:-6px;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;font-size:.7rem;background:#f2a33a;box-shadow:0 0 0 2px var(--card),0 2px 4px rgba(0,0,0,.35)}
 .qm-lote.qm-f0,.qm-lote.qm-f1{color:#14211c}
 </style>
 <div class="ob-pag">
@@ -1357,9 +1403,9 @@ _TPL_QUADRA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 </div>
 
 {% if mapa %}<h3 class="ob-sec">O mapa</h3>
-<div class="qm-grade">{% for l in mapa %}<a class="qm-lote qm-{{ 'alerta' if l.alerta else l.faixa }}" href="/painel/obras/{{ l.id }}" title="{{ l.alerta|e }}">
+<div class="qm-grade">{% for l in mapa %}<a class="qm-lote qm-{{ l.faixa }}" href="/painel/obras/{{ l.id }}" title="{{ l.alerta|e }}">{% if l.alerta %}<i class="qm-selo">⚠️</i>{% endif %}
   <b>{{ ('Lt ' ~ l.lote) if l.lote|string|length <= 4 else l.lote|e }}</b><span class="qm-txt">{{ l.alerta|e if l.alerta else ('pronta' if l.faixa == 'pronta' else '') }}</span><span class="qm-pct">{{ l.pct }}</span></a>{% endfor %}</div>
-<div class="qd-leg"><span><i class="qm-f0"></i>não começou</span><span><i class="qm-f1"></i>até 30%</span><span><i class="qm-f2"></i>até 60%</span><span><i class="qm-f3"></i>mais de 60%</span><span><i class="qm-pronta"></i>pronta</span><span><i class="qm-alerta"></i>alerta</span></div>
+<div class="qd-leg"><span><i class="qm-f0"></i>não começou</span><span><i class="qm-f1"></i>até 30%</span><span><i class="qm-f2"></i>até 60%</span><span><i class="qm-f3"></i>mais de 60%</span><span><i class="qm-pronta"></i>pronta</span><span>⚠️ alerta (passe o dedo ou o mouse)</span></div>
 <p class="ob-mut">Os lotes em grade pela numeração. Um toque abre a casa.</p>{% endif %}
 
 <h3 class="ob-sec" id="quadro">Quadro de etapas</h3>

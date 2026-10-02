@@ -291,3 +291,87 @@ def test_outra_conta_nao_ve_o_mapa(pool, conta, monkeypatch):
     r = cli.post(f"/painel/obras/mapa/{m['id']}/lotes", data={"dados": "[]"})
     assert "erro=" in r.headers["location"]
     assert om.lotes(pool, conta, m["id"])          # o desenho do dono continua lá
+
+
+def test_alerta_vira_selo_e_a_cor_continua_sendo_o_andamento(pool, conta):
+    # obra começada há 40 dias sem CNO: tem alerta de documento (obra_venda)
+    from datetime import date, timedelta
+    m = om.criar(pool, conta, "Área Selo")
+    o = ob.criar_obra(pool, conta, "Casa Selo", "casa")
+    ob.salvar_etapas(pool, conta, o["id"], [(None, "Fundação", 40), (None, "Cobertura", 60)])
+    o = ob.obter_obra(pool, conta, o["id"])
+    ob.marcar_etapa(pool, conta, o["id"], o["etapas"][0]["id"], concluida=True)
+    with pool.connection() as c:
+        c.execute("update obras set inicio_em=%s where id=%s", (date.today() - timedelta(days=40), o["id"]))
+        c.commit()
+    om.salvar_lotes(pool, conta, m["id"], [_lote("1", 0, 0, obra_id=o["id"])])
+    lote = om.vista(pool, conta, m["id"])["lotes"][0]
+    assert lote["alerta"]                       # o alerta continua lá, pro selo
+    assert lote["st"] == "f2"                   # e a cor é a do andamento (40%), não âmbar
+
+
+# ── a aba (pedido do dono em 02/10: "uma aba nova com tudo") ────────────────
+def test_exemplo_mostra_tudo_e_nao_grava_nada(pool, conta, monkeypatch):
+    def _contagem():
+        with pool.connection() as c:
+            return [c.execute(f"select count(*) from {t}").fetchone()[0]
+                    for t in ("obras", "obra_mapas", "obra_mapa_lotes", "lancamentos")]
+    antes = _contagem()
+    c = _painel(pool, conta, monkeypatch)
+    vazio = c.get("/painel/obras/mapa").text
+    assert "Ver um exemplo pronto" in vazio
+    html = c.get("/painel/obras/mapa?exemplo=1").text
+    assert "Residencial Exemplo" in html and "Nada aqui é seu" in html
+    assert "Casas no mapa" in html and "Precisa de atenção" in html
+    assert "Depósito abaixo do mínimo" in html and "Argamassa" in html
+    assert "Riscar os lotes" not in html          # o exemplo não se edita
+    assert _contagem() == antes                   # e nada foi gravado
+
+
+def test_vista_exemplo_tem_o_formato_da_vista_real():
+    v = om.vista_exemplo()
+    casas = [l for l in v["lotes"] if l.get("obra_id")]
+    assert v["resumo"]["casas"] == len(casas) == 17
+    assert v["resumo"]["prontas"] == 4 and v["resumo"]["alerta_obra"] == 2
+    assert v["resumo"]["alerta_mat"] == 2
+    l3 = next(l for l in casas if l["rotulo"] == "3")
+    assert l3["casa"]["telh"] and not l3["casa"]["pint"]       # 68%: telhado sim, pintura não
+    assert l3["mat_linhas"][0][0].startswith("Cimento") and "irmãs" in l3["mat_alerta"]
+    assert {l["st"] for l in v["lotes"]} >= {"pronta", "f3", "f2", "f1", "f0", "vago", "terceiro"}
+
+
+def test_resumo_e_perfil_completo_na_area_real(pool, conta, monkeypatch):
+    m = om.criar(pool, conta, "Área Aba")
+    a = ob.criar_obra(pool, conta, "Casa Aba 1", "casa")
+    b = ob.criar_obra(pool, conta, "Casa Aba 2", "casa")
+    for o, feitas in ((a, 2), (b, 0)):
+        ob.salvar_etapas(pool, conta, o["id"], [(None, "Fundação", 50), (None, "Cobertura", 50)])
+        oo = ob.obter_obra(pool, conta, o["id"])
+        for e in oo["etapas"][:feitas]:
+            ob.marcar_etapa(pool, conta, o["id"], e["id"], concluida=True)
+    om.salvar_lotes(pool, conta, m["id"], [_lote("1", 0, 0, obra_id=a["id"]),
+                                           _lote("2", 70, 0, obra_id=b["id"]),
+                                           _lote("3", 140, 0, situacao="vago")])
+    v = om.vista(pool, conta, m["id"])
+    assert v["resumo"]["casas"] == 2 and v["resumo"]["prontas"] == 1
+    assert v["resumo"]["pct"] == 50 and v["resumo"]["vagos"] == 1
+    lote = v["lotes"][0]
+    assert "mat_linhas" in lote and lote["fotos"] == []
+    html = _painel(pool, conta, monkeypatch).get(f"/painel/obras/mapa?m={m['id']}").text
+    assert "Andamento médio" in html and "pf-mattab" in html and "aten-lista" in html
+
+
+def test_a_aba_esta_no_menu_e_fica_acesa():
+    # renderiza o `base` direto, como tests/test_menu_bate_com_o_gate.py
+    from contas import equipe as eq
+    from web.portal import _env
+    conta = [1, "pj", "PX2", "doc", "app_pro", None, None, None,
+             False, None, None, True, None, None, True, None, "construcao"]
+    html = _env.get_template("base").render(
+        logado=True, papel="dono", caps=eq.caps_do_papel("dono"), conta=conta,
+        tem_pj=True, vende_servico=True, vende_produto=False, secao_ativa="obras_mapa",
+        n_contextos=1, ve_novidades=True, novidades_n=0, tem_cesta=False, embed=False,
+        raio_x_perfil={"chave": "obras", "aplica": True, "vocab": {}})
+    assert 'href="/painel/obras/mapa" class="nav-i on"' in html     # aba própria, acesa
+    assert 'href="/painel/obras" class="nav-i"' in html            # e Obras apagada
+    assert 'id="ic-mapa"' in html

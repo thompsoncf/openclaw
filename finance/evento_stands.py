@@ -1150,12 +1150,6 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
                     # o link público: digitando um CPF/CNPJ ninguém puxa pra esta conta
                     # quem é cliente de outra (ou tem o cadastro daqui arquivado)
                     return {"ok": False, "erro": _pode_juntar("nunca", None, None, [], None)}
-                elif juntar != "sempre" and _arquivado_de_outra_vendedora(
-                        pool, conta_id, dono["pessoa_id"], vendedor_id):
-                    # o cadastro dela AQUI foi arquivado e era da carteira de OUTRA
-                    # vendedora: a gestão decide
-                    return {"ok": False, "erro": "Esse CPF/CNPJ é de um cadastro arquivado "
-                            "de outra vendedora — peça à gestão pra ligar este stand a ele."}
                 else:
                     # a pessoa existe mas não tem cadastro ativo AQUI (é cliente de outra
                     # conta, ou o daqui foi arquivado): nasce o cadastro desta conta pra
@@ -1338,15 +1332,6 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
             "faltam": cad["faltam"], "congelado": congelado, "juntou": juntou}
 
 
-def _arquivado_de_outra_vendedora(pool, conta_id: int, pessoa_id, vendedor_id) -> bool:
-    """A pessoa tem, NESTA conta, cadastro arquivado na carteira de outra vendedora."""
-    with pool.connection() as c:
-        rows = c.execute("select vendedor_id from clientes where pessoa_id=%s and dono_id=%s "
-                         "and not ativo", (pessoa_id, conta_id)).fetchall()
-    meu = int(vendedor_id) if vendedor_id else None
-    return any(r[0] is not None and r[0] != meu for r in rows)
-
-
 def _so_digitos(s) -> str:
     return "".join(ch for ch in str(s or "") if ch.isdigit())
 
@@ -1430,24 +1415,13 @@ def _pode_juntar(juntar: str, vendedor_id, vendedor_do_cadastro, outras: list[di
                  nome_cadastro) -> str | None:
     """None se o stand pode entrar no cadastro que já existe; senão, a frase pra quem
     está salvando (ver `salvar_cadastro_stand`)."""
-    if juntar == "sempre":
+    # A ÚNICA regra de venda (o dono, 02/10/2026): "1 CNPJ só pode 2 stands" — o
+    # limite é conferido em `_cabe_na_empresa` e de novo sob trava. Gestão e vendedora
+    # (de qualquer venda) juntam; só o link PÚBLICO do contrato não — ali não é regra
+    # de venda, é proteção: quem tem um link não vê os dados de outra empresa
+    # digitando o CNPJ dela
+    if juntar in ("sempre", "do_vendedor"):
         return None
-    if juntar == "do_vendedor" and vendedor_id:
-        meu = int(vendedor_id)
-        # só bloqueia o que é de OUTRA vendedora (o cadastro na carteira dela, ou um
-        # stand vendido por ela). Cadastro sem dono e stand sem vendedora (os da lista
-        # do dono) a vendedora usa: o dono pediu em 02/10/2026 — "vendedora tem que
-        # conseguir salvar"
-        if all(v in (None, meu) for v in
-               [o["vendedor_id"] for o in outras] + [vendedor_do_cadastro]):
-            return None
-        nome = nome_cadastro or "outra loja"
-        onde = f" ({', '.join(o['codigo'] for o in outras)})" if outras else ""
-        de_outra = any(v not in (None, meu) for v in
-                       [o["vendedor_id"] for o in outras] + [vendedor_do_cadastro])
-        return (f"Esse CPF/CNPJ (ou WhatsApp) já é do cadastro {nome}{onde}"
-                + (", de outra vendedora" if de_outra else "")
-                + " — peça à gestão pra juntar os stands na mesma empresa.")
     return ("Este CPF/CNPJ (ou WhatsApp) já está no cadastro de outra loja deste evento — "
             "fale com o seu vendedor pra juntar os stands na mesma empresa.")
 

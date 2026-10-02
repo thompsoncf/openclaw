@@ -348,6 +348,7 @@ def vista(pool, conta_id: int, mapa_id: int) -> dict:
                 "alerta": alerta, "obra_nome": o["nome"],
                 "casa": casa_pecas(o),
                 "gasto": _ob._brl(o["custos"]["total"]),
+                "gasto_c": int(o["custos"]["total"] or 0),
                 "previsto": (f"{o['pct_previsto']}% do previsto" if o.get("pct_previsto") is not None
                              else "sem previsto"),
                 "m2": (_ob._brl(o["custo_m2"]) + "/m²") if o.get("custo_m2") else "",
@@ -366,5 +367,114 @@ def vista(pool, conta_id: int, mapa_id: int) -> dict:
                 d["mat_alerta"] = ((fur[0] if fur else "")
                                    or _omat.alerta_irmas(pool, conta_id, o, quadros=mats,
                                                          grupos=grupos, obras=por_grupo))
+                # a tabela inteira pro perfil (entrou / usado / na obra), como na ficha
+                d["mat_linhas"] = [[r["nome"], _omat.rotulo(r["entrou"], r["unidade"]),
+                                    _omat._qtd(r["usado"]), _omat.rotulo(r["saldo"], r["unidade"]),
+                                    bool(r["chave"]), bool(r["saldo"] < 0)] for r in linhas]
+            d["fotos"] = _fotos_recentes(pool, conta_id, o["id"])
         out.append(d)
-    return {"mapa": m, "lotes": out}
+    return {"mapa": m, "lotes": out, "resumo": resumo(out)}
+
+
+def _fotos_recentes(pool, conta_id: int, obra_id: int, n: int = 4) -> list[str]:
+    """As últimas fotos da obra, como links da rota com sessão (o bucket é
+    privado). Sem a 369, nenhuma."""
+    try:
+        from . import obra_fotos as _of
+        return [f"/painel/obras/{obra_id}/foto/{f['id']}"
+                for f in _of.listar(pool, conta_id, obra_id)[:n]]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def resumo(lotes_vista: list[dict]) -> dict:
+    """O topo da aba: casas no mapa, andamento médio, prontas, gasto e quantas
+    pedem atenção (⚠️ obra, 🧱 material)."""
+    casas = [l for l in lotes_vista if l.get("obra_id")]
+    n = len(casas)
+    return {"casas": n,
+            "pct": int(round(sum(l["pct"] for l in casas) / n)) if n else 0,
+            "prontas": sum(1 for l in casas if l["pct"] == 100),
+            "gasto": _ob._brl(sum(l.get("gasto_c", 0) for l in casas)),
+            "alerta_obra": sum(1 for l in casas if l.get("alerta")),
+            "alerta_mat": sum(1 for l in casas if l.get("mat_alerta")),
+            "vagos": sum(1 for l in lotes_vista if l["st"] == "vago")}
+
+
+# ── o exemplo (o botão "Ver um exemplo") ──────────────────────────────────
+#
+# Um loteamento fictício montado NA HORA, sem gravar nada no banco (decisão do
+# dono em 02/10/2026: "modo exemplo na aba"). Serve pra quem ainda não riscou a
+# planta ver o que a aba entrega, e pro vendedor mostrar ao prospect. A planta
+# é genérica: planta de cliente é do cliente e nunca aparece pra outra conta.
+
+_ETAPAS_EXEMPLO = (("Preliminares e fundação", 8), ("Estrutura", 22), ("Alvenaria", 32),
+                   ("Cobertura", 44), ("Instalações elétricas", 50),
+                   ("Instalações hidráulicas", 56), ("Reboco e revestimento", 68),
+                   ("Pisos", 78), ("Esquadrias", 87), ("Louças e metais", 92),
+                   ("Pintura", 98), ("Limpeza e entrega", 100))
+
+#: (rótulo, x, y, larg, alt, pct ou None = vago / "t" = terceiro, alerta, alerta de material)
+_LOTES_EXEMPLO = (
+    ("10", 350, 0, 70, 250, 100, "", ""), ("11", 420, 0, 70, 250, 87, "", ""),
+    ("12", 490, 0, 70, 250, 32, "", ""), ("13", 560, 0, 70, 250, 8, "", ""),
+    ("14", 630, 0, 70, 250, 0, "", ""), ("15", 700, 0, 70, 250, None, "", ""),
+    ("16", 770, 0, 230, 75, 100, "", ""), ("17", 770, 75, 230, 75, 56, "", ""),
+    ("18", 770, 150, 230, 75, 0, "", ""), ("19", 770, 225, 230, 75, None, "", ""),
+    ("1", 0, 320, 75, 200, 100, "pronta há 12 dias esperando o habite-se", ""),
+    ("2", 75, 320, 75, 200, 100, "", ""),
+    ("3", 150, 320, 75, 200, 68, "",
+     "Cimento CP-II 50 kg 33% acima das irmãs na mesma altura: esta casa já usou 48 sacos; a irmã usou 36."),
+    ("4", 225, 320, 75, 200, 68, "", ""), ("5", 300, 320, 70, 200, 44, "", ""),
+    ("6", 370, 320, 70, 200, 44, "",
+     "Areia média: uso maior que entrada (2 m³ descobertos)"),
+    ("7", 440, 320, 70, 200, 22, "", ""), ("8", 510, 320, 70, 200, 8, "CNO da obra atrasado", ""),
+    ("9", 580, 320, 70, 200, 0, "", ""),
+    ("", 650, 320, 100, 200, "t", "", ""), ("", 750, 320, 250, 200, "t", "", ""),
+)
+
+
+def _material_exemplo(pct: int, gastona: bool) -> list[list]:
+    if pct <= 0:
+        return []
+    usado = round(48 if gastona else 36 * min(1, pct / 68 + .1))
+    entrou = max(usado + (2 if pct < 100 else 0), 8)
+    return [["Cimento CP-II 50 kg", f"{entrou} sacos", str(usado), f"{entrou - usado} sacos", True, False],
+            ["Ferro 8 mm (barra 12 m)", "30 barras", "30" if pct >= 22 else "0",
+             "0 barras" if pct >= 22 else "30 barras", True, False],
+            ["Areia média", "6 m³", "5,5" if pct >= 32 else "0", "0,5 m³" if pct >= 32 else "6 m³", True, False],
+            ["Tijolo 8 furos", "4 milheiros", "4" if pct >= 32 else "0",
+             "0 milheiros" if pct >= 32 else "4 milheiros", True, False]]
+
+
+def vista_exemplo() -> dict:
+    """O mesmo formato de `vista`, inventado: a tela não sabe a diferença."""
+    out = []
+    for n, (rot, x, y, w, h, pct, alerta, mat_alerta) in enumerate(_LOTES_EXEMPLO, start=1):
+        d = {"id": -n, "rotulo": rot, "x": x, "y": y, "larg": w, "alt": h,
+             "situacao": "terceiro" if pct == "t" else ("vago" if pct is None else "meu"),
+             "obra_id": None, "pct": 0}
+        d["st"] = d["situacao"] if d["situacao"] != "meu" else "vago"
+        if isinstance(pct, int):
+            etapas = [{"nome": nome, "concluida_em": "x" if pct >= corte else None}
+                      for nome, corte in _ETAPAS_EXEMPLO]
+            fake = {"pct": pct, "etapas": etapas}
+            linhas = _material_exemplo(pct, gastona=bool(mat_alerta and "irmãs" in mat_alerta))
+            gasto_c = int(4_500_000 + pct * 63_000)
+            d.update({
+                "obra_id": -n, "pct": pct, "st": _faixa(pct), "alerta": alerta,
+                "obra_nome": f"Casa {rot}", "casa": casa_pecas(fake),
+                "gasto": _ob._brl(gasto_c), "gasto_c": gasto_c,
+                "previsto": f"{min(99, 12 + pct)}% do previsto",
+                "m2": _ob._brl(172_000 + (pct % 70) * 100) + "/m²",
+                "n_etapas": f"{sum(1 for e in etapas if e['concluida_em'])} de {len(etapas)} etapas",
+                "etapas": [[e["nome"], bool(e["concluida_em"])] for e in etapas],
+                "mat": " · ".join(f"{l[3]} de {l[0]}" for l in linhas if not l[3].startswith("0"))[:120],
+                "mat_alerta": mat_alerta, "mat_linhas": linhas, "fotos": [],
+            })
+        out.append(d)
+    m = {"id": 0, "nome": "Residencial Exemplo", "cidade": "", "planta_caminho": None,
+         "altura": 520, "tem_planta": False}
+    deposito = [{"nome": "Argamassa AC-II 20 kg", "saldo": "8 sacos", "minimo": "15 sacos"}]
+    return {"mapa": m, "lotes": out, "resumo": resumo(out), "deposito_baixo": deposito}
+

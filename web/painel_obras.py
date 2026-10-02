@@ -797,7 +797,8 @@ _CSS = r"""<style>
 _TPL_LISTA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="ob-pag">
 <div class="ob-topo"><div><h2>Obras</h2>
-  <div class="ob-sub">Cada casa e cada reforma: o que já custou, contra o previsto, e em que etapa está.</div></div></div>
+  <div class="ob-sub">Cada casa e cada reforma: o que já custou, contra o previsto, e em que etapa está.</div></div>
+  <a class="ob-bt" href="/painel/obras/mapa">🗺️ Mapa das obras ›</a></div>
 {% if erro %}<div class="ob-erro">{{ erro|e }}</div>{% endif %}
 
 <div class="ob-faixas">

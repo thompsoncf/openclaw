@@ -2188,3 +2188,39 @@ def test_o_limite_de_2_conta_a_empresa_mesmo_com_o_cadastro_arquivado(pool, cont
                                      juntar=quem, vendedor_id=None)
         assert r["ok"] is False and "máximo é 2" in r["erro"], (quem, r)
     assert _cads(pool, conta_id, "G61")["G61"]["doc"] == ""
+
+
+def test_a_pagina_da_outlet_chic_mostra_o_nome_do_reservado_e_do_vendido(pool, conta_id, monkeypatch):
+    # o dono (02/10/2026): "coloca no site público o nome das empresas que estão
+    # reservadas ou vendidas" — só a Outlet Chic; as outras páginas seguem como eram
+    import json
+    import re
+    from web import loja_stands as ls
+    monkeypatch.setattr(ls, "get_pool", lambda: pool)
+    _config_evento(pool, conta_id)
+    _venda(pool, conta_id, "G60", nome="Boutique Nova Era", status="vendido")
+    _venda(pool, conta_id, "G61", nome="Casa Bela", zap="86977776666", status="pre_reservado")
+    assert es.salvar_cadastro_stand(pool, conta_id, "G61", _dados(
+        fantasia="Casa Bela", doc=OUTRO_CNPJ, whats="86977776666", email="casa@bela.com"))["ok"]
+    _criar_stand(pool, conta_id, "G62")
+
+    def dados(slug):
+        with pool.connection() as c:
+            c.execute("update evento_stands_config set slug=%s where conta_id=%s", (slug, conta_id))
+            c.commit()
+        req = _Req()
+        req.query_params = {}
+        html = ls.loja_stands(req, slug).body.decode("utf-8")
+        return html, json.loads(re.search(r"var STANDS = (\{.*?\});", html, re.S).group(1))
+
+    html, st = dados("outlet-chic")
+    assert st["G60"]["expositor"] == "Boutique Nova Era" and st["G60"]["confirmado"] is False
+    assert st["G61"]["expositor"] == "Casa Bela" and st["G61"]["status"] == "reservado"
+    assert st["G62"]["expositor"] is None
+    # só a marca: nada de razão social, documento ou contato
+    assert "Boutique Nova Era Comércio Ltda" not in html and OUTRO_CNPJ not in html
+    assert "86977776666" not in html and "casa@bela.com" not in html
+    assert "'Reservado por'" in html and "s.confirmado ?" in html
+    # outra página de stands: só o vendido com contrato assinado (nenhum aqui)
+    _html, st = dados("outra-feira")
+    assert st["G60"]["expositor"] is None and st["G61"]["expositor"] is None

@@ -1018,14 +1018,27 @@ def _arquivar_se_sobrou(pool, conta_id: int, cliente_id) -> bool:
         return False
 
 
-def expositores_publicos(pool, conta_id: int, stands: list[dict]) -> dict[str, str]:
+def expositores_publicos(pool, conta_id: int, stands: list[dict], *,
+                        reservados_tambem: bool = False) -> dict[str, str]:
     """{codigo: nome fantasia} dos stands que a página pública pode nomear.
 
-    Só aparece quem CUMPRIU os dois passos: o pagamento foi confirmado (status
-    'vendido') e o contrato foi ASSINADO. Reservado ou com contrato pendente
-    continua anônimo — nome de empresa na vitrine pública é o sinal de que o
-    espaço é dela de fato, e não uma intenção. O nome é a MARCA do stand (o
-    fantasia do formulário 'Dados do cliente', ver `cadastros_dos_stands`)."""
+    Por padrão só aparece quem CUMPRIU os dois passos: o pagamento foi confirmado
+    (status 'vendido') e o contrato foi ASSINADO. Reservado ou com contrato
+    pendente continua anônimo — nome de empresa na vitrine pública é o sinal de
+    que o espaço é dela de fato, e não uma intenção. O nome é a MARCA do stand (o
+    fantasia do formulário 'Dados do cliente', ver `cadastros_dos_stands`) —
+    nunca razão social, documento ou contato.
+
+    `reservados_tambem` (02/10/2026, pedido do dono da Outlet Chic, só pra ela —
+    o portão é o slug em web/loja_stands): todo stand ocupado, reservado ou
+    vendido, mostra a marca de quem está nele."""
+    if reservados_tambem:
+        ocup = [s for s in stands if s["status"] != "livre"]
+        if not ocup:
+            return {}
+        cads = cadastros_dos_stands(pool, conta_id, ocup)
+        return {s["codigo"]: cads[s["codigo"]]["fantasia"] for s in ocup
+                if (cads.get(s["codigo"], {}).get("fantasia") or "").strip()}
     vend = [s for s in stands if s["status"] == "vendido" and s.get("orcamento_id")]
     if not vend:
         return {}

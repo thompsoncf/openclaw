@@ -934,12 +934,14 @@ ou divida entre as obras em andamento, quando for de todas.</p>
 {% for r in baixos %}<div class="ob-alertas">⚠️ {{ r.nome|e }} abaixo do mínimo: {{ rotulo_mat(r.saldo, r.unidade)|e }} (mínimo {{ rotulo_mat(r.minimo, r.unidade)|e }})</div>{% endfor %}
 <form method="post" action="/painel/obras/deposito-minimo">
 <div class="ob-rolo"><table class="ob-tab">
-<tr><th>Material</th><th style="text-align:right">Entrou</th><th style="text-align:right">Saiu</th><th style="text-align:right">No depósito</th><th style="text-align:right">Mínimo</th></tr>
+{# o saldo e o mínimo (editável) logo depois do nome: no celular a tabela rola de
+   lado, e o que se mexe não pode ficar escondido no fim #}
+<tr><th>Material</th><th style="text-align:right">No depósito</th><th style="text-align:right">Mínimo</th><th style="text-align:right">Entrou</th><th style="text-align:right">Saiu</th></tr>
 {% for r in deposito %}<tr><td{% if r.chave %} style="font-weight:600"{% endif %}>{{ r.nome|e }}</td>
-  <td class="v">{{ rotulo_mat(r.entrou, r.unidade)|e }}</td><td class="v">{{ '%g'|format(r.usado) }}</td>
   <td class="v"><b>{{ rotulo_mat(r.saldo, r.unidade)|e }}</b>{% if r.abaixo %} ⚠️{% endif %}</td>
   <td class="v"><input type="hidden" name="produto" value="{{ r.produto_id }}">
-    <input name="minimo" value="{{ '%g'|format(r.minimo) if r.minimo else '' }}" inputmode="decimal" style="max-width:5.5rem;text-align:right" placeholder="—"></td></tr>{% endfor %}
+    <input name="minimo" value="{{ '%g'|format(r.minimo) if r.minimo else '' }}" inputmode="decimal" style="max-width:4.5rem;text-align:right" placeholder="—"></td>
+  <td class="v">{{ rotulo_mat(r.entrou, r.unidade)|e }}</td><td class="v">{{ '%g'|format(r.usado) }}</td></tr>{% endfor %}
 </table></div>
 <div class="ob-acoes" style="margin-top:.5rem"><button class="ob-bt">Salvar mínimos</button>
 <span class="ob-mut">A nota sem obra entra aqui; “levei 10 sacos pra casa 2” transfere. Mínimo avisa quando o depósito baixar.</span></div>

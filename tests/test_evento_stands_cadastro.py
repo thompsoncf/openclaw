@@ -1942,3 +1942,199 @@ def test_mensagem_do_painel_com_e_comercial_no_nome_chega_inteira(pool, conta_id
     ok = parse_qs(urlparse(r.headers["location"]).query)["ok"][0]
     assert "DELICATA & CIA (mesma empresa do i04)" in ok and "cada stand com a sua marca" in ok
 
+
+# ---- 2ª verificação independente do #972 (02/10/2026)
+
+def _prime(pool, nome="Loja na Prime"):
+    """Uma OUTRA conta com um cliente que tem o CNPJ_VALIDO."""
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo, nome) values ('pj','Prime') returning id").fetchone()[0]
+        c.commit()
+    la = cli.salvar_cliente(pool, outra, nome, telefone="86955550005", cnpj=CNPJ_VALIDO,
+                            email="financeiro@loja.com")
+    return outra, la["id"]
+
+
+def _pessoa(pool, cnpj=CNPJ_VALIDO):
+    with pool.connection() as c:
+        return c.execute("select nome, celular, email from pessoas where cnpj=%s",
+                         ("".join(ch for ch in cnpj if ch.isdigit()),)).fetchone()
+
+
+def _editar_em_clientes(pool, conta_id, monkeypatch, cliente_id, nome, estande=True):
+    """O formulário da aba Clientes (web/portal.py) com o que o cliente já tem."""
+    from types import SimpleNamespace
+    from web import portal as pt
+    monkeypatch.setattr(pt, "_guard_clientes", lambda request, **k: ((conta_id,), pool))
+    monkeypatch.setattr(es, "app_de_stands", lambda p, c: estande)
+    d = cli.obter_cliente(pool, conta_id, cliente_id)
+    req = SimpleNamespace(session={})
+    pt.painel_cliente_editar(
+        req, cliente_id, nome=nome, telefone=d["telefone"] or "",
+        documento=d.get("documento_fmt") or "", cpf="", email=d["email"] or "",
+        aniversario="", obs=d.get("obs") or "", cidade=d["cidade"] or "", uf=d["uf"] or "",
+        endereco=d["endereco"] or "", cep=d["cep"] or "", razao_social=d["razao_social"] or "",
+        representante=d["representante"] or "", eh_cliente="1", eh_fornecedor="")
+    assert req.session.get("aviso") == "Cliente atualizado.", req.session
+
+
+def test_corrigir_o_nome_em_clientes_vale_pro_stand_e_nao_volta(pool, conta_id, monkeypatch):
+    _venda(pool, conta_id, "G60", nome="BOUTIQE NOVA ERA")
+    r = es.salvar_cadastro_stand(pool, conta_id, "G60", _dados(fantasia="BOUTIQE NOVA ERA"))
+    assert r["ok"]
+    _editar_em_clientes(pool, conta_id, monkeypatch, r["cliente_id"], "BOUTIQUE NOVA ERA")
+    cad = _cads(pool, conta_id, "G60")["G60"]
+    assert cad["fantasia"] == "BOUTIQUE NOVA ERA"
+    # a vendedora abre o formulário (com o que a tela mostra) e só muda o CEP
+    d = {k: cad[k] for k in ("fantasia", "whats", "razao", "doc", "rep", "email", "end",
+                             "cep", "cidade", "uf", "obs")}
+    assert es.salvar_cadastro_stand(pool, conta_id, "G60", dict(d, cep="64000-555"))["ok"]
+    assert cli.obter_cliente(pool, conta_id, r["cliente_id"])["nome"] == "BOUTIQUE NOVA ERA"
+    assert _cads(pool, conta_id, "G60")["G60"]["fantasia"] == "BOUTIQUE NOVA ERA"
+
+
+def test_corrigir_o_nome_da_empresa_nao_troca_a_marca_do_outro_stand(pool, conta_id, monkeypatch):
+    empresa, _prov, _o1, _o2 = _duas_lojas(pool, conta_id)
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())["ok"]
+    _editar_em_clientes(pool, conta_id, monkeypatch, empresa, "EM ESSENCE MODAS")
+    cads = _cads(pool, conta_id, "i04", "S97")
+    assert cads["i04"]["fantasia"] == "EM ESSENCE MODAS" and cads["S97"]["fantasia"] == "OCEAN BEACH"
+
+
+def test_conta_sem_o_app_de_estandes_nao_tem_a_reserva_mexida_pela_aba_clientes(
+        pool, conta_id, monkeypatch):
+    _venda(pool, conta_id, "G60", nome="BOUTIQE NOVA ERA")
+    r = es.salvar_cadastro_stand(pool, conta_id, "G60", _dados(fantasia="BOUTIQE NOVA ERA"))
+    _editar_em_clientes(pool, conta_id, monkeypatch, r["cliente_id"], "BOUTIQUE NOVA ERA",
+                        estande=False)
+    with pool.connection() as c:
+        assert c.execute("select empresa from prospeccao where conta_id=%s",
+                         (conta_id,)).fetchone()[0] == "BOUTIQE NOVA ERA"
+
+
+def test_cnpj_errado_de_cliente_de_outra_conta_se_corrige_com_o_certo(pool, conta_id):
+    outra, la = _prime(pool)
+    o2 = _venda(pool, conta_id, "S97", nome="OCEAN BEACH", zap="86922220002")
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(
+        fantasia="OCEAN BEACH", doc="", whats="86922220002"))["ok"]
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(        # o engano
+        fantasia="OCEAN BEACH", whats="86922220002"))["ok"]
+    assert _cads(pool, conta_id, "S97")["S97"]["doc"] == CNPJ_VALIDO
+    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(            # o certo
+        fantasia="OCEAN BEACH", doc=OUTRO_CNPJ, razao="OCEAN BEACH MODA PRAIA LTDA",
+        whats="86922220002"))
+    assert r["ok"] and r["acao"] == "criado"
+    assert _cads(pool, conta_id, "S97")["S97"]["doc"] == OUTRO_CNPJ
+    with pool.connection() as c:
+        emp, cnpj = c.execute("select empresa, cnpj from orcamentos where id=%s", (o2,)).fetchone()
+    assert (emp, cnpj) == ("OCEAN BEACH MODA PRAIA LTDA", OUTRO_CNPJ)
+    dele = cli.obter_cliente(pool, outra, la)
+    assert (dele["nome"], dele["telefone"], dele["email"]) == (
+        "Loja na Prime", "86955550005", "financeiro@loja.com")
+
+
+def test_cnpj_de_cadastro_arquivado_so_completa_e_o_link_publico_nao_puxa(pool, conta_id):
+    empresa, _prov, _o1, o2 = _duas_lojas(pool, conta_id)
+    cli.atualizar_cliente(pool, conta_id, empresa, email="fin@emessence.com")
+    antes = _pessoa(pool)
+    assert cli.arquivar_cliente(pool, conta_id, empresa)
+    # pelo link público, digitar o CNPJ não puxa a empresa arquivada
+    r = es.salvar_cadastro_do_contrato(pool, conta_id, o2, _so_cnpj())
+    assert r["ok"] is False and "fale com o seu vendedor" in r["erro"]
+    # pelo app: o stand ganha o cadastro da empresa, mas a identidade não muda
+    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())
+    assert r["ok"] and r["acao"] == "criado", r
+    assert _pessoa(pool) == antes == ("EM ESSENCE", "86911110001", "fin@emessence.com")
+    assert _cads(pool, conta_id, "S97")["S97"]["fantasia"] == "OCEAN BEACH"
+
+
+def test_o_link_publico_nao_puxa_cliente_de_outra_conta_pelo_cnpj(pool, conta_id):
+    _outra, _la = _prime(pool)
+    o2 = _venda(pool, conta_id, "S97", nome="OCEAN BEACH", zap="86922220002")
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(
+        fantasia="OCEAN BEACH", doc="", whats="86922220002"))["ok"]
+    r = es.salvar_cadastro_do_contrato(pool, conta_id, o2, _dados(fantasia="OCEAN BEACH",
+                                                                 whats="86922220002"))
+    assert r["ok"] is False and "fale com o seu vendedor" in r["erro"]
+    assert _cads(pool, conta_id, "S97")["S97"]["doc"] == ""
+
+
+def test_a_reserva_pelo_link_do_cliente_nao_troca_a_identidade_de_outra_conta(pool, conta_id):
+    outra, la = _prime(pool)
+    cid = cli.puxar_ou_criar_cliente(pool, conta_id, cnpj="".join(
+        ch for ch in CNPJ_VALIDO if ch.isdigit()))
+    o2 = _venda(pool, conta_id, "S97", nome="OCEAN BEACH", zap="86977776666")
+    assert es._vincular_cliente_da_reserva(pool, conta_id, ["S97"], o2, cid,
+                                           "OCEAN BEACH", "86977776666") == cid
+    dele = cli.obter_cliente(pool, outra, la)
+    assert (dele["nome"], dele["telefone"]) == ("Loja na Prime", "86955550005")
+    assert es.buscar(pool, conta_id, "S97")["cliente_id"] == cid
+
+
+def test_salvar_recusado_pelo_limite_nao_completa_a_empresa(pool, conta_id, monkeypatch):
+    # dois salvares ao mesmo tempo: os dois passam na conferência de antes; a trava
+    # do passo 3 recusa o segundo — e ele não pode ter deixado nada na empresa
+    _config_evento(pool, conta_id)
+    empresa, _prov, _o1, _o2 = _duas_lojas(pool, conta_id)
+    cli.atualizar_cliente(pool, conta_id, empresa, email="", cep="")
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())["ok"]       # 2 de 2
+    _venda(pool, conta_id, "G61", nome="TERCEIRA", zap="86933330003")
+    assert es.salvar_cadastro_stand(pool, conta_id, "G61", _dados(
+        fantasia="TERCEIRA", doc="", whats="86933330003"))["ok"]
+    monkeypatch.setattr(es, "_cabe_na_empresa", lambda *a, **k: None)
+    r = es.salvar_cadastro_stand(pool, conta_id, "G61", _dados(
+        fantasia="TERCEIRA", whats="", email="terceira@x.com", cep="64000-002"))
+    assert r["ok"] is False and "máximo é 2" in r["erro"]
+    d = cli.obter_cliente(pool, conta_id, empresa)
+    assert not (d["email"] or "").strip() and not (d["cep"] or "").strip()
+
+
+def test_o_whatsapp_da_loja_nao_vira_o_da_empresa_no_cadastro_dividido(pool, conta_id):
+    _empresa, _prov, _o1, o2 = _duas_lojas(pool, conta_id)
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())["ok"]
+    # o lojista do S97 salva o link do contrato sem mexer em nada (a tela mostra o da empresa)
+    assert es.salvar_cadastro_do_contrato(pool, conta_id, o2, {"fantasia": "OCEAN BEACH"})["ok"]
+    with pool.connection() as c:
+        zap = c.execute("select whatsapp from prospeccao where id=(select prospeccao_id from "
+                        "evento_stands where conta_id=%s and codigo='S97')", (conta_id,)).fetchone()[0]
+    assert zap == "86922220002"
+
+
+def test_a_vendedora_nao_entra_em_cadastro_sem_stand_que_nao_e_da_carteira_dela(pool, conta_id):
+    cass = _membro(pool, conta_id, "Cassandra")
+    casa = cli.salvar_cliente(pool, conta_id, "FORNECEDOR DA CASA", telefone="86900001111",
+                              cnpj=OUTRO_CNPJ)["id"]
+    cli.atualizar_cliente(pool, conta_id, casa, razao_social="CASA LTDA", representante="Dono")
+    _venda(pool, conta_id, "S97", nome="OCEAN BEACH", zap="86922220002")
+    _dono_da_venda(pool, conta_id, "S97", cass)
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(
+        fantasia="OCEAN BEACH", doc="", whats="86922220002"))["ok"]
+    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj() | {"doc": OUTRO_CNPJ},
+                                 juntar="do_vendedor", vendedor_id=cass)
+    assert r["ok"] is False and "FORNECEDOR DA CASA" in r["erro"] and "gestão" in r["erro"]
+    assert "outra vendedora" not in r["erro"]
+    cad = _cads(pool, conta_id, "S97")["S97"]                            # nada vazou
+    assert cad["razao"] != "CASA LTDA" and cad["doc"] == "" and cad["whats"] != "86900001111"
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj() | {"doc": OUTRO_CNPJ},
+                                    juntar="sempre")["ok"]               # a gestão pode
+
+
+def test_separar_pelo_stand_que_dava_nome_rebatiza_o_cadastro_que_ficou(pool, conta_id):
+    empresa, _prov, _o1, _o2 = _duas_lojas(pool, conta_id)
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())["ok"]
+    r = es.salvar_cadastro_stand(pool, conta_id, "i04", _dados(
+        fantasia="EM ESSENCE", doc=OUTRO_CNPJ, razao="EM ESSENCE NOVA LTDA"))
+    assert r["ok"] and r["cliente_id"] != empresa
+    assert cli.obter_cliente(pool, conta_id, empresa)["nome"] == "OCEAN BEACH"
+    assert cli.obter_cliente(pool, conta_id, r["cliente_id"])["nome"] == "EM ESSENCE"
+    cads = _cads(pool, conta_id, "i04", "S97")
+    assert cads["i04"]["fantasia"] == "EM ESSENCE" and cads["S97"]["fantasia"] == "OCEAN BEACH"
+    assert cads["S97"]["doc"] == CNPJ_VALIDO and cads["i04"]["doc"] == OUTRO_CNPJ
+
+
+def test_o_app_puxa_o_mapa_depois_de_todo_salvar_e_mostra_a_frase():
+    from web import painel_cockpit as pc
+    assert "if(window.stAtualizar)window.stAtualizar();" in pc._STANDS_JS
+    assert "if(j.juntou&&window.stAtualizar)" not in pc._STANDS_JS
+    assert "m.scrollIntoView(" in pc._STANDS_JS
+    assert "if(pedindo)denovo=true;else atualizar();" in pc._STANDS_AUTO_JS

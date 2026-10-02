@@ -11571,11 +11571,22 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
         campos["cpf"] = d
     elif tipo == "pj":
         campos["cnpj"] = d
+    from finance import evento_stands as _es
+    estande = "nome" in campos and _es.app_de_stands(pool, conta[0])
+    antes = (cli.obter_cliente(pool, conta[0], cliente_id) or {}) if estande else {}
     try:
         cli.atualizar_cliente(pool, conta[0], cliente_id, **campos)
         request.session["aviso"] = "Cliente atualizado."
     except ValueError as e:
         request.session["erro"] = str(e)
+        estande = False
+    if estande and antes:
+        # só o app de estandes (Outlet Chic): a marca do stand mora na reserva, e a
+        # correção do nome feita aqui vai pra ela (ver evento_stands.nome_do_cadastro_mudou)
+        try:
+            _es.nome_do_cadastro_mudou(pool, conta[0], cliente_id, antes.get("nome"), nome)
+        except Exception:  # noqa: BLE001 — o cliente já foi salvo; a marca fica como estava
+            pass
     return RedirectResponse("/painel/clientes", status_code=303)
 
 

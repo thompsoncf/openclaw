@@ -10043,9 +10043,13 @@ _STANDS_JS = r"""
       if(ok){var m=document.createElement('div');m.className='stok';
         m.textContent='✓ Salvo em Clientes'+(j.cad.faltam.length?' — ainda falta '+j.cad.faltam.length+' pro contrato.':' — contrato com todos os dados.')+
           (j.juntou?' Mesmo '+(j.juntou.doc||'CNPJ')+' do cadastro '+j.juntou.cliente+(j.juntou.stands.length?' ('+j.juntou.stands.join(', ')+')':'')+': ficou na mesma empresa, cada stand com a sua marca. Os dados da empresa ficaram; o que faltava foi completado.':'');
-        // o outro stand da empresa mudou junto: puxa o mapa de novo (sem esperar os 20 s)
-        if(j.juntou&&window.stAtualizar)window.stAtualizar();
-        ok.appendChild(m);}
+        ok.appendChild(m);
+        // o formulário encolheu: a frase (que explica a junção) fica na tela
+        if(m.scrollIntoView)m.scrollIntoView({block:'center',behavior:'smooth'});}
+      // todo salvar puxa o mapa de novo (sem esperar os 20 s): o outro stand da mesma
+      // empresa mudou junto, e um formulário dele aberto com o cadastro velho
+      // devolveria os dados antigos pra empresa
+      if(window.stAtualizar)window.stAtualizar();
     });
     return false;
   };
@@ -10191,7 +10195,7 @@ def _sub_do_mapa(tot: dict) -> str:
 # aberto não é redesenhado enquanto ele preenche um formulário (cadastro, venda).
 _STANDS_AUTO_JS = r"""
   (function(){
-    var pedindo=false, ultimo=JSON.stringify(STANDS), manterDetalhe=false;
+    var pedindo=false, ultimo=JSON.stringify(STANDS), manterDetalhe=false, denovo=false;
     function digitando(){
       if(editando||vendendo)return true;
       var a=document.activeElement;
@@ -10204,6 +10208,8 @@ _STANDS_AUTO_JS = r"""
       zapFetch(BASE_STANDS+'/estado',{headers:{'x-cockpit':'1'},cache:'no-store',silencioso:true})
         .then(function(j){
           pedindo=false;
+          // pedido que saiu ANTES de um salvar: a resposta é velha, pede de novo
+          if(denovo){denovo=false;atualizar();return;}
           if(!j||!j.ok||!j.stands)return;
           var novo=JSON.stringify(j.stands);
           if(novo===ultimo)return;
@@ -10215,11 +10221,13 @@ _STANDS_AUTO_JS = r"""
           var sub=document.querySelector('.hdr .tt small');
           if(sub&&j.sub)sub.textContent=j.sub;
         })
-        .catch(function(){pedindo=false;});
+        .catch(function(){pedindo=false;if(denovo){denovo=false;atualizar();}});
     }
-    // quem salvou um stand que entrou na mesma empresa de outro pede o mapa na hora
-    // o stand aberto já está certo (veio na resposta) e mostra o "✓ Salvo": não redesenha
-    window.stAtualizar=function(){ultimo='';manterDetalhe=true;atualizar();
+    // quem salvou um stand pede o mapa na hora (o outro stand da mesma empresa mudou
+    // junto); o stand aberto já está certo (veio na resposta) e mostra o "✓ Salvo":
+    // não redesenha
+    window.stAtualizar=function(){ultimo='';manterDetalhe=true;
+      if(pedindo)denovo=true;else atualizar();
     }
     setInterval(atualizar,20000);
     document.addEventListener('visibilitychange',function(){

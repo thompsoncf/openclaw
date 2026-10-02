@@ -467,7 +467,7 @@ def resultados(c, conta_id: int, agora: datetime) -> list[dict]:
                      left join clinica_profissionais p on p.id = r.profissional_id and p.conta_id = r.conta_id
                     where r.conta_id=%s and r.estado in ('aguardando','chegou')
                     order by r.estado <> 'chegou', r.previsto_em nulls last, r.id""", (conta_id,)).fetchall()
-    except Exception:  # noqa: BLE001 — sem a 477
+    except Exception:  # noqa: BLE001 — sem a 481
         return []
     return [{"id": r[0], "lead": r[1], "paciente": r[2], "fone": r[3], "previsto_em": r[4], "estado": r[5],
              "prof": r[6], "criado_em": r[7], "profissional_id": r[8], "chegou": r[5] == "chegou",

@@ -473,3 +473,71 @@ def test_gancho_completa_absorcao_nos_caminhos_ja_salvos(pool, conta):
     r = base["registrar_itens_cupom"].executar({"lancamento_id": lid, "itens": [item]})
     assert "tem itens salvos" in r and "🧱" in r                 # o -1 completa a absorção
     assert omat.quadro_da_obra(pool, conta, o["id"])[0]["entrou"] == Decimal(30)
+
+
+# ── os ajustes da demonstração de 02/10 (cada um com o que a tela mostrou) ──
+def _quadra_com_cimento(pool, conta, nome, casas):
+    """casas: [(etapas feitas, sacos comprados, sacos usados)] — tudo na mesma
+    quadra, com 4 etapas iguais em cada casa (25% cada)."""
+    g = og.criar_grupo(pool, conta, nome)
+    out = []
+    for n, (feitas, compra, uso) in enumerate(casas, start=1):
+        o = _obra(pool, conta, f"{nome} casa {n}")
+        ob.salvar_etapas(pool, conta, o["id"], [(None, f"Etapa {i}", 25) for i in range(4)])
+        o = ob.obter_obra(pool, conta, o["id"])
+        for e in o["etapas"][:feitas]:
+            ob.marcar_etapa(pool, conta, o["id"], e["id"], concluida=True)
+        og.definir(pool, conta, o["id"], g["id"], str(n))
+        lid = _lanc(pool, conta, centro=o["centro_custo_id"])
+        _itens(pool, lid, [("CIMENTO CP II 50KG", compra, "sc")])
+        omat.absorver_lancamento(pool, conta, lid)
+        if uso:
+            p = omat.achar_produto(pool, conta, "cimento cp ii")
+            omat.mover(pool, conta, acao="usei", produto_id=p["id"], quantidade=uso,
+                       obra_id=o["id"])
+        out.append(ob.obter_obra(pool, conta, o["id"]))
+    return out
+
+
+def test_irmas_adiantadas_nao_escondem_a_casa_gastona(pool, conta):
+    # a casa 3 (50%) comprou 50; a irmã na MESMA altura comprou 39. As duas
+    # adiantadas (100% e 75%) compraram muito mais por estarem adiantadas — e
+    # antes puxavam a média pra cima e escondiam a gastona.
+    c1, c2, c3, c4 = _quadra_com_cimento(pool, conta, "Quadra Alt",
+                                         [(4, 70, 0), (3, 60, 0), (2, 50, 0), (2, 39, 0)])
+    alerta = omat.alerta_irmas(pool, conta, c3)
+    assert "acima das irmãs na mesma altura" in alerta
+    assert "comprou 50 sacos" in alerta and "a irmã comprou 39" in alerta
+
+
+def test_irmas_comparam_na_mesma_regua(pool, conta):
+    # a casa 1 aponta uso (40 usados de 50 comprados); a irmã não aponta (só a
+    # compra de 45). Uso contra compra acusaria quem aponta: compara compra com
+    # compra — 50 contra 45 não é desvio.
+    c1, c2 = _quadra_com_cimento(pool, conta, "Quadra Régua", [(2, 50, 40), (2, 45, 0)])
+    assert omat.alerta_irmas(pool, conta, c1) == ""
+    # as duas apontando: aí sim, uso contra uso
+    d1, d2 = _quadra_com_cimento(pool, conta, "Quadra Uso", [(2, 60, 55), (2, 60, 40)])
+    assert "usou 55 sacos" in omat.alerta_irmas(pool, conta, d1)
+
+
+def test_mapa_poe_o_furo_antes_e_esconde_o_saldo_zerado(pool, conta):
+    c1, c2 = _quadra_com_cimento(pool, conta, "Quadra Furo", [(2, 10, 14), (2, 10, 10)])
+    m = om.criar(pool, conta, "Área Furo")
+    om.salvar_lotes(pool, conta, m["id"], [
+        {"rotulo": "1", "x": 0, "y": 0, "larg": 70, "alt": 100, "situacao": "meu", "obra_id": c1["id"]},
+        {"rotulo": "2", "x": 80, "y": 0, "larg": 70, "alt": 100, "situacao": "meu", "obra_id": c2["id"]}])
+    v = {l["rotulo"]: l for l in om.vista(pool, conta, m["id"])["lotes"]}
+    assert "uso maior que entrada" in v["1"]["mat_alerta"]       # o furo, não as irmãs
+    assert "-4" not in v["1"]["mat"] and v["1"]["mat"] == ""      # nada de saldo negativo na linha
+    assert v["2"]["mat"] == ""                                     # nem "0 sacos"
+
+
+def test_deposito_mostra_o_minimo_logo_depois_do_saldo(pool, conta, monkeypatch):
+    with pool.connection() as c:
+        pid, _, _ = omat._achar_ou_criar(c, conta, "Argamassa AC-II", "sc")
+        c.commit()
+    omat.mover(pool, conta, acao="chegou", produto_id=pid, quantidade=8)
+    html = _painel(pool, conta, monkeypatch).get("/painel/obras").text
+    cab = html[html.index("<th>Material</th>"):]
+    assert cab.index("No depósito") < cab.index("Mínimo") < cab.index("Entrou")

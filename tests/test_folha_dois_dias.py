@@ -201,7 +201,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "038_endereco_conta.sql",
               "132_plano_contas_centros_custo.sql", "150_funcionario_salario_vigencia.sql",
               "195_titulo_aprovacao.sql", "196_titulo_recorrencia.sql",
               "197_titulo_acrescimo.sql", "317_titulo_classificacao.sql",
-              "325_tipo_despesa.sql", "482_folha_adiantamento_e_saldo.sql")
+              "325_tipo_despesa.sql", "482_folha_adiantamento_e_saldo.sql",
+              "484_titulo_vencimento_e_referencia.sql")
 
 CONTA = 701
 
@@ -469,6 +470,22 @@ def test_a_tela_nao_preve_o_que_o_dono_cancelou_e_mostra_quando_pagou(pool, limp
     assert "adiantamento" not in ag["partes"], "cancelado não volta como previsto"
     assert ag["partes"]["saldo"]["situacao"] == "pago"
     assert ag["partes"]["saldo"]["pago_em"] == date(2026, 10, 2)
+
+
+def test_a_data_mudada_a_mao_fica_e_a_referencia_e_a_competencia(pool, limpo):
+    """O dono mudou o vencimento do saldo (484): mudar a regra depois não traz a
+    data de volta. E a referência das contas da folha é a competência — o
+    adiantamento do dia 20/10 é do salário de outubro, não de setembro."""
+    from finance import empresa as emp
+    fid = _func(pool, **_ADI_SALDO)
+    sid = _abertos(pool, fid)["saldo"]["id"]
+    assert emp.editar_titulo(pool, CONTA, sid, vencimento=date(2026, 11, 6))
+    assert ft.configurar(pool, CONTA, fid, **{**_ADI_SALDO, "saldo_regra": "dia",
+                                              "dia_pagamento": 10})["ok"]
+    assert _abertos(pool, fid)["saldo"]["venc"] == date(2026, 11, 6)
+    lista = emp.listar_titulos(pool, CONTA, status="aberto", tipo="pagar")
+    assert {t["referencia"] for t in lista} == {OUT}
+    assert all(t["referencia_anotada"] for t in lista)
 
 
 def test_apagar_conta_da_folha_vira_cancelar(pool, limpo):

@@ -4267,6 +4267,11 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
        A dica "vincule pra aparecer na ficha" era uma caixinha desligada logo
        abaixo, com cara de campo; mora aqui, no próprio campo. #}
     <label id="tit-cli-lbl" title="opcional — liga o título à ficha do fornecedor">Fornecedor<input name="cliente" id="tit-cli-input" list="tit-forn-dl" placeholder="opcional · liga à ficha"></label>
+    {#- o MÊS DE REFERÊNCIA (484, pedido do dono em 02/10/2026): só informação.
+       Em branco vale o mês anterior ao vencimento (a conta que vence 10/11 é a
+       de outubro). Só em conta a pagar — some com o "A receber". Mora nesta
+       linha, que se ajusta sozinha; a de cima é uma grade fixa de quatro. -#}
+    <label id="tit-ref-lbl" title="opcional — em branco, vale o mês anterior ao vencimento">Mês de referência<input name="mes_referencia" id="tit-ref-input" type="month"></label>
     {#- A CLASSIFICAÇÃO (migração 317) — pedido do dono em 23/09/2026: "no
        lançamento do contas a pagar já colocar o centro de custo e plano de
        contas e categoria". Os três são OPCIONAIS: quem nunca usou continua não
@@ -4406,6 +4411,9 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     var td = document.getElementById('tit-tipo-d');
     if(td){ td.style.display = pagar ? '' : 'none';
             td.querySelectorAll('input').forEach(function(r){ r.disabled = !pagar; if(!pagar) r.checked = false; }); }
+    // o MÊS DE REFERÊNCIA também é só da conta a pagar
+    var rl = document.getElementById('tit-ref-lbl'), ri = document.getElementById('tit-ref-input');
+    if(rl && ri){ rl.style.display = pagar ? '' : 'none'; ri.disabled = !pagar; if(!pagar) ri.value = ''; }
     titMemoria();
   }
   // A MEMÓRIA DO FORNECEDOR. Pergunta ao servidor como este fornecedor foi
@@ -4624,7 +4632,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         {% if t.folha_parte %} <span class="selo rep" title="gerada pela folha (Equipe e folha › Datas de pagamento): o valor acompanha a folha, e a baixa entra no holerite sozinha">📅 folha · {{ t.folha_parte }}</span>{% endif %}
         {% if not t.valor_centavos %} <span class="selo falta">falta o valor</span>{% endif %}
         {% if t.sem_fornecedor %} <span class="selo falta">sem fornecedor</span>{% endif %}</div>
-      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
+      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span>{% if t.tipo=='pagar' and t.referencia %} · <span title="mês de referência{{ '' if t.referencia_anotada else ' (o anterior ao vencimento — dá pra mudar no editar)' }}">ref. {{ t.referencia.strftime('%m/%Y') }}</span>{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
       seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
       "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}{#- o PORQUÊ de um valor mexido pelo painel da diferença (323): sem isto,
@@ -4788,6 +4796,15 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     <form method="post" action="/painel/empresa/titulo/{{ t.id }}/descricao" class="tit-edit">
       <input name="descricao" value="{{ t.descricao }}" placeholder="descrição" style="flex:2 1 140px;min-width:0">
       <input name="valor" value="{{ (t.valor_centavos/100)|n2 }}" inputmode="decimal" placeholder="valor R$" style="flex:1 1 80px;min-width:0">
+      {#- O VENCIMENTO e o MÊS DE REFERÊNCIA (484, pedido do dono em 02/10/2026).
+         A data só em conta a pagar ABERTA (a paga já tem a data dela no caixa);
+         a referência vem preenchida com a que vale hoje — anotada, ou o mês
+         anterior ao vencimento — e apagar volta ao padrão. Os `tem_*` separam
+         "apaguei" de "o campo nem veio", como no fornecedor. -#}
+      {% if t.tipo == 'pagar' %}
+      {% if t.status == 'aberto' %}<input type="hidden" name="tem_venc" value="1"><input type="date" name="vencimento" value="{{ t.vencimento.isoformat() if t.vencimento else '' }}" title="vencimento" required style="flex:1 1 120px;min-width:0">{% endif %}
+      <input type="hidden" name="tem_ref" value="1"><input type="month" name="mes_referencia" value="{{ t.referencia.strftime('%Y-%m') if t.referencia else '' }}" title="mês de referência — em branco, vale o mês anterior ao vencimento" style="flex:1 1 120px;min-width:0">
+      {% endif %}
       {# O FORNECEDOR, que faltava. Antes daqui o editar tinha dois campos e quem
          salvasse sem fornecedor não colocava mais — 30 de 30 títulos a pagar da
          Prime estavam assim, com o nome do fornecedor enfiado na descrição.
@@ -12692,7 +12709,8 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                          categoria: str = Form(""),
                          plano_conta_id: str = Form(""),
                          centro_custo_id: str = Form(""),
-                         tipo_despesa: str = Form("")):
+                         tipo_despesa: str = Form(""),
+                         mes_referencia: str = Form("")):
     from finance import empresa as emp, clientes as cli
     g = _guard_pj(request)
     if not g:
@@ -12760,7 +12778,10 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                              cliente_id=cli_id,
                              plano_conta_id=plano_conta_id.strip() or None,
                              centro_custo_id=centro_custo_id.strip() or None,
-                             tipo_despesa=tipo_despesa.strip() or None)
+                             tipo_despesa=tipo_despesa.strip() or None,
+                             # o MÊS DE REFERÊNCIA (484): só na conta a pagar
+                             mes_referencia=(mes_referencia.strip() or None
+                                             if tipo_ok == "pagar" else None))
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
@@ -13113,8 +13134,12 @@ def empresa_titulo_descricao(request: Request, titulo_id: int,
                              categoria: str = Form(""), plano_conta_id: str = Form(""),
                              centro_custo_id: str = Form(""), tem_classe: str = Form(""),
                              tem_plano: str = Form(""), tem_centro: str = Form(""),
-                             tipo_despesa: str = Form(""), tem_tipo: str = Form("")):
+                             tipo_despesa: str = Form(""), tem_tipo: str = Form(""),
+                             vencimento: str = Form(""), tem_venc: str = Form(""),
+                             mes_referencia: str = Form(""), tem_ref: str = Form("")):
     """Edita descrição, valor e/ou FORNECEDOR. valor vazio = não mexe no valor.
+    Na conta a pagar, também o VENCIMENTO e o MÊS DE REFERÊNCIA (484, pedido do
+    dono em 02/10/2026) — com o mesmo marcador de presença (`tem_venc`/`tem_ref`).
 
     O FORNECEDOR só entrou aqui em 03/09/2026, e a falta dele era o buraco que o
     dono relatou: salvou sem fornecedor, não colocava mais. Na Prime eram 30 de
@@ -13157,13 +13182,26 @@ def empresa_titulo_descricao(request: Request, titulo_id: int,
         # o TIPO (325), com o mesmo marcador de presença: só mexe se o campo
         # estava no formulário, e aí "" apaga
         tipo_d = tipo_despesa.strip() if tem_tipo else None
+    # O VENCIMENTO e a REFERÊNCIA (484). Data inválida ou vazia = não mexe (o
+    # vencimento é obrigatório); referência vazia = volta ao padrão.
+    novo_venc = None
+    if tem_venc in ("1", "on", "true") and vencimento.strip():
+        try:
+            novo_venc = _date.fromisoformat(vencimento.strip())
+        except ValueError:
+            novo_venc = None
+    nova_ref = False
+    if tem_ref in ("1", "on", "true"):
+        nova_ref = mes_referencia.strip() or None
     if (nova_desc is not None or novo_val is not None or nova_cp is not None
-            or tem_classe in ("1", "on", "true")):
+            or tem_classe in ("1", "on", "true") or novo_venc is not None
+            or nova_ref is not False):
         emp.editar_titulo(pool, conta[0], titulo_id,
                           descricao=nova_desc, valor_centavos=novo_val,
                           contraparte=nova_cp, cliente_id=cli_id,
                           categoria=cat, plano_conta_id=plano,
-                          centro_custo_id=centro, tipo_despesa=tipo_d)
+                          centro_custo_id=centro, tipo_despesa=tipo_d,
+                          vencimento=novo_venc, mes_referencia=nova_ref)
     return RedirectResponse("/painel/empresa", status_code=303)
 
 

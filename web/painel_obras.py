@@ -32,6 +32,7 @@ from jinja2 import Environment
 from db.conexao import get_pool
 from finance import obra_empreita as oe
 from finance import obra_fotos as of
+from finance import obra_grupos as og
 from finance import obra_reforma as orf
 from finance import obra_venda as ov
 from finance import obras as ob
@@ -121,8 +122,19 @@ def painel_obras(request: Request):
             avisos[o["id"]] = "trava: " + sit["trava"]["nome"].lower()
         elif sit["alertas"]:
             avisos[o["id"]] = sit["alertas"][0]
+    grupos = og.listar_grupos(pool, conta[0])
+    mapa = og.por_obra(pool, conta[0])
+    for o in obras:
+        o["lote"] = (mapa.get(o["id"]) or {}).get("lote", "")
+    grupos_view = []
+    for g in grupos:
+        dela = sorted([o for o in abertas if (mapa.get(o["id"]) or {}).get("grupo_id") == g["id"]],
+                      key=og._ordem_lote)
+        grupos_view.append({"g": g, "obras": dela, "r": og.resumo(dela)})
+    soltas = [o for o in abertas if not (mapa.get(o["id"]) or {}).get("grupo_id")]
     return _render(
         "obras", request, titulo="Obras", secao_ativa="obras", brl=_brl,
+        grupos=grupos, grupos_view=grupos_view, soltas=soltas, rotulo=og.rotulo(pool, conta[0]),
         obras=abertas, arquivadas=[o for o in obras if o["status"] == "arquivada"],
         n_andamento=len(andamento),
         # o botão Dividir reparte entre as EM OBRA (a mesma regra de `lancamento_na_obra`)
@@ -139,7 +151,8 @@ def painel_obras(request: Request):
 def criar(request: Request, nome: str = Form(""), tipo: str = Form("casa"),
           endereco: str = Form(""), area_m2: str = Form(""),
           custo_previsto: str = Form(""), valor: str = Form(""),
-          inicio_em: str = Form(""), previsao_em: str = Form("")):
+          inicio_em: str = Form(""), previsao_em: str = Form(""),
+          grupo_id: str = Form(""), lote: str = Form("")):
     conta, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -149,6 +162,8 @@ def criar(request: Request, nome: str = Form(""), tipo: str = Form("casa"),
                           valor_centavos=_cent(valor), inicio_em=_data(inicio_em),
                           previsao_em=_data(previsao_em),
                           criado_por=request.session.get("membro_id"))
+        if grupo_id.isdigit() or lote.strip():
+            og.definir(get_pool(), conta[0], o["id"], int(grupo_id) if grupo_id.isdigit() else None, lote)
     except ValueError as e:
         return _volta("/painel/obras", str(e))
     return RedirectResponse(f"/painel/obras/{o['id']}", status_code=303)
@@ -195,6 +210,7 @@ def ficha(request: Request, obra_id: int):
                    sou_dono=request.session.get("papel", "dono") == "dono",
                    fotos=_fotos_da_ficha(conta[0], o),
                    empreita=_empreita_da_ficha(conta[0], o),
+                   quadra=_quadra_da_ficha(conta[0], o),
                    sinapi=_sinapi_da_ficha(conta[0], o),
                    lead=_lead_da_ficha(conta[0], o),
                    tipos_item=orf.TIPOS_ITEM, unidades=orf.UNIDADES, modelos=orf.MODELOS,
@@ -266,7 +282,8 @@ def editar(request: Request, obra_id: int, nome: str = Form(""), tipo: str = For
            endereco: str = Form(""), area_m2: str = Form(""),
            custo_previsto: str = Form(""), valor: str = Form(""),
            status: str = Form("em_obra"), inicio_em: str = Form(""),
-           previsao_em: str = Form(""), obs: str = Form("")):
+           previsao_em: str = Form(""), obs: str = Form(""),
+           grupo_id: str | None = Form(None), lote: str | None = Form(None)):
     conta, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -277,6 +294,9 @@ def editar(request: Request, obra_id: int, nome: str = Form(""), tipo: str = For
                        valor_centavos=_cent(valor), status=status,
                        inicio_em=_data(inicio_em), previsao_em=_data(previsao_em),
                        obs=obs.strip())
+        if grupo_id is not None:
+            og.definir(get_pool(), conta[0], obra_id,
+                       int(grupo_id) if grupo_id.isdigit() else None, lote or "")
     except ValueError as e:
         return _volta(f"/painel/obras/{obra_id}", str(e))
     return RedirectResponse(f"/painel/obras/{obra_id}", status_code=303)
@@ -430,6 +450,15 @@ def _lead_da_ficha(conta_id: int, o: dict) -> dict | None:
     return _ol.lead_da_obra(get_pool(), conta_id, o["id"])
 
 
+def _quadra_da_ficha(conta_id: int, o: dict) -> dict:
+    pool = get_pool()
+    grupos = og.listar_grupos(pool, conta_id)
+    atual = og.por_obra(pool, conta_id).get(o["id"]) or {}
+    grupo = next((g for g in grupos if g["id"] == atual.get("grupo_id")), None)
+    return {"grupos": grupos, "rotulo": og.rotulo(pool, conta_id), "grupo": grupo,
+            "lote": atual.get("lote", "")}
+
+
 def _empreita_da_ficha(conta_id: int, o: dict) -> dict:
     """A mão de obra paga por etapa: o valor de cada etapa, os pagamentos juntos por
     lançamento e os lançamentos de mão de obra que ainda não fecharam etapa nenhuma."""
@@ -528,6 +557,101 @@ def etapa_paga_desfazer(request: Request, obra_id: int, lancamento_id: int):
         return redir
     oe.desfazer(get_pool(), conta[0], obra_id, lancamento_id)
     return RedirectResponse(f"/painel/obras/{obra_id}#empreitada", status_code=303)
+
+
+# ─────────────────────────────────────────────────────────────── a quadra
+@router.post("/painel/obras/quadra/nova")
+def quadra_nova(request: Request, nome: str = Form(""), empreendimento: str = Form("")):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        g = og.criar_grupo(get_pool(), conta[0], nome, empreendimento)
+    except ValueError as e:
+        return _volta("/painel/obras", str(e))
+    return RedirectResponse(f"/painel/obras/quadra/{g['id']}", status_code=303)
+
+
+@router.post("/painel/obras/rotulo-grupo")
+def rotulo_grupo(request: Request, rotulo: str = Form("")):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    og.salvar_rotulo(get_pool(), conta[0], rotulo)
+    return RedirectResponse("/painel/obras", status_code=303)
+
+
+def _grupo_da_conta(conta_id: int, grupo_id: int) -> dict | None:
+    return next((g for g in og.listar_grupos(get_pool(), conta_id) if g["id"] == grupo_id), None)
+
+
+@router.get("/painel/obras/quadra/{grupo_id}", response_class=HTMLResponse)
+def quadra(request: Request, grupo_id: int):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    g = _grupo_da_conta(conta[0], grupo_id)
+    if not g:
+        return RedirectResponse("/painel/obras", status_code=303)
+    q = og.quadro(get_pool(), conta[0], grupo_id)
+    return _render("obra_quadra", request, titulo=g["nome"], secao_ativa="obras", brl=_brl,
+                   g=g, q=q, rotulo=og.rotulo(get_pool(), conta[0]),
+                   comecou={o["id"]: og.comecou(o) for o in q["casas"]},
+                   aviso=(request.query_params.get("ok") or "").strip(),
+                   erro=(request.query_params.get("erro") or "").strip())
+
+
+@router.post("/painel/obras/quadra/{grupo_id}/marcar")
+def quadra_marcar(request: Request, grupo_id: int, etapa: str = Form(""),
+                  obra: list[int] = Form([])):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    destino = f"/painel/obras/quadra/{grupo_id}"
+    if not _grupo_da_conta(conta[0], grupo_id):
+        return RedirectResponse("/painel/obras", status_code=303)
+    if not obra:
+        return _volta(destino, "Escolha as casas na primeira coluna.")
+    try:
+        r = og.marcar_etapa_grupo(get_pool(), conta[0], grupo_id, etapa, obra_ids=obra)
+    except ValueError as e:
+        return _volta(destino, str(e))
+    from urllib.parse import quote
+    msg = f"{r['etapa']} marcada em {len(r['marcadas'])} casa(s)."
+    return RedirectResponse(f"{destino}?ok={quote(msg)}#quadro", status_code=303)
+
+
+@router.post("/painel/obras/quadra/{grupo_id}/desfazer")
+def quadra_desfazer(request: Request, grupo_id: int):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    destino = f"/painel/obras/quadra/{grupo_id}"
+    if not _grupo_da_conta(conta[0], grupo_id):
+        return RedirectResponse("/painel/obras", status_code=303)
+    r = og.desfazer_ultima(get_pool(), conta[0], grupo_id)
+    from urllib.parse import quote
+    msg = (f"Desfeito: {r['etapa']} voltou em {len(r['voltaram'])} casa(s)." if r
+           else "Não tem marcação em lote pra desfazer.")
+    return RedirectResponse(f"{destino}?ok={quote(msg)}#quadro", status_code=303)
+
+
+@router.post("/painel/obras/quadra/{grupo_id}/editar")
+def quadra_editar(request: Request, grupo_id: int, nome: str = Form(""),
+                  empreendimento: str = Form(""), apagar: str = Form("")):
+    conta, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not _grupo_da_conta(conta[0], grupo_id):
+        return RedirectResponse("/painel/obras", status_code=303)
+    try:
+        if apagar:
+            og.apagar_grupo(get_pool(), conta[0], grupo_id)
+            return RedirectResponse("/painel/obras", status_code=303)
+        og.editar_grupo(get_pool(), conta[0], grupo_id, nome, empreendimento)
+    except ValueError as e:
+        return _volta(f"/painel/obras/quadra/{grupo_id}", str(e))
+    return RedirectResponse(f"/painel/obras/quadra/{grupo_id}", status_code=303)
 
 
 @router.post("/painel/obras/pix")
@@ -665,10 +789,9 @@ _TPL_LISTA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <span class="v">{{ sem.n }}</span><span class="n">{{ brl(sem.total_centavos) }} de material e mão de obra sem casa</span></a>{% endif %}
 </div>
 
-{% if obras %}<div class="ob-lista">
-{% for o in obras %}<a class="ob-card" href="/painel/obras/{{ o.id }}">
+{% macro card(o) %}<a class="ob-card" href="/painel/obras/{{ o.id }}">
   <div><span class="nm">{{ '🏠' if o.tipo == 'casa' else '🔨' }} {{ o.nome|e }}</span>
-    <div class="ob-mut">{{ o.endereco|e or o.rotulo_tipo }}{% if o.area_m2 %} · {{ '%g'|format(o.area_m2) }} m²{% endif %}</div></div>
+    <div class="ob-mut">{% if o.lote %}Lote {{ o.lote|e }} · {% endif %}{{ o.endereco|e or o.rotulo_tipo }}{% if o.area_m2 %} · {{ '%g'|format(o.area_m2) }} m²{% endif %}</div></div>
   <div><span class="ob-mut">Etapas · {{ o.pct }}%</span>
     <div class="ob-bar"><i style="width:{{ o.pct }}%"></i></div>
     <span class="ob-mut">{{ ('próxima: ' ~ o.proxima_etapa|lower|e) if o.proxima_etapa else 'todas feitas' }}</span></div>
@@ -676,8 +799,34 @@ _TPL_LISTA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="ob-mut">{% if o.custo_previsto_centavos %}de {{ brl(o.custo_previsto_centavos) }} previstos ({{ o.pct_previsto }}%){% else %}sem previsto{% endif %}</div></div>
   <div><span class="ob-pill {{ o.status }}">{{ o.rotulo_status }}</span>
     {% if avisos[o.id] %}<div><span class="ob-chip">{{ avisos[o.id]|e }}</span></div>{% endif %}</div>
-</a>{% endfor %}
-</div>{% endif %}
+</a>{% endmacro %}
+{% if grupos_view %}
+{% for gv in grupos_view %}<div class="ob-box" style="margin-bottom:.8rem">
+  <div class="ob-acoes" style="justify-content:space-between">
+    <div><a href="/painel/obras/quadra/{{ gv.g.id }}" style="font-weight:700;font-size:1.05rem">{{ gv.g.nome|e }}</a>
+      <span class="ob-mut">{% if gv.g.empreendimento %} · {{ gv.g.empreendimento|e }}{% endif %} · {{ gv.r.n }} casa{{ 's' if gv.r.n != 1 }}{% if gv.r.prontas %} · {{ gv.r.prontas }} pronta{{ 's' if gv.r.prontas != 1 }}{% endif %}</span></div>
+    <div style="min-width:180px"><div class="ob-bar"><i style="width:{{ gv.r.pct }}%"></i></div><span class="ob-mut">{{ gv.r.pct }}% · {{ brl(gv.r.gasto) }}</span></div>
+    <a class="ob-bt" href="/painel/obras/quadra/{{ gv.g.id }}">Quadro de etapas ›</a>
+  </div>
+  {% if gv.obras %}<div class="ob-lista" style="margin-top:.6rem">{% for o in gv.obras %}{{ card(o) }}{% endfor %}</div>
+  {% else %}<p class="ob-mut" style="margin:.4rem 0 0">Nenhuma casa ainda — escolha {{ gv.g.nome|e }} na ficha da casa, em "Dados da obra".</p>{% endif %}
+</div>{% endfor %}
+{% if soltas %}<h3 class="ob-sec">Sem {{ rotulo|lower }} · {{ soltas|length }}</h3>
+<div class="ob-lista">{% for o in soltas %}{{ card(o) }}{% endfor %}</div>{% endif %}
+{% elif obras %}<div class="ob-lista">{% for o in obras %}{{ card(o) }}{% endfor %}</div>{% endif %}
+
+<details class="ob-box" style="margin-top:.8rem"><summary>+ Nova {{ rotulo|lower }}</summary>
+<form method="post" action="/painel/obras/quadra/nova" class="ob-grid" style="margin-top:.5rem">
+  <div><label>Nome</label><input name="nome" placeholder="{{ rotulo }} 4" required></div>
+  <div><label>Empreendimento (opcional)</label><input name="empreendimento" placeholder="Residencial Lago Azul"></div>
+  <div><label>&nbsp;</label><button class="ob-bt prim">Criar {{ rotulo|lower }}</button></div>
+</form>
+<p class="ob-mut" style="margin:.6rem 0 .3rem">Quadra junta as casas que andam juntas: a fundação da quadra inteira, a nota de cimento de várias casas. Casa sem quadra continua igual.</p>
+<form method="post" action="/painel/obras/rotulo-grupo" class="ob-acoes">
+  <label style="margin:0">Chamar os grupos de</label>
+  <input name="rotulo" value="{{ rotulo|e }}" style="max-width:10rem" placeholder="Quadra">
+  <button class="ob-bt">Salvar</button><span class="ob-mut">Quadra, Setor, Bloco…</span>
+</form></details>
 
 <details class="ob-box" {% if not obras %}open{% endif %}><summary>+ Nova obra</summary>
 <form method="post" action="/painel/obras/nova">
@@ -690,6 +839,8 @@ _TPL_LISTA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div><label>Venda prevista ou contrato (R$)</label><input name="valor" inputmode="decimal"></div>
     <div><label>Início</label><input type="date" name="inicio_em"></div>
     <div><label>Previsão de término</label><input type="date" name="previsao_em"></div>
+    {% if grupos %}<div><label>{{ rotulo }}</label><select name="grupo_id"><option value="">sem {{ rotulo|lower }}</option>{% for g in grupos %}<option value="{{ g.id }}">{{ g.nome|e }}</option>{% endfor %}</select></div>
+    <div><label>Lote</label><input name="lote" placeholder="12"></div>{% endif %}
   </div>
   <p class="ob-mut" style="margin:.6rem 0">A obra ganha um centro de custo com o mesmo nome — é por ele que o assistente
   do WhatsApp lança cada nota na casa certa. As etapas vêm da sua última obra do mesmo tipo.</p>
@@ -732,6 +883,7 @@ _TPL_FICHA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="ob-topo" style="margin-top:.4rem"><div>
   <h2>{{ '🏠' if o.tipo == 'casa' else '🔨' }} {{ o.nome|e }}</h2>
   <div class="ob-sub">{{ o.rotulo_tipo }}{% if o.endereco %} · {{ o.endereco|e }}{% endif %}{% if o.area_m2 %} · {{ '%g'|format(o.area_m2) }} m²{% endif %}
+    {% if quadra.grupo %}· <a href="/painel/obras/quadra/{{ quadra.grupo.id }}">{{ quadra.grupo.nome|e }}</a>{% endif %}{% if quadra.lote %} · Lote {{ quadra.lote|e }}{% endif %}
     · <span class="ob-pill {{ o.status }}">{{ o.rotulo_status }}</span>{% if lead %}
     · lead: <a href="/painel/prospeccao/{{ lead.id }}">{{ lead.nome|e }}</a>{% endif %}</div></div></div>
 {% if erro %}<div class="ob-erro">{{ erro|e }}</div>{% endif %}
@@ -989,6 +1141,8 @@ registro — e o registro depende de habite-se, CND da obra e averbação.{% els
     <div><label>Venda prevista ou contrato (R$)</label><input name="valor" value="{{ '%.2f'|format(o.valor_centavos / 100) if o.valor_centavos is not none else '' }}" inputmode="decimal"></div>
     <div><label>Início</label><input type="date" name="inicio_em" value="{{ o.inicio_em or '' }}"></div>
     <div><label>Previsão de término</label><input type="date" name="previsao_em" value="{{ o.previsao_em or '' }}"></div>
+    {% if quadra.grupos %}<div><label>{{ quadra.rotulo }}</label><select name="grupo_id"><option value="">sem {{ quadra.rotulo|lower }}</option>{% for g in quadra.grupos %}<option value="{{ g.id }}"{{ ' selected' if quadra.grupo and quadra.grupo.id == g.id }}>{{ g.nome|e }}</option>{% endfor %}</select></div>
+    <div><label>Lote</label><input name="lote" value="{{ quadra.lote|e }}"></div>{% endif %}
   </div>
   <div style="margin-top:.6rem"><label>Observação</label><textarea name="obs" rows="2">{{ o.obs|e }}</textarea></div>
   <p class="ob-mut" style="margin:.6rem 0">Mudar o nome muda o centro de custo junto. Arquivar tira a obra das listas sem
@@ -1072,6 +1226,65 @@ _TPL_PUB_404 = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <body style="font-family:system-ui,sans-serif;max-width:640px;margin:3rem auto;padding:0 1rem;color:#1d2433">
 <h2>Orçamento não encontrado</h2><p>O link pode ter sido digitado errado. Peça um novo a quem mandou.</p></body></html>"""
 
+_TPL_QUADRA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
+<style>
+.qd-tab{border-collapse:separate;border-spacing:3px;font-size:.8rem}
+.qd-tab th.v{writing-mode:vertical-rl;transform:rotate(180deg);height:7.5rem;vertical-align:bottom;text-align:left;
+  font-size:.7rem;font-weight:700;color:var(--txt-mut);padding:.2rem .1rem}
+.qd-tab td.c{width:1.9rem;height:1.6rem;text-align:center;border-radius:5px;font-weight:800}
+.qd-tab td.nome{white-space:nowrap;padding-right:.5rem}
+.qd-paga{background:var(--verde);color:#fff;box-shadow:inset 0 -4px 0 rgba(0,0,0,.25)}
+.qd-feita{background:var(--verde);color:#fff}
+.qd-adiantada{background:#f2a33a;color:#fff}
+.qd-falta{background:var(--borda);color:var(--txt-mut)}
+.qd-nao{background:transparent;color:var(--txt-mut)}
+.qd-tab button{font-size:.65rem;padding:.1rem .25rem}
+.qd-leg{display:flex;gap:.8rem;flex-wrap:wrap;font-size:.75rem;margin-top:.4rem}
+.qd-leg i{display:inline-block;width:.75rem;height:.75rem;border-radius:3px;margin-right:.25rem;vertical-align:-1px}
+</style>
+<div class="ob-pag">
+<a class="ob-volta" href="/painel/obras">← Obras</a>
+<div class="ob-topo" style="margin-top:.4rem"><div><h2>{{ g.nome|e }}</h2>
+  <div class="ob-sub">{{ rotulo }}{% if g.empreendimento %} · {{ g.empreendimento|e }}{% endif %} · {{ q.resumo.n }} casa{{ 's' if q.resumo.n != 1 }}</div></div></div>
+{% if erro %}<div class="ob-erro">{{ erro|e }}</div>{% endif %}
+{% if aviso %}<div class="ob-box" style="background:var(--verde-claro, #e9faf3)">{{ aviso|e }}</div>{% endif %}
+
+<div class="ob-faixas">
+  <div class="ob-cx"><span class="r">Andamento</span><span class="v">{{ q.resumo.pct }}%</span><span class="n">média das casas, pelo m²</span></div>
+  <div class="ob-cx"><span class="r">Prontas</span><span class="v">{{ q.resumo.prontas }} de {{ q.resumo.n }}</span><span class="n">casas com todas as etapas</span></div>
+  <div class="ob-cx"><span class="r">Gasto nas casas</span><span class="v">{{ brl(q.resumo.gasto) }}</span><span class="n">o que foi lançado em cada uma</span></div>
+</div>
+
+<h3 class="ob-sec" id="quadro">Quadro de etapas</h3>
+{% if q.casas %}
+<p class="ob-mut">Cada linha é uma casa, cada coluna uma etapa. Marque as casas na primeira coluna (já vêm marcadas as que começaram) e toque em "marcar" no pé da etapa. Pelo WhatsApp: "terminei a fundação da {{ g.nome|lower|e }}".</p>
+<form method="post" action="/painel/obras/quadra/{{ g.id }}/marcar">
+<div class="ob-rolo"><table class="qd-tab">
+<tr><th></th><th style="text-align:left">Casa</th>{% for col in q.colunas %}<th class="v">{{ col.nome|e }}</th>{% endfor %}<th>%</th></tr>
+{% for o in q.casas %}<tr>
+  <td><input type="checkbox" name="obra" value="{{ o.id }}" style="width:auto"{{ ' checked' if comecou[o.id] }}></td>
+  <td class="nome"><a href="/painel/obras/{{ o.id }}">{{ ('Lote ' ~ o.lote) if o.lote else o.nome }}</a></td>
+  {% for col in q.colunas %}{% set st = q.celulas[o.id][col.chave] %}<td class="c {{ 'qd-' ~ st if st else 'qd-nao' }}" title="{{ col.nome|e }}">{{ {'paga': '✓', 'feita': '✓', 'adiantada': '$', 'falta': '·'}.get(st, '–') }}</td>{% endfor %}
+  <td class="ob-mut"><b>{{ o.pct }}</b></td></tr>{% endfor %}
+<tr><td></td><td></td>{% for col in q.colunas %}<td><button class="ob-bt" name="etapa" value="{{ col.chave|e }}" title="marcar {{ col.nome|e }} nas casas escolhidas">marcar</button></td>{% endfor %}<td></td></tr>
+</table></div>
+</form>
+<div class="qd-leg"><span><i class="qd-paga"></i>feita e paga</span><span><i class="qd-feita"></i>feita</span><span><i class="qd-adiantada"></i>paga e não feita</span><span><i class="qd-falta"></i>falta</span></div>
+<form method="post" action="/painel/obras/quadra/{{ g.id }}/desfazer" style="margin-top:.6rem"><button class="ob-bt">Desfazer a última marcação em lote</button></form>
+{% else %}<p class="ob-mut">Nenhuma casa nesta {{ rotulo|lower }} ainda. Na ficha da casa, em "Dados da obra", escolha {{ g.nome|e }}.</p>{% endif %}
+
+<details class="ob-box" style="margin-top:1.2rem"><summary>Dados da {{ rotulo|lower }}</summary>
+<form method="post" action="/painel/obras/quadra/{{ g.id }}/editar" class="ob-grid" style="margin-top:.5rem">
+  <div><label>Nome</label><input name="nome" value="{{ g.nome|e }}" required></div>
+  <div><label>Empreendimento</label><input name="empreendimento" value="{{ g.empreendimento|e }}"></div>
+  <div><label>&nbsp;</label><button class="ob-bt prim">Salvar</button></div>
+</form>
+{% if not q.casas %}<form method="post" action="/painel/obras/quadra/{{ g.id }}/editar" onsubmit="return confirm('Apagar esta {{ rotulo|lower }}?')" style="margin-top:.4rem">
+  <input type="hidden" name="nome" value="{{ g.nome|e }}"><input type="hidden" name="apagar" value="1"><button class="ob-bt">Apagar</button></form>{% endif %}
+</details>
+</div>
+{% endblock %}"""
+
 _TPL_PUB = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orçamento · {{ o.obra_nome }}</title>
@@ -1142,3 +1355,5 @@ button{padding:.65rem 1.1rem;border-radius:9px;border:0;font-size:1rem;cursor:po
   <p class="mut" style="margin:.6rem 0 0">O aceite fica registrado com o seu nome, a data e o endereço de internet de onde foi feito.</p>
 </form>{% elif o.vencido %}<div class="cx err">A validade deste orçamento venceu. Peça um novo à empresa.</div>{% endif %}
 </div></body></html>"""
+
+_env.loader.mapping["obra_quadra"] = _TPL_QUADRA

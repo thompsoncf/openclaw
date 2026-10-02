@@ -48,7 +48,7 @@ def pool():
                                            vencimento date, valor_centavos bigint)""")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
                   "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql",
-                  "474_clinica_plano_pago_e_nao_fechou.sql"):
+                  "474_clinica_plano_pago_e_nao_fechou.sql", "490_clinica_resultados.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("update servicos_catalogo set setup_centavos=80000 where conta_id=39 and nome='Procedimento estético'")
@@ -318,6 +318,17 @@ def test_recusado_pelo_link_com_retorno_a_fazer_vai_pro_retorno(pool, zap):
         c.commit()
         assert _card(c, lead)[0] == "retorno"
         assert cp.plano(c, CLINICA, pid)["nao_fechou_motivo"] == "recusou pelo link"
+
+
+def test_plano_que_nao_fecha_com_resultado_a_entregar_vai_pro_retorno(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        eid = _atendido(c, lead)
+        from finance import clinica_pacotes as ckp
+        assert ckp.pedir_resultado(c, CLINICA, ca.evento(c, CLINICA, eid), None)
+        pid = _plano(c, lead)
+        cp.enviar(c, CLINICA, pid, 51, AGORA)
+        assert cp.nao_fechou(c, CLINICA, pid, "preco", 51) == "retorno"
 
 
 def test_plano_vencido_tira_o_card_da_coluna_do_plano(pool, zap):

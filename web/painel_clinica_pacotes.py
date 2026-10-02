@@ -23,7 +23,10 @@ from web.portal import _env, _render
 router = APIRouter()
 URL = "/painel/clinica/pacotes"
 _AVISOS = {"config": "Configuração salva.", "encerrado": "Pacote encerrado. O saldo fica registrado.",
-           "dispensado": "Retorno tirado da fila."}
+           "dispensado": "Retorno tirado da fila.",
+           "res_chegou": "Anotado: o resultado chegou. Marque a entrega com o paciente.",
+           "res_entregue": "Resultado entregue. Se era a única coisa pendente, o card do paciente foi para Concluído.",
+           "res_dispensar": "Resultado tirado da fila."}
 
 
 def _ir(request: Request, url: str, aviso: str = "", erro: str = "") -> RedirectResponse:
@@ -51,6 +54,7 @@ def lista(request: Request):
         marcar = {k["id"] for k in ckp.precisam_marcar(c, conta[0], agora)}
         atrasados = {k["id"] for k in pacotes if k["estado"] == "ativo" and ckp.atrasado(c, conta[0], k, hoje)}
         retornos = ckp.retornos(c, conta[0], agora, dias=14)
+        resultados = ckp.resultados(c, conta[0], agora)
         # o tipo de retorno de cada profissional: o horário marcado daqui fecha o retorno
         # (só um horário de categoria retorno fecha, clinica_agenda.SQL_HORARIO_DE_RETORNO)
         tipo_retorno = {}
@@ -65,7 +69,8 @@ def lista(request: Request):
     return _render("clinica_pacotes.html", request, titulo="Pacotes e retornos", **_ctx(request),
                    ativos=ativos, marcar=[k for k in ativos if k["id"] in marcar], marcar_ids=marcar,
                    atrasados=atrasados, outros=[k for k in pacotes if k["estado"] != "ativo"][:30],
-                   retornos=retornos, tipo_retorno=tipo_retorno, cfg=cfg, gerencia=gerencia, hoje=hoje,
+                   retornos=retornos, resultados=resultados, tipo_retorno=tipo_retorno, cfg=cfg, gerencia=gerencia,
+                   hoje=hoje,
                    vendidas=sum(k["total"] for k in pacotes if k["estado"] != "encerrado"),
                    usadas=sum(k["usadas"] for k in pacotes if k["estado"] != "encerrado"),
                    devidas=sum(k["saldo"] for k in ativos))
@@ -95,6 +100,19 @@ def dispensar(request: Request, retorno_id: int):
         ckp.dispensar_retorno(c, conta[0], retorno_id)
         c.commit()
     return _ir(request, URL, "dispensado")
+
+
+@router.post(URL + "/resultado/{resultado_id}/{acao}")
+def resultado(request: Request, resultado_id: int, acao: str):
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if acao not in ("chegou", "entregue", "dispensar"):
+        return _ir(request, URL)
+    with get_pool().connection() as c:
+        ok = ckp.resultado(c, conta[0], resultado_id, acao, request.session.get("membro_id"))
+        c.commit()
+    return _ir(request, URL, ("res_" + acao) if ok else "", "" if ok else "Esse resultado já não está em aberto.")
 
 
 @router.get(URL + "/{pacote_id}", response_class=HTMLResponse)
@@ -175,6 +193,14 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     <div class="pk-acoes"><a href="/painel/clinica/agenda/novo?{% if r.profissional_id %}prof={{ r.profissional_id }}&{% endif %}{% if tipo_retorno.get(r.profissional_id) %}tipo={{ tipo_retorno[r.profissional_id] }}&{% endif %}lead={{ r.lead or '' }}">Marcar</a>
       <form method="post" action="/painel/clinica/pacotes/retorno/{{ r.id }}/dispensar"><button class="sec">Tirar da fila</button></form></div></div>
   {% else %}<div class="pk-m">Nenhum retorno chegando.</div>{% endfor %}
+
+  <h3 class="pk-sec">Resultados a entregar</h3>
+  {% for r in resultados %}<div class="pk-l"><div><b>{{ r.paciente }}</b>{% if r.prof %} · {{ r.prof }}{% endif %}
+      {% if r.chegou %}<span class="pk-chip">chegou: marcar a entrega</span>{% elif r.atrasado %}<span class="pk-chip al">previsto {{ r.previsto_em.strftime('%d/%m') }}, ainda não chegou</span>{% elif r.previsto_em %}<span class="pk-chip">previsto {{ r.previsto_em.strftime('%d/%m') }}</span>{% else %}<span class="pk-chip">esperando o laboratório</span>{% endif %}</div>
+    <div class="pk-acoes">{% if r.chegou %}<a href="/painel/clinica/agenda/novo?{% if r.profissional_id %}prof={{ r.profissional_id }}&{% endif %}{% if tipo_retorno.get(r.profissional_id) %}tipo={{ tipo_retorno[r.profissional_id] }}&{% endif %}lead={{ r.lead or '' }}">Marcar entrega</a>{% else %}<form method="post" action="/painel/clinica/pacotes/resultado/{{ r.id }}/chegou"><button>Chegou</button></form>{% endif %}
+      <form method="post" action="/painel/clinica/pacotes/resultado/{{ r.id }}/entregue"><button class="sec">Entregue</button></form>
+      <form method="post" action="/painel/clinica/pacotes/resultado/{{ r.id }}/dispensar"><button class="sec">Tirar da fila</button></form></div></div>
+  {% else %}<div class="pk-m">Nenhum resultado esperando.</div>{% endfor %}
 
   <h3 class="pk-sec">Pacotes ativos</h3>
   {% for k in ativos %}<div class="pk-l"><div><a class="q" href="/painel/clinica/pacotes/{{ k.id }}">{{ k.paciente }}</a>

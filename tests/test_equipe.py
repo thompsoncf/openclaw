@@ -46,16 +46,20 @@ def test_caps_por_papel():
     # `origens` é a quarta capacidade (tela de Origens, pro convidado da agência).
     # A comparação segue sendo do dicionário INTEIRO de propósito: capacidade nova
     # que vaze pra um papel errado tem que quebrar aqui, não passar despercebida.
+    # `campo` é a quinta (02/10/2026): o app do mestre de obras (/obra). Dono e
+    # gestor têm (cobrem o mestre); vendedor, financeiro e convidado, não.
     assert equipe.caps_do_papel("dono") == {
-        "vendas": True, "financeiro": True, "gerir": True, "origens": True}
+        "vendas": True, "financeiro": True, "gerir": True, "origens": True, "campo": True}
     assert equipe.caps_do_papel("vendedor") == {
-        "vendas": True, "financeiro": False, "gerir": False, "origens": False}
+        "vendas": True, "financeiro": False, "gerir": False, "origens": False, "campo": False}
     assert equipe.caps_do_papel("financeiro") == {
-        "vendas": False, "financeiro": True, "gerir": False, "origens": False}
+        "vendas": False, "financeiro": True, "gerir": False, "origens": False, "campo": False}
     assert equipe.caps_do_papel("convidado") == {
-        "vendas": False, "financeiro": False, "gerir": False, "origens": True}
+        "vendas": False, "financeiro": False, "gerir": False, "origens": True, "campo": False}
+    assert equipe.caps_do_papel("mestre") == {
+        "vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": True}
     assert equipe.caps_do_papel(None) == {
-        "vendas": False, "financeiro": False, "gerir": False, "origens": False}
+        "vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": False}
 
 
 def test_aplicar_contexto():

@@ -129,16 +129,17 @@ def _achar_ou_criar(c, conta_id: int, descricao: str, unidade: str) -> tuple[int
 
 
 def _mov(c, conta_id: int, produto_id: int, tipo: str, qtd, *, obra_id=None,
-         transf_id=None, lancamento_id=None, item_id=None, motivo=None) -> None:
-    """O movimento é a verdade, e o saldo sai SEMPRE da soma por local
+         transf_id=None, lancamento_id=None, item_id=None, motivo=None) -> int:
+    """Grava o movimento e devolve o id dele (o "desfazer" do app do mestre
+    apaga pelos ids). O movimento é a verdade, e o saldo sai SEMPRE da soma por local
     (`saldo_local`, `_quadros`). O cache `catalogo_produtos.saldo` do motor do
     fornecedor NÃO é tocado: ele é da conta inteira, e o apagar-a-nota (cascade
     da 484) não teria como acertá-lo."""
-    c.execute("""insert into estoque_mov (produto_id, fornecedor_id, tipo, quantidade,
+    return c.execute("""insert into estoque_mov (produto_id, fornecedor_id, tipo, quantidade,
                      obra_id, transf_id, lancamento_id, item_id, motivo)
-                 values (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                 values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
               (produto_id, conta_id, tipo, qtd, obra_id, transf_id,
-               lancamento_id, item_id, motivo))
+               lancamento_id, item_id, motivo)).fetchone()[0]
 
 
 def _obra_do_lancamento(c, conta_id: int, lancamento_id: int):
@@ -284,23 +285,24 @@ def mover(pool, conta_id: int, *, acao: str, produto_id: int, quantidade,
         raise ValueError("Quantas unidades? Preciso de um número maior que zero.")
     if acao in ("usei", "levei") and not obra_id:
         raise ValueError("De qual obra?")
+    ids = []
     with pool.connection() as c:
         if acao == "usei":
-            _mov(c, conta_id, produto_id, "saida", q, obra_id=obra_id,
-                 motivo=f"uso ({por})" if por else "uso")
+            ids.append(_mov(c, conta_id, produto_id, "saida", q, obra_id=obra_id,
+                            motivo=f"uso ({por})" if por else "uso"))
         elif acao == "levei":
             t = uuid.uuid4().hex[:12]
-            _mov(c, conta_id, produto_id, "saida", q, transf_id=t,
-                 motivo=f"transferência ({por})" if por else "transferência")
-            _mov(c, conta_id, produto_id, "entrada", q, obra_id=obra_id, transf_id=t,
-                 motivo="transferência")
+            ids.append(_mov(c, conta_id, produto_id, "saida", q, transf_id=t,
+                            motivo=f"transferência ({por})" if por else "transferência"))
+            ids.append(_mov(c, conta_id, produto_id, "entrada", q, obra_id=obra_id, transf_id=t,
+                            motivo="transferência"))
         elif acao == "chegou":
-            _mov(c, conta_id, produto_id, "entrada", q, obra_id=obra_id,
-                 motivo=f"chegada ({por})" if por else "chegada")
+            ids.append(_mov(c, conta_id, produto_id, "entrada", q, obra_id=obra_id,
+                            motivo=f"chegada ({por})" if por else "chegada"))
         else:
             raise ValueError("Ação de material desconhecida.")
         c.commit()
-    out = {"deposito": saldo_local(pool, conta_id, produto_id, None)}
+    out = {"deposito": saldo_local(pool, conta_id, produto_id, None), "mov_ids": ids}
     if obra_id:
         out["na_obra"] = saldo_local(pool, conta_id, produto_id, obra_id)
     with pool.connection() as c:

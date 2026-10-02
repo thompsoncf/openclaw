@@ -648,6 +648,34 @@ CAMPOS_CONTRATO = (
 _ROTULO_TAM = {"tenda": "Espaço em tenda", "personalizado": "Stand personalizado"}
 
 
+def receita_do_cnpj(doc: str) -> dict:
+    """O que o botão "Receita" devolve pros formulários do cliente do stand (painel,
+    app e link do contrato) — o cadastro que o CONTRATO pede, como a Receita tem:
+    razão social (não o nome fantasia), nome fantasia, endereço completo, CEP,
+    cidade, UF, e-mail e o representante sugerido pelo quadro de sócios.
+    Antes (até 02/10/2026) as três rotas devolviam só nome/e-mail/cidade/UF, e o
+    "nome" era o fantasia: caía no campo Razão social. Sempre {"ok": bool, ...}."""
+    from . import cnpj_info, validadoc
+    ok, tipo, digitos = validadoc.valida(doc)
+    if tipo == "pf":
+        return {"ok": False, "erro": "A busca na Receita é só pra CNPJ — com CPF, digite os dados."}
+    if tipo != "pj" or not ok:
+        return {"ok": False, "erro": "CNPJ inválido — confira os 14 números."}
+    info = cnpj_info.consultar_cnpj(digitos)
+    if not info:
+        return {"ok": False, "erro": "Não consegui achar esse CNPJ na Receita agora — "
+                                     "tente de novo ou digite os dados."}
+    cep = "".join(c for c in str(info.get("cep") or "") if c.isdigit())
+    return {"ok": True,
+            "razao": info.get("razao_social") or info.get("nome"),
+            "fantasia": info.get("fantasia"),
+            "rep": info.get("representante"),
+            "end": info.get("endereco_completo"),
+            "cep": f"{cep[:5]}-{cep[5:]}" if len(cep) == 8 else (cep or None),
+            "cidade": info.get("cidade"), "uf": info.get("uf"),
+            "email": info.get("email")}
+
+
 def rotulo_tamanho(tam: str) -> str:
     """'4x3' -> '4x3m'; tenda/personalizado por extenso."""
     return _ROTULO_TAM.get(tam) or (f"{tam}m" if tam else "")

@@ -321,6 +321,7 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
     # (web/app.py): na construção, a foto que não é nota (o telhado pronto) vai pra
     # obra pelo guardar_foto_da_obra. PDF não é foto de obra, e fica de fora.
     _midia_pro_livro(agente, imagem_b64, media_type)
+    agente.livro.canal_interativo = True          # o Telegram mostra o teclado de respostas
     # AGILIDADE (percepcao): o loop do agente leva alguns segundos (varias chamadas
     # ao modelo). Mostra "digitando..." na hora pra pessoa saber que estamos nessa.
     try:
@@ -345,7 +346,19 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
     from finance.nfce_qr import deve_mandar_dica_qr
     if deve_mandar_dica_qr(dica_qr, chave_nfce, getattr(agente, "_obs_tools", set())):
         resposta += (DICA_QR if chave_nfce else DICA_QR_FALHOU)
-    await update.message.reply_text(resposta)
+    await update.message.reply_text(resposta, reply_markup=_teclado_da_escolha(agente))
+
+
+def _teclado_da_escolha(agente):
+    """A escolha com toque (finance/escolhas.py) no Telegram: um TECLADO DE
+    RESPOSTAS — o toque manda o título como mensagem comum, e o fluxo de texto de
+    sempre recebe "Casa 2". Some depois do toque. None sem escolha."""
+    escolha = getattr(getattr(agente, "livro", None), "escolha", None)
+    if not escolha:
+        return None
+    from telegram import KeyboardButton, ReplyKeyboardMarkup
+    return ReplyKeyboardMarkup([[KeyboardButton(o["titulo"])] for o in escolha["opcoes"]],
+                               one_time_keyboard=True, resize_keyboard=True)
 
 
 async def on_text(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):

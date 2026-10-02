@@ -856,6 +856,30 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
         return (f"Desfeito: {r['etapa'].lower()} voltou a ficar em aberto em "
                 f"{len(r['voltaram'])} casa(s) de {g['nome']}.")
 
+    def oferecer_escolha(e: dict) -> str:
+        """"De qual obra?" e "que etapa ficou pronta?" com toque (finance/escolhas.py,
+        pedido do dono em 02/10/2026)."""
+        from . import escolhas as esc
+        if (e.get("tipo") or "obra") == "etapa":
+            o, erro = _obra(e.get("obra"))
+            if not o:
+                return erro
+            escolha = esc.de_etapa(pool, conta_id, ob.obter_obra(pool, conta_id, o["id"]))
+            if not escolha:
+                return f"Todas as etapas de {o['nome']} já estão feitas."
+        else:
+            escolha = esc.de_obra(pool, conta_id)
+            if not escolha:
+                return (f"Ainda não tem obra cadastrada. Quem cadastra é a empresa, no painel: "
+                        f"{ob.LINK_OBRAS}")
+        titulos = ", ".join(op["titulo"] for op in escolha["opcoes"])
+        if livro is not None and getattr(livro, "canal_interativo", False):
+            livro.escolha = escolha
+            return (f"Os botões vão logo depois da sua resposta, com: {titulos}. Escreva SÓ a "
+                    "pergunta curta (\"É de qual obra?\" / \"Qual etapa ficou pronta?\"), sem "
+                    "listar as opções. O toque chega como o nome da opção.")
+        return "Liste as opções numeradas pra pessoa responder:\n" + esc.texto_das_opcoes(escolha)
+
     def guardar_foto_da_obra(e: dict) -> str:
         """A foto que NÃO é nota (telhado, parede, piso pronto): guarda na obra e na
         etapa (finance/obra_fotos.py). A imagem é a da mensagem atual, que o webhook
@@ -1082,6 +1106,18 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             parametros={"type": "object", "properties": {"quadra": {"type": "string"}},
                         "required": ["quadra"]},
             executar=desfazer_etapa_quadra,
+        ),
+        Ferramenta(
+            nome="oferecer_escolha",
+            descricao=("Mostra BOTÕES pra pessoa escolher, em vez de perguntar por texto: "
+                       "tipo 'obra' (de qual obra é a despesa) ou tipo 'etapa' (que etapa "
+                       "ficou pronta numa obra — precisa da obra). Use sempre que for "
+                       "perguntar uma dessas duas coisas."),
+            parametros={"type": "object",
+                        "properties": {"tipo": {"type": "string", "enum": ["obra", "etapa"]},
+                                       "obra": {"type": "string", "description": "pra tipo etapa"}},
+                        "required": ["tipo"]},
+            executar=oferecer_escolha,
         ),
         Ferramenta(
             nome="guardar_foto_da_obra",

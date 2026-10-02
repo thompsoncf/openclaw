@@ -78,7 +78,7 @@ def pool():
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         c.execute((BASE / "360_clinica_agenda.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "471_clinica_tratamento_proposto.sql").read_text(encoding="utf-8"))
-        c.execute((BASE / "481_clinica_resultados.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "490_clinica_resultados.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()

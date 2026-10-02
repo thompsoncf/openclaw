@@ -1,4 +1,4 @@
--- 481_clinica_resultados.sql
+-- 490_clinica_resultados.sql
 -- CRM da clínica, entrega 1d (docs/mockups/clinica_crm_telas.html, seções 01, 02 e 05,
 -- aprovado em 01/10/2026). finance/clinica_pacotes.py e finance/clinica_agenda.py.
 --

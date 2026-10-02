@@ -1,4 +1,4 @@
--- 482_novidade_clinica_resultado_a_entregar.sql
+-- 491_novidade_clinica_resultado_a_entregar.sql
 -- O aviso da entrega 1d do CRM da clínica (docs/mockups/clinica_crm_telas.html, seções 01
 -- e 05, aprovado em 01/10/2026), seguindo a seção 5 do CLAUDE.md.
 --
@@ -7,7 +7,7 @@
 -- QUEM RECEBE, conferido na produção em 01/10/2026 (só leitura, nicho clinica):
 --   39 Espaço Pelle Clínica Dermatologica Ltda (a única conta do nicho)
 --
--- Sem schema novo (a tabela é a 481). Aditiva e idempotente (on conflict (chave) do nothing).
+-- Sem schema novo (a tabela é a 490). Aditiva e idempotente (on conflict (chave) do nothing).
 
 insert into public.novidades (chave, tipo, publico, pra_quem, titulo, resumo, link, corpo, publicado_em) values
 ('clinica-resultado-a-entregar', 'novidade', 'clinica', '{dono,gestor,vendedor}',

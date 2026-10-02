@@ -541,13 +541,13 @@ def _segura_em_consulta(c, conta_id: int, lead_id: int, evento_id: int) -> bool:
 
 def _resultado_pendente(c, conta_id: int, lead_id: int) -> bool:
     """Há resultado de exame do paciente ainda não entregue (esperando o laboratório ou
-    já chegado)? Biópsia, coleta e exame não deixam o card concluir (migração 481)."""
+    já chegado)? Biópsia, coleta e exame não deixam o card concluir (migração 490)."""
     try:
         with c.transaction():
             return c.execute("""select 1 from clinica_resultados
                                  where conta_id=%s and prospeccao_id=%s and estado in ('aguardando','chegou')
                                  limit 1""", (conta_id, lead_id)).fetchone() is not None
-    except Exception:  # noqa: BLE001 — sem a 481
+    except Exception:  # noqa: BLE001 — sem a 490
         return False
 
 
@@ -775,7 +775,7 @@ def card_do_retorno(c, conta_id: int, lead_id: int | None, membro_id: int | None
                     """select count(*), count(*) filter (where estado in ('aguardando','chegou'))
                          from clinica_resultados where conta_id=%s and prospeccao_id=%s""",
                     (conta_id, lead_id)).fetchone()
-        except Exception:  # noqa: BLE001 — sem a 481
+        except Exception:  # noqa: BLE001 — sem a 490
             r_teve, r_aberto = 0, 0
         if not (teve or r_teve) or aberto or r_aberto:
             return None

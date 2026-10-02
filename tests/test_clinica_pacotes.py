@@ -49,7 +49,8 @@ def pool():
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
                   "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql",
-                  "474_clinica_plano_pago_e_nao_fechou.sql", "490_clinica_resultados.sql"):
+                  "474_clinica_plano_pago_e_nao_fechou.sql", "490_clinica_resultados.sql",
+                  "495_clinica_recebimentos.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("""update servicos_catalogo set setup_centavos=80000, volta_dias=null
@@ -282,6 +283,30 @@ def test_o_lembrete_de_sessao_espera_o_pagamento(pool, zap):
         c.commit()
         assert cp.conferir_pagamentos(c, CLINICA) == 1
         assert ckp.lembrar(c, CLINICA, _br(liberou))["sessao"] == 1
+
+
+def test_sessao_coberta_pelo_pacote_nao_tem_receber(pool, zap):
+    """A agenda lê a cobertura como a tela do agendamento: antes do Finalizar, pelo pacote
+    que vai baixar. A sessão coberta não se recebe nem por um POST velho."""
+    from finance import clinica_recebimentos as crb
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+    _plano_aceito(pool, lead)
+    with pool.connection() as c:
+        eid = _sessao(c, lead, SEG)
+        assert ca.mudar_situacao(c, CLINICA, eid, "presente") is None
+        c.commit()
+        ev = ca.evento(c, CLINICA, eid)
+        crb.anotar(c, CLINICA, [ev])
+        assert ev["pgto"] == "pacote"
+    assert "coberto pelo pacote" in crb.receber(pool, CLINICA, eid, valor_centavos=80000, forma="pix", membro_id=51)
+    with pool.connection() as c:
+        for st in ("atendimento", "finalizado"):
+            assert ca.mudar_situacao(c, CLINICA, eid, st) is None
+        c.commit()
+        ev = ca.evento(c, CLINICA, eid)
+        crb.anotar(c, CLINICA, [ev])
+        assert ev["pgto"] == "pacote"                           # finalizado: pelo que baixou
 
 
 def test_consulta_que_nao_e_do_pacote_nao_baixa(pool, zap):

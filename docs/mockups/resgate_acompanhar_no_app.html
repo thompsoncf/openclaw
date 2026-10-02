@@ -1,0 +1,271 @@
+<title>Resgate ao vivo no app</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* O visual do próprio painel do Zaq (escuro, verde; lilás pra IA), igual aos mockups do
+   funil. Tema único de propósito: o app e o painel não têm modo claro. */
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23; --line-2:#2A3A31;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-2:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-2:#F2C66E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-2:#F0A9A2; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --ia:#C9A3E0; --ia-2:#E3CCF2; --ia-borda:#3E2E4E; --ia-fundo:#1A1422;
+  --zap-in:#1F2C33; --zap-out:#005C4B;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+b{font-weight:600}
+code{font-family:var(--mono);font-size:.78em;color:var(--dim)}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:2.4rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.09em;text-transform:uppercase}
+.head{display:flex;flex-direction:column;gap:.6rem;max-width:80ch}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);line-height:1.1}
+.head p{color:var(--dim);margin:0}
+.head p b{color:var(--text)}
+.sec{display:flex;flex-direction:column;gap:1rem}
+.sec>header{display:flex;flex-direction:column;gap:.3rem;max-width:80ch}
+.sec h2{font-size:1.25rem}
+.sec header p{color:var(--dim);margin:0;font-size:.92rem}
+.sec header p b{color:var(--text)}
+.nota{font-size:.8rem;color:var(--dim);display:flex;gap:.5rem;align-items:flex-start;max-width:88ch;margin:0}
+.nota i{font-style:normal;font-family:var(--mono);font-size:.66rem;color:var(--bg);background:var(--neon);border-radius:4px;padding:.05rem .35rem;margin-top:.15rem;flex:none}
+.nota.al i{background:var(--ambar)}
+.nota b{color:var(--text)}
+
+/* números medidos */
+.med{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.mt{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.75rem .9rem;display:flex;flex-direction:column;gap:.2rem}
+.mt .v{font-family:var(--display);font-size:1.5rem;font-variant-numeric:tabular-nums;line-height:1.15}
+.mt .v small{font-size:.82rem;color:var(--dim);font-weight:500}
+.mt p{margin:0;font-size:.8rem;color:var(--dim)}
+.mt.at{border-color:var(--ambar-borda)} .mt.at .v{color:var(--ambar-2)}
+.mt.al{border-color:var(--coral-borda)} .mt.al .v{color:var(--coral-2)}
+
+/* a linha do tempo de sábado */
+.tl{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.tr{display:grid;grid-template-columns:9rem 1fr;border-top:1px solid var(--line)}
+.tr:first-child{border-top:0}
+.tr>div{padding:.6rem .8rem;font-size:.84rem;color:var(--dim)}
+.tr>div:first-child{font-family:var(--mono);font-size:.74rem;color:var(--neon-2);border-right:1px solid var(--line)}
+.tr b{color:var(--text)}
+.tr.hoje>div:first-child{color:var(--faint)}
+
+/* as peças: duas telas de celular lado a lado */
+.pecas{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start}
+.peca{display:flex;flex-direction:column;gap:.6rem;min-width:0}
+.peca>h3{font-size:1rem}
+.peca>p{margin:0;font-size:.8rem;color:var(--dim)}
+.peca>p b{color:var(--text)}
+.etq{font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:var(--ia-2);background:var(--ia-fundo);border:1px solid var(--ia-borda);border-radius:4px;padding:.02rem .4rem;align-self:flex-start}
+.fone{width:100%;max-width:300px;border:1px solid var(--line-2);border-radius:28px;background:var(--bg);overflow:hidden;display:flex;flex-direction:column;margin-inline:auto}
+.fone .sb{display:flex;justify-content:space-between;padding:.5rem 1.1rem .2rem;font-size:.68rem;color:var(--dim);font-variant-numeric:tabular-nums}
+
+/* tela do lead (gestão) */
+.hd{padding:.5rem .8rem .6rem;display:flex;flex-direction:column;gap:.35rem;border-bottom:1px solid var(--line)}
+.hd .t{display:flex;align-items:center;gap:.5rem}
+.hd .t i{font-style:normal;color:var(--dim);font-size:1.1rem}
+.hd h4{font-size:1rem}
+.hd small{display:block;color:var(--dim);font-size:.7rem;line-height:1.3}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.cp{font-size:.64rem;border-radius:999px;padding:.08rem .5rem;border:1px solid var(--line-2);color:var(--dim)}
+.cp.ia{border-color:var(--ia-borda);background:var(--ia-fundo);color:var(--ia-2)}
+.cp.vivo{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-2)}
+.cp.vivo::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--neon);margin-right:.3rem;vertical-align:1px}
+.conv{padding:.7rem .7rem .4rem;display:flex;flex-direction:column;gap:.4rem;min-height:300px;background:var(--bg-2)}
+.nt{align-self:center;text-align:center;font-size:.64rem;color:var(--dim);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:.25rem .5rem;max-width:90%}
+.bl{max-width:82%;border-radius:10px;padding:.35rem .55rem;font-size:.74rem;line-height:1.4;color:#E9EDEF}
+.bl small{display:block;font-family:var(--mono);font-size:.54rem;color:#8FA8B3;margin-top:.15rem;text-align:right}
+.bl.out{background:var(--zap-out);align-self:flex-end}
+.bl.in{background:var(--zap-in);align-self:flex-start}
+.bl .de{display:block;font-family:var(--mono);font-size:.54rem;color:var(--ia-2);margin-bottom:.1rem}
+.dig{align-self:flex-end;font-size:.62rem;color:var(--ia-2);font-family:var(--mono)}
+.rod{padding:.55rem .7rem .7rem;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:.4rem;background:var(--bg)}
+.rod p{margin:0;font-size:.68rem;color:var(--dim)}
+.rod p b{color:var(--text)}
+.rod .bt{font-size:.7rem;border:1px solid var(--line-2);border-radius:8px;padding:.3rem .6rem;color:var(--text);align-self:flex-start;background:var(--surface)}
+
+/* a notificação na tela travada */
+.trava{background:linear-gradient(180deg,#0E1512,#0A0F0C);padding:1.4rem .8rem 1.2rem;min-height:300px;display:flex;flex-direction:column;gap:.55rem}
+.trava .hr{text-align:center;font-family:var(--display);font-size:2.4rem;line-height:1;margin:.3rem 0 .1rem;font-variant-numeric:tabular-nums}
+.trava .dt{text-align:center;font-size:.7rem;color:var(--dim);margin-bottom:.6rem}
+.push{border:1px solid var(--line-2);border-radius:14px;background:var(--surface-2);padding:.55rem .65rem;display:flex;flex-direction:column;gap:.1rem}
+.push .de{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.56rem;color:var(--faint);letter-spacing:.03em}
+.push b{font-size:.74rem}
+.push span{font-size:.7rem;color:var(--dim);line-height:1.35}
+
+/* o feed Atividade */
+.at-l{padding:.6rem .7rem;display:flex;flex-direction:column;gap:.4rem;background:var(--bg-2);min-height:300px}
+.ev{display:grid;grid-template-columns:1.6rem 1fr;gap:.5rem;align-items:start;padding:.45rem .5rem;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:.72rem;color:var(--dim)}
+.ev b{color:var(--text)}
+.ev .ic{width:1.6rem;height:1.6rem;border-radius:50%;display:grid;place-items:center;font-size:.8rem;background:var(--surface-2)}
+.ev.n .ic{background:var(--ia-fundo);border:1px solid var(--ia-borda)}
+.ev.r .ic{background:var(--neon-fundo);border:1px solid var(--neon-borda)}
+.ev small{display:block;font-family:var(--mono);font-size:.56rem;color:var(--faint);margin-top:.1rem}
+.abas{display:flex;justify-content:space-around;border-top:1px solid var(--line);padding:.45rem 0 .6rem;font-size:.6rem;color:var(--faint)}
+.abas span.on{color:var(--neon-2)}
+
+/* decisões */
+.dec{display:flex;flex-direction:column;gap:10px}
+.dc{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem;display:grid;grid-template-columns:2rem 1fr;gap:.2rem .6rem}
+.dc .nn{font-family:var(--display);font-size:1.3rem;color:var(--neon-2);grid-row:span 3}
+.dc h4{font-size:.95rem}
+.dc p{margin:0;font-size:.82rem;color:var(--dim)}
+.dc p b{color:var(--text)}
+.dc .rec{font-size:.8rem;color:var(--neon-2)}
+.dc .rec::before{content:"recomendo: ";font-family:var(--mono);font-size:.62rem;color:var(--faint);letter-spacing:.04em}
+.passos{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.ps{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem;display:flex;flex-direction:column;gap:.4rem}
+.ps h4{font-size:.95rem}
+.ps ul{margin:0;padding-left:1.1rem;color:var(--dim);font-size:.8rem;display:flex;flex-direction:column;gap:.2rem}
+.ps .k{font-size:.6rem}
+
+@media (max-width:900px){
+  .med{grid-template-columns:repeat(2,1fr)}
+  .pecas,.passos{grid-template-columns:1fr}
+  .tr{grid-template-columns:1fr}
+  .tr>div:first-child{border-right:0;padding-bottom:0}
+}
+</style>
+
+<div class="wrap">
+
+<div class="head">
+  <span class="k">Mockup pra aprovação · 02/10/2026 · Prime Eventos</span>
+  <h1>Acompanhar o Resgate ao vivo, pelo app</h1>
+  <p>Você ligou o Resgate na Prime e quer ver, em tempo real, o que acontece <b>depois que a mensagem sai e o lead passa pra ZAQ SDR</b>. Hoje o app mostra a lista, mas não a conversa, e não avisa quando a ZAQ SDR assume um lead. São duas peças: <b>a conversa ao vivo</b> na tela do lead (a) e <b>o aviso a cada lead que a ZAQ SDR assume</b> (b). Uma terceira, opcional, põe o Resgate no feed Atividade.</p>
+</div>
+
+<!-- ============ MEDIDO ============ -->
+<section class="sec">
+  <header><h2>Onde o Resgate está agora</h2>
+  <p>Consulta só de leitura na conta da Prime, em 02/10 de manhã.</p></header>
+  <div class="med">
+    <div class="mt"><span class="v">0 <small>leads</small></span><p>com a ZAQ SDR até agora. Nada foi enviado a cliente ainda.</p></div>
+    <div class="mt at"><span class="v">415 <small>avisados</small></span><p>Os vendedores receberam o aviso "vai pro resgate em 2 dias" ontem às 08:07.</p></div>
+    <div class="mt"><span class="v">Sáb 08:07</span><p>O lead só passa 48h depois do aviso. É quando o primeiro vai.</p></div>
+    <div class="mt"><span class="v">30 <small>por dia</small></span><p>Um a cada 20 a 30 minutos, das 8h às 20h, de segunda a sábado.</p></div>
+  </div>
+  <div class="tl">
+    <div class="tr hoje"><div>sex 02/10</div><div>Nada passa pra ZAQ SDR. Os 415 ainda estão dentro das 48h em que o vendedor pode segurar o lead.</div></div>
+    <div class="tr"><div>sáb 03/10 · 08:07</div><div><b>O primeiro lead passa.</b> A ZAQ SDR vira dona, a conversa passa a ser respondida pela IA e a retomada sai pelo mesmo número da conversa.</div></div>
+    <div class="tr"><div>sáb 03/10 · até 20h</div><div>Um lead a cada 20 a 30 minutos, até 30 no dia. Cliente que responde é atendido na hora pela IA.</div></div>
+    <div class="tr"><div>todo dia · 20h</div><div>O resumo do dia chega no WhatsApp do supervisor (já funciona: ontem às 20h saiu).</div></div>
+  </div>
+  <p class="nota al"><i>atenção</i><span>Na Prime só há <b>uma pessoa com papel de dono ou gestor</b> (o Manoel, dono). Ele <b>não tem nenhum aparelho com aviso ligado</b> e não tem WhatsApp no perfil. Sem isso, qualquer notificação que eu construa não chega. O passo a passo está na decisão 1.</span></p>
+</section>
+
+<!-- ============ AS PEÇAS ============ -->
+<section class="sec">
+  <header><h2>As três peças</h2>
+  <p>Os nomes e as mensagens são de exemplo. <b>Nada disso mexe em chip, conexão ou na regra do Resgate</b>: é só mostrar e avisar o que já acontece.</p></header>
+
+  <div class="pecas">
+
+    <div class="peca">
+      <span class="etq">a · novo na tela do lead</span>
+      <h3>A conversa, ao vivo</h3>
+      <p>Hoje, quando o dono abre um lead, vê só a ficha. Passa a ver <b>a conversa inteira, só leitura</b>, que se atualiza sozinha a cada 8 segundos, como a do vendedor.</p>
+      <div class="fone">
+        <div class="sb"><span>08:34</span><span>▂▄▆ 5G</span></div>
+        <div class="hd">
+          <div class="t"><i>‹</i><div><h4>Ana</h4><small>15 anos · 14/03 · 150 convidados</small></div></div>
+          <div class="chips"><span class="cp ia">🤖 ZAQ SDR · resgate</span><span class="cp">era do Pedro</span><span class="cp vivo">ao vivo</span></div>
+        </div>
+        <div class="conv">
+          <div class="nt">Passou pro resgate da IA: 9 dias sem mensagem nossa. Era do Pedro.</div>
+          <div class="bl out"><span class="de">ZAQ SDR</span>Oi, Ana! Aqui é da Prime Eventos 😊 Você tinha pedido o orçamento dos 15 anos pra 14/03. Ainda posso te ajudar?<small>08:07 ✓✓</small></div>
+          <div class="bl in">Oi! Ainda quero sim, estava resolvendo a data<small>08:21</small></div>
+          <div class="bl out"><span class="de">ZAQ SDR</span>Que bom! A 14/03 está livre. Quer conhecer o espaço essa semana? Tenho quinta às 10h ou sábado às 11h.<small>08:21 ✓</small></div>
+          <div class="dig">ZAQ SDR está escrevendo…</div>
+        </div>
+        <div class="rod">
+          <p><b>Você só acompanha.</b> Quem responde é a ZAQ SDR.</p>
+          <span class="bt">Passar pra outro</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="peca">
+      <span class="etq">b · novo aviso</span>
+      <h3>Um aviso a cada lead assumido</h3>
+      <p>Quando a ZAQ SDR assume um lead e a retomada sai, e quando o cliente <b>responde</b>, chega um aviso no celular. Tocar nele abre a conversa da peça (a).</p>
+      <div class="fone">
+        <div class="sb"><span></span><span>▂▄▆ 5G</span></div>
+        <div class="trava">
+          <div class="hr">08:07</div>
+          <div class="dt">sábado, 3 de outubro</div>
+          <div class="push"><div class="de"><span>ZAQ · PAINEL</span><span>agora</span></div><b>🤖 ZAQ SDR assumiu a Ana</b><span>Era do Pedro, 9 dias sem mensagem nossa. Retomada enviada: "Oi, Ana! Aqui é da Prime Eventos…"</span></div>
+          <div class="push"><div class="de"><span>ZAQ · PAINEL</span><span>08:21</span></div><b>💬 Ana respondeu à ZAQ SDR</b><span>"Oi! Ainda quero sim, estava resolvendo a data"</span></div>
+          <div class="push"><div class="de"><span>ZAQ · PAINEL</span><span>08:33</span></div><b>🤖 ZAQ SDR assumiu o Rafael</b><span>Era da Jacqueline, 11 dias sem mensagem nossa. Retomada enviada.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="peca">
+      <span class="etq">c · opcional</span>
+      <h3>O Resgate no feed Atividade</h3>
+      <p>A aba <b>Atividade</b> do dono já lista ganhos, perdas, visitas e propostas. Ganha duas linhas: <b>assumiu</b> e <b>respondeu</b>. É o histórico do dia, pra quem não viu os avisos.</p>
+      <div class="fone">
+        <div class="sb"><span>18:12</span><span>▂▄▆ 5G</span></div>
+        <div class="hd"><div class="t"><div><h4>Atividade</h4><small>o que o time fez</small></div></div></div>
+        <div class="at-l">
+          <div class="ev r"><span class="ic">💬</span><div><b>Rafael respondeu</b> à ZAQ SDR<small>há 12 min · resgate</small></div></div>
+          <div class="ev n"><span class="ic">🤖</span><div><b>ZAQ SDR assumiu</b> a Paula · era da Jacqueline<small>há 40 min · resgate</small></div></div>
+          <div class="ev"><span class="ic">📍</span><div>Jacqueline marcou visita — Hana<small>há 1 h</small></div></div>
+          <div class="ev r"><span class="ic">💬</span><div><b>Ana respondeu</b> à ZAQ SDR<small>há 3 h · resgate</small></div></div>
+          <div class="ev n"><span class="ic">🤖</span><div><b>ZAQ SDR assumiu</b> a Ana · era do Pedro<small>há 3 h · resgate</small></div></div>
+        </div>
+        <div class="abas"><span>Placar</span><span class="on">Atividade</span><span>Leads</span><span>Perfil</span></div>
+      </div>
+    </div>
+
+  </div>
+  <p class="nota"><i>nota</i><span>Quem já fala com o cliente continua tendo o caminho de sempre: <b>"Passar pra outro"</b> tira o lead da ZAQ SDR e a IA sai da conversa. Se alguém da equipe escrever pro cliente, a IA já pausa sozinha (isso já existe).</span></p>
+</section>
+
+<!-- ============ DECISÕES ============ -->
+<section class="sec">
+  <header><h2>Pra você decidir</h2></header>
+  <div class="dec">
+    <div class="dc"><span class="nn">1</span><h4>Como o aviso chega no seu celular?</h4>
+      <p>O aviso é uma notificação do app. Ela só chega em celular que <b>instalou o app e ligou os avisos</b>, e hoje a Prime tem zero aparelhos assim. Antes de sábado: abrir o app no celular (<code>app.zaq-ia.com/cockpit</code>), adicionar à tela inicial e tocar em <b>Ativar avisos</b> no Perfil. São dois minutos.</p>
+      <p class="rec">push só no app, sem e-mail nem WhatsApp. Um e-mail por lead seriam até 30 por dia. O WhatsApp do supervisor continua com o resumo das 20h e os alertas.</p></div>
+    <div class="dc"><span class="nn">2</span><h4>Quem recebe: o dono e os gestores?</h4>
+      <p>Você respondeu que os dois. Na Prime isso significa <b>só o Manoel</b>, que é o único com esses papéis. Se você acompanha por outro login (por exemplo o seu, de suporte), me diga qual é pra eu incluir.</p>
+      <p class="rec">dono e gestores, e mais o login que você me indicar.</p></div>
+    <div class="dc"><span class="nn">3</span><h4>Quais acontecimentos avisam?</h4>
+      <p><b>Assumiu</b> (até 30 por dia) e <b>respondeu</b> (o que mais importa). O cliente que pede pra parar, a visita marcada e o orçamento pra conferir já chegam no WhatsApp do supervisor.</p>
+      <p class="rec">assumiu e respondeu. Se ficar muito aviso, a gente agrupa depois.</p></div>
+    <div class="dc"><span class="nn">4</span><h4>Entra a peça (c), o Resgate no feed Atividade?</h4>
+      <p>É pequena e reaproveita a aba que já existe. Dá o histórico do dia sem depender de ter visto o aviso.</p>
+      <p class="rec">sim.</p></div>
+  </div>
+  <p class="nota"><i>§6</i><span>A peça (a) vale pra qualquer conta: o dono e os gestores passam a ver a conversa de qualquer lead da <b>própria conta</b>, que o painel do computador já mostra. As peças (b) e (c) só aparecem pra quem tem o Resgate ligado, hoje só a Prime. A palavra "festa" só entra nas contas de eventos.</span></p>
+</section>
+
+<!-- ============ COMO SERIA CONSTRUÍDO ============ -->
+<section class="sec">
+  <header><h2>Como seria construído</h2></header>
+  <div class="passos">
+    <div class="ps"><span class="k">peça a</span><h4>A conversa na tela do lead</h4><ul>
+      <li>Rota de leitura das mensagens para dono e gestor, só da conta deles.</li>
+      <li>A tela de gestão desenha a conversa e atualiza a cada 8s, igual à do vendedor.</li>
+      <li>Selo "ZAQ SDR · resgate" e de quem era o lead.</li></ul></div>
+    <div class="ps"><span class="k">peça b</span><h4>O aviso</h4><ul>
+      <li>Dois pontos no Resgate: quando a retomada sai e quando o cliente responde.</li>
+      <li>Push pros donos e gestores, sem tocar no envio de mensagem nem no chip.</li>
+      <li>Falha no aviso nunca atrapalha o Resgate (cada aviso no seu try).</li></ul></div>
+    <div class="ps"><span class="k">peça c e o resto</span><h4>Feed e aviso nas Novidades</h4><ul>
+      <li>Duas linhas novas no feed Atividade.</li>
+      <li>Aviso nas Novidades, público <code>resgate_ligado</code>, pra dono e gestor.</li>
+      <li>Testes, e conferência na Prime (eventos) e na ZAQ (recorrente).</li></ul></div>
+  </div>
+  <p class="nota al"><i>prazo</i><span>O primeiro lead passa <b>sábado às 08:07</b>. Aprovando hoje, dá pra ter tudo no ar antes disso. Se não der, o Resgate segue normal e nada se perde: só não haverá o aviso nem a conversa ao vivo nos primeiros leads.</span></p>
+  <p class="nota"><i>§0</i><span>Nada aqui altera chip, conexão, <code>canais_config</code> ou conversa de cliente. A leitura da conversa não grava nada.</span></p>
+</section>
+
+</div>

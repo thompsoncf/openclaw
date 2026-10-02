@@ -188,3 +188,94 @@ def test_dado_estranho_da_receita_nao_derruba_a_consulta(monkeypatch):
     # o tipo ja dentro do logradouro nao repete ("RUA RUA ...")
     _brasilapi(monkeypatch, dict(LTDA, logradouro="RUA DAS FLORES", complemento="", bairro=""))
     assert cnpj_info.consultar_cnpj(CNPJ)["endereco_completo"] == "RUA DAS FLORES, 1229"
+
+
+def test_cpf_do_mei_antigo_nunca_vai_pro_nome_de_quem_assina(monkeypatch):
+    # MEI aberto no formato antigo: a razão social é "NOME + CPF" no FIM. A verificação
+    # independente pegou o CPF entrando no campo Representante legal (e no contrato).
+    antigo = dict(MEI, razao_social="MARIA DE JESUS DE SOUSA SILVA 81234567890")
+    _brasilapi(monkeypatch, antigo)
+    info = cnpj_info.consultar_cnpj(CNPJ)
+    assert info["representante"] == "MARIA DE JESUS DE SOUSA SILVA"
+    assert info["razao_social"] == "MARIA DE JESUS DE SOUSA SILVA 81234567890"     # a razão é como a Receita tem
+    j = es.receita_do_cnpj(CNPJ)
+    assert j["rep"] == "MARIA DE JESUS DE SOUSA SILVA" and not any(c.isdigit() for c in j["rep"])
+    assert cnpj_info._representante(dict(MEI, razao_social="JOSE DA SILVA 123.456.789-00")) == "JOSE DA SILVA"
+
+
+def test_quem_assina_presidente_antes_de_diretor_e_so_pessoa_fisica():
+    r = cnpj_info._representante
+    # o quadro da Receita vem em ordem alfabética: o 1º diretor não ganha do presidente
+    assert r({"qsa": [{"nome_socio": "ANA", "qualificacao_socio": "Diretor"},
+                      {"nome_socio": "ZELIA", "qualificacao_socio": "Presidente"}]}) == "ZELIA"
+    # sócio pessoa jurídica não assina em nome próprio
+    assert r({"qsa": [{"nome_socio": "HOLDING X LTDA", "identificador_de_socio": 1,
+                       "qualificacao_socio": "Sócio Pessoa Jurídica Domiciliado no Exterior"},
+                      {"nome_socio": "JOAO", "identificador_de_socio": 2,
+                       "qualificacao_socio": "Administrador"}]}) == "JOAO"
+    assert r({"qsa": [{"nome_socio": "HOLDING X LTDA", "identificador_de_socio": 1,
+                       "qualificacao_socio": "Sócio"}]}) is None
+    assert r({"qsa": [{"nome_socio": "HOLDING X LTDA", "identificador_de_socio": 1,
+                       "qualificacao_socio": "Titular Pessoa Jurídica Domiciliado no Brasil"},
+                      {"nome_socio": "JOAO", "identificador_de_socio": 2,
+                       "qualificacao_socio": "Administrador"}]}) == "JOAO"
+    # menor e administrador judicial também não
+    assert r({"qsa": [{"nome_socio": "PEDRINHO", "identificador_de_socio": 2,
+                       "qualificacao_socio": "Sócio Menor (Assistido/Representado)"}]}) is None
+    assert r({"qsa": [{"nome_socio": "ESCRITORIO Y", "qualificacao_socio": "Administrador Judicial"}]}) is None
+
+
+def test_um_clique_por_vez(tmp_path):
+    out = _roda(r"""
+  var b = {disabled: false};
+  var a1 = receitaTrava(b), a2 = receitaTrava(b); receitaSolta(b); var a3 = receitaTrava(b);
+  console.log(JSON.stringify({a1: a1, a2: a2, a3: a3, semBotao: receitaTrava(null)}));
+""", tmp_path)
+    assert out == {"a1": True, "a2": False, "a3": True, "semBotao": True}
+
+
+def test_as_tres_rotas_devolvem_o_cadastro_inteiro(monkeypatch):
+    # as rotas não podem voltar a montar a resposta curta (nome/e-mail/cidade/UF) por conta própria
+    import asyncio
+
+    import web.contrato_publico as contrato
+    import web.painel_cockpit as app
+    import web.painel_eventos_stands as painel
+
+    _brasilapi(monkeypatch, LTDA)
+
+    def corpo(resp):
+        if asyncio.iscoroutine(resp):
+            resp = asyncio.run(resp)
+        return resp.status_code, json.loads(resp.body)
+
+    def confere(resp):
+        status, j = corpo(resp)
+        assert status == 200 and j["ok"] is True
+        assert j["razao"] == "T C FERNANDES LTDA" and j["rep"] == "THOMPSON CAVALCANTE FERNANDES"
+        assert j["end"].startswith("RUA VETERINARIO") and j["cep"] == "64052-410"
+        assert "nome" not in j
+
+    # painel: logado traz tudo; sem login, 401 com frase que a pessoa entende
+    monkeypatch.setattr(painel, "_acesso", lambda request, *a, **k: ((40,), {}))
+    confere(painel.consulta_cnpj(object(), doc=CNPJ))
+    monkeypatch.setattr(painel, "_acesso", lambda request, *a, **k: (None, None))
+    status, j = corpo(painel.consulta_cnpj(object(), doc=CNPJ))
+    assert status == 401 and "sessão expirou" in j["erro"]
+
+    # app: logado traz tudo; sem sessão, 401
+    monkeypatch.setattr(app, "_sessao", lambda request: {"conta_id": 40})
+    monkeypatch.setattr(app, "_gerencia", lambda request: None)
+    confere(app.cockpit_stands_consulta_cnpj(object(), doc=CNPJ))
+    monkeypatch.setattr(app, "_sessao", lambda request: None)
+    assert corpo(app.cockpit_stands_consulta_cnpj(object(), doc=CNPJ))[0] == 401
+
+    # link do contrato: contrato de stand não assinado traz tudo; assinado ou inexistente, 404
+    monkeypatch.setattr(contrato, "get_pool", lambda: None)
+    monkeypatch.setattr(contrato, "carregar", lambda token, pool: {"assinado": False, "cadastro": {"n_ok": 1}})
+    confere(contrato.contrato_cnpj("tok", doc=CNPJ))
+    monkeypatch.setattr(contrato, "carregar", lambda token, pool: {"assinado": True, "cadastro": {"n_ok": 7}})
+    assert corpo(contrato.contrato_cnpj("tok", doc=CNPJ))[0] == 404
+    monkeypatch.setattr(contrato, "carregar", lambda token, pool: None)
+    assert corpo(contrato.contrato_cnpj("tok", doc=CNPJ))[0] == 404
+

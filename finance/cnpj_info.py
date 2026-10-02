@@ -85,17 +85,24 @@ def consultar_cnpj(cnpj: str) -> dict | None:
             "representante": representante}
 
 
-# quem assina pela empresa, na ordem em que a Receita costuma qualificar
+# quem assina pela empresa, em ordem de PRIORIDADE (o quadro da Receita vem em ordem
+# alfabetica: numa S/A o primeiro "Diretor" da lista nao e' quem preside)
 _QUEM_ASSINA = ("administrador", "titular", "presidente", "diretor", "empresario")
+# quem esta' no quadro mas nao assina em nome proprio
+_NAO_ASSINA = ("menor", "incapaz", "judicial", "pessoa juridica")
+_SOCIO_PJ = 1          # identificador_de_socio: 1 = pessoa juridica, 2 = pessoa fisica
 _EMPRESARIO_INDIVIDUAL = 2135
 
 
 def _representante(dados: dict) -> str | None:
-    """O representante legal SUGERIDO pelo quadro de socios da Receita: o primeiro
-    socio qualificado pra assinar (socio-administrador, titular, presidente,
-    diretor); se so ha um socio, ele. Empresario individual (MEI) nao tem quadro
-    de socios — a razao social E' o nome da pessoa (as vezes com o numero do CNPJ
-    na frente, que sai). E' sugestao: quem preenche confere."""
+    """O representante legal SUGERIDO pelo quadro de socios da Receita: o socio
+    PESSOA FISICA mais qualificado pra assinar (administrador, titular, presidente,
+    diretor — nesta prioridade); se so ha um socio pessoa fisica, ele. Socio pessoa
+    juridica, menor/incapaz e administrador judicial nao entram. Empresario
+    individual (MEI) nao tem quadro de socios — a razao social E' o nome da pessoa,
+    com o numero do CNPJ na frente (formato novo) ou o CPF no fim (formato antigo):
+    os numeros saem, o CPF nunca vai pro nome de quem assina. E' sugestao: quem
+    preenche confere."""
     import unicodedata
 
     def _plano(txt):
@@ -103,21 +110,28 @@ def _representante(dados: dict) -> str | None:
         return "".join(c for c in t if not unicodedata.combining(c))
 
     qsa = dados.get("qsa")
-    socios = [str(s.get("nome_socio")).strip() for s in (qsa if isinstance(qsa, list) else [])
-              if isinstance(s, dict) and str(s.get("nome_socio") or "").strip()]
-    quali = [_plano(s.get("qualificacao_socio")) for s in (qsa if isinstance(qsa, list) else [])
-             if isinstance(s, dict) and str(s.get("nome_socio") or "").strip()]
-    for nome, q in zip(socios, quali):
-        if any(k in q for k in _QUEM_ASSINA):
-            return nome
-    if len(socios) == 1:
-        return socios[0]
+    quadro = []                                   # (nome, qualificacao) de quem pode assinar
+    for s in (qsa if isinstance(qsa, list) else []):
+        if not isinstance(s, dict) or not str(s.get("nome_socio") or "").strip():
+            continue
+        q = _plano(s.get("qualificacao_socio"))
+        if s.get("identificador_de_socio") == _SOCIO_PJ or any(k in q for k in _NAO_ASSINA):
+            continue
+        quadro.append((str(s.get("nome_socio")).strip(), q))
+    for k in _QUEM_ASSINA:
+        for nome, q in quadro:
+            if k in q:
+                return nome
+    if len(quadro) == 1:
+        return quadro[0][0]
     try:
         individual = int(dados.get("codigo_natureza_juridica") or 0) == _EMPRESARIO_INDIVIDUAL
     except (TypeError, ValueError):
         individual = False
     if individual:
-        nome = str(dados.get("razao_social") or "").strip().lstrip("0123456789.-/ ").strip()
+        import re
+        nome = str(dados.get("razao_social") or "").strip().lstrip("0123456789.-/ ")
+        nome = re.sub(r"[\s\d.\-/*]+$", "", nome)       # CPF no fim (MEI de formato antigo)
         return nome or None
     return None
 

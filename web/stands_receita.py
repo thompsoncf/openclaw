@@ -36,6 +36,15 @@ RECEITA_JS = r"""
     poe('email', j.email, 'e-mail');
     return feito;
   }
+  // Um clique por vez: toque duplo disparava duas consultas e a segunda resposta
+  // trocava "a Receita preencheu…" por "nada novo". Devolve false se já está consultando.
+  function receitaTrava(btn){
+    if (!btn) return true;
+    if (btn.disabled) return false;
+    btn.disabled = true;
+    return true;
+  }
+  function receitaSolta(btn){ if (btn) btn.disabled = false; }
   function receitaMsg(feito){
     return feito.length
       ? '✓ A Receita preencheu: ' + feito.join(', ') + '. Confira antes de salvar.'

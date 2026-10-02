@@ -604,7 +604,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .cf.vazio input{border-color:#E0B458}
 .cflin{display:flex;gap:8px;align-items:flex-end}
 .cflin .cf{flex:1;min-width:0}
-.cfgrid{display:grid;grid-template-columns:1fr 1.6fr .6fr;gap:8px}
+.cfgrid{display:grid;grid-template-columns:1.3fr 1.5fr .6fr;gap:8px}
 .cfgrid .cf{min-width:0}
 .cfrec{min-height:40px;padding:0 12px;border-radius:8px;border:1px solid #DCD5C6;background:#FBFAF7;color:#14213D;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer}
 .cfmsg{font-size:12px;color:#5A6678;line-height:1.45}
@@ -873,14 +873,16 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
   b.addEventListener('click',function(){
     var doc=(f.elements['doc'].value||'').trim(); m.hidden=false;
     if(!doc){m.textContent='Digite o CNPJ antes.';return;}
+    if(!receitaTrava(b))return;
     m.textContent='Consultando a Receita…';
     fetch(f.getAttribute('action').replace(/\/dados$/,'/cnpj')+'?doc='+encodeURIComponent(doc))
       .then(function(r){return r.json();})
       .then(function(j){
+        receitaSolta(b);
         if(!j||!j.ok){m.textContent=(j&&j.erro)||'Não consegui consultar agora — digite os dados.';return;}
         m.textContent=receitaMsg(receitaPreenche(f,j));
       })
-      .catch(function(){m.textContent='Não consegui consultar agora — digite os dados.';});
+      .catch(function(){receitaSolta(b);m.textContent='Não consegui consultar agora — digite os dados.';});
   });
 })();
 </script>{% endraw %}{% endif %}

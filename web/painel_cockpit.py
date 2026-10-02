@@ -10020,8 +10020,10 @@ _STANDS_JS = r"""
     var form=document.getElementById('stform'), msg=document.getElementById('strecmsg');
     var doc=form.elements['doc'].value.trim(); msg.hidden=false;
     if(!doc){msg.textContent='Digite o CNPJ antes.';return;}
+    if(!receitaTrava(btn))return;
     msg.textContent='Consultando a Receita…';
     zapFetch(BASE_STANDS+'/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+      receitaSolta(btn);
       if(!j){msg.textContent='Não consegui consultar agora — digite os dados.';return;}
       if(!j.ok){msg.textContent=j.erro||'Não consegui consultar agora.';return;}
       msg.textContent=receitaMsg(receitaPreenche(form,j));
@@ -10619,8 +10621,11 @@ window.cliReceita=function(){
   var f=document.getElementById('cliform'), m=document.getElementById('clirecmsg');
   var doc=(f.elements['doc'].value||'').trim(); m.hidden=false;
   if(!doc){m.textContent='Digite o CNPJ antes.';return;}
+  var btn=f.querySelector('.strec');
+  if(!receitaTrava(btn))return;
   m.textContent='Consultando a Receita…';
   zapFetch('__BASE__/stands/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+    receitaSolta(btn);
     if(!j){m.textContent='Não consegui consultar agora — digite os dados.';return;}
     if(!j.ok){m.textContent=j.erro||'Não consegui consultar agora.';return;}
     m.textContent=receitaMsg(receitaPreenche(f,j));

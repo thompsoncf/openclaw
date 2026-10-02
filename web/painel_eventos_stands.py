@@ -426,7 +426,8 @@ def consulta_cnpj(request: Request, doc: str = ""):
     from fastapi.responses import JSONResponse as _J
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
-        return _J({"ok": False, "erro": "login"}, status_code=401)
+        return _J({"ok": False, "erro": "Sua sessão expirou — entre de novo e repita a busca."},
+                  status_code=401)
     return _J(es.receita_do_cnpj(doc))
 
 
@@ -1377,15 +1378,17 @@ function esReceita(btn){
   var doc = form.elements['doc'].value.trim();
   msg.hidden = false;
   if (!doc){ msg.textContent = 'Digite o CNPJ antes de buscar.'; return; }
+  if (!receitaTrava(btn)) return;
   msg.textContent = 'Consultando a Receita…';
   fetch('/painel/eventos/estandes/consulta-cnpj?doc=' + encodeURIComponent(doc), {headers:{'x-requested-with':'fetch'}})
     .then(function(r){ return r.json(); })
     .then(function(j){
+      receitaSolta(btn);
       if (!j.ok){ msg.textContent = j.erro || 'Não consegui consultar agora.'; return; }
       msg.textContent = receitaMsg(receitaPreenche(form, j));
       esCadProg(form);
     })
-    .catch(function(){ msg.textContent = 'Não consegui consultar agora — digite os dados.'; });
+    .catch(function(){ receitaSolta(btn); msg.textContent = 'Não consegui consultar agora — digite os dados.'; });
 }
 function esIrCadastro(btn){
   var detail = btn.closest('.oc-detail');

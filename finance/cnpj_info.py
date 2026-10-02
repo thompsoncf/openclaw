@@ -19,7 +19,12 @@ _TIMEOUT = 8
 def consultar_cnpj(cnpj: str) -> dict | None:
     """Consulta o CNPJ na BrasilAPI e devolve {nome, endereco, bairro, cep, cidade, uf, email, telefone, ...}.
     None se nao achar ou falhar. nome usa fantasia (mais reconhecivel) com
-    fallback pra razao social."""
+    fallback pra razao social.
+
+    Pra quem precisa do cadastro como a Receita tem (contrato): `razao_social` e
+    `fantasia` SEPARADOS, `endereco_completo` (tipo + logradouro, numero,
+    complemento, bairro) e `representante` (ver `_representante`). As chaves
+    antigas nao mudam de sentido — quem ja usava `nome`/`endereco` segue igual."""
     cnpj = "".join(c for c in (cnpj or "") if c.isdigit())
     if len(cnpj) != 14:
         return None
@@ -59,9 +64,53 @@ def consultar_cnpj(cnpj: str) -> dict | None:
     email = (dados.get("email") or "").strip().lower() or None
     ddd = (dados.get("ddd_telefone_1") or "").strip()
     telefone = _formata_telefone(ddd)
+    # o cadastro como a Receita tem, pro contrato
+    razao = (dados.get("razao_social") or "").strip() or None
+    fantasia = (dados.get("nome_fantasia") or "").strip() or None
+    _tipo = (dados.get("descricao_tipo_de_logradouro") or "").strip()
+    _rua = " ".join(x for x in (_tipo, _log) if x)
+    _compl = " ".join((dados.get("complemento") or "").split())
+    endereco_completo = ", ".join(x for x in (_rua, _num, _compl, bairro) if x) if _rua else None
     return {"nome": nome, "endereco": endereco, "bairro": bairro, "cep": cep,
             "cidade": cidade, "uf": uf, "cnae": cnae_desc, "ramo": ramo,
-            "nicho": nicho, "email": email, "telefone": telefone}
+            "nicho": nicho, "email": email, "telefone": telefone,
+            "razao_social": razao, "fantasia": fantasia,
+            "endereco_completo": endereco_completo,
+            "representante": _representante(dados)}
+
+
+# quem assina pela empresa, na ordem em que a Receita costuma qualificar
+_QUEM_ASSINA = ("administrador", "titular", "presidente", "diretor", "empresario")
+_EMPRESARIO_INDIVIDUAL = 2135
+
+
+def _representante(dados: dict) -> str | None:
+    """O representante legal SUGERIDO pelo quadro de socios da Receita: o primeiro
+    socio qualificado pra assinar (socio-administrador, titular, presidente,
+    diretor); se so ha um socio, ele. Empresario individual (MEI) nao tem quadro
+    de socios — a razao social E' o nome da pessoa (as vezes com o numero do CNPJ
+    na frente, que sai). E' sugestao: quem preenche confere."""
+    import unicodedata
+
+    def _plano(txt):
+        t = unicodedata.normalize("NFKD", str(txt or "").lower())
+        return "".join(c for c in t if not unicodedata.combining(c))
+
+    socios = [s for s in (dados.get("qsa") or []) if isinstance(s, dict)
+              and (s.get("nome_socio") or "").strip()]
+    for s in socios:
+        if any(q in _plano(s.get("qualificacao_socio")) for q in _QUEM_ASSINA):
+            return s["nome_socio"].strip()
+    if len(socios) == 1:
+        return socios[0]["nome_socio"].strip()
+    try:
+        individual = int(dados.get("codigo_natureza_juridica") or 0) == _EMPRESARIO_INDIVIDUAL
+    except (TypeError, ValueError):
+        individual = False
+    if individual:
+        nome = (dados.get("razao_social") or "").strip().lstrip("0123456789.-/ ").strip()
+        return nome or None
+    return None
 
 
 def _formata_telefone(bruto: str) -> str | None:

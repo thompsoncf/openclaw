@@ -33,6 +33,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from db.conexao import get_pool
 from finance import contrato as ctr, servicos_catalogo as scat
 from web.portal import _env
+from web.stands_receita import RECEITA_JS
 
 router = APIRouter()
 _log = logging.getLogger("contrato.publico")
@@ -470,22 +471,16 @@ def contrato_dados(request: Request, token: str, fantasia: str = Form(""),
 
 @router.get("/contrato/{token}/cnpj")
 def contrato_cnpj(token: str, doc: str = ""):
-    """O botão "Receita" do formulário do lojista: razão social, e-mail, cidade e UF
-    pelo CNPJ — a mesma consulta do app. Só pra contrato de estande ainda não
-    assinado: o link é a credencial, como no resto da página."""
+    """O botão "Receita" do formulário do lojista: o cadastro que o contrato pede,
+    pelo CNPJ — a mesma consulta do app e do painel (es.receita_do_cnpj). Só pra
+    contrato de estande ainda não assinado: o link é a credencial, como no resto
+    da página."""
     pool = get_pool()
     d = carregar(token, pool)
     if not d or d["assinado"] or not d.get("cadastro"):
         return JSONResponse({"ok": False, "erro": "Contrato não encontrado."}, status_code=404)
-    from finance import cnpj_info, validadoc
-    ok, tipo, digitos = validadoc.valida(doc)
-    if tipo != "pj" or not ok:
-        return JSONResponse({"ok": False, "erro": "CNPJ inválido."})
-    info = cnpj_info.consultar_cnpj(digitos)
-    if not info:
-        return JSONResponse({"ok": False, "erro": "CNPJ não encontrado na Receita."})
-    return JSONResponse({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
-                         "cidade": info.get("cidade"), "uf": info.get("uf")})
+    from finance import evento_stands as _es
+    return JSONResponse(_es.receita_do_cnpj(doc))
 
 
 @router.post("/contrato/{token}/assinar")
@@ -869,7 +864,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
   </div>
 </div>
 {% if d.cadastro %}{% raw %}<script>
-// o botão "Receita" do formulário do lojista: razão social, e-mail, cidade e UF
+""" + RECEITA_JS + r"""
+// o botão "Receita" do formulário do lojista: traz o cadastro que o contrato pede
 (function(){
   var b=document.getElementById('cfrec'), f=document.getElementById('dados'),
       m=document.getElementById('cfmsg');
@@ -882,11 +878,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       .then(function(r){return r.json();})
       .then(function(j){
         if(!j||!j.ok){m.textContent=(j&&j.erro)||'Não consegui consultar agora — digite os dados.';return;}
-        if(j.nome)f.elements['razao'].value=j.nome;
-        if(j.email&&!f.elements['email'].value.trim())f.elements['email'].value=j.email;
-        if(j.cidade)f.elements['cidade'].value=j.cidade;
-        if(j.uf)f.elements['uf'].value=j.uf;
-        m.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+        m.textContent=receitaMsg(receitaPreenche(f,j));
       })
       .catch(function(){m.textContent='Não consegui consultar agora — digite os dados.';});
   });

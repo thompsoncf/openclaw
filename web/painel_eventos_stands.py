@@ -57,6 +57,7 @@ from finance import comprovantes as comprov
 from finance import contrato as ctr
 from finance import evento_stands as es
 from web.loja_stands import PLANTA_CSS, PLANTA_DEFS_JS
+from web.stands_receita import RECEITA_JS
 from web.portal import _env, _render, brl, conta_logada, nicho_da_conta
 
 router = APIRouter()
@@ -417,24 +418,16 @@ def registrar_saldo(request: Request, codigo: str, valor: str = Form("")):
 
 @router.get("/painel/eventos/estandes/consulta-cnpj")
 def consulta_cnpj(request: Request, doc: str = ""):
-    """"Buscar na Receita" do formulário Dados do cliente. É a MESMA consulta da
-    aba Clientes (finance.cnpj_info, BrasilAPI) — mas numa rota daqui porque o
-    gate de papéis só libera ao gestor o prefixo /painel/eventos/estandes; a de
-    Clientes é do dono. Devolve razão social, e-mail, cidade e UF (o que a
-    consulta traz; endereço e CEP o gestor digita)."""
+    """"Buscar na Receita" do formulário Dados do cliente. A consulta é a da
+    BrasilAPI (finance.cnpj_info) — numa rota daqui porque o gate de papéis só
+    libera ao gestor o prefixo /painel/eventos/estandes; a de Clientes é do dono.
+    Devolve o cadastro que o contrato pede (es.receita_do_cnpj): razão social,
+    nome fantasia, representante, endereço, CEP, cidade, UF e e-mail."""
     from fastapi.responses import JSONResponse as _J
-    from finance import cnpj_info, validadoc
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
         return _J({"ok": False, "erro": "login"}, status_code=401)
-    ok, tipo, d = validadoc.valida(doc)
-    if tipo != "pj" or not ok:
-        return _J({"ok": False, "erro": "CNPJ inválido"})
-    info = cnpj_info.consultar_cnpj(d)
-    if not info:
-        return _J({"ok": False, "erro": "CNPJ não encontrado na Receita"})
-    return _J({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
-               "cidade": info.get("cidade"), "uf": info.get("uf")})
+    return _J(es.receita_do_cnpj(doc))
 
 
 @router.post("/painel/eventos/estandes/{codigo}/cliente")
@@ -1377,6 +1370,7 @@ function esCadProg(form){
     if (faltam.length) b.textContent = 'Cadastro ' + ok + '/' + reqs.length; else b.remove();
   });
 }
+""" + RECEITA_JS + r"""
 function esReceita(btn){
   var form = btn.closest('form');
   var msg = form.querySelector('.cad-receita');
@@ -1388,11 +1382,7 @@ function esReceita(btn){
     .then(function(r){ return r.json(); })
     .then(function(j){
       if (!j.ok){ msg.textContent = j.erro || 'Não consegui consultar agora.'; return; }
-      if (j.nome) form.elements['razao'].value = j.nome;
-      if (j.email && !form.elements['email'].value.trim()) form.elements['email'].value = j.email;
-      if (j.cidade) form.elements['cidade'].value = j.cidade;
-      if (j.uf) form.elements['uf'].value = j.uf;
-      msg.textContent = '✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      msg.textContent = receitaMsg(receitaPreenche(form, j));
       esCadProg(form);
     })
     .catch(function(){ msg.textContent = 'Não consegui consultar agora — digite os dados.'; });

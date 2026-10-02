@@ -10024,11 +10024,7 @@ _STANDS_JS = r"""
     zapFetch(BASE_STANDS+'/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
       if(!j){msg.textContent='Não consegui consultar agora — digite os dados.';return;}
       if(!j.ok){msg.textContent=j.erro||'Não consegui consultar agora.';return;}
-      if(j.nome)form.elements['razao'].value=j.nome;
-      if(j.email&&!form.elements['email'].value.trim())form.elements['email'].value=j.email;
-      if(j.cidade)form.elements['cidade'].value=j.cidade;
-      if(j.uf)form.elements['uf'].value=j.uf;
-      msg.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      msg.textContent=receitaMsg(receitaPreenche(form,j));
       stProg();
     });
   };
@@ -10285,7 +10281,7 @@ def cockpit_stands(request: Request, abrir: str = ""):
             _es.regras_de_pagamento(cfg)["saldo_ate"].strftime("%d/%m")
             if _es.regras_de_pagamento(cfg)["saldo_ate"] else "") + ";"
         + f"var BASE_STANDS='{_BASE}/stands';</script>"
-        + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS
+        + "<script>(function(){" + PLANTA_DEFS_JS + _receita_js() + _STANDS_JS
         + (_STANDS_AUTO_JS if com_abas else "") + "})();</script>"
     )
     return _page("Mapa de stands", corpo)
@@ -10318,19 +10314,13 @@ def cockpit_stands_estado(request: Request):
 
 @router.get("/cockpit/stands/consulta-cnpj")
 def cockpit_stands_consulta_cnpj(request: Request, doc: str = ""):
-    """"Receita" do formulário do cliente do stand: razão social, e-mail, cidade e
-    UF pelo CNPJ (a mesma consulta da aba Clientes). Endereço e CEP o vendedor digita."""
+    """"Receita" do formulário do cliente do stand e do "+ Novo cliente": o cadastro
+    que o contrato pede, pelo CNPJ (es.receita_do_cnpj) — razão social, nome
+    fantasia, representante, endereço, CEP, cidade, UF e e-mail."""
     if not (_sessao(request) or _gerencia(request)):
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    from finance import cnpj_info, validadoc
-    ok, tipo, d = validadoc.valida(doc)
-    if tipo != "pj" or not ok:
-        return JSONResponse({"ok": False, "erro": "CNPJ inválido"})
-    info = cnpj_info.consultar_cnpj(d)
-    if not info:
-        return JSONResponse({"ok": False, "erro": "CNPJ não encontrado na Receita"})
-    return JSONResponse({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
-                         "cidade": info.get("cidade"), "uf": info.get("uf")})
+    from finance import evento_stands as _es
+    return JSONResponse(_es.receita_do_cnpj(doc))
 
 
 @router.post("/cockpit/stands/{codigo}/cliente")
@@ -10615,8 +10605,16 @@ def _cartao_cliente_novo(cfg: dict, meu_id: int, cad: dict, minimo: int, app_url
             + (f"<div class=acts>{acoes}</div>" if acoes else "") + "</div>")
 
 
+def _receita_js() -> str:
+    """O JS que preenche o formulário com a resposta da Receita — o mesmo do painel e
+    do link do contrato (web/stands_receita)."""
+    from web.stands_receita import RECEITA_JS
+    return RECEITA_JS
+
+
 # O Receita do "Novo cliente": a mesma consulta do formulário do stand
 _CLI_NOVO_JS = r"""<script>
+__RECEITA_JS__
 window.cliReceita=function(){
   var f=document.getElementById('cliform'), m=document.getElementById('clirecmsg');
   var doc=(f.elements['doc'].value||'').trim(); m.hidden=false;
@@ -10625,11 +10623,7 @@ window.cliReceita=function(){
   zapFetch('__BASE__/stands/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
     if(!j){m.textContent='Não consegui consultar agora — digite os dados.';return;}
     if(!j.ok){m.textContent=j.erro||'Não consegui consultar agora.';return;}
-    if(j.nome)f.elements['razao'].value=j.nome;
-    if(j.email&&!f.elements['email'].value.trim())f.elements['email'].value=j.email;
-    if(j.cidade)f.elements['cidade'].value=j.cidade;
-    if(j.uf)f.elements['uf'].value=j.uf;
-    m.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+    m.textContent=receitaMsg(receitaPreenche(f,j));
   });
 };
 </script>"""
@@ -10666,7 +10660,7 @@ def _pagina_cliente_novo(dados: dict, erro: str = "") -> HTMLResponse:
     corpo = (_hdr("Novo cliente", "Quando ele reservar pelo seu link, a venda já nasce completa.",
                   voltar=f"{_BASE}/stands/clientes")
              + _STANDS_CSS + "<div class=scroll>" + form + "</div>"
-             + _CLI_NOVO_JS.replace("__BASE__", _BASE))
+             + _CLI_NOVO_JS.replace("__RECEITA_JS__", _receita_js()).replace("__BASE__", _BASE))
     return _page("Novo cliente", corpo)
 
 

@@ -771,7 +771,7 @@ def card_sem_plano(c, conta_id: int, lead: int | None, motivo: str, membro_id: i
         ca._nota(c, lead, membro_id, f"Plano não fechado ({motivo}). O card voltou para Consulta: "
                                      "outro atendimento dele ainda espera a clínica.")
         return "consulta"
-    destino = "retorno" if "retorno" in chaves and ca._retorno_pendente(c, conta_id, lead) else "ganho"
+    destino = "retorno" if "retorno" in chaves and ca._pendente(c, conta_id, lead) else "ganho"
     c.execute("""update prospeccao set status=%s, estagio='lead', valor_estimado_centavos=%s, atualizado_em=now()
                   where id=%s and conta_id=%s""", (destino, preco, lead, conta_id))
     fr.registrar_movimento(c, conta_id, lead, atual, destino, "plano", membro_id)
@@ -876,7 +876,11 @@ def _confirmar_pagamento(c, conta_id: int, plano_id: int, membro_id: int | None)
                                    (conta_id, plano_id)).fetchone() is not None
     except Exception:  # noqa: BLE001 — sem a 381
         tem_pacote = False
-    destino = "tratamento" if tem_pacote else ("ganho" if "ganho" in chaves else None)
+    # sem sessões, a venda conclui; mas o resultado de exame ou o retorno a fazer ainda
+    # seguram o paciente na coluna Retorno
+    destino = "tratamento" if tem_pacote else (
+        "retorno" if "retorno" in chaves and ca._pendente(c, conta_id, lead) else
+        "ganho" if "ganho" in chaves else None)
     st = c.execute("select status from prospeccao where id=%s and conta_id=%s for update", (lead, conta_id)).fetchone()
     # de onde o pagamento leva: o que vem antes do tratamento, e o paciente que já
     # tinha concluído e comprou um tratamento novo

@@ -49,7 +49,7 @@ def pool():
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
                   "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql",
-                  "474_clinica_plano_pago_e_nao_fechou.sql"):
+                  "474_clinica_plano_pago_e_nao_fechou.sql", "490_clinica_resultados.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("""update servicos_catalogo set setup_centavos=80000, volta_dias=null
@@ -489,6 +489,119 @@ def test_profissional_sem_atendimento_de_retorno_segue_a_regra_de_antes(pool, za
         c.commit()
         assert c.execute("select estado from clinica_retornos where id=%s", (_retorno_id(c, lead),)
                          ).fetchone()[0] == "marcado"
+
+
+def test_resultado_a_entregar_segura_o_card_ate_a_entrega(pool, zap):
+    """Biópsia, coleta e exame não fecham o card: ele espera em Retorno, a recepção
+    marca quando chegou e quando foi entregue, e só então o paciente conclui."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        eid = _sessao(c, lead, SEG, tipo="Consulta")
+        for s in ("confirmado", "presente", "atendimento"):
+            assert ca.mudar_situacao(c, CLINICA, eid, s) is None
+        assert ca.mudar_situacao(c, CLINICA, eid, "finalizado", tratamento="nao", resultado=True,
+                                 resultado_em=date(2026, 10, 9)) is None
+        c.commit()
+        assert _card(c, lead) == "retorno"
+        assert "resultado a entregar" in c.execute(
+            "select descricao from prospeccao_atividades order by id desc limit 1").fetchone()[0]
+        [r] = ckp.resultados(c, CLINICA, _br(date(2026, 10, 1)))
+        assert (r["paciente"], r["previsto_em"], r["estado"], r["atrasado"]) == ("Ana Clara", date(2026, 10, 9),
+                                                                                  "aguardando", False)
+        assert ckp.resultados(c, CLINICA, _br(date(2026, 10, 12)))[0]["atrasado"]
+        assert ckp.varrer_retorno(c) == 0                       # esperando o laboratório: fica
+        assert ckp.resultado(c, CLINICA, r["id"], "chegou")
+        assert not ckp.resultado(c, CLINICA, r["id"], "chegou")   # uma vez só
+        assert ckp.resultados(c, CLINICA, _br(date(2026, 10, 12)))[0]["chegou"]
+        assert _card(c, lead) == "retorno"
+        assert ckp.resultado(c, CLINICA, r["id"], "entregue", 51)
+        c.commit()
+        assert _card(c, lead) == "ganho"
+        assert ckp.resultados(c, CLINICA, _br(date(2026, 10, 12))) == []
+        assert not ckp.resultado(c, CLINICA, r["id"], "entregue")
+
+
+def test_resultado_entregue_com_retorno_ainda_a_fazer_fica_em_retorno(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=30, resultado=True)
+        [r] = ckp.resultados(c, CLINICA, _br(SEG))
+        assert ckp.resultado(c, CLINICA, r["id"], "entregue")
+        c.commit()
+        assert _card(c, lead) == "retorno"                      # o retorno ainda está a marcar
+        assert ckp.dispensar_retorno(c, CLINICA, _retorno_id(c, lead))
+        c.commit()
+        assert _card(c, lead) == "ganho"
+
+
+def test_resultado_que_nasce_com_o_card_concluido_traz_de_volta_pelo_relogio(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        eid = _sessao(c, lead, SEG, tipo="Consulta")
+        _finalizar(c, eid, tratamento="nao")
+        assert _card(c, lead) == "ganho"
+        assert ckp.pedir_resultado(c, CLINICA, ca.evento(c, CLINICA, eid), None)
+        assert ckp.pedir_resultado(c, CLINICA, ca.evento(c, CLINICA, eid), None) is None   # um por atendimento
+        c.commit()
+        assert ckp.varrer_retorno(c) == 1
+        assert _card(c, lead) == "retorno"
+        [r] = ckp.resultados(c, CLINICA, _br(SEG))
+        assert ckp.resultado(c, CLINICA, r["id"], "dispensar")
+        c.commit()
+        assert _card(c, lead) == "ganho"
+
+
+def test_dois_resultados_o_card_espera_os_dois(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", resultado=True)
+        _finalizar(c, _sessao(c, lead, SEG, h=10, tipo="Testes alérgicos"), resultado=True)
+        r1, r2 = ckp.resultados(c, CLINICA, _br(SEG))
+        assert ckp.resultado(c, CLINICA, r1["id"], "entregue")
+        c.commit()
+        assert _card(c, lead) == "retorno"
+        assert ckp.resultado(c, CLINICA, r2["id"], "entregue")
+        c.commit()
+        assert _card(c, lead) == "ganho"
+
+
+def test_resultado_sem_data_passa_a_atrasado_depois_de_15_dias(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", resultado=True)
+        c.execute("update clinica_resultados set criado_em = %s", (_br(date(2026, 9, 28)),))
+        assert not ckp.resultados(c, CLINICA, _br(date(2026, 10, 13)))[0]["atrasado"]
+        assert ckp.resultados(c, CLINICA, _br(date(2026, 10, 14)))[0]["atrasado"]
+
+
+def test_funil_de_antes_o_resultado_vai_pra_fila_e_o_card_fecha(pool, zap):
+    with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=39 and chave in ('consulta','tratamento','retorno')")
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", resultado=True)
+        assert _card(c, lead) == "ganho"
+        assert len(ckp.resultados(c, CLINICA, _br(SEG))) == 1
+        assert ckp.varrer_retorno(c) == 0
+
+
+def test_tela_da_fila_de_resultados(cli, pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Ana Clara", fone="+5599911110004")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", resultado=True)
+        rid = ckp.resultados(c, CLINICA, _br(SEG))[0]["id"]
+    html = cli.get("/painel/clinica/pacotes").text
+    assert "Resultados a entregar" in html and "esperando o laboratório" in html
+    r = cli.post(f"/painel/clinica/pacotes/resultado/{rid}/chegou")
+    assert "aviso=res_chegou" in r.headers["location"]
+    html = cli.get("/painel/clinica/pacotes").text
+    with pool.connection() as c:
+        retorno = _tipo(c, "Retorno")["id"]
+    assert "chegou: marcar a entrega" in html and f"tipo={retorno}&" in html
+    assert "aviso=res_entregue" in cli.post(f"/painel/clinica/pacotes/resultado/{rid}/entregue").headers["location"]
+    assert "já não está em aberto" in cli.get(
+        cli.post(f"/painel/clinica/pacotes/resultado/{rid}/entregue").headers["location"]).text
+    with pool.connection() as c:
+        assert _card(c, lead) == "ganho"
 
 
 # ------------------------------------------------------------------ os lembretes

@@ -379,7 +379,8 @@ def ver_evento(request: Request, evento_id: int):
 
 @router.post("/painel/clinica/agenda/evento/{evento_id}/situacao")
 def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
-                    tratamento: str = Form(""), valor: str = Form(""), retorno: str = Form("")):
+                    tratamento: str = Form(""), valor: str = Form(""), retorno: str = Form(""),
+                    resultado: str = Form(""), resultado_em: str = Form("")):
     conta, _g, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -388,10 +389,18 @@ def evento_situacao(request: Request, evento_id: int, nova: str = Form(""),
     if valor.strip() and valor_c is None:
         return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}",
                    erro="Valor inválido. Use o formato 1.500,00.")
+    previsto = None
+    if resultado_em.strip():
+        resultado = "1"                 # a data do laboratório é o pedido do resultado
+        try:
+            previsto = date.fromisoformat(resultado_em.strip())
+        except ValueError:
+            return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}",
+                       erro="Data do resultado inválida.")
     with get_pool().connection() as c:
         erro = ca.mudar_situacao(c, conta[0], evento_id, nova, tratamento=(tratamento or None),
                                  valor_centavos=valor_c, membro_id=request.session.get("membro_id"),
-                                 retorno_dias=_int(retorno))
+                                 retorno_dias=_int(retorno), resultado=resultado == "1", resultado_em=previsto)
         (c.rollback if erro else c.commit)()
     if not erro and nova == "finalizado" and tratamento == "sim":
         # o médico propôs tratamento: a recepção monta o plano agora, com o paciente na frente
@@ -663,11 +672,13 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       {% else %}
       <div class="inteira"><span class="mut">O médico propôs tratamento? (o card do paciente anda no funil com a resposta)</span>
         <div class="ag-ops" style="margin-top:.3rem">
-          <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'vai para Retorno, se o médico pediu, ou Concluído' if 'retorno' in funil else 'Fechado' }}</label>
+          <label><input type="radio" name="tratamento" value="nao" required> Não — {{ 'vai para Retorno, se o médico pediu ou há resultado a entregar, ou Concluído' if 'retorno' in funil else 'Fechado' }}</label>
           <label><input type="radio" name="tratamento" value="sim" required> Sim — {{ 'fica em Consulta até o plano ser enviado' if 'consulta' in funil else 'Plano de tratamento' }}</label></div></div>
       <label>Valor proposto (se souber)<input name="valor" inputmode="decimal" placeholder="1.500,00"></label>
       {% endif %}
       <label>O médico pediu retorno em quantos dias? (vazio: não pediu)<input name="retorno" inputmode="numeric" value="{{ '' if pacote_vai else volta_padrao }}"></label>
+      <label class="inteira" style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" name="resultado" value="1" style="width:auto"> Resultado a entregar (biópsia, coleta, exame){{ ': o paciente só conclui depois da entrega' if 'retorno' in funil else '' }}</label>
+      <label>Resultado previsto para (se o laboratório disse)<input type="date" name="resultado_em"></label>
       <div class="ag-acoes inteira"><button>Finalizar</button></div>
     </form>
     {% endif %}{% endif %}

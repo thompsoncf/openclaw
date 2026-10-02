@@ -78,6 +78,7 @@ def pool():
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         c.execute((BASE / "360_clinica_agenda.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "471_clinica_tratamento_proposto.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "490_clinica_resultados.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -847,6 +848,26 @@ def test_finalizado_sem_resposta_nao_prende_em_consulta_e_card_adiante_nao_volta
         assert _status(c, eid2)[0] == "proposta"          # alguém já levou adiante: fica
 
 
+def test_tela_finalizar_com_resultado_a_entregar(cli, pool):
+    seg = _proxima_segunda()
+    with pool.connection() as c:
+        eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, "Consulta")["id"],
+                               inicio=ca.utc(seg, time(8)), nome="Ana", fone="99 97777-0099")
+        assert erro is None
+        _ate_atendimento(c, eid)
+        c.commit()
+    r = cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
+                 data={"nova": "finalizado", "tratamento": "nao", "resultado": "1", "resultado_em": "31/02"})
+    assert "inválida" in cli.get(r.headers["location"]).text
+    cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",       # a data sem a caixa vale como pedido
+             data={"nova": "finalizado", "tratamento": "nao",
+                   "resultado_em": (seg + timedelta(days=10)).isoformat()})
+    with pool.connection() as c:
+        assert c.execute("select previsto_em, estado from clinica_resultados where evento_id=%s", (eid,)
+                         ).fetchone() == (seg + timedelta(days=10), "aguardando")
+        assert _status(c, eid)[0] == "retorno"
+
+
 def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
     seg = _proxima_segunda()
     with pool.connection() as c:
@@ -856,8 +877,8 @@ def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
         _ate_atendimento(c, eid)
         c.commit()
     html = cli.get(f"/painel/clinica/agenda/evento/{eid}").text
-    assert "O médico propôs tratamento?" in html
-    assert "vai para Retorno, se o médico pediu, ou Concluído" in html and "fica em Consulta" in html
+    assert "O médico propôs tratamento?" in html and "Resultado a entregar" in html
+    assert "vai para Retorno, se o médico pediu ou há resultado a entregar, ou Concluído" in html and "fica em Consulta" in html
     # a conta que ainda não aplicou o modelo lê pra onde o card vai NELA
     with pool.connection() as c:
         guardadas = c.execute("select chave, fase from funil_etapas where conta_id=%s", (CLINICA,)).fetchall()

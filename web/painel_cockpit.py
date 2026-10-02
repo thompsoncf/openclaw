@@ -9983,7 +9983,6 @@ _STANDS_JS = r"""
   }
   function formHTML(c){
     var h='<form id=stform onsubmit="return stSalvar(this)" oninput="stProg()">';
-    if(c.dividido_com&&c.dividido_com.length)h+='<div class=stnota>Mesma empresa do stand '+esc(c.dividido_com.join(', '))+': razão social, CNPJ, endereço e contato valem pros dois. O nome fantasia é só deste stand.</div>';
     h+=campo('fantasia','Nome fantasia',c,1,'autocomplete=organization');
     h+=campo('razao','Razão social',c,1,'placeholder="Como sai no contrato"');
     h+='<div class=stlin>'+campo('doc','CNPJ / CPF',c,1,'inputmode=numeric placeholder="00.000.000/0000-00"')+
@@ -10041,8 +10040,7 @@ _STANDS_JS = r"""
       editando=false; detalhe(); minhas();
       var ok=document.getElementById('stcad');
       if(ok){var m=document.createElement('div');m.className='stok';
-        m.textContent='✓ Salvo em Clientes'+(j.cad.faltam.length?' — ainda falta '+j.cad.faltam.length+' pro contrato.':' — contrato com todos os dados.')+
-          (j.juntou?' Mesmo CNPJ do cadastro '+j.juntou.cliente+(j.juntou.stands.length?' ('+j.juntou.stands.join(', ')+')':'')+': ficou na mesma empresa, cada stand com a sua marca.':'');
+        m.textContent='✓ Salvo em Clientes'+(j.cad.faltam.length?' — ainda falta '+j.cad.faltam.length+' pro contrato.':' — contrato com todos os dados.');
         ok.appendChild(m);}
     });
     return false;
@@ -10360,16 +10358,13 @@ def cockpit_stand_salvar_cliente(request: Request, codigo: str,
         if not meu_id or dono != meu_id:
             return JSONResponse({"ok": False, "erro": "Este stand não é de uma venda sua."},
                                 status_code=403)
-    # mesmo CNPJ de outro stand: a gestão junta sempre; a vendedora, só as vendas dela
     r = _es.salvar_cadastro_stand(pool, conta_id, codigo, {
         "fantasia": fantasia, "whats": whats, "razao": razao, "doc": doc, "rep": rep,
-        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf},
-        juntar="sempre" if _eh_gestao(request, g) else "do_vendedor", vendedor_id=meu_id)
+        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf})
     if not r["ok"]:
         return JSONResponse({"ok": False, "erro": r["erro"]})
     cad = _es.cadastros_dos_stands(pool, conta_id, [_es.buscar(pool, conta_id, codigo)])[codigo]
-    return JSONResponse({"ok": True, "acao": r["acao"], "congelado": r["congelado"], "cad": cad,
-                         "juntou": r.get("juntou")})
+    return JSONResponse({"ok": True, "acao": r["acao"], "congelado": r["congelado"], "cad": cad})
 
 
 @router.get("/cockpit/stands/vendas", response_class=HTMLResponse)

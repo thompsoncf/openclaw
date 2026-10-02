@@ -446,18 +446,12 @@ def salvar_cliente_do_stand(request: Request, codigo: str,
         return cfg_ou_redir
     r = es.salvar_cadastro_stand(get_pool(), conta[0], codigo, {
         "fantasia": fantasia, "whats": whats, "razao": razao, "doc": doc, "rep": rep,
-        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf, "obs": obs},
-        juntar="sempre")
+        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf, "obs": obs})
     if not r["ok"]:
         return RedirectResponse(
             f"/painel/eventos/estandes?erro={r['erro']}&abrir={codigo}", status_code=303)
     msg = (f"Cliente do {codigo} salvo em Clientes"
            + (" (cadastro novo)." if r["acao"] == "criado" else " (atualizado)."))
-    if r.get("juntou"):
-        j = r["juntou"]
-        msg = (f"O {codigo} entrou no cadastro {j['cliente']}"
-               + (f" (mesma empresa do {', '.join(j['stands'])})" if j["stands"] else "")
-               + ": um CNPJ, cada stand com a sua marca.")
     if r["congelado"]:
         msg += " O contrato já foi assinado — ele não muda."
     elif r["faltam"]:
@@ -1031,7 +1025,6 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       {% if pode_gerir %}
       {% macro falta(k) %}{% if cad.get('faltam') and k in (cad.faltam|map(attribute='k')|list) %} falta{% endif %}{% endmacro %}
       <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/cliente" oninput="esCadProg(this)">
-        {% if cad.get('dividido_com') %}<div class="fld-nota" style="margin:0 0 8px">Mesma empresa do stand {{ cad.dividido_com|join(', ') }}: razão social, CNPJ, endereço e contato valem pros dois. O nome fantasia é só deste stand.</div>{% endif %}
         <div class="cad-form">
           <label class="fld{{ falta('fantasia') }}"><span>Nome fantasia <i>*</i></span><input name="fantasia" data-req="1" maxlength="200" value="{{ cad.get('fantasia','') }}" required></label>
           <label class="fld{{ falta('razao') }}"><span>Razão social <i>*</i></span><input name="razao" data-req="1" maxlength="200" value="{{ cad.get('razao','') }}" placeholder="Como sai no contrato"></label>

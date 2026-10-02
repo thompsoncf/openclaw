@@ -382,7 +382,10 @@ def ver_evento(request: Request, evento_id: int):
                    abre_prontuario=abre_prontuario, rascunho=rascunho,
                    ev=ev, prof=prof, remarcar=remarcar,
                    proximos=[s for s in ca.PROXIMOS.get(ev["situacao"], ())
-                             if s != "faltou" or ca.libera_faltou(ev, agora)],
+                             if (s != "faltou" or ca.libera_faltou(ev, agora))
+                             and not (ev["situacao"] == "faltou" and s == "agendado"
+                                      and ca.local(ev["inicio"]).date() != ca.hoje_br(agora))],
+                   hoje_do_evento=ca.local(ev["inicio"]).date() == ca.hoje_br(agora),
                    atrasado=ca.atrasado_min(ev, agora), tolerancia=ca.TOLERANCIA_FALTOU_MIN,
                    ligacao=ca.LIGACAO,
                    conversa=conversa, quando=f"{ca.dia_txt(ev['inicio'])} {ev['hora']}–{ev['fim_txt']}",
@@ -688,7 +691,7 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
   <div class="ag-caixa">
-    <div><b>Status:</b> <span class="ev s-{{ ev.situacao }}" style="display:inline-block;padding:.1rem .5rem;border-radius:6px;border:1px solid var(--borda)">{{ SIT_D[ev.situacao] }}</span>{% if atrasado %} · <b>atrasado {{ atrasado }} min</b>{% elif ev.situacao in ('agendado','confirmado') and 'faltou' not in proximos %} · <span class="mut">o Faltou aparece {{ tolerancia }} min depois do horário</span>{% endif %}
+    <div><b>Status:</b> <span class="ev s-{{ ev.situacao }}" style="display:inline-block;padding:.1rem .5rem;border-radius:6px;border:1px solid var(--borda)">{{ SIT_D[ev.situacao] }}</span>{% if atrasado %} · <b>atrasado {{ atrasado }} min</b>{% elif hoje_do_evento and ev.situacao in ('agendado','confirmado') and 'faltou' not in proximos %} · <span class="mut">o Faltou aparece {{ tolerancia }} min depois do horário</span>{% endif %}
       {% if ev.pede_remarcar_em %} · <b>pediu para remarcar</b>{% endif %}
       {% if ev.confirmado_em %} · confirmou{% elif ev.confirmacao_enviada_em %} · lembrete da véspera enviado{% endif %}</div>
     {% if ficha_kid %}<div style="margin-top:.4rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><span><a href="/painel/clinica/pacientes/{{ ficha_kid }}">Ficha do paciente</a> · {{ ficha_txt }}{% if ficha and ficha.alergia %} · <b>⚠ alergia</b>{% endif %}</span>
@@ -761,7 +764,7 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 
   {% if remarcar %}
   <form class="ag-caixa ag-form" method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/remarcar">
-    <div class="inteira"><b>Remarcar</b> <span class="mut">próximas passagens pela cidade{% if remarcar|length > 1 %} e a sede{% endif %}</span>
+    <div class="inteira"><b>Remarcar</b> <span class="mut">{% if remarcar[0].local_id == ev.local_id %}próximas passagens pela cidade do paciente{% else %}sem passagem marcada pela cidade do paciente nos próximos 75 dias{% endif %}{% if remarcar | selectattr('sede') | list %} e a sede{% endif %}</span>
       {% for g in remarcar %}<div style="margin-top:.5rem"><span class="mut">{{ g.titulo }}</span><div class="ag-ops" style="margin-top:.2rem">{% for o in g.horarios %}<label><input type="radio" name="inicio" value="{{ o.valor }}" {% if loop.first and loop.index0 == 0 and g == remarcar[0] %}checked{% endif %}> {{ o.txt }}</label>{% endfor %}</div></div>{% endfor %}</div>
     <div class="ag-acoes inteira"><button>Remarcar para este horário</button></div>
   </form>

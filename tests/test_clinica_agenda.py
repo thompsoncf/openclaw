@@ -33,7 +33,10 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   valor_estimado_centavos bigint not null default 0,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint, membro_id bigint,
-  tipo text, resultado text, descricao text default '', criado_em timestamptz default now());
+  tipo text, resultado text, descricao text default '', criado_em timestamptz default now(),
+  -- o CHECK de produção (migração 075): o Ligar quebrou com valor fora dele
+  constraint prospeccao_atividades_resultado_check check (resultado in
+    ('sem_resposta','retornar','interessado','sem_interesse','agendado','fechado')));
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, contato_nome text,
   ultima_msg_em timestamptz default now());
@@ -518,7 +521,11 @@ def test_ligar_registra_o_contato_no_card(pool):
         assert ca.ligar(c, CLINICA, eid, "nao_atendeu", 51) is None
         r = c.execute("""select tipo, resultado, descricao from prospeccao_atividades
                           order by id desc limit 1""").fetchone()
-        assert r == ("ligacao", "nao_atendeu", "Ligação sobre o horário de seg 28/09 08:00: não atendeu.")
+        assert r == ("ligacao", "sem_resposta", "Ligação sobre o horário de seg 28/09 08:00: não atendeu.")
+        assert ca.ligar(c, CLINICA, eid, "atendeu", 51) is None
+        assert c.execute("select resultado from prospeccao_atividades order by id desc limit 1").fetchone() == (None,)
+        _ate_atendimento(c, eid)
+        assert "quem ainda vai vir" in ca.ligar(c, CLINICA, eid, "atendeu", 51)
 
 
 def test_remarcar_pelas_proximas_passagens_e_a_sede(pool):

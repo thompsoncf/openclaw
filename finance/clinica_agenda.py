@@ -50,6 +50,10 @@ NAO_OCUPA = ("cancelou", "faltou")
 TOLERANCIA_FALTOU_MIN = 15
 #: o resultado de "Ligar" (conta como contato na linha do tempo do card)
 LIGACAO = {"atendeu": "atendeu", "nao_atendeu": "não atendeu", "recado": "deixei recado"}
+#: ...gravado no `resultado` que o banco aceita (o CHECK da migração 075: sem_resposta,
+#: retornar, interessado...). O texto exato vai na descrição; "atendeu" não tem
+#: equivalente e fica sem resultado (revisão de 02/10/2026: o valor novo dava erro)
+_LIGACAO_RESULTADO = {"atendeu": None, "nao_atendeu": "sem_resposta", "recado": "sem_resposta"}
 ORIGENS = ("Instagram", "Indicação", "Google", "Já é paciente", "Outro")
 _SEMANA = {1: "seg", 2: "ter", 3: "qua", 4: "qui", 5: "sex", 6: "sáb", 7: "dom"}
 # A RESPOSTA É A MENSAGEM INTEIRA (o número sozinho) ou começa pela palavra: "15h",
@@ -256,8 +260,10 @@ def opcoes_remarcar(c, conta_id: int, ev: dict, agora: datetime, prof_id: int) -
     locais = {x["id"]: x for x in cc.listar_locais(c, conta_id, so_ativos=False)}
     sede = next((x["id"] for x in locais.values() if x["tipo"] == "sede"), None)
     passagens: dict[tuple, list] = {}
+    # SEM LIMITE DE HORÁRIOS: os da sede (14 por dia útil) gastavam o limite antes das
+    # viagens, e a passagem a mais de ~40 dias não aparecia (revisão de 02/10/2026)
     for x in livres(c, conta_id, prof_id, ev["servico_id"], hoje_br(agora), dias=75, agora=agora,
-                    limite=400, ignorar=ev["id"]):
+                    ignorar=ev["id"]):
         if x["inicio"] == ev["inicio"]:
             continue                        # o horário de agora não é opção
         passagens.setdefault((local(x["inicio"]).date(), x["local_id"]), []).append(x)
@@ -265,14 +271,16 @@ def opcoes_remarcar(c, conta_id: int, ev: dict, agora: datetime, prof_id: int) -
         dia, loc = chave
         nome = (locais.get(loc) or {}).get("cidade") or (locais.get(loc) or {}).get("nome") or "agenda"
         rot = f"{nome}{' (sede)' if loc == sede and loc != ev.get('local_id') else ''} · {dia_txt(passagens[chave][0]['inicio'])}"
-        return {"titulo": rot, "local_id": loc,
+        return {"titulo": rot, "local_id": loc, "sede": loc == sede and loc != ev.get("local_id"),
                 "horarios": [{"valor": x["inicio"].isoformat(), "txt": hora_txt(x["inicio"])}
                              for x in passagens[chave][:8]]}
     chaves = sorted(passagens)
     da_cidade = [k for k in chaves if k[1] == ev.get("local_id")][:4]
     da_sede = [k for k in chaves if k[1] == sede and k[1] != ev.get("local_id")][:2]
-    outras = [k for k in chaves if k not in da_cidade and k not in da_sede][:2] if not da_cidade else []
-    return [_grupo(k) for k in da_cidade + outras + da_sede]
+    outras = [k for k in chaves if k not in da_cidade and k not in da_sede and k[1] != sede][:2] \
+        if not da_cidade else []
+    # a cidade (ou, sem passagem por ela, os outros lugares) primeiro, em ordem de data; a sede à parte
+    return [_grupo(k) for k in sorted(da_cidade + outras)] + [_grupo(k) for k in da_sede]
 
 
 def ligar(c, conta_id: int, evento_id: int, resultado: str, membro_id: int | None) -> str | None:
@@ -283,11 +291,20 @@ def ligar(c, conta_id: int, evento_id: int, resultado: str, membro_id: int | Non
     ev = evento(c, conta_id, evento_id)
     if not ev or not ev.get("lead"):
         return "Agendamento sem card: não há onde registrar."
+    if ev["situacao"] not in ("agendado", "confirmado", "faltou"):
+        return "A ligação é pra quem ainda vai vir (ou faltou)."
     c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
                  values (%s,%s,'ligacao',%s,%s)""",
-              (ev["lead"], membro_id, resultado,
+              (ev["lead"], membro_id, _LIGACAO_RESULTADO[resultado],
                f"Ligação sobre o horário de {dia_txt(ev['inicio'])} {ev['hora']}: {LIGACAO[resultado]}."))
-    c.execute("update prospeccao set atualizado_em=now() where id=%s and conta_id=%s", (ev["lead"], conta_id))
+    try:
+        with c.transaction():
+            # CONTA COMO CONTATO onde o produto mede contato (o "registrar contato" do
+            # funil grava o mesmo campo; é o que o painel do dono lê)
+            c.execute("update prospeccao set ultimo_contato_em=now(), atualizado_em=now() where id=%s and conta_id=%s",
+                      (ev["lead"], conta_id))
+    except Exception:  # noqa: BLE001 — banco sem a coluna
+        c.execute("update prospeccao set atualizado_em=now() where id=%s and conta_id=%s", (ev["lead"], conta_id))
     return None
 
 

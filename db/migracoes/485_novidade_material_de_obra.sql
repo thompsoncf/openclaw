@@ -3,13 +3,13 @@
 -- do CLAUDE.md. Desenho aprovado pelo dono em 02/10/2026 (PR 2 do mapa). Precisa
 -- da 350 (o portão `construcao`).
 --
--- PRA QUEM: dono, gestor e financeiro — quem cuida de custo cuida de material.
+-- PRA QUEM: dono e gestor (o pra_quem só aceita dono/gestor/vendedor — 199).
 --
 -- Aditiva e idempotente (on conflict (chave) do nothing).
 
 insert into public.novidades (chave, tipo, publico, pra_quem, titulo, resumo, link, corpo, publicado_em) values
 
-('obras-material', 'novidade', 'construcao', '{dono,gestor,financeiro}',
+('obras-material', 'novidade', 'construcao', '{dono,gestor}',
  'A nota agora vira material contado',
  'A mesma foto da nota que lança o dinheiro passa a guardar os itens: 60 sacos de cimento entram contados na obra. "Usei 15 sacos na casa 2" dá baixa, o depósito avisa quando baixar do mínimo, e o sistema aponta a casa que está gastando acima das irmãs da quadra.',
  '/painel/obras',

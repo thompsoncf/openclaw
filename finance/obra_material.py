@@ -174,7 +174,8 @@ def absorver_lancamento(pool, conta_id: int, lancamento_id: int) -> str:
                                     and (p.codigo = '3.1.03'
                                          or l.categoria = any(%s))
                                     and not exists (select 1 from estoque_mov m
-                                                     where m.item_id = i.id)""",
+                                                     where m.item_id = i.id
+                                                       and m.fornecedor_id = l.conta_id)""",
                               (lancamento_id, conta_id, list(CATEGORIAS_MATERIAL))).fetchall()
             if not itens:
                 return ""
@@ -239,7 +240,8 @@ def realocar_do_lancamento(pool, conta_id: int, lancamento_id: int) -> None:
                 qtd = Decimal(str(qtd))
                 livre = min(qtd, max(_saldo_em(c, conta_id, pid, origem), Decimal(0)))
                 if livre == qtd:
-                    c.execute("update estoque_mov set obra_id=%s where id=%s", (destino, mid))
+                    c.execute("update estoque_mov set obra_id=%s where id=%s and fornecedor_id=%s",
+                              (destino, mid, conta_id))
                 elif livre > 0:
                     t = uuid.uuid4().hex[:12]
                     _mov(c, conta_id, pid, "saida", livre, obra_id=origem, transf_id=t,

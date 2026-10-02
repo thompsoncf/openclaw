@@ -1090,7 +1090,7 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
         identidade nunca são gravados daqui (ficam na prospecção e na proposta).
     `juntar` diz quem pode entrar no cadastro de outra reserva:
         "sempre"       gestão (painel, ou dono/gestor no app)
-        "do_vendedor"  a vendedora, se as outras reservas do cadastro são vendas dela
+        "do_vendedor"  a vendedora (de qualquer venda: a única regra é o limite)
         "nunca"        o link público do contrato — ninguém entra no cadastro de
                        outra loja (nem vê os dados dela) digitando um CPF/CNPJ"""
     from . import clientes as _cli
@@ -1150,12 +1150,6 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
                     # o link público: digitando um CPF/CNPJ ninguém puxa pra esta conta
                     # quem é cliente de outra (ou tem o cadastro daqui arquivado)
                     return {"ok": False, "erro": _pode_juntar("nunca", None, None, [], None)}
-                elif juntar != "sempre" and not _pessoa_de_outra_conta(pool, conta_id,
-                                                                     dono["pessoa_id"]):
-                    # o cadastro dela AQUI foi arquivado pela gestão (podia ser da
-                    # carteira de outra vendedora, e ter stands): a gestão traz de volta
-                    return {"ok": False, "erro": "Esse CPF/CNPJ é de um cadastro arquivado "
-                            "em Clientes — peça à gestão pra ligar este stand a ele."}
                 else:
                     # a pessoa existe mas não tem cadastro ativo AQUI (é cliente de outra
                     # conta, ou o daqui foi arquivado): nasce o cadastro desta conta pra
@@ -1196,7 +1190,7 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
             outras = _outras_reservas(pool, conta_id, alvo, oid, codigo)
             cli_alvo = _cli.obter_cliente(pool, conta_id, alvo) or {}
             erro = (_pode_juntar(juntar, vendedor_id, vend_alvo, outras,
-                                 cli_alvo.get("nome"), pelo_zap=not digitos)
+                                 cli_alvo.get("nome"))
                     or _cabe_na_empresa(pool, conta_id, outras, oid, codigo))
             if erro:
                 return {"ok": False, "erro": erro}
@@ -1246,14 +1240,22 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
     with pool.connection() as c:
         if entrou:
             # trava o cadastro e confere o limite de novo: dois salvares ao mesmo tempo
-            # no mesmo CNPJ não passam juntos do máximo por empresa
+            # no mesmo CNPJ não passam juntos do máximo por empresa. Conta a EMPRESA (a
+            # pessoa): stands de um cadastro dela arquivado, ou de outro cadastro dela
+            # nesta conta, também contam — "1 CNPJ só pode 2 stands"
+            # pessoa ANTES do cadastro: a mesma ordem de `clientes.atualizar_cliente`
+            # (update pessoas, depois clientes) — na ordem inversa as duas se travavam
+            c.execute("select id from pessoas where id=(select pessoa_id from clientes "
+                      "where id=%s and dono_id=%s) for update", (cid, conta_id))
             c.execute("select id from clientes where id=%s and dono_id=%s for update",
                       (cid, conta_id))
             n = c.execute(
-                "select count(*) from evento_stands where conta_id=%s and cliente_id=%s "
-                "and status <> 'livre' and codigo <> %s and (%s::bigint is null "
+                "select count(*) from evento_stands where conta_id=%s and status <> 'livre' "
+                "and (cliente_id=%s or cliente_id in (select id from clientes where dono_id=%s "
+                "and pessoa_id=(select pessoa_id from clientes where id=%s and dono_id=%s))) "
+                "and codigo <> %s and (%s::bigint is null "
                 "or orcamento_id is distinct from %s::bigint)",
-                (conta_id, cid, codigo, oid, oid)).fetchone()[0]
+                (conta_id, cid, conta_id, cid, conta_id, codigo, oid, oid)).fetchone()[0]
             desta = c.execute(
                 "select count(*) from evento_stands where conta_id=%s and status <> 'livre' "
                 "and (codigo=%s or (%s::bigint is not null and orcamento_id=%s::bigint))",
@@ -1338,12 +1340,6 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
             "faltam": cad["faltam"], "congelado": congelado, "juntou": juntou}
 
 
-def _pessoa_de_outra_conta(pool, conta_id: int, pessoa_id) -> bool:
-    with pool.connection() as c:
-        return bool(c.execute("select 1 from clientes where pessoa_id=%s and dono_id <> %s "
-                              "limit 1", (pessoa_id, conta_id)).fetchone())
-
-
 def _so_digitos(s) -> str:
     return "".join(ch for ch in str(s or "") if ch.isdigit())
 
@@ -1424,27 +1420,16 @@ def _cabe_na_empresa(pool, conta_id: int, outras: list[dict], orcamento_id, codi
 
 
 def _pode_juntar(juntar: str, vendedor_id, vendedor_do_cadastro, outras: list[dict],
-                 nome_cadastro, pelo_zap: bool = False) -> str | None:
+                 nome_cadastro) -> str | None:
     """None se o stand pode entrar no cadastro que já existe; senão, a frase pra quem
     está salvando (ver `salvar_cadastro_stand`)."""
-    if juntar == "sempre":
+    # A ÚNICA regra de venda (o dono, 02/10/2026): "1 CNPJ só pode 2 stands" — o
+    # limite é conferido em `_cabe_na_empresa` e de novo sob trava. Gestão e vendedora
+    # (de qualquer venda) juntam; só o link PÚBLICO do contrato não — ali não é regra
+    # de venda, é proteção: quem tem um link não vê os dados de outra empresa
+    # digitando o CNPJ dela
+    if juntar in ("sempre", "do_vendedor"):
         return None
-    if juntar == "do_vendedor" and vendedor_id:
-        meu = int(vendedor_id)
-        # as outras reservas são vendas dela; e cadastro sem stand nenhum (um da aba
-        # Clientes, de fornecedor, da gestão) só se for da carteira dela — ou se ela
-        # chegou nele pelo WhatsApp do próprio lojista (o caminho de sempre da main)
-        if (all(o["vendedor_id"] == meu for o in outras)
-                and (vendedor_do_cadastro == meu
-                     or (vendedor_do_cadastro is None and (outras or pelo_zap)))):
-            return None
-        nome = nome_cadastro or "outra loja"
-        onde = f" ({', '.join(o['codigo'] for o in outras)})" if outras else ""
-        de_outra = any(v not in (None, meu) for v in
-                       [o["vendedor_id"] for o in outras] + [vendedor_do_cadastro])
-        return (f"Esse CPF/CNPJ (ou WhatsApp) já é do cadastro {nome}{onde}"
-                + (", de outra vendedora" if de_outra else "")
-                + " — peça à gestão pra juntar os stands na mesma empresa.")
     return ("Este CPF/CNPJ (ou WhatsApp) já está no cadastro de outra loja deste evento — "
             "fale com o seu vendedor pra juntar os stands na mesma empresa.")
 

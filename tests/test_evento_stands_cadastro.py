@@ -1547,21 +1547,19 @@ def test_salvar_de_novo_no_stand_juntado_nao_rebatiza_a_empresa(pool, conta_id):
         assert c.execute("select count(*) from clientes where ativo").fetchone()[0] == 1
 
 
-def test_a_vendedora_nao_entra_no_cadastro_da_venda_de_outra(pool, conta_id):
+def test_a_vendedora_entra_na_empresa_mesmo_com_o_outro_stand_de_outra(pool, conta_id):
+    # o dono (02/10/2026): "aqui só tem uma regra, 1 CNPJ só pode 2 stands"
     cass, rob = _membro(pool, conta_id, "Cassandra"), _membro(pool, conta_id, "Roberta")
     empresa, provisorio, _o1, o2 = _duas_lojas(pool, conta_id)
     _dono_da_venda(pool, conta_id, "i04", cass)
     _dono_da_venda(pool, conta_id, "S97", rob)
-    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(fantasia="OCEAN BEACH"),
+    antes = cli.obter_cliente(pool, conta_id, empresa)
+    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj(),
                                  juntar="do_vendedor", vendedor_id=rob)
-    assert r["ok"] is False
-    assert "EM ESSENCE (i04)" in r["erro"] and "outra vendedora" in r["erro"] and "gestão" in r["erro"]
-    # nada mudou: o S97 continua no provisório, sem CNPJ
-    assert es.buscar(pool, conta_id, "S97")["cliente_id"] == provisorio
-    assert _cads(pool, conta_id, "S97")["S97"]["doc"] == ""
-    # a gestão junta
-    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(fantasia="OCEAN BEACH"), juntar="sempre")
-    assert r["ok"] and r["cliente_id"] == empresa
+    assert r["ok"] and r["cliente_id"] == empresa and r["acao"] == "juntado", r
+    depois = cli.obter_cliente(pool, conta_id, empresa)
+    for k in ("nome", "telefone", "razao_social", "representante", "endereco", "documento"):
+        assert depois[k] == antes[k], k                            # entrar não trocou nada
 
 
 def test_o_link_publico_do_contrato_nunca_entra_no_cadastro_de_outra_loja(pool, conta_id):
@@ -2041,14 +2039,12 @@ def test_cnpj_de_cadastro_arquivado_so_completa_e_o_link_publico_nao_puxa(pool, 
     # pelo link público, digitar o CNPJ não puxa a empresa arquivada
     r = es.salvar_cadastro_do_contrato(pool, conta_id, o2, _so_cnpj())
     assert r["ok"] is False and "fale com o seu vendedor" in r["erro"]
-    # a vendedora pelo app também não: o cadastro arquivado é coisa da gestão
+    # pelo app a vendedora puxa — o stand ganha o cadastro da empresa, e a identidade
+    # não muda
     cass = _membro(pool, conta_id, "Cassandra")
     _dono_da_venda(pool, conta_id, "S97", cass)
     r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj(), juntar="do_vendedor",
                                  vendedor_id=cass)
-    assert r["ok"] is False and "arquivado" in r["erro"] and "gestão" in r["erro"]
-    # pela gestão: o stand ganha o cadastro da empresa, mas a identidade não muda
-    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())
     assert r["ok"] and r["acao"] == "criado", r
     assert _pessoa(pool) == antes == ("EM ESSENCE", "86911110001", "fin@emessence.com")
     assert _cads(pool, conta_id, "S97")["S97"]["fantasia"] == "OCEAN BEACH"
@@ -2113,7 +2109,7 @@ def test_o_whatsapp_da_loja_nao_vira_o_da_empresa_no_cadastro_dividido(pool, con
     assert zap == "86922220002"
 
 
-def test_a_vendedora_nao_entra_em_cadastro_sem_stand_que_nao_e_da_carteira_dela(pool, conta_id):
+def test_a_vendedora_entra_em_cadastro_que_ja_existe_sem_trocar_nada(pool, conta_id):
     cass = _membro(pool, conta_id, "Cassandra")
     casa = cli.salvar_cliente(pool, conta_id, "FORNECEDOR DA CASA", telefone="86900001111",
                               cnpj=OUTRO_CNPJ)["id"]
@@ -2122,14 +2118,27 @@ def test_a_vendedora_nao_entra_em_cadastro_sem_stand_que_nao_e_da_carteira_dela(
     _dono_da_venda(pool, conta_id, "S97", cass)
     assert es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(
         fantasia="OCEAN BEACH", doc="", whats="86922220002"))["ok"]
+    # cadastro na carteira de OUTRA vendedora também: a única regra é o limite de 2
+    rob = _membro(pool, conta_id, "Roberta")
+    with pool.connection() as c:
+        c.execute("update clientes set vendedor_id=%s where id=%s", (rob, casa))
+        c.commit()
+    # a vendedora salva (o dono: "vendedora tem que conseguir salvar"), e entrar só
+    # completa — a razão social que o cadastro tinha fica
     r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj() | {"doc": OUTRO_CNPJ},
                                  juntar="do_vendedor", vendedor_id=cass)
-    assert r["ok"] is False and "FORNECEDOR DA CASA" in r["erro"] and "gestão" in r["erro"]
-    assert "outra vendedora" not in r["erro"]
-    cad = _cads(pool, conta_id, "S97")["S97"]                            # nada vazou
-    assert cad["razao"] != "CASA LTDA" and cad["doc"] == "" and cad["whats"] != "86900001111"
-    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj() | {"doc": OUTRO_CNPJ},
-                                    juntar="sempre")["ok"]               # a gestão pode
+    assert r["ok"] and r["cliente_id"] == casa, r
+    assert cli.obter_cliente(pool, conta_id, casa)["razao_social"] == "CASA LTDA"
+
+
+def test_a_vendedora_entra_na_empresa_com_stand_da_lista_sem_vendedora(pool, conta_id):
+    # o i04 veio da lista do dono, sem vendedora; o S97 é venda da Cassandra
+    cass = _membro(pool, conta_id, "Cassandra")
+    empresa, _prov, _o1, _o2 = _duas_lojas(pool, conta_id)
+    _dono_da_venda(pool, conta_id, "S97", cass)
+    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj(), juntar="do_vendedor",
+                                 vendedor_id=cass)
+    assert r["ok"] and r["cliente_id"] == empresa and r["acao"] == "juntado", r
 
 
 def test_separar_pelo_stand_que_dava_nome_rebatiza_o_cadastro_que_ficou(pool, conta_id):
@@ -2162,3 +2171,20 @@ def test_pelo_whatsapp_do_lojista_a_vendedora_salva_num_cadastro_sem_dono(pool, 
     r = es.salvar_cadastro_stand(pool, conta_id, "S97", _dados(
         fantasia="OCEAN BEACH", doc="", whats="86922220002"), juntar="do_vendedor", vendedor_id=cass)
     assert r["ok"] and r["cliente_id"] == joao, r
+
+
+def test_o_limite_de_2_conta_a_empresa_mesmo_com_o_cadastro_arquivado(pool, conta_id):
+    # "1 CNPJ só pode 2 stands": a gestão arquivou o cadastro da empresa, que ainda tem
+    # o i04 e o S97 — um 3º stand com o mesmo CNPJ não passa
+    _config_evento(pool, conta_id)
+    empresa, _prov, _o1, _o2 = _duas_lojas(pool, conta_id)
+    assert es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())["ok"]       # 2 de 2
+    assert cli.arquivar_cliente(pool, conta_id, empresa)
+    _venda(pool, conta_id, "G61", nome="TERCEIRA", zap="86933330003")
+    assert es.salvar_cadastro_stand(pool, conta_id, "G61", _dados(
+        fantasia="TERCEIRA", doc="", whats="86933330003"))["ok"]
+    for quem in ("sempre", "do_vendedor"):
+        r = es.salvar_cadastro_stand(pool, conta_id, "G61", _so_cnpj("TERCEIRA"),
+                                     juntar=quem, vendedor_id=None)
+        assert r["ok"] is False and "máximo é 2" in r["erro"], (quem, r)
+    assert _cads(pool, conta_id, "G61")["G61"]["doc"] == ""

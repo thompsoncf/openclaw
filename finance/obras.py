@@ -494,6 +494,9 @@ def por_na_obra(pool, conta_id: int, lancamento_id: int, obra_id: int) -> dict:
                             natureza=coalesce(natureza, 'empresa')
                       where id=%s and conta_id=%s""", (obra[0], lancamento_id, conta_id))
         c.commit()
+    # o material da nota vai junto com o dinheiro (migração 484; nunca derruba)
+    from . import obra_material as _omat
+    _omat.realocar_do_lancamento(pool, conta_id, lancamento_id)
     return {"lancamento_id": lancamento_id, "obra": obra[1], "valor_centavos": int(lanc[2])}
 
 
@@ -538,6 +541,10 @@ def dividir(pool, conta_id: int, lancamento_id: int, obra_ids, por: str = "igual
                             natureza=coalesce(natureza, 'empresa')
                       where id=%s and conta_id=%s""", (lancamento_id, conta_id))
         c.commit()
+    # dividida, a nota não é de uma casa só: o material dela volta pro depósito
+    # (migração 484; os itens não se rateiam sozinhos — quem quiser leva com "levei")
+    from . import obra_material as _omat
+    _omat.realocar_do_lancamento(pool, conta_id, lancamento_id)
     return out
 
 

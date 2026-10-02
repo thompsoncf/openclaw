@@ -6,6 +6,7 @@ lista. As ferramentas executam de verdade (o dono autorizou execução direta).
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 
 from finance import relogio
@@ -558,8 +559,15 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                                 membro_id: int | None = None) -> list[Ferramenta]:
     """consultar_obra, dividir_entre_obras, por_na_obra, marcar_etapa e
     gastos_sem_obra — o dia do encarregado (docs/mockups/nicho_construcao.html,
-    seção 07). Nenhuma cria obra: obra nasce no painel (decisão 1 do dono)."""
+    seção 07). Nenhuma cria obra: obra nasce no painel (decisão 1 do dono).
+
+    E o MATERIAL (docs/mockups/obras_mapa_3d.html, seção 3): o gancho
+    `livro.apos_itens` faz os itens da nota virarem quantidade na obra, e
+    apontar_material/consultar_material são o dia a dia falado."""
+    from . import obra_material as omat
     from . import obras as ob
+    if livro is not None:
+        livro.apos_itens = lambda lanc_id: omat.absorver_lancamento(pool, conta_id, lanc_id)
 
     def _obra(ref) -> tuple[dict | None, str]:
         o = ob.obra_por_nome(pool, conta_id, ref)
@@ -881,6 +889,150 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                     "listar as opções. O toque chega como o nome da opção.")
         return "Liste as opções numeradas pra pessoa responder:\n" + esc.texto_das_opcoes(escolha)
 
+    # ── o material (docs/mockups/obras_mapa_3d.html, seção 3) ─────────────
+    def _destinos_do_material(ref: str) -> tuple[list[dict], str]:
+        """A obra dita — ou a QUADRA inteira, que divide entre as casas em obra
+        que começaram (a mesma regra da marcação em lote).
+
+        A quadra só entra quando a pessoa FALOU de quadra ("quadra 5", "Q5", o
+        nome do grupo): "casa 5" ambígua não pode cair na Quadra 5 pelo número
+        e espalhar material por casas erradas — aí a resposta é perguntar."""
+        o = ob.obra_por_nome(pool, conta_id, ref)
+        if o:
+            return [o], ""
+        try:
+            from . import obra_grupos as og
+            alvo = ob._norm(ref)
+            rot = ob._norm(og.rotulo(pool, conta_id))
+            falou_grupo = bool(re.search(r"\b(quadra|setor|bloco)\b", alvo)
+                               or (rot and re.search(rf"\b{re.escape(rot)}\b", alvo))
+                               or re.fullmatch(r"q\s*\d+", alvo)
+                               or any(ob._norm(g["nome"]) == alvo
+                                      for g in og.listar_grupos(pool, conta_id)))
+            g = og.grupo_por_nome(pool, conta_id, ref) if falou_grupo else None
+            if g:
+                casas = og.casas(pool, conta_id, g["id"])
+                if not casas:
+                    return [], f"A {g['nome']} ainda não tem casas."
+                em_obra = [x for x in casas if x["pct"] < 100
+                           and x["status"] not in ("pronta", "vendida", "entregue", "arquivada")]
+                comecaram = [x for x in em_obra if og.comecou(x)]
+                if not comecaram:
+                    return [], (f"Nenhuma casa da {g['nome']} está em obra agora — diga a "
+                                "casa, ou deixe no depósito.")
+                return comecaram, ""
+        except Exception:  # noqa: BLE001 — sem a 478
+            pass
+        _, erro = _obra(ref)
+        return [], erro
+
+    def apontar_material(e: dict) -> str:
+        """'usei 15 sacos na casa 2' / 'levei 10 do depósito pra quadra 5' /
+        'chegou 60 sacos'. Apontar é OPCIONAL (decisão 2 do dono): quem aponta
+        ganha o saldo fino; quem não aponta já tem a comparação entre as irmãs."""
+        from decimal import Decimal
+        acao = (e.get("acao") or "").strip()
+        if acao not in ("usei", "levei", "chegou"):
+            return "Diga a ação: usei, levei (do depósito pra obra) ou chegou."
+        try:
+            q = Decimal(str(e.get("quantidade") or 0).replace(",", "."))
+        except Exception:  # noqa: BLE001
+            q = Decimal(0)
+        if q <= 0:
+            return "Quantas unidades? Preciso do número."
+        destinos: list[dict] = []
+        if (e.get("obra") or "").strip():
+            destinos, erro = _destinos_do_material(e["obra"].strip())
+            if erro:
+                return erro
+        if acao in ("usei", "levei") and not destinos:
+            return "De qual obra? (pode ser a quadra inteira também)"
+        ref = (e.get("material") or "").strip()
+        p = omat.achar_produto(pool, conta_id, ref)
+        if p is not None and "ambiguo" in p:
+            return f"Qual deles? {' · '.join(p['ambiguo'])}. Não registrei nada ainda."
+        if p is None:
+            if acao == "chegou" and ref:
+                with pool.connection() as c:
+                    pid, nome, un = omat._achar_ou_criar(c, conta_id, ref, e.get("unidade") or "")
+                    c.commit()
+                p = {"id": pid, "nome": nome, "unidade": un}
+            else:
+                tem = [r for r in omat.deposito(pool, conta_id) if r["saldo"] > 0]
+                nomes = ", ".join(r["nome"] for r in tem[:8])
+                return (f"Não conheço o material “{ref}”." +
+                        (f" No depósito tem: {nomes}." if nomes else
+                         " Ainda não entrou material — mande a foto da nota que eu guardo os itens."))
+        avisos, partes = [], []
+        try:
+            if not destinos:                      # chegou, sem obra: o depósito
+                r = omat.mover(pool, conta_id, acao="chegou", produto_id=p["id"], quantidade=q)
+                frase = (f"Chegou: {omat.rotulo(q, p['unidade'])} de {p['nome']} no depósito "
+                         f"(agora {omat.rotulo(r['deposito'], p['unidade'])}).")
+            else:
+                # a quadra divide igual; os milésimos que sobram ficam na primeira
+                cota = (q / len(destinos)).quantize(Decimal("0.001"))
+                quotas = [cota] * len(destinos)
+                quotas[0] += q - sum(quotas)
+                r = None
+                for o, qi in zip(destinos, quotas):
+                    r = omat.mover(pool, conta_id, acao=acao, produto_id=p["id"],
+                                   quantidade=qi, obra_id=o["id"])
+                    partes.append(f"{o['nome']} ({omat.rotulo(qi, p['unidade'])})")
+                    if r["furo"]:
+                        avisos.append(f"uso maior que entrada em {o['nome']} — confere se faltou nota")
+                verbo = {"usei": "usados em", "levei": "levados do depósito pra",
+                         "chegou": "recebidos em"}[acao]
+                frase = (f"Apontei: {omat.rotulo(q, p['unidade'])} de {p['nome']} {verbo} "
+                         + (destinos[0]["nome"] if len(destinos) == 1 else
+                            f"{len(destinos)} casas — " + ", ".join(partes)) + ".")
+                if len(destinos) == 1 and acao != "levei":
+                    frase += f" Na obra ficam {omat.rotulo(r['na_obra'], p['unidade'])}."
+                if acao == "levei":
+                    frase += f" No depósito ficam {omat.rotulo(r['deposito'], p['unidade'])}."
+            if r and r.get("abaixo_minimo"):
+                avisos.append(f"{p['nome']} abaixo do mínimo no depósito")
+        except ValueError as err:
+            return str(err)
+        return frase + ("".join(f" ⚠️ {a.capitalize()}." for a in avisos))
+
+    def consultar_material(e: dict) -> str:
+        """'quanto cimento tem na casa 3?' / 'como está o depósito?'. A tabela do
+        mockup: entrou / usado / no local — e os alertas de graça (furo, mínimo,
+        irmãs da quadra)."""
+        ref_obra = (e.get("obra") or "").strip()
+        ref_mat = (e.get("material") or "").strip()
+        if ref_obra:
+            o, erro = _obra(ref_obra)
+            if not o:
+                return erro
+            linhas = omat.quadro_da_obra(pool, conta_id, o["id"])
+            titulo = f"Material de {o['nome']}:"
+        else:
+            linhas = omat.deposito(pool, conta_id)
+            titulo = "No depósito:"
+        if ref_mat:
+            alvo = ob._norm(ref_mat)
+            linhas = [r for r in linhas if alvo in ob._norm(r["nome"])]
+        if not linhas:
+            onde = f"em {o['nome']}" if ref_obra else "no depósito"
+            return (f"Não tem material registrado {onde}. A foto da nota já guarda os "
+                    "itens sozinha; material que chegou SEM nota entra com 'chegou 60 "
+                    "sacos de cimento'.")
+        corpo = "\n".join(
+            f"• {r['nome']}: entrou {omat.rotulo(r['entrou'], r['unidade'])}, "
+            f"usados {omat._qtd(r['usado'])}, "
+            + ("no depósito " if not ref_obra else "na obra ")
+            + omat.rotulo(r["saldo"], r["unidade"])
+            + (" ⚠️ abaixo do mínimo" if r.get("abaixo") else "")
+            for r in linhas[:12])
+        extras = [f"⚠️ {f}" for f in omat.furos(linhas)]
+        if ref_obra:
+            alerta = omat.alerta_irmas(pool, conta_id, o)
+            if alerta:
+                extras.append(f"⚠️ {alerta}")
+        return titulo + "\n" + corpo + ("\n" + "\n".join(extras) if extras else "")
+
     def guardar_foto_da_obra(e: dict) -> str:
         """A foto que NÃO é nota (telhado, parede, piso pronto): guarda na obra e na
         etapa (finance/obra_fotos.py). A imagem é a da mensagem atual, que o webhook
@@ -1119,6 +1271,38 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                                        "obra": {"type": "string", "description": "pra tipo etapa"}},
                         "required": ["tipo"]},
             executar=oferecer_escolha,
+        ),
+        Ferramenta(
+            nome="apontar_material",
+            descricao=("Registra MATERIAL em quantidade (não mexe em dinheiro): acao 'usei' "
+                       "(consumiu na obra), 'levei' (do depósito pra obra) ou 'chegou' "
+                       "(entrou no depósito, ou na obra se dita). 'chegou' é SÓ pra material "
+                       "SEM NOTA (sobra de outra obra, doação, compra sem nota): a foto da "
+                       "nota já dá entrada sozinha, e apontar as duas coisas conta em dobro. "
+                       "Em 'obra' também vale a QUADRA — divide entre as casas em obra. "
+                       "Apontar é opcional: use quando a pessoa disser, nunca cobre."),
+            parametros={"type": "object",
+                        "properties": {"acao": {"type": "string",
+                                                "enum": ["usei", "levei", "chegou"]},
+                                       "material": {"type": "string",
+                                                    "description": "ex: cimento, ferro 8mm"},
+                                       "quantidade": {"type": "number"},
+                                       "unidade": {"type": "string",
+                                                   "description": "saco, m³, barra… (se disse)"},
+                                       "obra": {"type": "string",
+                                                "description": "a obra ou a quadra, como falou"}},
+                        "required": ["acao", "material", "quantidade"]},
+            executar=apontar_material,
+        ),
+        Ferramenta(
+            nome="consultar_material",
+            descricao=("Quanto material tem: na obra ('quanto cimento tem na casa 3?') ou no "
+                       "depósito (sem obra). Mostra entrou/usado/saldo e os alertas (uso maior "
+                       "que entrada, mínimo do depósito, consumo acima das casas irmãs)."),
+            parametros={"type": "object",
+                        "properties": {"material": {"type": "string"},
+                                       "obra": {"type": "string"}}},
+            executar=consultar_material,
         ),
         Ferramenta(
             nome="guardar_foto_da_obra",

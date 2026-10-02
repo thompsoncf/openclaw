@@ -149,6 +149,10 @@ class LivroCaixa:
         # o webhook liga — sem ele, as opções vão escritas no texto.
         self.escolha = None
         self.canal_interativo = False
+        # o gancho pós-itens do cupom: a construção liga (finance/tools_pj.py) pra
+        # os itens virarem o controle de material (finance/obra_material.py).
+        # Recebe o lancamento_id e devolve a frase pra resposta ('' se nada).
+        self.apos_itens = None
 
     def lancamento_por_chave(self, chave: str | None, global_: bool = False) -> dict | None:
         """Consulta se ja' existe lancamento com essa chave (NFC-e).
@@ -759,7 +763,13 @@ class LivroCaixa:
                 conn.execute("delete from lancamento_rateio where lancamento_id = %s "
                              "and conta_id = %s", (lancamento_id, self.conta_id))
             conn.commit()
-            return cur.rowcount > 0
+            mudou = cur.rowcount > 0
+        if mudou:
+            # o material da nota vai pra onde o dinheiro foi (migração 484). Só
+            # mexe em conta que tem material; nunca derruba a troca de centro.
+            from . import obra_material as _omat
+            _omat.realocar_do_lancamento(self.pool, self.conta_id, lancamento_id)
+        return mudou
 
     def ids_por_natureza(self, ano: int, mes: int, membro_id: int | None = None,
                          natureza: str | None = None) -> list[int]:

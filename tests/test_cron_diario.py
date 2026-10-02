@@ -33,7 +33,11 @@ def test_o_cron_roda_sem_o_segredo_do_painel_e_sem_carregar_o_painel():
     assert r.stdout.strip() == "False", "o cron voltou a depender do painel"
 
 
-def _fingir(monkeypatch, *, alerta, faxina):
+_FOLHA_OK = {"contas": 1, "criados": 2, "atualizados": 0, "cancelados": 0}
+
+
+def _fingir(monkeypatch, *, alerta, faxina, folha=lambda: _FOLHA_OK):
+    import finance.folha_titulos as folha_titulos
     import finance.notificar as notificar
     import finance.observabilidade as obs
     chamadas = []
@@ -42,19 +46,25 @@ def _fingir(monkeypatch, *, alerta, faxina):
         chamadas.append(("alerta", pool, sempre))
         return alerta()
 
+    def _folha(pool):
+        chamadas.append(("folha", pool))
+        return folha()
+
     def _faxina(pool, dias=30):
         chamadas.append(("faxina", pool, dias))
         return faxina()
 
     monkeypatch.setattr(notificar, "alerta_fase_b", _alerta)
+    monkeypatch.setattr(folha_titulos, "sincronizar_todas", _folha)
     monkeypatch.setattr(obs, "expurgar_antigos", _faxina)
     return chamadas
 
 
-def test_roda_os_dois_passos_com_o_mesmo_banco(monkeypatch):
+def test_roda_os_passos_com_o_mesmo_banco(monkeypatch):
     chamadas = _fingir(monkeypatch, alerta=lambda: True, faxina=lambda: 3)
     assert cron_diario.rodar(pool="POOL") is True
-    assert chamadas == [("alerta", "POOL", True), ("faxina", "POOL", 30)]
+    assert chamadas == [("alerta", "POOL", True), ("folha", "POOL"),
+                        ("faxina", "POOL", 30)]
 
 
 def test_o_resumo_quebrado_nao_impede_a_faxina_e_vira_falha(monkeypatch):
@@ -62,7 +72,18 @@ def test_o_resumo_quebrado_nao_impede_a_faxina_e_vira_falha(monkeypatch):
         raise RuntimeError("banco fora")
     chamadas = _fingir(monkeypatch, alerta=_quebra, faxina=lambda: 0)
     assert cron_diario.rodar(pool="POOL") is False
-    assert [c[0] for c in chamadas] == ["alerta", "faxina"]
+    assert [c[0] for c in chamadas] == ["alerta", "folha", "faxina"]
+
+
+def test_a_folha_quebrada_nao_impede_a_faxina_e_vira_falha(monkeypatch):
+    """As contas a pagar da folha (482) são um passo como os outros: quebrado,
+    vira saída 1, e a faxina roda assim mesmo."""
+    def _quebra():
+        raise RuntimeError("banco fora")
+    chamadas = _fingir(monkeypatch, alerta=lambda: True, faxina=lambda: 0,
+                       folha=_quebra)
+    assert cron_diario.rodar(pool="POOL") is False
+    assert [c[0] for c in chamadas] == ["alerta", "folha", "faxina"]
 
 
 def test_a_faxina_quebrada_vira_falha(monkeypatch):

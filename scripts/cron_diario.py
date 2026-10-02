@@ -1,5 +1,6 @@
-"""O cron diário: o resumo da Fase B no Telegram do admin e a faxina do
-`conversas_log` (roda 1x/dia no Render, serviço `openclaw-cron-diario-va`).
+"""O cron diário: o resumo da Fase B no Telegram do admin, as contas a pagar da
+folha (adiantamento e saldo) e a faxina do `conversas_log` (roda 1x/dia no
+Render, serviço `openclaw-cron-diario-va`).
 
 POR QUE ESTE ARQUIVO EXISTE
 O cron rodava `python -c "from web.app import _setup; ..."` — carregava o painel
@@ -34,7 +35,7 @@ DIAS_CONVERSAS_LOG = 30
 
 
 def rodar(pool=None) -> bool:
-    """Roda os dois passos. Devolve True se nenhum quebrou."""
+    """Roda os passos. Devolve True se nenhum quebrou."""
     if pool is None:
         from db.conexao import get_pool
         pool = get_pool()
@@ -49,6 +50,19 @@ def rodar(pool=None) -> bool:
                          "Telegram do admin (/admin ou ADMIN_TELEGRAM_ID)")
     except Exception:  # noqa: BLE001 — a faxina roda mesmo assim
         _log.exception("resumo da Fase B quebrou")
+        ok = False
+
+    try:
+        # A folha em dois dias (482): é aqui que o adiantamento e o saldo de
+        # novembro nascem em 1º/11, e que o saldo de outubro se acerta com o que
+        # a folha mudou de ontem pra hoje.
+        from finance.folha_titulos import sincronizar_todas
+        r = sincronizar_todas(pool)
+        _log.info("folha em dois dias: %s conta(s), %s criada(s), %s ajustada(s), "
+                  "%s cancelada(s)", r["contas"], r["criados"], r["atualizados"],
+                  r["cancelados"])
+    except Exception:  # noqa: BLE001
+        _log.exception("folha em dois dias quebrou")
         ok = False
 
     try:

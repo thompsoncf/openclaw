@@ -465,6 +465,45 @@ def _classificacao_valida(pool, conta_id: int, plano_conta_id, centro_custo_id):
             _pc.centro_custo_valido(pool, conta_id, centro_custo_id))
 
 
+# ─────────────────────────────────────────────────── o MÊS DE REFERÊNCIA (484)
+# Pedido do dono em 02/10/2026, e as duas decisões dele: é SÓ INFORMAÇÃO (o DRE
+# continua pela data do pagamento) e, quando ninguém preenche, vale o MÊS
+# ANTERIOR AO VENCIMENTO — a conta que vence 10/11 é a de outubro (aluguel, luz,
+# água, salário). O padrão é calculado na leitura, e não gravado: as contas que
+# já existiam não foram reescritas, e mudar o vencimento de uma conta sem
+# referência anotada leva a referência junto.
+def referencia_padrao(vencimento: date | None) -> date | None:
+    """O mês anterior ao do vencimento (1º dia)."""
+    if not vencimento:
+        return None
+    if vencimento.month == 1:
+        return date(vencimento.year - 1, 12, 1)
+    return date(vencimento.year, vencimento.month - 1, 1)
+
+
+def ler_mes(texto) -> date | None:
+    """'2026-10' (o <input type=month>), '10/2026' ou uma data -> 1º do mês.
+    Vazio ou lixo -> None."""
+    if isinstance(texto, date):
+        return date(texto.year, texto.month, 1)
+    t = str(texto or "").strip()
+    try:
+        if "/" in t:
+            mm, aaaa = t.split("/")[-2:]
+            return date(int(aaaa), int(mm), 1)
+        partes = t.split("-")
+        if len(partes) >= 2:
+            return date(int(partes[0]), int(partes[1]), 1)
+    except (ValueError, TypeError):
+        return None
+    return None
+
+
+def _somar_meses(d: date, n: int) -> date:
+    total = d.year * 12 + (d.month - 1) + n
+    return date(total // 12, total % 12 + 1, 1)
+
+
 def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  valor_centavos: int, vencimento: date,
                  contraparte: str = "", categoria: str = "",
@@ -476,7 +515,8 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  precisa_aprovacao: bool | None = None,
                  plano_conta_id=None,
                  centro_custo_id=None,
-                 tipo_despesa=None) -> dict:
+                 tipo_despesa=None,
+                 mes_referencia=None) -> dict:
     """Cria um título aberto. tipo: 'pagar' | 'receber'. cliente_id LIGA o título
     a um cliente da base (honorário/venda a prazo aparece na ficha dele).
 
@@ -542,6 +582,11 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
     tipo_ok = _norm_tipo(tipo_despesa) if tipo == "pagar" else None
     if tipo_ok:
         cols.append("tipo_despesa"); vals.append(tipo_ok)
+    # o MÊS DE REFERÊNCIA (484), também só quando veio: em branco, a leitura
+    # assume o mês anterior ao vencimento
+    ref = ler_mes(mes_referencia) if mes_referencia else None
+    if ref:
+        cols.append("mes_referencia"); vals.append(ref)
     with pool.connection() as c:
         r = c.execute(
             f"insert into titulos ({', '.join(cols)}) "
@@ -555,7 +600,7 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
             "periodicidade": periodicidade, "valor_variavel": valor_variavel,
             "cliente_id": cli_id, "aprovacao": aprov,
             "plano_conta_id": plano_ok, "centro_custo_id": centro_ok,
-            "tipo_despesa": tipo_ok}
+            "tipo_despesa": tipo_ok, "mes_referencia": ref}
 
 
 def listar_titulos(pool, conta_id: int, status: str = "aberto",
@@ -581,7 +626,8 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
                        t.plano_conta_id, pc.codigo, pc.nome,
                        t.centro_custo_id, cc.nome,
                        to_jsonb(t)->>'tipo_despesa',
-                       to_jsonb(t)->>'folha_parte'
+                       to_jsonb(t)->>'folha_parte',
+                       to_jsonb(t)->>'mes_referencia'
                   from titulos t
                   left join clientes cl on cl.id = t.cliente_id
                   left join pessoas p on p.id = cl.pessoa_id
@@ -642,6 +688,11 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             "tipo_despesa": r[28],
             # conta gerada pela FOLHA (482): 'adiantamento' | 'saldo' | None
             "folha_parte": r[29],
+            # o MÊS DE REFERÊNCIA (484): o anotado, ou o mês anterior ao
+            # vencimento. `referencia_anotada` diz qual dos dois.
+            "referencia": (date.fromisoformat(r[30]) if r[30]
+                           else referencia_padrao(venc)),
+            "referencia_anotada": bool(r[30]),
         })
     return out
 
@@ -816,7 +867,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                        recorrente, vencimento, criado_por, pago_sem_autorizacao,
                        aprovacao, periodicidade, valor_variavel,
                        plano_conta_id, centro_custo_id,
-                       to_jsonb(titulos)->>'tipo_despesa'""",
+                       to_jsonb(titulos)->>'tipo_despesa',
+                       to_jsonb(titulos)->>'mes_referencia'""",
             (data_pagto, acrescimo_centavos, titulo_id, conta_id),
         ).fetchone()
         if not t:
@@ -937,6 +989,15 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                 if t[14]:   # o tipo repete junto: o aluguel fixo continua fixo
                     c.execute("update titulos set tipo_despesa=%s where id=%s",
                               (t[14], proximo_id))
+                if t[15] and t[6]:
+                    # a REFERÊNCIA anotada (484) anda o mesmo tanto que o
+                    # vencimento: o aluguel de outubro vira o de novembro. Sem
+                    # anotação não precisa: o padrão já sai do vencimento novo.
+                    passo = ((prox.year * 12 + prox.month)
+                             - (t[6].year * 12 + t[6].month))
+                    c.execute("update titulos set mes_referencia=%s where id=%s",
+                              (_somar_meses(date.fromisoformat(t[15]), passo),
+                               proximo_id))
         if conn is None:
             c.commit()
     return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id,
@@ -1564,9 +1625,27 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
                   categoria: str | None = None,
                   plano_conta_id=None,
                   centro_custo_id=None,
-                  tipo_despesa=None) -> bool:
-    """Corrige descrição, valor e/ou FORNECEDOR de um título. NÃO mexe em
-    vencimento nem tipo. Multi-tenant: só o título DESTA conta. Passa só o que
+                  tipo_despesa=None,
+                  vencimento: date | None = None,
+                  mes_referencia=False) -> bool:
+    """Corrige descrição, valor e/ou FORNECEDOR de um título. NÃO mexe no tipo.
+
+    O VENCIMENTO entrou em 02/10/2026 (484, pedido do dono: "preciso de uma opção
+    para editar a data do vencimento, após feito o lançamento"). Só em conta A
+    PAGAR e ABERTA: a paga já tem a data dela no caixa, e a receber pode ser
+    parcela de orçamento ou cobrança com link — mudar a data só aqui deixaria as
+    duas pontas discordando. A mudança marca `vencimento_manual`, que é o que faz a
+    folha em dois dias (482) não mover a data que o dono escolheu. A conta que
+    repete passa a repetir a partir da data nova (a próxima sai dela na baixa).
+
+    `mes_referencia` (484): False = não mexe; None ou vazio = volta ao padrão (o
+    mês anterior ao vencimento); um mês = anota. Também só em conta a pagar. O
+    formulário vem com a referência PREENCHIDA, então "o mesmo mês que o padrão já
+    dava, numa conta sem anotação" não é anotar: é a pessoa não ter mexido. Sem
+    esta regra, corrigir a data digitada errada (10/11 → 10/12) congelaria a
+    referência velha (outubro) em vez de deixá-la seguir a data nova.
+
+    Multi-tenant: só o título DESTA conta. Passa só o que
     quer mudar; campo None é ignorado. Descrição vazia é ignorada (não apaga);
     valor negativo é rejeitado. Retorna True se algo mudou.
 
@@ -1629,6 +1708,25 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
             sets.append("tipo_despesa=null")
         elif _norm_tipo(tipo_despesa):
             sets.append("tipo_despesa=%s"); args.append(_norm_tipo(tipo_despesa))
+    if vencimento is not None:
+        # no UPDATE, o `vencimento` à direita é o valor ANTIGO: a marca só acende
+        # quando a data muda de fato
+        sets.append("vencimento_manual = vencimento_manual or "
+                    "(status='aberto' and tipo='pagar' and vencimento <> %s)")
+        args.append(vencimento)
+        sets.append("vencimento = case when status='aberto' and tipo='pagar' "
+                    "then %s else vencimento end")
+        args.append(vencimento)
+    if mes_referencia is not False:
+        ref = ler_mes(mes_referencia) if mes_referencia else None
+        # à direita, `mes_referencia` e `vencimento` são os valores ANTIGOS
+        sets.append(
+            "mes_referencia = case "
+            "when tipo <> 'pagar' then mes_referencia "
+            "when mes_referencia is null and %s::date = "
+            "(date_trunc('month', vencimento) - interval '1 month')::date then null "
+            "else %s::date end")
+        args.extend([ref, ref])
     if not sets:
         return False
     with pool.connection() as c:

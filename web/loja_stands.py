@@ -179,6 +179,7 @@ def loja_stands(request: Request, slug: str):
         just_sent_codes_json=json.dumps([x for x in (msg_codigo, c2_raw) if x]
                                         if msg == "ok" else []),
         cfg=cfg, marca=marca, n_total=len(stands), stands_json=stands_json,
+        fachada=_FACHADAS.get(cfg.get("slug") or ""),
         data_br=_data_br, msg=msg, msg_codigo=msg_codigo, ct=ct,
         vendedor_link=vendedor_link, vendedor_nome=vendedor_nome, cliente_json=cliente_json,
         ct_json=json.dumps(ct or None), stand_link_json=json.dumps(stand_link or None),
@@ -285,7 +286,15 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
 # caminho livre deixaria `../../` chegar em qualquer arquivo), cache em
 # memória, imutável (se a arte mudar, muda o nome).
 # ─────────────────────────────────────────────────────────────────────────
-_FOTOS_OK = {"2x2", "3x2", "3x3", "4x2", "4x3"}
+_FOTOS_OK = {"2x2", "3x2", "3x3", "4x2", "4x3",
+             "fachada-outlet-chic", "fachada-outlet-chic-800"}
+# A foto do topo da página (01/10/2026, pedido do dono): a fachada do local com o
+# pórtico do evento, pág. 2 do PDF oficial. É arte DESTE evento — entra pelo slug
+# da página, nunca pra todas as contas que vendem stand.
+_FACHADAS = {
+    "outlet-chic": {"arquivo": "fachada-outlet-chic",
+                    "alt": "Fachada do Centro de Convenções de Teresina com o pórtico do Outlet Chic"},
+}
 _FOTOS_DIR = os.path.join(os.path.dirname(__file__), "estatico", "stands")
 _fotos_cache: dict[str, bytes] = {}
 
@@ -320,23 +329,24 @@ PLANTA_CSS = """
    (página pública, painel do gestor, app da vendedora). Cada tela só informa as
    cores no elemento do mapa: --pl-dim (texto), --pl-line (traço), --pl-surf (fundo
    de rótulo). Nada aqui recebe clique: o toque passa pro stand. Classes com prefixo
-   plc- pra não trombar com as do app (que já tem .pl, .ic…). */
+   plc- pra não trombar com as do app (que já tem .pl, .ic…). --plk (posto pelo
+   plantaMontar) encolhe a letra dos rótulos quando a planta tem menos de 800px. */
 .plc{position:absolute;box-sizing:border-box;display:flex;align-items:center;justify-content:center;
-  text-align:center;white-space:nowrap;line-height:1;font-size:8px;font-weight:700;letter-spacing:.03em;
+  text-align:center;white-space:nowrap;line-height:1;font-size:calc(8px*var(--plk,1));font-weight:700;letter-spacing:.03em;
   color:var(--pl-dim,#9FA087);pointer-events:none}
 .plc-linha{background:var(--pl-line,rgba(245,243,230,.16))}
 .plc-muro{border:1px solid var(--pl-line,rgba(245,243,230,.16))}
-.plc-zona{font-size:7.5px;font-weight:800;text-transform:uppercase;border-radius:4px;
+.plc-zona{font-size:calc(7.5px*var(--plk,1));font-weight:800;text-transform:uppercase;border-radius:4px;
   background:var(--pl-surf,#181A10);border:1px solid var(--pl-line,rgba(245,243,230,.16))}
-.plc-faixa{background:#CFC8B8;color:#3A362C;font-size:9px;font-weight:800;letter-spacing:.07em;
+.plc-faixa{background:#CFC8B8;color:#3A362C;font-size:calc(9px*var(--plk,1));font-weight:800;letter-spacing:.07em;
   text-transform:uppercase;border-radius:4px}
-.plc-avenue{font-size:8.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.75}
-.plc-txt{font-size:7px;text-transform:uppercase;letter-spacing:.05em}
+.plc-avenue{font-size:calc(8.5px*var(--plk,1));font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.75}
+.plc-txt{font-size:calc(7px*var(--plk,1));text-transform:uppercase;letter-spacing:.05em}
 .plc-tenda{border:1.5px dashed var(--pl-dim,#9FA087);border-radius:6px;background:rgba(245,243,230,.05)}
 /* texto em pé: vt lê de cima pra baixo, vb de baixo pra cima (como na planta) */
 .plc-vt,.plc-vb{writing-mode:vertical-rl;text-orientation:mixed}
 .plc-vb{transform:rotate(180deg)}
-.plc-faixa.plc-vt,.plc-faixa.plc-vb{font-size:7px;letter-spacing:.02em}
+.plc-faixa.plc-vt,.plc-faixa.plc-vb{font-size:calc(7px*var(--plk,1));letter-spacing:.02em}
 .plc-ic svg{display:block;width:100%;height:100%}
 """
 
@@ -347,13 +357,13 @@ PLANTA_DEFS_JS = r"""
   var PLANTA = {
     inferior:{w:1000,h:448.8,
       stands:{"i01":[76.8,14.3,29.5,58.7],"i02":[106.3,14.3,29.1,58.7],"i03":[135.4,14.3,29.6,58.7],"i04":[180.5,14.3,29.5,58.7],"i05":[209.9,14.3,29.2,58.7],"i06":[239.1,14.3,29.2,58.7],"i07":[268.3,14.3,29.2,58.7],"i08":[297.5,14.3,29.2,58.7],"i09":[326.7,14.3,29.3,58.7],"i10":[356.0,14.3,29.1,58.7],"i11":[385.1,14.3,29.2,58.7],"i12":[414.3,14.3,29.2,58.7],"i13":[443.5,14.3,29.3,58.7],"i14":[472.7,14.3,29.3,58.7],"i15":[502.0,14.3,29.5,58.7],"i16":[81.6,124.0,59.0,29.3],"i17":[81.6,153.2,59.0,29.1],"i18":[81.6,182.3,59.0,29.1],"i19":[81.6,211.4,59.0,29.2],"i20":[191.3,138.5,58.5,43.8],"i21":[249.8,138.5,58.5,43.8],"i22":[308.3,138.5,58.4,43.8],"i23":[366.7,138.5,58.7,43.8],"i24":[191.3,182.3,58.5,43.9],"i25":[249.8,182.3,58.5,43.9],"i26":[308.3,182.3,58.4,43.9],"i27":[366.7,182.3,58.7,43.9],"i28":[468.6,124.1,29.6,29.1],"i29":[468.6,153.2,29.6,29.1],"i30":[468.6,182.3,29.6,29.0],"i31":[468.6,211.3,29.6,29.1],"i32":[160.3,292.9,29.6,58.8],"i33":[189.9,292.9,29.2,58.8],"i34":[219.0,292.9,29.2,58.8],"i35":[248.2,292.9,29.3,58.8],"i36":[277.5,292.9,29.2,58.8],"i37":[306.7,292.9,29.3,58.8],"i38":[335.9,292.9,29.3,58.8],"i39":[365.2,292.9,29.5,58.8],"i40":[472.5,292.9,29.6,58.5],"i41":[502.0,292.9,29.5,58.8],"i42":[472.5,351.4,29.6,58.3],"G43":[541.2,14.3,29.5,58.7],"G44":[570.7,14.3,29.2,58.7],"G45":[599.9,14.3,29.2,58.7],"G46":[629.2,14.3,29.2,58.7],"G47":[658.4,14.3,29.3,58.7],"G48":[687.7,14.3,29.2,58.7],"G49":[716.8,14.3,29.2,58.7],"G50":[746.0,14.3,29.1,58.7],"G51":[775.2,14.3,29.2,58.7],"G52":[804.4,14.3,29.3,58.7],"G53":[833.7,14.3,29.1,58.7],"G54":[862.8,14.3,29.7,58.7],"G55":[541.4,138.5,58.5,43.8],"G56":[599.9,138.5,58.5,43.8],"G57":[658.4,138.5,58.4,43.8],"G58":[716.8,138.5,58.6,43.8],"G59":[541.4,182.3,58.5,43.8],"G60":[599.9,182.3,58.5,43.8],"G61":[658.4,182.3,58.4,43.8],"G62":[716.8,182.3,58.6,43.8],"G63":[820.5,122.9,59.0,29.4],"G64":[820.5,152.3,59.0,29.0],"G65":[820.5,181.3,59.0,29.1],"G66":[820.5,210.4,59.0,29.3],"G67":[583.8,291.6,44.2,29.7],"G68":[628.1,291.6,44.0,29.7],"G69":[714.0,291.6,29.5,58.6],"G70":[743.5,291.6,29.2,58.6],"G71":[772.7,291.6,29.2,58.6],"G72":[801.9,291.6,29.2,58.6],"G73":[831.0,291.6,29.2,58.6],"G74":[860.3,291.6,29.5,58.6]},
-      decor:[{"k":"linha","r":[0.0,4.8,75.8,0.0]},{"k":"linha","r":[0.0,64.1,75.8,0.0]},{"k":"linha","r":[0.0,355.9,108.9,0.0]},{"k":"linha","r":[75.8,4.8,0.0,351.2]},{"k":"linha","r":[75.8,7.8,818.8,0.0]},{"k":"linha","r":[312.3,7.8,0.0,6.9]},{"k":"linha","r":[130.5,355.9,94.5,0.0]},{"k":"linha","r":[894.6,4.8,0.0,235.0]},{"k":"linha","r":[894.6,282.5,0.0,72.6]},{"k":"linha","r":[894.6,4.5,53.8,0.0]},{"k":"linha","r":[948.4,4.5,0.0,350.6]},{"k":"linha","r":[865.0,354.9,83.5,0.0]},{"k":"linha","r":[501.9,409.9,0.0,19.4]},{"k":"linha","r":[473.0,429.3,28.9,0.0]},{"k":"muro","r":[225.0,353.6,204.1,75.6]},{"k":"muro","r":[501.9,362.4,276.2,67.0]},{"k":"muro","r":[570.4,340.5,101.4,21.9]},{"k":"muro","r":[778.2,353.7,86.8,75.6]},{"k":"muro","r":[865.0,354.9,135.0,91.3]},{"k":"muro","r":[190.9,120.1,8.6,9.1]},{"k":"muro","r":[307.1,121.0,8.6,9.1]},{"k":"muro","r":[421.2,118.4,8.2,8.6]},{"k":"muro","r":[428.1,118.4,8.2,8.6]},{"k":"muro","r":[540.8,118.4,9.1,8.6]},{"k":"muro","r":[658.3,118.4,9.1,8.6]},{"k":"muro","r":[774.5,118.4,8.6,8.6]},{"k":"muro","r":[188.3,235.4,9.1,9.1]},{"k":"muro","r":[305.4,236.7,9.1,9.1]},{"k":"muro","r":[419.4,233.7,8.2,8.2]},{"k":"muro","r":[425.9,233.7,8.2,8.2]},{"k":"muro","r":[539.1,232.8,9.1,8.6]},{"k":"muro","r":[657.0,232.8,8.6,8.6]},{"k":"muro","r":[773.2,232.8,8.6,8.6]},{"k":"muro","r":[539.1,349.0,8.6,9.1]},{"k":"muro","r":[772.4,349.5,8.6,8.6]},{"k":"zona","r":[88.6,75.2,141.7,14.3],"t":"Outlet Acessórios"},{"k":"zona","r":[305.0,75.2,90.3,14.3],"t":"Outlet Make"},{"k":"zona","r":[644.9,95.0,101.9,14.3],"t":"Outlet Grifes"},{"k":"zona vb","r":[141.7,111.9,15.1,137.4],"t":"Outlet Acessórios"},{"k":"zona","r":[263.5,122.2,88.6,14.3],"t":"Home Decor"},{"k":"zona","r":[167.2,272.6,108.0,14.3],"t":"Outlet Fitness"},{"k":"zona","r":[297.2,272.6,84.2,14.3],"t":"Outlet Kids"},{"k":"faixa vt","r":[522.2,70.8,16.8,221.6],"t":"Outlet Grifes"},{"k":"ic","ic":"seta","r":[14.7,193.5,13.4,17.7]},{"k":"zona","r":[6.9,217.3,28.5,11.7],"t":"Sobe"},{"k":"ic","ic":"seta","r":[880.8,256.6,17.7,13.8],"g":270},{"k":"faixa vb","r":[907.6,213.8,12.1,99.4],"t":"Entrada única"},{"k":"ic","ic":"saida","r":[108.9,345.6,21.6,21.2]},{"k":"ic","ic":"saida","r":[431.1,411.2,21.6,20.7]},{"k":"ic","ic":"wc","r":[625.9,386.6,21.2,21.2]},{"k":"avenue vb","r":[986.2,79.9,9.5,212.5],"t":"Av. Marechal Castelo Branco"}]},
+      decor:[{"k":"linha","r":[0.0,4.8,75.8,0.0]},{"k":"linha","r":[0.0,64.1,75.8,0.0]},{"k":"linha","r":[0.0,355.9,108.9,0.0]},{"k":"linha","r":[75.8,4.8,0.0,351.2]},{"k":"linha","r":[75.8,7.8,818.8,0.0]},{"k":"linha","r":[312.3,7.8,0.0,6.9]},{"k":"linha","r":[130.5,355.9,94.5,0.0]},{"k":"linha","r":[894.6,4.8,0.0,235.0]},{"k":"linha","r":[894.6,282.5,0.0,72.6]},{"k":"linha","r":[894.6,4.5,53.8,0.0]},{"k":"linha","r":[948.4,4.5,0.0,350.6]},{"k":"linha","r":[865.0,354.9,83.5,0.0]},{"k":"linha","r":[501.9,409.9,0.0,19.4]},{"k":"linha","r":[473.0,429.3,28.9,0.0]},{"k":"muro","r":[225.0,353.6,204.1,75.6]},{"k":"muro","r":[501.9,362.4,276.2,67.0]},{"k":"muro","r":[570.4,340.5,101.4,21.9]},{"k":"muro","r":[778.2,353.7,86.8,75.6]},{"k":"muro","r":[865.0,354.9,135.0,91.3]},{"k":"muro","r":[190.9,120.1,8.6,9.1]},{"k":"muro","r":[307.1,121.0,8.6,9.1]},{"k":"muro","r":[421.2,118.4,8.2,8.6]},{"k":"muro","r":[428.1,118.4,8.2,8.6]},{"k":"muro","r":[540.8,118.4,9.1,8.6]},{"k":"muro","r":[658.3,118.4,9.1,8.6]},{"k":"muro","r":[774.5,118.4,8.6,8.6]},{"k":"muro","r":[188.3,235.4,9.1,9.1]},{"k":"muro","r":[305.4,236.7,9.1,9.1]},{"k":"muro","r":[419.4,233.7,8.2,8.2]},{"k":"muro","r":[425.9,233.7,8.2,8.2]},{"k":"muro","r":[539.1,232.8,9.1,8.6]},{"k":"muro","r":[657.0,232.8,8.6,8.6]},{"k":"muro","r":[773.2,232.8,8.6,8.6]},{"k":"muro","r":[539.1,349.0,8.6,9.1]},{"k":"muro","r":[772.4,349.5,8.6,8.6]},{"k":"zona","r":[88.6,75.2,141.7,14.3],"t":"Outlet Acessórios"},{"k":"zona","r":[305.0,75.2,90.3,14.3],"t":"Outlet Make"},{"k":"zona","r":[644.9,95.0,101.9,14.3],"t":"Outlet Grifes"},{"k":"zona vb","r":[141.7,111.9,15.1,137.4],"t":"Outlet Acessórios"},{"k":"zona","r":[263.5,122.2,88.6,14.3],"t":"Home Decor"},{"k":"zona","r":[167.2,272.6,108.0,14.3],"t":"Outlet Fitness"},{"k":"zona","r":[297.2,272.6,84.2,14.3],"t":"Outlet Kids"},{"k":"faixa vt","r":[522.2,70.8,16.8,221.6],"t":"Outlet Grifes"},{"k":"ic","ic":"seta","r":[14.7,193.5,13.4,17.7]},{"k":"zona","r":[0.9,217.3,40.5,11.7],"t":"Sobe"},{"k":"ic","ic":"seta","r":[880.8,256.6,17.7,13.8],"g":270},{"k":"faixa vb","r":[907.6,213.8,12.1,99.4],"t":"Entrada única"},{"k":"ic","ic":"saida","r":[108.9,345.6,21.6,21.2]},{"k":"ic","ic":"saida","r":[431.1,411.2,21.6,20.7]},{"k":"ic","ic":"wc","r":[625.9,386.6,21.2,21.2]},{"k":"avenue vb","r":[986.2,79.9,9.5,212.5],"t":"Av. Marechal Castelo Branco"}]},
     superior:{w:1000,h:368.0,
       stands:{"S75":[151.4,16.6,29.2,43.5],"S76":[180.6,16.6,29.3,43.5],"S77":[209.8,16.6,29.0,43.5],"S78":[238.8,16.6,29.0,43.5],"S79":[267.9,16.6,29.2,43.5],"S80":[297.1,16.6,29.0,43.5],"S81":[326.1,16.6,29.2,43.5],"S82":[355.3,16.6,29.2,43.5],"S83":[384.5,16.6,29.2,43.5],"S84":[428.2,16.6,29.2,43.5],"S85":[457.4,16.6,29.2,43.5],"S86":[486.6,16.6,29.2,43.5],"S87":[515.7,16.6,28.9,43.5],"S88":[544.7,16.6,29.2,43.5],"S89":[573.9,16.6,29.2,43.5],"S90":[603.0,16.6,29.0,43.5],"S91":[632.0,16.6,29.2,43.5],"S92":[661.3,16.6,29.1,43.5],"S93":[690.3,16.6,29.0,43.5],"S94":[719.3,16.6,29.3,43.5],"S95":[748.6,16.6,29.0,43.5],"S96":[777.6,16.6,29.2,43.5],"S97":[64.7,75.8,43.8,43.6],"S98":[64.7,133.8,43.8,29.0],"S99":[64.7,162.9,43.8,28.9],"S100":[64.7,191.7,43.8,29.2],"S101":[64.7,220.9,43.8,28.9],"S102":[64.7,249.8,43.8,29.1],"S103":[152.1,96.3,43.7,43.5],"S104":[195.8,96.3,43.8,43.5],"S105":[239.5,96.3,43.8,43.5],"S106":[283.3,96.3,43.7,43.5],"S107":[370.5,96.3,43.7,43.5],"S108":[414.3,96.3,43.8,43.5],"S109":[458.1,96.3,43.5,43.5],"S110":[501.6,96.3,43.9,43.5],"S111":[588.9,96.3,43.8,43.5],"S112":[632.7,96.3,43.6,43.5],"S113":[676.4,96.3,43.7,43.5],"S114":[720.1,96.3,43.7,43.5],"S115":[152.1,139.8,43.7,43.6],"S116":[195.8,139.8,43.8,43.6],"S117":[239.5,139.8,43.8,43.6],"S118":[283.3,139.8,43.7,43.6],"S119":[370.5,139.8,43.7,43.6],"S120":[414.3,139.8,43.8,43.6],"S121":[458.1,139.8,43.5,43.6],"S122":[501.6,139.8,43.9,43.6],"S123":[588.9,139.8,43.8,43.6],"S124":[632.7,139.8,43.6,43.6],"S125":[676.4,139.8,43.7,43.6],"S126":[720.1,139.8,43.7,43.6],"S127":[269.5,240.9,29.3,43.6],"S128":[298.9,240.9,29.0,43.6],"S129":[327.9,240.9,29.2,43.6],"S130":[414.2,219.5,43.8,29.2],"S131":[458.1,219.5,43.5,29.2],"S132":[501.6,219.5,43.9,29.2],"S133":[588.9,219.5,43.8,29.2],"S134":[632.7,219.5,43.5,29.2],"S135":[676.2,219.5,43.8,29.2],"S136":[720.1,219.5,43.7,29.2],"S137":[806.8,60.2,43.8,28.9],"S138":[806.8,89.1,43.8,29.2],"S139":[806.8,118.3,43.8,28.9],"S140":[806.8,147.2,43.8,28.8],"S141":[806.8,176.0,43.8,29.2],"S142":[806.8,205.2,43.8,28.9],"S143":[406.4,284.3,29.2,58.2],"S144":[435.6,284.3,29.2,58.2],"S145":[464.8,284.3,29.0,58.2],"S146":[493.8,284.3,29.2,58.2],"S147":[523.0,284.3,29.0,58.2],"S148":[552.1,284.3,29.2,58.2],"S149":[581.3,284.3,29.1,58.2],"S150":[610.4,284.3,29.3,58.2],"S151":[757.9,284.3,29.2,58.2],"S152":[787.1,284.3,29.1,58.2],"S153":[816.2,284.3,29.2,58.2],"S154":[845.4,284.3,29.2,58.2]},
       decor:[{"k":"linha","r":[0.0,8.4,874.7,0.0]},{"k":"linha","r":[53.6,8.4,0.0,8.2]},{"k":"linha","r":[53.6,16.6,97.8,0.0]},{"k":"linha","r":[0.0,63.9,59.4,0.0]},{"k":"linha","r":[59.4,64.4,0.0,286.8]},{"k":"linha","r":[59.4,284.5,346.7,0.0]},{"k":"muro","r":[166.3,262.6,103.2,22.0]},{"k":"linha","r":[0.0,355.5,647.1,0.0]},{"k":"linha","r":[709.7,354.2,165.0,0.0]},{"k":"linha","r":[874.7,4.8,0.0,236.7]},{"k":"linha","r":[874.7,284.7,0.0,70.4]},{"k":"linha","r":[874.7,4.8,106.3,0.0]},{"k":"linha","r":[981.0,4.8,0.0,350.3]},{"k":"linha","r":[874.7,295.0,106.3,0.0]},{"k":"linha","r":[874.7,355.1,106.3,0.0]},{"k":"faixa vt","r":[18.1,10.8,14.7,61.8],"t":"Entrada"},{"k":"ic","ic":"seta","r":[42.3,35.0,17.7,13.4],"g":90},{"k":"faixa vb","r":[901.5,244.5,14.7,38.9],"t":"Saída"},{"k":"ic","ic":"seta","r":[873.9,257.0,17.7,13.4],"g":90},{"k":"ic","ic":"wc","r":[214.3,309.3,21.6,21.2]},{"k":"ic","ic":"saida","r":[687.7,342.1,21.6,21.6]},{"k":"avenue vb","r":[984.0,80.8,9.5,216.0],"t":"Av. Marechal Castelo Branco"}]},
     outlet_car:{w:1000,h:328.1,
       stands:{"C155":[511.0,87.9,38.8,37.8],"C156":[564.5,87.9,38.8,37.8],"C157":[618.0,87.9,38.8,37.8],"C158":[671.6,87.9,38.8,37.8],"C159":[769.6,87.9,38.8,37.8],"C160":[823.1,87.9,38.8,37.8],"C161":[876.7,87.9,38.8,37.8],"C162":[930.5,87.9,38.8,37.8]},
-      decor:[{"k":"linha","r":[0.0,32.4,1000.0,0.0]},{"k":"linha","r":[0.0,77.8,1000.0,0.0]},{"k":"linha","r":[366.6,260.9,631.9,0.0]},{"k":"muro","r":[31.4,108.7,71.3,72.3]},{"k":"tenda","r":[234.3,109.7,238.2,118.9]},{"k":"ic","ic":"carro","cor":"#26272B","r":[512.5,133.4,30.1,56.8]},{"k":"ic","ic":"carro","cor":"#F1EDEE","r":[581.0,136.0,29.6,56.3]},{"k":"ic","ic":"carro","cor":"#DDE6EA","r":[640.3,134.8,29.1,62.1]},{"k":"ic","ic":"carro","cor":"#E0504A","r":[674.9,136.4,31.1,56.8]},{"k":"ic","ic":"carro","cor":"#39456A","r":[771.9,129.8,30.6,56.8]},{"k":"ic","ic":"carro","cor":"#F1EDEE","r":[842.4,132.0,29.6,56.3]},{"k":"ic","ic":"carro","cor":"#DDE6EA","r":[883.7,130.7,28.6,62.1]},{"k":"ic","ic":"carro","cor":"#26272B","r":[946.3,130.5,30.6,55.8]},{"k":"ic","ic":"moto","cor":"#3A65A8","r":[551.1,138.2,18.4,43.7]},{"k":"ic","ic":"moto","cor":"#F7B717","r":[617.4,137.6,18.0,43.7]},{"k":"ic","ic":"moto","cor":"#F7B717","r":[708.5,137.3,18.0,43.2]},{"k":"ic","ic":"moto","cor":"#3A65A8","r":[804.1,131.1,18.0,43.2]},{"k":"ic","ic":"moto","cor":"#F7B717","r":[824.5,131.4,18.9,43.2]},{"k":"ic","ic":"moto","cor":"#3A65A8","r":[919.8,132.9,18.4,43.7]},{"k":"ic","ic":"palco","r":[25.9,90.4,107.2,113.1]},{"k":"ic","ic":"musica","r":[140.0,146.8,35.9,38.3]},{"k":"ic","ic":"mesa","r":[240.3,118.8,31.1,28.6]},{"k":"ic","ic":"mesa","r":[269.8,148.7,31.5,29.1]},{"k":"ic","ic":"mesa","r":[302.9,116.5,31.1,28.6]},{"k":"ic","ic":"mesa","r":[336.5,149.6,31.1,28.6]},{"k":"ic","ic":"mesa","r":[361.9,114.9,31.1,29.1]},{"k":"ic","ic":"mesa","r":[400.6,146.0,30.6,28.6]},{"k":"ic","ic":"mesa","r":[428.5,117.3,31.1,28.6]},{"k":"ic","ic":"barraca","r":[234.4,195.0,35.4,34.9]},{"k":"ic","ic":"barraca","r":[268.5,194.6,35.4,35.4]},{"k":"ic","ic":"barraca","r":[302.1,194.1,35.9,35.4]},{"k":"ic","ic":"barraca","r":[336.2,194.7,35.9,34.9]},{"k":"ic","ic":"barraca","r":[370.3,193.7,35.9,35.4]},{"k":"ic","ic":"barraca","r":[404.4,193.8,35.4,35.4]},{"k":"ic","ic":"barraca","r":[438.1,193.8,35.4,34.9]},{"k":"txt","t":"Tenda 20x10","r":[311.4,178.5,72.8,11.6]},{"k":"faixa","t":"Praça de Alimentação","r":[242.9,233.6,225.8,19.7]},{"k":"txt vb","t":"Palco 6x6","r":[11.6,109.4,9.7,63.1]},{"k":"avenue","t":"Av. Marechal Castelo Branco","r":[434.2,6.8,271.7,13.6]},{"k":"faixa","t":"Entrada","r":[705.4,49.4,74.2,18.6]},{"k":"ic","ic":"seta","g":180,"r":[733.6,79.1,18.0,21.8]},{"k":"faixa","t":"Outlet Car","r":[514.6,199.1,466.0,24.4]},{"k":"faixa","t":"Outlet Chic","r":[615.9,264.0,265.3,29.5]},{"k":"ic","ic":"seta","g":180,"r":[747.4,299.0,18.4,22.3]},{"k":"linha","r":[726.5,77.8,0.0,54.7]},{"k":"linha","r":[726.5,132.6,32.3,0.0]},{"k":"linha","r":[758.8,77.8,0.0,54.7]},{"k":"zona","t":"Espaço em tenda","r":[545.2,61.4,131.0,12.6]},{"k":"zona","t":"Stand personalizado","r":[791.9,61.4,155.3,12.6]}]}
+      decor:[{"k":"linha","r":[0.0,32.4,1000.0,0.0]},{"k":"linha","r":[0.0,77.8,1000.0,0.0]},{"k":"linha","r":[366.6,260.9,631.9,0.0]},{"k":"muro","r":[31.4,108.7,71.3,72.3]},{"k":"tenda","r":[234.3,109.7,238.2,118.9]},{"k":"ic","ic":"carro","cor":"#26272B","r":[512.5,133.4,30.1,56.8],"g":180},{"k":"ic","ic":"carro","cor":"#F1EDEE","r":[581.0,136.0,29.6,56.3],"g":180},{"k":"ic","ic":"carro","cor":"#DDE6EA","r":[640.3,134.8,29.1,62.1],"g":180},{"k":"ic","ic":"carro","cor":"#E0504A","r":[674.9,136.4,31.1,56.8],"g":180},{"k":"ic","ic":"carro","cor":"#39456A","r":[771.9,129.8,30.6,56.8],"g":180},{"k":"ic","ic":"carro","cor":"#F1EDEE","r":[842.4,132.0,29.6,56.3],"g":180},{"k":"ic","ic":"carro","cor":"#DDE6EA","r":[883.7,130.7,28.6,62.1],"g":180},{"k":"ic","ic":"carro","cor":"#26272B","r":[946.3,130.5,30.6,55.8],"g":180},{"k":"ic","ic":"moto","cor":"#3A65A8","r":[551.1,138.2,18.4,43.7],"g":180},{"k":"ic","ic":"moto","cor":"#F7B717","r":[617.4,137.6,18.0,43.7],"g":180},{"k":"ic","ic":"moto","cor":"#F7B717","r":[708.5,137.3,18.0,43.2],"g":180},{"k":"ic","ic":"moto","cor":"#3A65A8","r":[804.1,131.1,18.0,43.2],"g":180},{"k":"ic","ic":"moto","cor":"#F7B717","r":[824.5,131.4,18.9,43.2],"g":180},{"k":"ic","ic":"moto","cor":"#3A65A8","r":[919.8,132.9,18.4,43.7],"g":180},{"k":"ic","ic":"palco","r":[25.9,90.4,107.2,113.1]},{"k":"ic","ic":"musica","r":[140.0,146.8,35.9,38.3]},{"k":"ic","ic":"mesa","r":[240.3,118.8,31.1,28.6]},{"k":"ic","ic":"mesa","r":[269.8,148.7,31.5,29.1]},{"k":"ic","ic":"mesa","r":[302.9,116.5,31.1,28.6]},{"k":"ic","ic":"mesa","r":[336.5,149.6,31.1,28.6]},{"k":"ic","ic":"mesa","r":[361.9,114.9,31.1,29.1]},{"k":"ic","ic":"mesa","r":[400.6,146.0,30.6,28.6]},{"k":"ic","ic":"mesa","r":[428.5,117.3,31.1,28.6]},{"k":"ic","ic":"barraca","r":[234.4,195.0,35.4,34.9]},{"k":"ic","ic":"barraca","r":[268.5,194.6,35.4,35.4]},{"k":"ic","ic":"barraca","r":[302.1,194.1,35.9,35.4]},{"k":"ic","ic":"barraca","r":[336.2,194.7,35.9,34.9]},{"k":"ic","ic":"barraca","r":[370.3,193.7,35.9,35.4]},{"k":"ic","ic":"barraca","r":[404.4,193.8,35.4,35.4]},{"k":"ic","ic":"barraca","r":[438.1,193.8,35.4,34.9]},{"k":"txt","t":"Tenda 20x10","r":[311.4,178.5,72.8,11.6]},{"k":"faixa","t":"Praça de Alimentação","r":[242.9,233.6,225.8,19.7]},{"k":"txt vb","t":"Palco 6x6","r":[11.6,109.4,9.7,63.1]},{"k":"avenue","t":"Av. Marechal Castelo Branco","r":[434.2,6.8,271.7,13.6]},{"k":"faixa","t":"Entrada","r":[705.4,49.4,74.2,18.6]},{"k":"ic","ic":"seta","g":180,"r":[733.6,79.1,18.0,21.8]},{"k":"faixa","t":"Outlet Car","r":[514.6,199.1,466.0,24.4]},{"k":"faixa","t":"Outlet Chic","r":[615.9,264.0,265.3,29.5]},{"k":"ic","ic":"seta","g":180,"r":[747.4,299.0,18.4,22.3]},{"k":"linha","r":[726.5,77.8,0.0,54.7]},{"k":"linha","r":[726.5,132.6,32.3,0.0]},{"k":"linha","r":[758.8,77.8,0.0,54.7]},{"k":"zona","t":"Espaço em tenda","r":[545.2,61.4,131.0,12.6]},{"k":"zona","t":"Stand personalizado","r":[791.9,61.4,155.3,12.6]}]}
   };
 
   var pavilions = [
@@ -456,14 +466,35 @@ PLANTA_DEFS_JS = r"""
       if (d.g) el.style.transform = 'rotate(' + d.g + 'deg)';
       grid.appendChild(el);
     });
+    // a fila (mesmo topo, mesma altura, mesmo nº de letras) usa a largura do stand mais
+    // estreito dela: a letra e a quebra em duas linhas saem iguais pros vizinhos
+    var fila = {};
+    function chave(code){ var r = P.stands[code]; return r[1] + '|' + r[3] + '|' + code.length; }
+    Object.keys(P.stands).forEach(function(code){
+      var k2 = chave(code), w = P.stands[code][2];
+      if (fila[k2] == null || w < fila[k2]) fila[k2] = w;
+    });
     Object.keys(P.stands).forEach(function(code){
       var el = o.tile(code);
       if (!el) return;
       var r = P.stands[code];
       poe(el, r, vao);
       // a letra cabe no stand: o código (3 ou 4 letras) nunca encosta na borda
-      el.style.fontSize = Math.max(6.5, Math.min(10, (px(r[2]) - vao - miolo) / (0.62 * code.length),
-                                                  (px(r[3]) - vao) * 0.45)).toFixed(1) + 'px';
+      var lw = px(fila[chave(code)]) - vao, lh = px(r[3]) - vao;
+      var f = Math.min(10, (lw - miolo) / (0.62 * code.length), lh * 0.45);
+      if (f < 8 && code.length > 3 && lh > lw * 1.3){
+        // estreito e alto (S127–S129, S143–S154): a letra em cima, o número embaixo —
+        // como a própria planta do PDF escreve. O texto do botão continua "S145".
+        el.textContent = '';
+        el.appendChild(document.createTextNode(code.slice(0, 1)));
+        el.appendChild(document.createElement('br'));
+        el.appendChild(document.createTextNode(code.slice(1)));
+        el.style.flexDirection = 'column';
+        el.style.lineHeight = '1.05';
+        el.setAttribute('aria-label', code);      // leitor de tela lê "S145", não "S 145"
+        f = Math.min(10, (lw - miolo) / (0.62 * (code.length - 1)), (lh - miolo) / 2.1);
+      }
+      el.style.fontSize = Math.max(6.5, f).toFixed(1) + 'px';
       grid.appendChild(el);
     });
     // stand do banco que não está na planta desenhada: fila corrida embaixo —
@@ -479,6 +510,7 @@ PLANTA_DEFS_JS = r"""
       grid.appendChild(el);
       x += 40; alt = y + 26;
     });
+    grid.style.setProperty('--plk', Math.min(1, o.larg / 800).toFixed(3));
     grid.style.display = 'block';
     grid.style.boxSizing = 'content-box';
     grid.style.width = o.larg + 'px';
@@ -540,6 +572,17 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 
   .hero{background:#12130C;color:#F3F1E3;margin-inline:-16px;padding:28px 16px 24px;border-bottom:4px solid var(--mint);}
   .hero-inner{max-width:1180px;margin:0 auto;}
+  /* com a foto da fachada: texto à esquerda, foto à direita; no celular a foto sobe
+     pro topo, de ponta a ponta */
+  .hero-inner.com-foto{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,clamp(320px,42vw,500px));gap:32px;align-items:center;}
+  .hero-foto{margin:0;border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow);background:#0e0f0a;aspect-ratio:16/9;}
+  .hero-foto img{display:block;width:100%;height:100%;object-fit:cover;}
+  @media (max-width:860px){
+    .hero-inner.com-foto{grid-template-columns:minmax(0,1fr);gap:18px;}
+    /* tablet em pé e celular deitado: de ponta a ponta a foto ficava maior que a tela
+       e empurrava título e mapa pra fora — limita pela altura da janela */
+    .hero-foto{order:-1;width:100%;max-width:min(100%,560px,calc(55vh*16/9));justify-self:center;}
+  }
   .brand{font-size:clamp(34px,7vw,58px);line-height:0.95;margin:0;}
   .brand span{color:var(--mint);}
   .hero-meta{display:flex;flex-wrap:wrap;gap:14px 22px;margin-top:14px;font-size:14px;color:#C9C7B4;}
@@ -753,7 +796,8 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 </head><body>
 
 <div class="hero">
-  <div class="hero-inner">
+  <div class="hero-inner{% if fachada %} com-foto{% endif %}">
+    <div class="hero-texto">
     <h1 class="brand display"><span>{{ marca[:3] }}</span>{{ marca[3:] }} — STANDS</h1>
     <div class="hero-meta">
       {% if cfg.edicao_label %}<span><b>{{ cfg.edicao_label }}</b></span>{% endif %}
@@ -763,6 +807,8 @@ _TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
     <p class="hero-pitch">Escolha seu stand direto no mapa da planta oficial do evento: toque em um stand livre, veja tamanho e valor, pague o sinal no Pix e envie o comprovante — a reserva é sua enquanto a equipe confirma.</p>
     {% if vendedor_link %}<div class="info-strip">Atendimento de <b>{{ vendedor_nome or 'seu vendedor' }}</b> — escolha o stand que quiser; a reserva feita aqui fica registrada neste atendimento.</div>{% endif %}
     {% if cfg.whatsapp_numero %}<div class="info-strip">Cotas de patrocínio (Ouro, Prata e Bronze) são negociadas direto com a equipe — chama no WhatsApp.</div>{% endif %}
+    </div>
+    {% if fachada %}<figure class="hero-foto"><img src="/estatico/stands/{{ fachada.arquivo }}.jpg" srcset="/estatico/stands/{{ fachada.arquivo }}-800.jpg 800w, /estatico/stands/{{ fachada.arquivo }}.jpg 1600w" sizes="(max-width:860px) calc(100vw - 34px), 500px" width="1600" height="900" alt="{{ fachada.alt }}" decoding="async"></figure>{% endif %}
   </div>
 </div>
 

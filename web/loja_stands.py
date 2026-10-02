@@ -251,16 +251,18 @@ def _loja_stands_comprovante_sync(slug: str, codigo: str, nome: str, whatsapp: s
     # deixa lead órfão nem comprovante solto no bucket.
     codigos = [codigo] + ([codigo2.strip()] if (codigo2 or "").strip() else [])
     sinal_c = _centavos(sinal)
+    # cliente cadastrado antes pela vendedora (link com `?c=`): a reserva vai pro
+    # cadastro dele. Código assinado e revalidado aqui; inválido = o caminho de sempre.
+    # Vem ANTES da checagem: o limite por empresa conta também os stands desse cadastro.
+    cli = es.cliente_do_codigo(pool, conta_id, cliente) if (cliente or "").strip() else None
     v = es.validar_reserva(pool, conta_id, codigos, whatsapp,
-                           sinal_c if sinal_c is not None else None)
+                           sinal_c if sinal_c is not None else None,
+                           cliente_id=(cli or {}).get("id"))
     if not v["ok"]:
         return RedirectResponse(
             f"/e/{slug}?msg=erro_{v.get('cod') or 'reserva'}&codigo={codigo}", status_code=303)
 
     prospeccao_id = _criar_prospeccao_simples(pool, conta_id, nome, whatsapp, vendedor)
-    # cliente cadastrado antes pela vendedora (link com `?c=`): a reserva vai pro
-    # cadastro dele. Código assinado e revalidado aqui; inválido = o caminho de sempre.
-    cli = es.cliente_do_codigo(pool, conta_id, cliente) if (cliente or "").strip() else None
     r = es.subir_e_registrar_comprovante(pool, conta_id, codigo, conteudo, content_type,
                                          prospeccao_id=prospeccao_id,
                                          junto_com=codigos[1:], sinal_centavos=v["sinal"],

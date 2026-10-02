@@ -813,10 +813,11 @@ def _montar_cadastro(d: dict, cliente_id=None) -> dict:
     return cad
 
 
-def _cadastro_do_cliente(c: dict) -> dict:
-    """Um cliente de `clientes` no formato do cadastro do stand."""
+def _cadastro_do_cliente(c: dict, marca: str | None = None) -> dict:
+    """Um cliente de `clientes` no formato do cadastro do stand. `marca` é o nome
+    fantasia DESTE stand quando a empresa tem outro stand com outra marca."""
     return _montar_cadastro({
-        "fantasia": c.get("nome"), "whats": c.get("telefone"),
+        "fantasia": (marca or "").strip() or c.get("nome"), "whats": c.get("telefone"),
         "razao": c.get("razao_social"), "doc": c.get("documento_fmt") or "",
         "rep": c.get("representante"), "email": c.get("email"),
         "end": c.get("endereco"), "cep": c.get("cep"),
@@ -832,8 +833,17 @@ def cadastros_dos_stands(pool, conta_id: int, stands: list[dict]) -> dict[str, d
     ocup = [s for s in stands if s["status"] != "livre"]
     clientes = _cli.obter_clientes(pool, conta_id,
                                    [s.get("cliente_id") for s in ocup])
+    # MESMA EMPRESA, MARCAS DIFERENTES (02/10/2026): um CNPJ com dois stands, cada um
+    # com o seu nome na fachada (EM ESSENCE no i04, OCEAN BEACH no S97). O cadastro
+    # — razão social, CNPJ, endereço — é um só; a MARCA é de cada reserva e mora na
+    # prospecção dela. Só vale pra cadastro dividido entre reservas: no resto, o
+    # nome fantasia continua sendo o nome do cliente.
+    divididos = _clientes_divididos(pool, conta_id, list(clientes))
+    de_fora = _clientes_de_outra_conta(pool, conta_id, clientes)
     pids = [s["prospeccao_id"] for s in ocup
-            if s.get("prospeccao_id") and s.get("cliente_id") not in clientes]
+            if s.get("prospeccao_id") and (s.get("cliente_id") not in clientes
+                                           or s.get("cliente_id") in divididos
+                                           or s.get("cliente_id") in de_fora)]
     prosp = {}
     if pids:
         with pool.connection() as c:
@@ -844,12 +854,116 @@ def cadastros_dos_stands(pool, conta_id: int, stands: list[dict]) -> dict[str, d
     for s in ocup:
         c = clientes.get(s.get("cliente_id"))
         if c:
-            out[s["codigo"]] = _cadastro_do_cliente(c)
+            outros = divididos.get(c["id"])
+            if outros or c["id"] in de_fora:
+                p = prosp.get(s.get("prospeccao_id"))
+                cad = _cadastro_do_cliente(c, marca=p[1] if p else None)
+                if outros:
+                    cad["dividido_com"] = [x for x in outros if x != s["codigo"]]
+                out[s["codigo"]] = cad
+            else:
+                out[s["codigo"]] = _cadastro_do_cliente(c)
         else:
             p = prosp.get(s.get("prospeccao_id"))
             out[s["codigo"]] = _montar_cadastro(
                 {"fantasia": p[1] if p else "", "whats": p[2] if p else ""})
     return out
+
+
+def _clientes_divididos(pool, conta_id: int, cliente_ids: list[int]) -> dict[int, list[str]]:
+    """{cliente_id: [códigos]} dos cadastros que servem a MAIS DE UMA reserva (propostas
+    diferentes). Dois stands da mesma reserva não contam: é uma marca só."""
+    ids = [int(i) for i in cliente_ids if i]
+    if not ids:
+        return {}
+    with pool.connection() as c:
+        rows = c.execute(
+            "select cliente_id, codigo, coalesce(orcamento_id, -id) from evento_stands "
+            "where conta_id=%s and cliente_id = any(%s) and status <> 'livre' order by codigo",
+            (conta_id, ids)).fetchall()
+    por = {}
+    for cid, codigo, reserva in rows:
+        por.setdefault(cid, []).append((codigo, reserva))
+    return {cid: [cod for cod, _ in itens] for cid, itens in por.items()
+            if len({r for _, r in itens}) > 1}
+
+
+def _clientes_de_outra_conta(pool, conta_id: int, clientes: dict) -> set[int]:
+    """Os cadastros cuja pessoa (identidade) também é cliente de OUTRA conta. O nome
+    dela é o que a outra conta registrou — aqui o stand mostra a marca da reserva."""
+    pessoas = {c.get("pessoa_id"): cid for cid, c in clientes.items() if c.get("pessoa_id")}
+    if not pessoas:
+        return set()
+    with pool.connection() as c:
+        rows = c.execute("select distinct pessoa_id from clientes where pessoa_id = any(%s) "
+                         "and dono_id <> %s", (list(pessoas), conta_id)).fetchall()
+    return {pessoas[r[0]] for r in rows}
+
+
+def _outras_reservas(pool, conta_id: int, cliente_id, orcamento_id, codigo: str) -> list[dict]:
+    """Os stands ocupados de OUTRAS reservas ligados a este cliente:
+    [{codigo, vendedor_id}]. Os stands da mesma proposta são a mesma reserva."""
+    if not cliente_id:
+        return []
+    with pool.connection() as c:
+        rows = c.execute(
+            """select s.codigo, pr.vendedor_id
+                 from evento_stands s
+                 left join prospeccao pr on pr.id = s.prospeccao_id and pr.conta_id = s.conta_id
+                where s.conta_id=%s and s.cliente_id=%s and s.status <> 'livre'
+                  and s.codigo <> %s
+                  and (%s::bigint is null or s.orcamento_id is distinct from %s::bigint)
+                order by s.codigo""",
+            (conta_id, cliente_id, codigo, orcamento_id, orcamento_id)).fetchall()
+    return [{"codigo": r[0], "vendedor_id": r[1]} for r in rows]
+
+
+def _dono_do_documento(pool, conta_id: int, tipo: str, digitos: str) -> dict | None:
+    """Quem já tem este CPF/CNPJ: {"pessoa_id", "cliente_id", "vendedor_id"}. A pessoa
+    (identidade) é única no sistema; `cliente_id` é o cadastro dela NESTA conta —
+    None quando ela só existe como cliente de outra conta."""
+    col = "cnpj" if tipo == "pj" else "cpf"
+    with pool.connection() as c:
+        p = c.execute(f"select id from pessoas where {col}=%s", (digitos,)).fetchone()
+        if not p:
+            return None
+        cl = c.execute("select id, vendedor_id from clientes where pessoa_id=%s and dono_id=%s "
+                       "and ativo order by id limit 1", (p[0], conta_id)).fetchone()
+    return {"pessoa_id": p[0], "cliente_id": cl[0] if cl else None,
+            "vendedor_id": cl[1] if cl else None}
+
+
+def _arquivar_se_sobrou(pool, conta_id: int, cliente_id) -> bool:
+    """O cadastro provisório do stand (só nome, sem documento) que ficou sem nada
+    depois que o stand entrou no cadastro da empresa: sai da lista de Clientes
+    (arquivado, não apagado). Qualquer vínculo — outro stand, proposta, título,
+    lançamento, carteira de vendedora — ou um documento, e ele fica como está."""
+    from . import clientes as _cli
+    if not cliente_id:
+        return False
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                "select coalesce(p.cnpj, p.cpf), c.vendedor_id from clientes c "
+                "left join pessoas p on p.id = c.pessoa_id where c.id=%s and c.dono_id=%s and c.ativo",
+                (cliente_id, conta_id)).fetchone()
+            if not r or r[0] or r[1]:
+                return False
+            for tabela in ("evento_stands", "orcamentos", "titulos", "lancamentos"):
+                dono = "conta_id" if tabela in ("evento_stands", "orcamentos") else None
+                existe = c.execute("select to_regclass(%s)", (tabela,)).fetchone()[0]
+                if not existe:
+                    continue
+                q = f"select 1 from {tabela} where cliente_id=%s"
+                if dono:
+                    q += f" and {dono}={int(conta_id)}"
+                if c.execute(q + " limit 1", (cliente_id,)).fetchone():
+                    return False
+        return _cli.arquivar_cliente(pool, conta_id, int(cliente_id))
+    except Exception as e:  # noqa: BLE001 — limpeza: sem ela o cadastro só fica na lista
+        _log.info("evento_stands: não arquivei o cadastro provisório %s: %s: %s",
+                  cliente_id, type(e).__name__, e)
+        return False
 
 
 def expositores_publicos(pool, conta_id: int, stands: list[dict]) -> dict[str, str]:
@@ -876,7 +990,8 @@ def expositores_publicos(pool, conta_id: int, stands: list[dict]) -> dict[str, s
             if cads.get(s["codigo"], {}).get("fantasia")}
 
 
-def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict) -> dict:
+def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
+                          juntar: str = "sempre", vendedor_id=None) -> dict:
     """Salva o formulário "Dados do cliente" do stand.
 
     Cria o cliente na aba Clientes se ele ainda não existe (dedup por CNPJ/CPF
@@ -884,7 +999,19 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict) -> dict
     é uma edição explícita, não um enriquecimento. Depois liga o stand e a
     proposta ao cliente e, se o contrato AINDA NÃO foi assinado, leva os dados
     pra ele (o assinado é documento congelado). Devolve
-    {"ok", "cliente_id", "acao", "faltam", "congelado"} ou {"ok": False, "erro"}."""
+    {"ok", "cliente_id", "acao", "faltam", "congelado", "juntou"} ou {"ok": False, "erro"}.
+
+    O DOCUMENTO QUE JÁ É DE OUTRO CADASTRO (02/10/2026). A vendedora pôs no S97
+    (OCEAN BEACH) o CNPJ que já estava no i04 (EM ESSENCE): mesma empresa, duas
+    marcas, dois stands. Antes isso batia na unicidade do CNPJ e respondia "já está
+    cadastrado em outro cliente", sem saída. Agora o stand ENTRA no cadastro que já
+    tem o documento (`juntou` diz qual e com que stands) e o cadastro provisório que
+    ele tinha é arquivado — respeitando o limite de stands por empresa do evento (2). O nome do cadastro não é trocado: a marca deste stand
+    fica na prospecção dele (ver `cadastros_dos_stands`). `juntar` diz quem pode:
+        "sempre"       gestão (painel, ou dono/gestor no app)
+        "do_vendedor"  a vendedora, se os outros stands do cadastro são vendas dela
+        "nunca"        o link público do contrato — ninguém entra no cadastro de
+                       outra loja (nem vê os dados dela) digitando um CNPJ"""
     from . import clientes as _cli
     from . import contrato as _ctr
     from . import validadoc
@@ -911,13 +1038,58 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict) -> dict
     elif tipo == "pj":
         campos["cnpj"] = digitos
     cid = stand.get("cliente_id")
+    oid = stand.get("orcamento_id")
     acao = "atualizado"
+    juntou, antigo, de_fora = None, None, False
     try:
+        if digitos:
+            atual = _cli.obter_cliente(pool, conta_id, cid) if cid else None
+            if digitos != ((atual or {}).get("documento") or ""):
+                dono = _dono_do_documento(pool, conta_id, tipo, digitos)
+                if dono and dono["pessoa_id"] != (atual or {}).get("pessoa_id"):
+                    # o documento já é de outro cadastro: o stand entra nele
+                    alvo = dono["cliente_id"]
+                    outras = _outras_reservas(pool, conta_id, alvo, oid, codigo)
+                    erro = _pode_juntar(pool, conta_id, juntar, vendedor_id, dono, outras,
+                                        _cli.obter_cliente(pool, conta_id, alvo) if alvo else None)
+                    if erro:
+                        return {"ok": False, "erro": erro}
+                    erro = _cabe_na_empresa(pool, conta_id, outras, oid, codigo)
+                    if erro:
+                        return {"ok": False, "erro": erro}
+                    antigo = cid
+                    if alvo:
+                        cid = int(alvo)
+                    else:
+                        # a pessoa só existe como cliente de outra conta: nasce o cadastro
+                        # DESTA conta pra ela (o dedup de sempre) — a identidade não se mexe
+                        r = _cli.salvar_cliente(pool, conta_id, fantasia,
+                                                cpf=campos.get("cpf"), cnpj=campos.get("cnpj"))
+                        cid, de_fora = int(r["id"]), True
+                    acao = "juntado"
+                    juntou = {"cliente": (_cli.obter_cliente(pool, conta_id, cid) or {}).get("nome") or "",
+                              "stands": [o["codigo"] for o in outras]}
+                elif cid and _outras_reservas(pool, conta_id, cid, oid, codigo):
+                    # o cadastro serve a outra reserva e ESTE stand trocou de documento:
+                    # ele sai do cadastro dividido e ganha o seu (o outro stand não muda)
+                    r = _cli.salvar_cliente(pool, conta_id, fantasia,
+                                            cpf=campos.get("cpf"), cnpj=campos.get("cnpj"))
+                    cid, acao = int(r["id"]), "criado"
         if not cid:
             r = _cli.salvar_cliente(pool, conta_id, fantasia, telefone=g("whats") or None,
                                     cpf=campos.get("cpf"), cnpj=campos.get("cnpj"))
             cid, acao = int(r["id"]), r["acao"]
-        _cli.atualizar_cliente(pool, conta_id, cid, **campos)
+        gravar = dict(campos)
+        if _outras_reservas(pool, conta_id, cid, oid, codigo):
+            # cadastro dividido com outra reserva: o NOME é do cadastro (a marca deste
+            # stand vai pra prospecção dele, logo abaixo)
+            gravar.pop("nome", None)
+        if de_fora:
+            # identidade de quem é cliente de OUTRA conta: nome, telefone e e-mail dele
+            # não são desta conta pra trocar (a marca do stand fica na prospecção)
+            for k in ("nome", "telefone", "email"):
+                gravar.pop(k, None)
+        _cli.atualizar_cliente(pool, conta_id, cid, **gravar)
     except ValueError as e:
         return {"ok": False, "erro": str(e)}
     except Exception as e:  # noqa: BLE001 — ex.: CPF/CNPJ já é de OUTRO cliente
@@ -926,10 +1098,12 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict) -> dict
                                          "cliente — abra o cadastro dele em Clientes."}
         raise
 
-    oid = stand.get("orcamento_id")
     with pool.connection() as c:
+        # a reserva inteira vai junto: os stands da mesma proposta são da mesma empresa
         c.execute("update evento_stands set cliente_id=%s, atualizado_em=now() "
-                  "where conta_id=%s and codigo=%s", (cid, conta_id, codigo))
+                  "where conta_id=%s and (codigo=%s or (%s::bigint is not null "
+                  "and orcamento_id=%s::bigint and status <> 'livre'))",
+                  (cid, conta_id, codigo, oid, oid))
         if stand.get("prospeccao_id"):
             c.execute("update prospeccao set empresa=%s, whatsapp=%s "
                       "where id=%s and conta_id=%s",
@@ -945,9 +1119,47 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict) -> dict
             congelado = False
         _espelhar_no_orcamento(pool, conta_id, oid, cid, campos, tipo, digitos,
                                congelado)
+    if antigo and antigo != cid:
+        _arquivar_se_sobrou(pool, conta_id, antigo)
     cad = cadastros_dos_stands(pool, conta_id, [dict(stand, cliente_id=cid)])[codigo]
     return {"ok": True, "cliente_id": cid, "acao": acao,
-            "faltam": cad["faltam"], "congelado": congelado}
+            "faltam": cad["faltam"], "congelado": congelado, "juntou": juntou}
+
+
+def _cabe_na_empresa(pool, conta_id: int, outras: list[dict], orcamento_id, codigo: str) -> str | None:
+    """A regra do evento vale também pra quem entra num cadastro que já existe: a
+    mesma empresa tem no máximo `max_por_empresa` stands (2, salvo config). Conta os
+    stands que ela já tem em outras reservas mais os desta. None se cabe."""
+    maximo = regras_de_pagamento(obter_config(pool, conta_id))["max_por_empresa"]
+    with pool.connection() as c:
+        desta = c.execute(
+            "select count(*) from evento_stands where conta_id=%s and status <> 'livre' "
+            "and (codigo=%s or (%s::bigint is not null and orcamento_id=%s::bigint))",
+            (conta_id, codigo, orcamento_id, orcamento_id)).fetchone()[0]
+    if len(outras) + int(desta or 1) <= maximo:
+        return None
+    ja = ", ".join(o["codigo"] for o in outras)
+    return (f"Essa empresa já tem {len(outras)} stand{'s' if len(outras) != 1 else ''} ({ja}) — "
+            f"o máximo é {maximo} por empresa. Use outro CNPJ ou fale com a organização.")
+
+
+def _pode_juntar(pool, conta_id: int, juntar: str, vendedor_id, dono: dict,
+                 outras: list[dict], cliente: dict | None) -> str | None:
+    """None se o stand pode entrar no cadastro que já tem o documento; senão, a frase
+    pra quem está salvando (ver `salvar_cadastro_stand`)."""
+    if juntar == "sempre":
+        return None
+    if juntar == "do_vendedor" and vendedor_id:
+        meu = int(vendedor_id)
+        da_carteira = dono.get("vendedor_id")
+        if all(o["vendedor_id"] == meu for o in outras) and da_carteira in (None, meu):
+            return None
+        nome = (cliente or {}).get("nome") or "outra loja"
+        onde = f" ({', '.join(o['codigo'] for o in outras)})" if outras else ""
+        return (f"Esse CPF/CNPJ já é do cadastro {nome}{onde}, de outra vendedora — "
+                "peça à gestão pra juntar os stands na mesma empresa.")
+    return ("Este CPF/CNPJ já está no cadastro de outra loja deste evento — "
+            "fale com o seu vendedor pra juntar os stands na mesma empresa.")
 
 
 def _espelhar_no_orcamento(pool, conta_id: int, orcamento_id: int, cliente_id: int,
@@ -1034,7 +1246,8 @@ def salvar_cadastro_do_contrato(pool, conta_id: int, orcamento_id, dados: dict) 
     # nome fantasia e WhatsApp vazios no formulário não apagam o que o cadastro tem
     final.update({k: dados[k] for k in chaves
                   if k in dados and (dados[k] or k not in ("fantasia", "whats"))})
-    r = salvar_cadastro_stand(pool, conta_id, st[0]["codigo"], final)
+    # o link é público: ninguém entra no cadastro de outra loja digitando um CNPJ
+    r = salvar_cadastro_stand(pool, conta_id, st[0]["codigo"], final, juntar="nunca")
     if not r.get("ok"):
         return r
     outros = [s["codigo"] for s in st[1:]]

@@ -625,7 +625,14 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
         except (TypeError, ValueError):
             return "Preciso do id do lançamento que vai ser dividido."
         nomes = [n for n in (e.get("obras") or []) if str(n).strip()]
-        if e.get("todas") or not nomes:
+        por = "m2" if (e.get("por") == "m2" or e.get("quadra")) else "igual"
+        if (e.get("quadra") or "").strip():
+            from . import obra_grupos as og
+            g = og.grupo_por_nome(pool, conta_id, e["quadra"])
+            if not g:
+                return _sem_quadra(e["quadra"])
+            alvo = [o for o in og.casas(pool, conta_id, g["id"]) if o["status"] != "arquivada"]
+        elif e.get("todas") or not nomes:
             alvo = [o for o in ob.listar_obras(pool, conta_id, com_custos=False)
                     if o["status"] == "em_obra"]
         else:
@@ -639,7 +646,7 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             return ("Pra dividir preciso de pelo menos duas obras em andamento. "
                     "De qual obra é esse gasto?")
         try:
-            partes = ob.dividir(pool, conta_id, lid, [o["id"] for o in alvo])
+            partes = ob.dividir(pool, conta_id, lid, [o["id"] for o in alvo], por=por)
         except ValueError as err:
             return f"Não dividi: {err}"
         return "Dividi: " + "; ".join(
@@ -715,13 +722,15 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
     def pagar_etapa(e: dict) -> str:
         """O pagamento do empreiteiro por etapa (finance/obra_empreita.py): o
         lançamento de mão de obra da obra passa a dizer QUE etapas ele fechou."""
-        o, erro = _obra(e.get("obra"))
-        if not o:
-            return erro
         from . import obra_empreita as oe
         etapas = e.get("etapas") or []
         if isinstance(etapas, str):
             etapas = [x.strip() for x in etapas.replace(" e ", ",").split(",") if x.strip()]
+        if (e.get("quadra") or "").strip():
+            return _pagar_etapa_quadra(e, etapas)
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
         try:
             r = oe.pagar_etapas(pool, conta_id, o["id"], etapas,
                                 lancamento_id=int(e.get("lancamento_id") or 0),
@@ -737,6 +746,95 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             txt += " ⚠️ Já tinha pagamento antes: " + "; ".join(r["ja_pagas"]) + \
                    ". Confirme se é parcela combinada ou pagamento em dobro."
         return txt
+
+    def _sem_quadra(ref) -> str:
+        from . import obra_grupos as og
+        nomes = ", ".join(g["nome"] for g in og.listar_grupos(pool, conta_id))
+        if not nomes:
+            return (f"Ainda não tem {og.rotulo(pool, conta_id).lower()} cadastrada. Quem cadastra "
+                    f"é a empresa, no painel: {ob.LINK_OBRAS}")
+        return f"Não achei “{ref}”. As que existem: {nomes}. Qual delas?"
+
+    def _pagar_etapa_quadra(e: dict, etapas: list) -> str:
+        """"Paguei 36 mil pro empreiteiro, fundação da quadra 4": divide o lançamento
+        entre as casas da quadra pelo m² e marca as etapas pagas em cada uma."""
+        from . import obra_empreita as oe
+        from . import obra_grupos as og
+        g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
+        if not g:
+            return _sem_quadra(e.get("quadra"))
+        alvo = [o for o in og.casas(pool, conta_id, g["id"]) if o["status"] != "arquivada"]
+        if not alvo:
+            return f"{g['nome']} ainda não tem casas."
+        try:
+            lid = int(e.get("lancamento_id") or 0)
+            if len(alvo) > 1:
+                ob.dividir(pool, conta_id, lid, [o["id"] for o in alvo], por="m2")
+            else:
+                ob.por_na_obra(pool, conta_id, lid, alvo[0]["id"])
+        except (ValueError, TypeError) as err:
+            return str(err)
+        pagas, adiant, erros = 0, [], []
+        for o in alvo:
+            try:
+                r = oe.pagar_etapas(pool, conta_id, o["id"], etapas, lancamento_id=lid,
+                                    obs=(e.get("obs") or "").strip())
+                pagas += 1
+                if r["adiantadas"]:
+                    adiant.append(f"{o['nome']} ({', '.join(n.lower() for n in r['adiantadas'])})")
+            except ValueError as err:
+                erros.append(f"{o['nome']}: {err}")
+        txt = (f"Dividi o pagamento entre as {len(alvo)} casas de {g['nome']} pelo m² e marquei "
+               f"as etapas como PAGAS em {pagas} delas.")
+        if adiant:
+            txt += (" ⚠️ Ainda não estão concluídas em: " + "; ".join(adiant)
+                    + " — foi adiantamento? Avise, uma vez, sem sermão.")
+        if erros:
+            txt += " Não marquei em: " + "; ".join(erros) + "."
+        return txt
+
+    def marcar_etapa_quadra(e: dict) -> str:
+        """"Terminei a fundação da quadra 5": marca nas casas que começaram (decisão
+        4 do dono: na hora, dizendo quem ficou de fora; "desfaz" volta)."""
+        from . import obra_grupos as og
+        g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
+        if not g:
+            return _sem_quadra(e.get("quadra"))
+        ids = None
+        lotes = [str(x).strip() for x in (e.get("lotes") or []) if str(x).strip()]
+        if lotes:
+            casas = og.casas(pool, conta_id, g["id"])
+            querer = {og._numero(x) or ob._norm(x) for x in lotes}
+            ids = [o["id"] for o in casas
+                   if (og._numero(o.get("lote") or "") or ob._norm(o.get("lote") or o["nome"])) in querer]
+            if not ids:
+                return f"Não achei esses lotes em {g['nome']}."
+        try:
+            r = og.marcar_etapa_grupo(pool, conta_id, g["id"], (e.get("etapa") or "").strip(),
+                                      obra_ids=ids)
+        except ValueError as err:
+            return str(err)
+        if not r["marcadas"]:
+            txt = f"Nada a marcar: {r['etapa'].lower()} já estava feita nas casas de {g['nome']}."
+        else:
+            txt = (f"Marquei {r['etapa'].lower()} em {len(r['marcadas'])} casa(s) de {g['nome']} "
+                   f"({', '.join(r['marcadas'])}). {g['nome']} está em {r['pct']}%.")
+        if r["fora"]:
+            txt += f" Ficaram de fora porque ainda não começaram: {', '.join(r['fora'])}."
+        if r["sem_etapa"]:
+            txt += f" Sem essa etapa: {', '.join(r['sem_etapa'])}."
+        return txt + ' Se errou, é só dizer "desfaz".'
+
+    def desfazer_etapa_quadra(e: dict) -> str:
+        from . import obra_grupos as og
+        g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
+        if not g:
+            return _sem_quadra(e.get("quadra"))
+        r = og.desfazer_ultima(pool, conta_id, g["id"])
+        if not r:
+            return f"Não tem marcação em lote pra desfazer em {g['nome']}."
+        return (f"Desfeito: {r['etapa'].lower()} voltou a ficar em aberto em "
+                f"{len(r['voltaram'])} casa(s) de {g['nome']}.")
 
     def guardar_foto_da_obra(e: dict) -> str:
         """A foto que NÃO é nota (telhado, parede, piso pronto): guarda na obra e na
@@ -829,9 +927,10 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
         ),
         Ferramenta(
             nome="dividir_entre_obras",
-            descricao=("Divide um lançamento JÁ REGISTRADO em partes iguais entre obras "
-                       "(a nota de material que é de várias casas). Use o lancamento_id "
-                       "que o registro devolveu. 'todas' = todas as obras em andamento."),
+            descricao=("Divide um lançamento JÁ REGISTRADO entre obras (a nota de material "
+                       "que é de várias casas). Use o lancamento_id que o registro devolveu. "
+                       "'todas' = todas as obras em andamento; 'quadra' = as casas daquela "
+                       "quadra, pelo m²."),
             parametros={
                 "type": "object",
                 "properties": {
@@ -839,6 +938,10 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                     "obras": {"type": "array", "items": {"type": "string"},
                               "description": "os nomes das obras; vazio com todas=true"},
                     "todas": {"type": "boolean"},
+                    "quadra": {"type": "string",
+                               "description": "a quadra/setor como a pessoa falou (ex: quadra 5): divide entre as casas dela pelo m²"},
+                    "por": {"type": "string", "enum": ["igual", "m2"],
+                            "description": "igual (padrão) ou pelo m² de cada obra"},
                 },
                 "required": ["lancamento_id"],
             },
@@ -920,11 +1023,33 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                        "e etapa paga duas vezes."),
             parametros={"type": "object",
                         "properties": {"obra": obra_s,
+                                       "quadra": {"type": "string",
+                                                  "description": "no lugar da obra: o pagamento é da quadra inteira (divide pelo m²)"},
                                        "etapas": {"type": "array", "items": {"type": "string"}},
                                        "lancamento_id": {"type": "integer"},
                                        "obs": {"type": "string"}},
-                        "required": ["obra", "etapas", "lancamento_id"]},
+                        "required": ["etapas", "lancamento_id"]},
             executar=pagar_etapa,
+        ),
+        Ferramenta(
+            nome="marcar_etapa_quadra",
+            descricao=("Marca uma etapa em TODAS as casas de uma quadra/setor de uma vez "
+                       "(\"terminei a fundação da quadra 5\"). Só entram as casas que já "
+                       "começaram, salvo se ele disser os lotes. Diga quem ficou de fora."),
+            parametros={"type": "object",
+                        "properties": {"quadra": {"type": "string"},
+                                       "etapa": {"type": "string"},
+                                       "lotes": {"type": "array", "items": {"type": "string"},
+                                                 "description": "só estes lotes (ex: [\"1\", \"2\"]); vazio = as que começaram"}},
+                        "required": ["quadra", "etapa"]},
+            executar=marcar_etapa_quadra,
+        ),
+        Ferramenta(
+            nome="desfazer_etapa_quadra",
+            descricao="Desfaz a ÚLTIMA marcação de etapa em lote daquela quadra (\"desfaz\").",
+            parametros={"type": "object", "properties": {"quadra": {"type": "string"}},
+                        "required": ["quadra"]},
+            executar=desfazer_etapa_quadra,
         ),
         Ferramenta(
             nome="guardar_foto_da_obra",

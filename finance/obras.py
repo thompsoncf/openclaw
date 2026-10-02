@@ -497,9 +497,11 @@ def por_na_obra(pool, conta_id: int, lancamento_id: int, obra_id: int) -> dict:
     return {"lancamento_id": lancamento_id, "obra": obra[1], "valor_centavos": int(lanc[2])}
 
 
-def dividir(pool, conta_id: int, lancamento_id: int, obra_ids) -> list[dict]:
-    """Divide o lançamento em partes iguais entre as obras (os centavos que sobram
-    ficam na primeira). O lançamento continua inteiro — ver a escolha 3."""
+def dividir(pool, conta_id: int, lancamento_id: int, obra_ids, por: str = "igual") -> list[dict]:
+    """Divide o lançamento entre as obras — em partes iguais, ou pelo m² de cada uma
+    (`por="m2"`, a regra da quadra: casa maior consome mais; se alguma não tem área,
+    volta pra partes iguais). Os centavos que sobram ficam na primeira. O lançamento
+    continua inteiro — ver a escolha 3."""
     ids = list(dict.fromkeys(int(i) for i in obra_ids))
     if len(ids) < 2:
         raise ValueError("Pra dividir, preciso de pelo menos duas obras.")
@@ -510,18 +512,23 @@ def dividir(pool, conta_id: int, lancamento_id: int, obra_ids) -> list[dict]:
         if lanc[3] == "pessoal":
             raise ValueError("Esse lançamento está marcado como pessoal.")
         obras = c.execute(
-            "select id, centro_custo_id, nome from obras where conta_id=%s and id = any(%s)",
+            "select id, centro_custo_id, nome, area_m2 from obras where conta_id=%s and id = any(%s)",
             (conta_id, ids)).fetchall()
         if len(obras) != len(ids):
             raise ValueError("Uma das obras não é desta conta.")
         por_id = {o[0]: o for o in obras}
         total = int(lanc[2])
-        parte, resto = divmod(total, len(ids))
+        areas = [float(por_id[i][3] or 0) for i in ids]
+        if por == "m2" and all(a > 0 for a in areas):
+            valores = [int(total * a // sum(areas)) for a in areas]
+        else:
+            valores = [total // len(ids)] * len(ids)
+        valores[0] += total - sum(valores)
         c.execute("delete from lancamento_rateio where lancamento_id=%s and conta_id=%s",
                   (lancamento_id, conta_id))
         out = []
         for n, oid in enumerate(ids):
-            valor = parte + (resto if n == 0 else 0)
+            valor = valores[n]
             c.execute("""insert into lancamento_rateio (conta_id, lancamento_id,
                                                         centro_custo_id, valor_centavos)
                               values (%s,%s,%s,%s)""",
@@ -607,9 +614,33 @@ def bloco_persona(pool, conta_id: int) -> str:
             f"({_brl(falta['total_centavos'])}). Se ele perguntar, ou numa hora boa (uma "
             "vez, sem insistir), ofereça distribuir: gastos_sem_obra lista, e cada um vai "
             "com por_na_obra ou dividir_entre_obras.")
+    linhas += _bloco_das_quadras(pool, conta_id)
     linhas += _bloco_das_casas(pool, conta_id, obras)
     linhas += _bloco_das_reformas(pool, conta_id, obras)
     return "\n".join(linhas)
+
+
+def _bloco_das_quadras(pool, conta_id: int) -> list[str]:
+    """As quadras (finance/obra_grupos.py) e como falar delas. Vazio sem quadra."""
+    try:
+        from . import obra_grupos as og
+        grupos = og.listar_grupos(pool, conta_id)
+        if not grupos:
+            return []
+        rot = og.rotulo(pool, conta_id)
+        mapa = og.por_obra(pool, conta_id)
+        partes = []
+        for g in grupos:
+            n = sum(1 for v in mapa.values() if v["grupo_id"] == g["id"])
+            partes.append(f"{g['nome']} ({n} casa{'s' if n != 1 else ''})")
+    except Exception:  # noqa: BLE001 — sem a 476
+        return []
+    return [f"- {rot.upper()}S (a empresa chama o grupo de casas de \"{rot}\"): " + "; ".join(partes) + ".",
+            f"- \"terminei a fundação da {rot.lower()} 5\" -> marcar_etapa_quadra (marca nas casas que "
+            "começaram e diz quem ficou de fora); \"desfaz\" -> desfazer_etapa_quadra.",
+            f"- Nota de material \"pra {rot.lower()} 5\": registre sem centro_custo e chame "
+            "dividir_entre_obras com quadra (divide pelo m²). Pagamento de empreiteiro da "
+            f"{rot.lower()} inteira: pagar_etapa com quadra no lugar da obra."]
 
 
 def _bloco_das_reformas(pool, conta_id: int, obras: list[dict]) -> list[str]:

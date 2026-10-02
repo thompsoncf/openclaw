@@ -86,8 +86,8 @@ def pagar_etapas(pool, conta_id: int, obra_id: int, etapas_ref: list, *,
         usado = c.execute(
             """select string_agg(distinct e.nome, ', ') from obra_etapa_pagamentos p
                  join obra_etapas e on e.id = p.etapa_id
-                where p.conta_id=%s and p.lancamento_id=%s""",
-            (conta_id, lancamento_id)).fetchone()[0]
+                where p.conta_id=%s and p.lancamento_id=%s and p.obra_id=%s""",
+            (conta_id, lancamento_id, obra_id)).fetchone()[0]
         if usado:
             raise ValueError(f"Esse lançamento já foi usado pra pagar: {usado.lower()}.")
         valor = _parte_da_obra(c, conta_id, obra, lancamento_id)

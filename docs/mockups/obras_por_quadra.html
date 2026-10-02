@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obras por quadra</title>
+<style>
+  :root { --verde:#12b886; --verde-claro:#3ee0a6; --vf:#e9faf3; --tinta:#14211c; --cinza:#5b6b64;
+          --linha:#dfe8e3; --ambar:#f2a33a; --af:#fff5e6; --azul:#2b7de9; --azf:#eaf2fd; --coral:#e8590c; --cf:#fff0e8; --fundo:#f6f8f7; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--fundo); color:var(--tinta); font:15px/1.5 "Segoe UI","Helvetica Neue",Arial,sans-serif; }
+  .pg { max-width:980px; margin:0 auto; padding:28px 16px 60px; }
+  h1 { font-size:28px; margin:0 0 6px; letter-spacing:-.4px; }
+  h2 { font-size:20px; margin:34px 0 10px; letter-spacing:-.2px; }
+  h2 .n { display:inline-grid; place-items:center; width:26px; height:26px; border-radius:50%; background:var(--tinta); color:#fff; font-size:13px; margin-right:8px; vertical-align:2px; }
+  h3 { font-size:15px; margin:0 0 6px; }
+  p { margin:0 0 10px; }
+  .mut { color:var(--cinza); }
+  .card { background:#fff; border:1px solid var(--linha); border-radius:12px; padding:16px; }
+  .duas { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .tres { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  @media (max-width:760px){ .duas,.tres{ grid-template-columns:1fr; } }
+  .chip { display:inline-block; padding:1px 9px; border-radius:99px; font-size:12px; font-weight:700; }
+  .chip.v { background:var(--vf); color:#0b7a58; } .chip.a { background:var(--af); color:#9a5b06; }
+  .chip.az { background:var(--azf); color:#1d5fb8; } .chip.c { background:var(--cf); color:#b4440a; }
+  .aviso { background:var(--af); border-radius:10px; padding:10px 14px; font-size:14px; }
+  .ok { background:var(--vf); border-radius:10px; padding:10px 14px; font-size:14px; }
+
+  /* hierarquia */
+  .arvore { display:flex; gap:10px; align-items:stretch; flex-wrap:wrap; }
+  .no { flex:1 1 200px; background:#fff; border:1px solid var(--linha); border-radius:12px; padding:12px 14px; position:relative; }
+  .no .t { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; color:var(--cinza); }
+  .no b { font-size:16px; }
+  .seta { align-self:center; font-size:22px; color:var(--cinza); }
+
+  /* mapa da quadra */
+  .mapa { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; padding:12px; background:#eef3f0; border-radius:10px; }
+  .lote { border-radius:8px; padding:7px 6px; min-height:64px; font-size:12px; color:#fff; position:relative; }
+  .lote b { display:block; font-size:13px; }
+  .lote .pct { position:absolute; right:7px; bottom:5px; font-weight:800; font-size:14px; }
+  .l0 { background:#c3cfc9; color:var(--tinta); } .l1 { background:#8fd9bd; color:var(--tinta);} .l2 { background:#3ec997; }
+  .l3 { background:#12a07a; } .lp { background:#0f5f4a; } .lt { background:var(--ambar); }
+  .rua { grid-column:1/-1; text-align:center; font-size:11px; letter-spacing:3px; color:var(--cinza); padding:2px 0; border-top:2px dashed #c9d6cf; border-bottom:2px dashed #c9d6cf; }
+  .leg { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; margin-top:8px; }
+  .leg i { display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:4px; vertical-align:-2px; }
+
+  /* quadro casas x etapas */
+  .quadro { overflow-x:auto; }
+  table.q { border-collapse:separate; border-spacing:3px; font-size:12px; min-width:760px; }
+  table.q th { font-size:10.5px; font-weight:700; color:var(--cinza); writing-mode:vertical-rl; transform:rotate(180deg); text-align:left; padding:4px 2px; height:118px; vertical-align:bottom; }
+  table.q th.casa { writing-mode:horizontal-tb; transform:none; height:auto; vertical-align:bottom; text-align:left; }
+  table.q td { width:30px; height:26px; text-align:center; border-radius:5px; font-weight:800; }
+  table.q td.nome { width:auto; text-align:left; font-weight:600; padding-right:8px; white-space:nowrap; }
+  .f { background:var(--verde); color:#fff; } .fp { background:var(--verde); color:#fff; box-shadow:inset 0 -4px 0 #0b5c45; }
+  .ad { background:var(--ambar); color:#fff; } .nf { background:#e6ece9; color:#a5b3ac; }
+  table.q td.tot { width:auto; padding:0 8px; background:#fff; border:1px solid var(--linha); color:var(--tinta); }
+  table.q tr.col td { height:auto; background:transparent; }
+  table.q tr.col td button { font-size:10px; border:1px solid var(--linha); background:#fff; border-radius:5px; padding:2px 3px; cursor:pointer; }
+
+  /* lista */
+  .grupo { background:#fff; border:1px solid var(--linha); border-radius:12px; margin-bottom:10px; overflow:hidden; }
+  .grupo .cab { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:#f9fbfa; border-bottom:1px solid var(--linha); flex-wrap:wrap; gap:8px; }
+  .barra { height:8px; border-radius:6px; background:#e1e9e5; overflow:hidden; width:160px; display:inline-block; vertical-align:middle; }
+  .barra i { display:block; height:100%; background:var(--verde); }
+  .linha { display:grid; grid-template-columns:1.2fr .8fr 1fr 1fr; gap:8px; padding:9px 14px; border-bottom:1px solid #eef2f0; font-size:13.5px; align-items:center; }
+  .linha:last-child { border-bottom:0; }
+
+  /* chat */
+  .chat { background:#e8efe9; border-radius:14px; padding:12px; }
+  .b { max-width:86%; padding:7px 11px; border-radius:10px; margin:0 0 7px; font-size:13.5px; }
+  .eu { margin-left:auto; background:#d6f8c6; border-top-right-radius:3px; }
+  .zq { background:#fff; border-top-left-radius:3px; }
+
+  /* custo */
+  table.c { width:100%; border-collapse:collapse; font-size:13.5px; }
+  table.c th, table.c td { padding:7px 6px; border-bottom:1px solid var(--linha); text-align:right; }
+  table.c th:first-child, table.c td:first-child { text-align:left; }
+  table.c th { font-size:11px; text-transform:uppercase; color:var(--cinza); letter-spacing:.5px; }
+  table.c tr.t td { font-weight:800; border-top:2px solid var(--tinta); }
+
+  .decisao { background:#fff; border:1px solid var(--linha); border-left:4px solid var(--ambar); border-radius:10px; padding:12px 14px; margin-bottom:10px; }
+  .decisao .rec { font-size:13.5px; color:#0b7a58; margin-top:4px; }
+  code { background:#eef3f0; padding:1px 5px; border-radius:4px; font-size:13px; }
+</style>
+</head>
+<body><div class="pg">
+
+<span class="chip a">desenho · pra aprovar antes de implementar</span>
+<h1>Obras por quadra (ou setor)</h1>
+<p class="mut">Zaq Construção e Reforma · 01/10/2026 · continua o desenho de 25/09 (docs/mockups/nicho_construcao.html)</p>
+
+<h2><span class="n">1</span>O problema</h2>
+<p>Hoje cada casa é uma obra sozinha. Mas quem constrói casa popular trabalha em <b>loteamento</b>: as casas ficam em quadras, e a obra <b>anda em lote</b> — a equipe faz a fundação da quadra inteira, depois a alvenaria de todas; o caminhão de cimento serve pra várias casas; o empreiteiro cobra "a fundação da quadra 4". E tem custo que não é de casa nenhuma: a terraplanagem, a rede de esgoto, o poste, o muro da quadra.</p>
+<div class="aviso">Com 20 casas, marcar etapa casa por casa e dividir nota na mão vira trabalho — e o custo comum fica fora do custo da casa, então a casa parece mais barata do que é.</div>
+
+<h2><span class="n">2</span>A ideia: três níveis, e as etapas no centro</h2>
+<div class="arvore">
+  <div class="no"><div class="t">Empreendimento <span class="mut">(opcional)</span></div><b>Residencial Lago Azul</b><div class="mut" style="font-size:13px">o loteamento inteiro</div></div>
+  <div class="seta">→</div>
+  <div class="no"><div class="t">Quadra · ou Setor</div><b>Quadra 4</b><div class="mut" style="font-size:13px">o grupo que anda junto. A empresa escolhe o nome: Quadra, Setor, Bloco, Etapa…</div></div>
+  <div class="seta">→</div>
+  <div class="no"><div class="t">Casa = a obra de hoje</div><b>Lote 12</b><div class="mut" style="font-size:13px">continua tendo custo, etapas, papéis e venda próprios</div></div>
+</div>
+<p style="margin-top:12px">Nada do que existe muda: a casa continua sendo a obra, com o centro de custo dela. A quadra só <b>junta</b> as casas — e ganha três coisas que hoje não existem:</p>
+<div class="tres">
+  <div class="card"><h3>O quadro de etapas</h3><p class="mut" style="margin:0">Casas × etapas numa tela só: o cronograma da quadra. Marca uma etapa em todas as casas de uma vez.</p></div>
+  <div class="card"><h3>O mapa</h3><p class="mut" style="margin:0">Os lotes da quadra, cada um com a cor do andamento. A obra vista de cima.</p></div>
+  <div class="card"><h3>O custo comum</h3><p class="mut" style="margin:0">Terraplanagem, rede, muro: lançados na quadra e divididos entre as casas pelo m². O custo da casa passa a ser o cheio.</p></div>
+</div>
+
+<h2><span class="n">3</span>A tela Obras, agrupada</h2>
+<div class="grupo">
+  <div class="cab"><div><b>Quadra 4</b> <span class="mut">· Residencial Lago Azul · 12 casas</span></div>
+    <div><span class="barra"><i style="width:38%"></i></span> <b>38%</b> <span class="chip a">2 com prazo vencendo</span> <span class="chip v">3 prontas</span></div></div>
+  <div class="linha"><span><b>Lote 1</b></span><span class="mut">casa · pronta</span><span>R$ 108.800</span><span><span class="chip c">trava: habite-se</span></span></div>
+  <div class="linha"><span><b>Lote 2</b></span><span class="mut">casa · 62%</span><span>R$ 71.200</span><span class="mut">próxima: reboco</span></div>
+  <div class="linha"><span><b>Lote 3</b></span><span class="mut">casa · 62%</span><span>R$ 70.950</span><span class="mut">próxima: reboco</span></div>
+  <div class="linha"><span class="mut">+ 9 casas</span><span></span><span></span><span><a href="#">abrir a quadra ›</a></span></div>
+</div>
+<div class="grupo"><div class="cab"><div><b>Quadra 5</b> <span class="mut">· Residencial Lago Azul · 8 casas</span></div><div><span class="barra"><i style="width:12%"></i></span> <b>12%</b></div></div></div>
+<div class="grupo"><div class="cab"><div><b>Sem quadra</b> <span class="mut">· reformas e casas avulsas</span></div><div class="mut">4 obras</div></div></div>
+<p class="mut" style="font-size:13.5px">Quem não usa quadra não vê nada de diferente: sem quadra cadastrada, a lista é a de hoje.</p>
+
+<h2><span class="n">4</span>A ficha da quadra</h2>
+<div class="duas">
+  <div class="card">
+    <h3>O mapa da Quadra 4 <span class="mut" style="font-weight:400">· exemplo</span></h3>
+    <div class="mapa">
+      <div class="lote lp"><b>Lt 1</b>pronta<span class="pct">100</span></div>
+      <div class="lote lt"><b>Lt 2</b>CNO vence<span class="pct">62</span></div>
+      <div class="lote l3"><b>Lt 3</b><span class="pct">62</span></div>
+      <div class="lote l3"><b>Lt 4</b><span class="pct">62</span></div>
+      <div class="lote l2"><b>Lt 5</b><span class="pct">44</span></div>
+      <div class="lote l2"><b>Lt 6</b><span class="pct">44</span></div>
+      <div class="rua">RUA 7</div>
+      <div class="lote lp"><b>Lt 7</b>pronta<span class="pct">100</span></div>
+      <div class="lote lp"><b>Lt 8</b>pronta<span class="pct">100</span></div>
+      <div class="lote l1"><b>Lt 9</b><span class="pct">22</span></div>
+      <div class="lote l1"><b>Lt 10</b><span class="pct">22</span></div>
+      <div class="lote l0"><b>Lt 11</b><span class="pct">0</span></div>
+      <div class="lote l0"><b>Lt 12</b><span class="pct">0</span></div>
+    </div>
+    <div class="leg"><span><i style="background:#c3cfc9"></i>não começou</span><span><i style="background:#8fd9bd"></i>até 30%</span><span><i style="background:#3ec997"></i>até 60%</span><span><i style="background:#12a07a"></i>mais de 60%</span><span><i style="background:#0f5f4a"></i>pronta</span><span><i style="background:var(--ambar)"></i>alerta</span></div>
+    <p class="mut" style="font-size:13px;margin-top:8px">Os lotes saem em grade pela numeração. Um toque abre a ficha da casa.</p>
+  </div>
+  <div class="card">
+    <h3>Os números da quadra</h3>
+    <table class="c">
+      <tr><td>Andamento (média pelo m²)</td><td><b>38%</b></td></tr>
+      <tr><td>Casas prontas</td><td>3 de 12</td></tr>
+      <tr><td>Gasto nas casas</td><td>R$ 742.300</td></tr>
+      <tr><td>Custo comum da quadra</td><td>R$ 96.000</td></tr>
+      <tr><td>Custo por m² das casas prontas (com o comum)</td><td>R$ 1.760</td></tr>
+      <tr><td>SINAPI-MA ago/2026</td><td>R$ 1.969 <span class="chip v">−11%</span></td></tr>
+      <tr><td>Dinheiro parado em casa pronta</td><td>R$ 326.400</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3>O quadro de etapas — o coração da quadra</h3>
+  <p class="mut">Cada linha é uma casa, cada coluna uma etapa. Verde = feita · com risco embaixo = feita e paga ao empreiteiro · âmbar = paga e ainda não feita (adiantamento) · cinza = falta. O botão no pé da coluna marca a etapa em todas as casas selecionadas.</p>
+  <div class="quadro"><table class="q">
+    <tr><th class="casa">Casa</th><th>Fundação</th><th>Estrutura</th><th>Alvenaria</th><th>Cobertura</th><th>Elétrica</th><th>Hidráulica</th><th>Reboco</th><th>Pisos</th><th>Esquadrias</th><th>Louças</th><th>Pintura</th><th>Limpeza</th><th class="casa">%</th></tr>
+    <tr><td class="nome">Lote 1</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="f">✓</td><td class="f">✓</td><td class="f">✓</td><td class="f">✓</td><td class="f">✓</td><td class="tot">100</td></tr>
+    <tr><td class="nome">Lote 2</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="f">✓</td><td class="f">✓</td><td class="nf">·</td><td class="nf">·</td><td class="ad">$</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="tot">62</td></tr>
+    <tr><td class="nome">Lote 3</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="fp">✓</td><td class="f">✓</td><td class="f">✓</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="tot">62</td></tr>
+    <tr><td class="nome">Lote 5</td><td class="fp">✓</td><td class="fp">✓</td><td class="f">✓</td><td class="f">✓</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="tot">44</td></tr>
+    <tr><td class="nome">Lote 9</td><td class="fp">✓</td><td class="f">✓</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="tot">22</td></tr>
+    <tr><td class="nome">Lote 11</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="nf">·</td><td class="tot">0</td></tr>
+    <tr class="col"><td class="nome"></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td><button>marcar</button></td><td></td></tr>
+  </table></div>
+  <p class="mut" style="font-size:13px;margin-top:8px">Lendo o quadro: o reboco é o gargalo da quadra (ninguém passou de 62%), e no Lote 2 as esquadrias foram pagas antes da hora.</p>
+</div>
+
+<h2><span class="n">5</span>No WhatsApp e no Telegram</h2>
+<div class="duas">
+  <div class="chat">
+    <div class="b eu">terminei a fundação da quadra 5</div>
+    <div class="b zq">Marquei <b>fundação</b> em 6 casas da Quadra 5 (lotes 1 a 6). Os lotes 7 e 8 ainda não começaram — ficaram de fora.<br><span class="mut" style="font-size:12px">Errou? É só dizer "desfaz".</span></div>
+    <div class="b eu">📷 nota · 40 sacos de cimento pra quadra 5</div>
+    <div class="b zq">Anotei R$ 1.520,00 de material. Dividi entre as 8 casas da Quadra 5 pelo m²: R$ 190,00 cada.</div>
+  </div>
+  <div class="chat">
+    <div class="b eu">paguei 36 mil pro empreiteiro, fundação e estrutura da quadra 4</div>
+    <div class="b zq">Lancei R$ 36.000 de mão de obra e marquei <b>fundação e estrutura pagas</b> nas 12 casas da Quadra 4 (R$ 3.000 por casa). ⚠️ Nos lotes 11 e 12 a fundação ainda não foi feita — foi adiantamento?</div>
+    <div class="b eu">paguei 8 mil da terraplanagem da quadra 4</div>
+    <div class="b zq">Lancei R$ 8.000 como <b>custo comum da Quadra 4</b>. Ele entra no custo de cada casa pelo m².</div>
+  </div>
+</div>
+
+<h2><span class="n">6</span>O custo comum, dividido pelo m²</h2>
+<div class="duas">
+  <div class="card">
+    <p>Terraplanagem, rede de água e esgoto, poste, muro e portão da quadra: <b>não são de casa nenhuma, mas são de todas</b>. Ficam lançados na quadra (que ganha um centro de custo próprio, como a casa já tem) e entram no custo de cada casa na proporção da área.</p>
+    <div class="ok">O lançamento não é quebrado em pedaços: a conta é feita na hora de mostrar, igual à divisão de nota que já existe. O extrato e a conciliação continuam batendo.</div>
+  </div>
+  <div class="card">
+    <h3>Exemplo — Lote 2, 45 m², quadra com 540 m²</h3>
+    <table class="c">
+      <tr><th>Custo</th><th>Valor</th></tr>
+      <tr><td>Lançado na casa</td><td>R$ 71.200</td></tr>
+      <tr><td>Comum da quadra (R$ 96.000 × 45/540)</td><td>R$ 8.000</td></tr>
+      <tr class="t"><td>Custo cheio da casa</td><td>R$ 79.200</td></tr>
+      <tr><td>Por m²</td><td>R$ 1.760</td></tr>
+    </table>
+    <p class="mut" style="font-size:13px;margin-top:6px">A margem e a comparação com o SINAPI passam a usar o custo cheio.</p>
+  </div>
+</div>
+
+<h2><span class="n">7</span>O que muda por dentro</h2>
+<div class="card">
+  <ul style="margin:0;padding-left:20px">
+    <li><b>Tabela nova <code>obra_grupos</code></b>: nome ("Quadra 4"), empreendimento (texto opcional), o rótulo que a empresa escolheu (Quadra/Setor/Bloco) e um centro de custo próprio — pro custo comum.</li>
+    <li><b>Na obra</b>: <code>grupo_id</code> e <code>lote</code>. Casa sem quadra continua igual.</li>
+    <li><b>Etapa em lote</b>: marcar a etapa em todas as casas da quadra (ou nas escolhidas) reaproveita o <code>marcar_etapa</code> de cada casa — o andamento, a casa pronta e a parcela da reforma continuam valendo.</li>
+    <li><b>Nota e pagamento da quadra</b>: dividir pelo m² entre as casas (a divisão de hoje é em partes iguais; ganha a opção pelo m²) e marcar etapa paga em cada uma.</li>
+    <li><b>Agente</b>: entende "da quadra 5" como alvo; "desfaz" volta a última marcação em lote.</li>
+    <li><b>Lembrete de segunda</b>: agrupa por quadra quando houver ("Quadra 4: 3 casas travadas no habite-se").</li>
+  </ul>
+</div>
+<p class="mut" style="font-size:13.5px">Entrega sugerida em 2 PRs: (1) quadra, lista agrupada, quadro de etapas com marcação em lote e o agente; (2) mapa, custo comum pelo m² e lembrete agrupado.</p>
+
+<h2><span class="n">8</span>As decisões que são suas</h2>
+<div class="decisao"><b>1. O nome do grupo:</b> "Quadra", "Setor", "Bloco"… fixo ou a empresa escolhe?
+  <div class="rec">Recomendo: a empresa escolhe, com "Quadra" como padrão — loteamento fala quadra; condomínio fala bloco.</div></div>
+<div class="decisao"><b>2. O nível "Empreendimento" (o loteamento) acima da quadra:</b> precisa?
+  <div class="rec">Recomendo: só um campo de texto na quadra por enquanto. Vira nível próprio se aparecer quem tem dois loteamentos ao mesmo tempo.</div></div>
+<div class="decisao"><b>3. O custo comum entra no custo de cada casa?</b> E dividido como?
+  <div class="rec">Recomendo: sim, pelo m² — casa maior consome mais da quadra. Em partes iguais fica como opção.</div></div>
+<div class="decisao"><b>4. "Terminei a fundação da quadra 5":</b> marca em todas na hora, ou pergunta antes?
+  <div class="rec">Recomendo: marca na hora e diz quais ficaram de fora, com "desfaz" — perguntar toda vez é o atrito que faz a pessoa voltar pro caderno.</div></div>
+<div class="decisao"><b>5. O mapa:</b> grade pela numeração dos lotes, ou desenhar a planta real do loteamento?
+  <div class="rec">Recomendo: a grade agora (sai de graça da numeração); a planta desenhada depois, se fizer falta.</div></div>
+
+</div></body></html>

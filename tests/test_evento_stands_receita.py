@@ -171,3 +171,20 @@ def test_os_quatro_formularios_usam_a_mesma_regra():
     assert "function receitaPreenche(" in painel._TPL and "function receitaPreenche(" in contrato._TPL
     assert "function receitaPreenche(" in app._receita_js()
     assert "__RECEITA_JS__" in app._CLI_NOVO_JS
+
+
+def test_dado_estranho_da_receita_nao_derruba_a_consulta(monkeypatch):
+    # a consulta e' compartilhada com Clientes, Servicos e Empresa das outras contas:
+    # o trecho novo (razao, endereco completo, representante) nunca pode quebra-la
+    torto = dict(LTDA, qsa={"nome_socio": 7}, complemento=12, razao_social=None,
+                 descricao_tipo_de_logradouro=None, codigo_natureza_juridica="x")
+    _brasilapi(monkeypatch, torto)
+    info = cnpj_info.consultar_cnpj(CNPJ)
+    assert info["nome"] == "ALADDIN CONSULTORIA E TECNOLOGIA" and info["cidade"] == "TERESINA"
+    assert info["representante"] is None and info["razao_social"] is None
+    assert info["endereco_completo"] == "VETERINARIO BUGYJA BRITTO, 1229, 12, HORTO"
+    _brasilapi(monkeypatch, dict(LTDA, qsa=[{"nome_socio": 7, "qualificacao_socio": None}, "lixo", None]))
+    assert cnpj_info.consultar_cnpj(CNPJ)["representante"] == "7"            # sócio único, sem quebrar
+    # o tipo ja dentro do logradouro nao repete ("RUA RUA ...")
+    _brasilapi(monkeypatch, dict(LTDA, logradouro="RUA DAS FLORES", complemento="", bairro=""))
+    assert cnpj_info.consultar_cnpj(CNPJ)["endereco_completo"] == "RUA DAS FLORES, 1229"

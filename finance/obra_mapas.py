@@ -341,7 +341,10 @@ def vista(pool, conta_id: int, mapa_id: int) -> dict:
             alerta = _alerta(pool, conta_id, o)
             feitas = sum(1 for e in o["etapas"] if e["concluida_em"])
             d.update({
-                "pct": o["pct"], "st": "alerta" if alerta else _faixa(o["pct"]),
+                # a cor é SEMPRE o andamento; o alerta vira um selo no canto
+                # (pedido do dono em 02/10: com o lote inteiro âmbar, um
+                # loteamento com prazo de documento vencendo perdia a leitura)
+                "pct": o["pct"], "st": _faixa(o["pct"]),
                 "alerta": alerta, "obra_nome": o["nome"],
                 "casa": casa_pecas(o),
                 "gasto": _ob._brl(o["custos"]["total"]),

@@ -119,3 +119,20 @@ def test_as_tres_telas_desenham_com_a_mesma_funcao():
     # e ninguém voltou a desenhar em grade de 24 colunas
     for fonte in (pub._TPL, painel._TPL, app._STANDS_JS):
         assert "repeat(24" not in fonte and "gridTemplateColumns" not in fonte
+
+
+def test_no_mapa_3d_o_clique_chega_no_stand():
+    # 01/10/2026: com cada stand virando filho direto do chão (translateZ próprio), a
+    # moldura do zoom (.floor-zoom, preserve-3d) passou a ganhar o clique no Mapa 3D —
+    # no computador nenhum stand selecionava. A moldura não recebe ponteiro; o chão sim.
+    import re as _re
+
+    import web.loja_stands as pub
+
+    zoom = _re.search(r"\.floor-zoom\{[^}]*\}", pub._TPL).group(0)
+    chao = _re.search(r"\.floor-grid\{[^}]*\}", pub._TPL).group(0)
+    assert "pointer-events:none" in zoom
+    assert "pointer-events:auto" in chao
+    # o cenário nunca rouba o toque do stand
+    assert "pointer-events:none" in _re.search(r"\.plc\{[^}]*\}", PLANTA_CSS).group(0)
+

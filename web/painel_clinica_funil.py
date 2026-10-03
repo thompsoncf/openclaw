@@ -58,24 +58,36 @@ def _escolhas(form) -> dict:
 
 @router.post(URL)
 async def aplicar(request: Request):
+    # o async é só pra ler o formulário (a lista `item` repetida); o banco roda no
+    # threadpool, pra não travar o event loop de todo mundo
+    from starlette.concurrency import run_in_threadpool
+    form = await request.form()
+    return await run_in_threadpool(_aplicar, request, form.getlist("item"), _escolhas(form))
+
+
+def _aplicar(request: Request, itens: list, escolhas: dict):
     conta, redir = _gerencia(request)
     if redir is not None:
         return redir
-    form = await request.form()
     with get_pool().connection() as c:
-        _feito, erro = cfu.aplicar(c, conta[0], form.getlist("item"), _escolhas(form))
+        _feito, erro = cfu.aplicar(c, conta[0], itens, escolhas)
         (c.rollback if erro else c.commit)()
     return _ir(request, "" if erro else "aplicado", erro or "")
 
 
 @router.post(URL + "/regras")
 async def regras(request: Request):
+    from starlette.concurrency import run_in_threadpool
+    form = await request.form()
+    return await run_in_threadpool(_regras, request, _escolhas(form))
+
+
+def _regras(request: Request, escolhas: dict):
     conta, redir = _gerencia(request)
     if redir is not None:
         return redir
-    form = await request.form()
     with get_pool().connection() as c:
-        erro = cfu.salvar_regras(c, conta[0], _escolhas(form))
+        erro = cfu.salvar_regras(c, conta[0], escolhas)
         (c.rollback if erro else c.commit)()
     return _ir(request, "" if erro else "regras", erro or "")
 
@@ -109,14 +121,20 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
 
-  {% macro regras(nome_form) %}
+  {% macro tri(nome, opcoes) %}<div class="fu-tri">{% for m in opcoes %}<label><input type="radio" name="{{ nome }}" value="{{ m }}" {% if e.marcado[nome] == m %}checked{% endif %}> {{ MODO_D[m] }}</label>{% endfor %}{% if e.modos[nome] == 'outro' %}<label><input type="radio" name="{{ nome }}" value="outro" {% if e.marcado[nome] == 'outro' %}checked{% endif %}> {{ MODO_D['outro'] }}</label>{% endif %}</div>{% endmacro %}
+  {% macro regras() %}
     <div class="fu-reg"><b>A agenda move o cartão</b><span class="fu-nota">Presente, Faltou, Finalizar, plano, pagamento, sessões e retorno. Vem junto com as colunas.</span><span class="fu-chip">ligado</span></div>
     <div class="fu-reg"><b>Primeira resposta nossa leva para Em conversa</b>
-      <div class="fu-tri">{% for m in ('off','observando','ligado') %}<label><input type="radio" name="resposta" value="{{ m }}" {% if e.modos.resposta == m or (not e.aplicado and m == 'observando') %}checked{% endif %}> {{ MODO_D[m] }}</label>{% endfor %}</div></div>
+      {% if e.modos.resposta == 'outro' %}<span class="fu-nota">Em conversa já anda por outro gatilho, escolhido na Régua: escolher aqui troca pelo da resposta.</span>{% endif %}
+      {% if e.outras.gatilho %}<span class="fu-nota">O modo vale para a conta toda e também mexe em {{ e.outras.gatilho|join(', ') }}: para mudar o modo, use a Régua.</span>{% endif %}
+      {{ tri('resposta', ('off','observando','ligado')) }}</div>
     <div class="fu-reg"><b>Prazo de Em conversa: {{ prazo_dias }} dias, {{ prazo_renov }} renovações</b><span class="fu-nota">renovar pede justificativa; vencido, ninguém perde o cartão sozinho: a recepção decide</span>
-      <div class="fu-tri">{% for m in ('off','observando','ligado') %}<label><input type="radio" name="prazo" value="{{ m }}" {% if e.modos.prazo == m or (not e.aplicado and m == 'observando') %}checked{% endif %}> {{ MODO_D[m] }}</label>{% endfor %}</div></div>
+      {% if e.modos.prazo == 'outro' %}<span class="fu-nota">Em conversa já tem outro prazo, escolhido na Régua: escolher aqui troca por {{ prazo_dias }} dias e {{ prazo_renov }} renovações.</span>{% endif %}
+      {% if e.outras.prazo %}<span class="fu-nota">O modo vale para a conta toda e também mexe em {{ e.outras.prazo|join(', ') }}: para mudar o modo, use a Régua.</span>{% endif %}
+      {{ tri('prazo', ('off','observando','ligado')) }}</div>
     <div class="fu-reg"><b>Perdido volta a Em conversa quando a pessoa escreve</b>
-      <div class="fu-tri">{% for m in ('off','ligado') %}<label><input type="radio" name="reabre" value="{{ m }}" {% if e.modos.reabre == m or (not e.aplicado and m == 'ligado') %}checked{% endif %}> {{ MODO_D[m] }}</label>{% endfor %}</div></div>
+      {% if e.modos.reabre == 'outro' %}<span class="fu-nota">O Perdido já reabre em outra coluna, escolhida na Régua.</span>{% endif %}
+      {{ tri('reabre', ('off','ligado')) }}</div>
     <div class="fu-reg"><b>Mensagens automáticas (chamar de novo, resgate)</b><span class="fu-nota">ficam para as próximas entregas: a recepção primeiro</span><span class="fu-chip">desligado</span></div>
   {% endmacro %}
 
@@ -128,7 +146,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         <span>{% if it.acao == 'criar' %}{{ it.para }} <span class="fu-chip">nova</span>{% elif it.acao == 'rotulo' %}<span class="fu-de">{{ it.de }}</span> → {{ it.para }}{% else %}{{ it.texto }}{% endif %}{% if it.nota %}<br><span class="fu-nota">{{ it.nota }}</span>{% endif %}</span></label>
       {% else %}<div class="fu-nota">As colunas já estão iguais ao modelo.</div>{% endfor %}
     </div>
-    <div class="fu-cx"><h3>2. O que anda sozinho<small>ensaio: a regra não mexe em nada e conta o que teria feito</small></h3>{{ regras('aplicar') }}</div>
+    <div class="fu-cx"><h3>2. O que anda sozinho<small>ensaio: a regra não mexe em nada e conta o que teria feito</small></h3>{{ regras() }}</div>
     <div class="fu-cx"><h3>3. Conferir e aplicar<small>o que muda no dia</small></h3>
       <div class="fu-res">
         <div><span>Colunas novas</span><b>{{ e.itens|selectattr('acao','equalto','criar')|list|length }}</b></div>
@@ -147,11 +165,12 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="fu-nota">O funil da clínica está no quadro. Nome, prazo e gatilho de cada coluna também ficam em <a href="/painel/prospeccao/regua#etapas">Funil › Régua</a>.</div>
       {% for it in e.itens %}<div class="fu-nota">Ainda diferente do modelo: {{ it.texto or it.para }}</div>{% endfor %}
     </div>
-    <div class="fu-cx"><h3>O que anda sozinho</h3>{{ regras('regras') }}<button>Salvar as regras</button></div>
+    <div class="fu-cx"><h3>O que anda sozinho</h3>{{ regras() }}<button>Salvar as regras</button></div>
     <div class="fu-cx"><h3>O ensaio<small>últimos {{ ensaio_dias }} dias</small></h3>
       <div class="fu-res">
         <div><span>Primeira resposta: cartões que teria levado para Em conversa</span><b>{{ e.ensaio.resposta }}</b></div>
-        <div><span>Prazo de Em conversa: avisos que teria dado</span><b>{{ e.ensaio.prazo }}</b></div>
+        <div><span>Prazo de Em conversa: cartões que teriam recebido aviso</span><b>{{ e.ensaio.prazo }}</b></div>
+        <div><span>Se ligar a primeira resposta agora: cartões que andam para Em conversa de uma vez</span><b>{{ e.ensaio.ao_ligar }}</b></div>
       </div>
       <div class="fu-nota">Quando os números fizerem sentido, passe a regra de ensaio para ligado.</div>
     </div>

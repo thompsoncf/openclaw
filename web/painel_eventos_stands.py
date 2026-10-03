@@ -428,7 +428,12 @@ def consulta_cnpj(request: Request, doc: str = ""):
     if conta is None:
         return _J({"ok": False, "erro": "Sua sessão expirou — entre de novo e repita a busca."},
                   status_code=401)
-    return _J(es.receita_do_cnpj(doc))
+    # 03/10/2026: primeiro o cadastro que a conta já tem em Clientes, depois a Receita
+    try:
+        pool = get_pool()
+    except Exception:  # noqa: BLE001 — sem banco, só a Receita
+        pool = None
+    return _J(es.buscar_dados_do_documento(pool, conta[0], doc))
 
 
 @router.post("/painel/eventos/estandes/{codigo}/cliente")
@@ -540,10 +545,30 @@ async def anexar_comprovante(request: Request, codigo: str, nome: str = Form("")
 def _anexar_comprovante_sync(request: Request, codigo: str, nome: str,
                              whatsapp: str, conteudo: bytes, content_type: str,
                              vendedor: str = ""):
+    from urllib.parse import quote
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
         return cfg_ou_redir
     pool = get_pool()
+    stand = es.buscar(pool, conta[0], codigo)
+    if stand and stand["status"] == "pre_reservado":
+        # a reserva já existe (a da lista, ou o arquivo veio errado): o comprovante
+        # entra nela — em todos os stands da mesma reserva — e a proposta que faltar
+        # nasce (03/10/2026)
+        r = es.anexar_comprovante_da_reserva(pool, conta[0], codigo, conteudo, content_type)
+        if not r.get("ok"):
+            return RedirectResponse(
+                f"/painel/eventos/estandes?erro={quote(r.get('erro') or 'Não deu pra anexar.')}",
+                status_code=303)
+        return RedirectResponse(
+            f"/painel/eventos/estandes?ok={quote('Comprovante anexado à reserva ' + ' + '.join(r['codigos']) + '.')}",
+            status_code=303)
+    if stand and stand["status"] == "livre" and not (nome or "").strip():
+        # sem o nome do lojista o stand ficava reservado sem reserva registrada: sem
+        # proposta, sem contrato, sem vendedora (S116, S78 e i14 em 02/10/2026)
+        return RedirectResponse(
+            f"/painel/eventos/estandes?erro={quote('Informe o nome do lojista — sem ele não nascem a proposta e o contrato.')}&abrir={codigo}",
+            status_code=303)
     pid = None
     if (nome or "").strip():
         from web.loja_stands import _criar_prospeccao_simples
@@ -555,12 +580,12 @@ def _anexar_comprovante_sync(request: Request, codigo: str, nome: str,
                                          content_type, prospeccao_id=pid)
     if not r.get("ok"):
         return RedirectResponse(
-            f"/painel/eventos/estandes?erro={r.get('erro') or 'Não deu pra anexar.'}",
+            f"/painel/eventos/estandes?erro={quote(r.get('erro') or 'Não deu pra anexar.')}",
             status_code=303)
     msg = f"Comprovante anexado — estande {codigo} reservado."
     if r.get("contrato_token"):
         msg += " Proposta e contrato criados."
-    return RedirectResponse(f"/painel/eventos/estandes?ok={msg}", status_code=303)
+    return RedirectResponse(f"/painel/eventos/estandes?ok={quote(msg)}", status_code=303)
 
 
 @router.get("/painel/eventos/estandes/{codigo}/comprovante")
@@ -697,7 +722,8 @@ _CSS = r"""<style>
 
 /* ---- lista completa (o cadastro, stand a stand) ---- */
 .es-pag .lst-filtros{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
-.es-pag .lst-filtros input[type=text]{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;color:var(--fg);font-family:inherit;font-size:12px;padding:7px 13px;width:150px;min-height:0;margin:0}
+.es-pag .lst-filtros input[type=text],.es-pag .lst-filtros select{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;color:var(--fg);font-family:inherit;font-size:12px;padding:7px 13px;width:220px;max-width:100%;min-height:0;margin:0}
+.es-pag .lst-filtros select{width:auto;cursor:pointer}
 .es-pag .tbl-wrap{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:4px 10px 8px;margin-bottom:18px;max-height:60vh}
 .es-pag table.es-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
 .es-pag .es-tbl th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--fg-dim);padding:9px 10px 6px;position:sticky;top:0;background:var(--surface)}
@@ -864,7 +890,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 {% set zap = wa_num(cad.get('whats') or cli.get('whatsapp')) %}
 {% set pend = d.get('pend') or [] %}
 {% set rotulo = {'livre':'Livre','pre_reservado':'Reservado','vendido':'Vendido'}[d.status] %}
-<div class="oc-hist"{% if grupo %} data-grupo="{{ grupo }}"{% endif %} data-st="{{ d.status }}" data-cod="{{ d.codigo|lower }}"{% if escondido %} hidden{% endif %}>
+{% set doc_dig = (cad.get('doc') or '')|replace('.','')|replace('/','')|replace('-','') %}
+<div class="oc-hist"{% if grupo %} data-grupo="{{ grupo }}"{% endif %} data-st="{{ d.status }}" data-cod="{{ d.codigo|lower }}" data-busca="{{ (d.codigo ~ ' ' ~ (cad.get('fantasia') or '') ~ ' ' ~ (cli.get('empresa') or '') ~ ' ' ~ (cad.get('razao') or '') ~ ' ' ~ (cad.get('doc') or ''))|lower }}" data-doc="{{ doc_dig }}" data-vend="{{ cli.get('vendedor_id') or '' }}"{% if escondido %} hidden{% endif %}>
   <div class="oc-hist-top">
     <div class="oc-open" title="{% if d.status == 'livre' %}Abrir opções{% else %}Ver comprovante, contrato e cliente{% endif %}" onclick="ocToggle(this)">
       <div class="oc-stand-badge" style="background:{{ cor[0] }};color:{{ cor[1] }}"><div class="c">{{ d.codigo }}</div><div class="z">{% if d.get('g_n', 1) > 1 %}{{ d.g_n }} stands{% else %}{{ tam_label.get(d.tamanho, d.tamanho) }}{% endif %}</div></div>
@@ -957,7 +984,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         <span class="sub">{% if d.status == 'livre' %}Venda fechada por fora (WhatsApp/presencial)? Anexa o comprovante e o stand fica reservado igual ao da página — com proposta e contrato.{% else %}Substitui o arquivo atual (comprovante melhor, ou parcela seguinte) — o prazo da reserva não muda.{% endif %}</span>
         {% if d.status == 'livre' %}
         <div class="campos">
-          <input type="text" name="nome" placeholder="Nome do lojista (pra nascer o contrato)" maxlength="200">
+          <input type="text" name="nome" placeholder="Nome do lojista *" maxlength="200" required>
           <input type="text" name="whatsapp" placeholder="WhatsApp (opcional)" maxlength="40">
           {% if vendedores %}<select name="vendedor"><option value="">— venda sem vendedor —</option>
             {% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select>{% endif %}
@@ -1039,7 +1066,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
           <label class="fld{{ falta('fantasia') }}"><span>Nome fantasia <i>*</i></span><input name="fantasia" data-req="1" maxlength="200" value="{{ cad.get('fantasia','') }}" required></label>
           <label class="fld{{ falta('razao') }}"><span>Razão social <i>*</i></span><input name="razao" data-req="1" maxlength="200" value="{{ cad.get('razao','') }}" placeholder="Como sai no contrato"></label>
           <div class="cad-linha"><label class="fld{{ falta('doc') }}"><span>CNPJ / CPF <i>*</i></span><input name="doc" data-req="1" maxlength="20" value="{{ cad.get('doc','') }}" placeholder="00.000.000/0000-00"></label>
-            <button type="button" class="oc-ghost-btn" onclick="esReceita(this)">Buscar na Receita</button></div>
+            <button type="button" class="oc-ghost-btn" onclick="esReceita(this)">Buscar dados</button></div>
           <label class="fld{{ falta('rep') }}"><span>Representante legal <i>*</i></span><input name="rep" data-req="1" maxlength="200" value="{{ cad.get('rep','') }}" placeholder="Quem assina pelo lojista"></label>
           <label class="fld{{ falta('whats') }}"><span>WhatsApp <i>*</i></span><input name="whats" data-req="1" maxlength="40" value="{{ cad.get('whats','') }}"></label>
           <label class="fld"><span>E-mail</span><input name="email" type="email" maxlength="200" value="{{ cad.get('email','') }}" placeholder="contato@loja.com.br"></label>
@@ -1168,7 +1195,15 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   <button class="fn-tab" data-f="livre" onclick="lstStatus(this)"><span class="pt" style="background:var(--mint)"></span>Livres <span class="n">{{ kpis.get('livre',0) }}</span></button>
   <button class="fn-tab" data-f="pre_reservado" onclick="lstStatus(this)"><span class="pt" style="background:var(--gold)"></span>Reservados <span class="n">{{ kpis.get('pre_reservado',0) }}</span></button>
   <button class="fn-tab" data-f="vendido" onclick="lstStatus(this)"><span class="pt" style="background:var(--coral)"></span>Vendidos <span class="n">{{ kpis.get('vendido',0) }}</span></button>
-  <input type="text" id="lst-busca" placeholder="Buscar código…" oninput="lstFiltra()">
+  <input type="text" id="lst-busca" placeholder="Buscar código, loja ou CNPJ…" oninput="lstFiltra()">
+  {% if vendedores %}
+  {#- só a lista de UMA vendedora (pedido do dono, 03/10/2026) -#}
+  <select id="lst-vend" onchange="lstFiltra()" aria-label="Vendedor">
+    <option value="">Todos os vendedores</option>
+    {% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}
+    <option value="0">Sem vendedor</option>
+  </select>
+  {% endif %}
 </div>
 <div class="oc-list" id="lista-stands">
 {% for s in stands %}{{ linha_stand(vinculos.get(s.codigo, s)) }}{% endfor %}
@@ -1387,15 +1422,15 @@ function esReceita(btn){
   var msg = form.querySelector('.cad-receita');
   var doc = form.elements['doc'].value.trim();
   msg.hidden = false;
-  if (!doc){ msg.textContent = 'Digite o CNPJ antes de buscar.'; return; }
+  if (!doc){ msg.textContent = 'Digite o CNPJ ou CPF antes de buscar.'; return; }
   if (!receitaTrava(btn)) return;
-  msg.textContent = 'Consultando a Receita…';
+  msg.textContent = 'Buscando em Clientes e na Receita…';
   fetch('/painel/eventos/estandes/consulta-cnpj?doc=' + encodeURIComponent(doc), {headers:{'x-requested-with':'fetch'}})
     .then(function(r){ return r.json(); })
     .then(function(j){
       receitaSolta(btn);
       if (!j.ok){ msg.textContent = j.erro || 'Não consegui consultar agora.'; return; }
-      msg.textContent = receitaMsg(receitaPreenche(form, j));
+      msg.textContent = receitaMsg(receitaPreenche(form, j), j);
       esCadProg(form);
     })
     .catch(function(){ receitaSolta(btn); msg.textContent = 'Não consegui consultar agora — digite os dados.'; });
@@ -1442,11 +1477,18 @@ function lstStatus(btn){
   document.querySelectorAll('.lst-filtros .fn-tab').forEach(function(b){ b.classList.toggle('on', b === btn); });
   lstFiltra();
 }
+// BUSCA E VENDEDOR (03/10/2026, pedido do dono): o campo acha pelo código, pelo nome
+// da loja (marca ou razão social) e pelo CNPJ/CPF — com ou sem pontuação; o seletor
+// deixa só os stands da lista de uma vendedora ("Sem vendedor": os ocupados que não têm)
 function lstFiltra(){
   var q = (document.getElementById('lst-busca').value || '').trim().toLowerCase();
+  var qd = q.replace(/[^0-9]/g, '');
+  var sv = document.getElementById('lst-vend'), v = sv ? sv.value : '';
   document.querySelectorAll('#lista-stands .oc-hist').forEach(function(el){
-    var ok = (!lstF || el.dataset.st === lstF) && (!q || el.dataset.cod.indexOf(q) !== -1);
-    el.hidden = !ok;
+    var achou = !q || (el.dataset.busca || el.dataset.cod).indexOf(q) !== -1 ||
+                (qd.length >= 3 && (el.dataset.doc || '').indexOf(qd) !== -1);
+    var dele = !v || (v === '0' ? (!el.dataset.vend && el.dataset.st !== 'livre') : el.dataset.vend === v);
+    el.hidden = !((!lstF || el.dataset.st === lstF) && achou && dele);
   });
 }
 </script>

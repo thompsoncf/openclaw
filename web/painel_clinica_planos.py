@@ -314,7 +314,7 @@ _CSS = r"""<style>
 .pl-linha{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.5rem;padding:.45rem 0;border-top:1px solid var(--borda);align-items:center}
 .pl-linha a{color:var(--txt);text-decoration:none;font-weight:600}
 .pl-chip{font-size:.7rem;padding:.08rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut)}
-.pl-chip.enviado{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}
+.pl-chip.enviado{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
 .pl-chip.aceito{border-color:var(--verde);color:var(--verde-claro)}
 .pl-nq{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}.pl-nq select{width:auto}
 .pl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem}

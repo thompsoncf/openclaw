@@ -195,13 +195,13 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   border-radius:11px;padding:.6rem .8rem}
 .hj-card.quente{border-left-color:var(--verde)}
 .hj-card.fora{border-left-color:var(--amar)}
-.hj-card.urgente{border-left-color:#e5484d;background:#3a1d1d}
-.hj-card .chip.urgente{border-color:#6e2b2b;background:#3a1d1d;color:#f0b8b8;font-weight:700}
+.hj-card.urgente{border-left-color:var(--coral);background:var(--coral-fundo)}
+.hj-card .chip.urgente{border-color:var(--coral-borda);background:var(--coral-fundo);color:var(--coral);font-weight:700}
 .hj-card .cab{display:flex;gap:.45rem;align-items:baseline;flex-wrap:wrap}
 .hj-card .quem{font-weight:700;font-size:.95rem;color:var(--txt);text-decoration:none}
 .hj-card .meta{font-size:.78rem;color:var(--txt-mut)}
 .hj-card .chip{font-size:.68rem;padding:.08rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut)}
-.hj-card .chip.fora{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}
+.hj-card .chip.fora{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
 .hj-card .frase{font-size:.86rem;margin-top:.3rem;color:var(--txt);opacity:.9;overflow-wrap:anywhere}
 .hj-card .msg{font-size:.86rem;margin:.4rem 0 .1rem;padding:.45rem .6rem;border-radius:9px;
   background:var(--neon-fundo);border:1px solid var(--neon-borda);overflow-wrap:anywhere}
@@ -218,7 +218,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .hj-modo h3{margin:0 0 .3rem;font-size:1.02rem}
 .hj-modo .ex{font-size:.82rem;color:var(--txt-mut);margin:.15rem 0 .6rem}
 .hj-modo label{display:block;font-size:.8rem;color:var(--txt-mut);margin:.6rem 0 .2rem}
-.hj-modo textarea{width:100%;min-height:64px;padding:.55rem .7rem;border-radius:8px;border:1px solid #333;
+.hj-modo textarea{width:100%;min-height:64px;padding:.55rem .7rem;border-radius:8px;border:1px solid var(--line-2);
   background:var(--bg);color:var(--txt);font-size:1rem;font-family:inherit;box-sizing:border-box}
 .hj-modo .linha{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
 @media (max-width:560px){.hj-modo .linha{grid-template-columns:1fr}}

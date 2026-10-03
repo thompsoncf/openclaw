@@ -9780,7 +9780,7 @@ _STANDS_CSS = """<style>
 
 _STANDS_JS = r"""
   var tamLabel={'4x2':'4x2m','4x3':'4x3m','3x2':'3x2m','2x2':'2x2m','3x3':'3x3m','tenda':'Espaço em tenda','personalizado':'Stand personalizado'};
-  var pav='inferior', sel=null, editando=false, filtro='', vendendo=false;
+  var pav='inferior', sel=null, editando=false, filtro='', vendendo=false, anexando=false;
   // o que o contrato precisa do cliente (mesma lista do painel do gestor)
   var REQ=[['fantasia','Nome fantasia'],['whats','WhatsApp'],['razao','Razão social'],['doc','CNPJ/CPF'],
            ['rep','Representante legal'],['end','Endereço'],['cidade','Cidade']];
@@ -9804,7 +9804,7 @@ _STANDS_JS = r"""
     var b=document.createElement('button');
     b.className='std '+s.status+(code===sel?' sel':'')+(filtro&&s.status!==filtro?' apaga':'');
     b.textContent=code;
-    b.onclick=function(){sel=code;editando=false;vendendo=false;render();detalhe();
+    b.onclick=function(){sel=code;editando=false;vendendo=false;anexando=false;render();detalhe();
       document.getElementById('stdet').scrollIntoView({behavior:'smooth',block:'nearest'});};
     return b;
   }
@@ -9855,9 +9855,13 @@ _STANDS_JS = r"""
       if(!vendendo)h+='<button type=button onclick="stVender()">Registrar venda</button>';
     } else if(s.pode){
       h+=acoesVenda(s);
+      // a reserva já existe (lançada pela lista, ou o arquivo veio errado): o
+      // comprovante que o cliente mandou no WhatsApp entra aqui (03/10/2026)
+      if(s.status==='reservado'&&!anexando)h+='<button type=button onclick="stAnexar()">'+(s.lista?'📎 Anexar comprovante do sinal':'Trocar comprovante')+'</button>';
     }
     h+='</div>';
     if(s.status!=='livre')h+='<span class=sts>'+situacao(s)+'</span>';
+    if(s.status==='reservado'&&s.pode&&anexando)h+=formAnexo(sel,s);
     if(s.status==='livre'&&vendendo)h+=formVenda(sel);
     if(s.status!=='livre'&&s.cad)h+=cadHTML(s);
     box.innerHTML=h; box.hidden=false;
@@ -9917,6 +9921,16 @@ _STANDS_JS = r"""
     h+='<div class=stnota>O stand fica reservado no seu nome, igual à venda pelo seu link. Sinal mínimo de '+reais(SINAL_MIN)+' por stand; a gestão confere o comprovante e confirma.</div>';
     return h+'</form></div>';
   }
+  function formAnexo(code,s){
+    var g=(s.rcods||s.gcods||[code]);
+    var h='<div class=stcad><form class=stvenda method=post enctype="multipart/form-data" action="'+BASE_STANDS+'/'+encodeURIComponent(code)+'/comprovante">';
+    h+='<label class=stfld><span>Comprovante do sinal <i>*</i></span><input name=arquivo type=file required accept="image/*,application/pdf"></label>';
+    h+='<div class=stac><button class=stsalvar type=submit>Anexar comprovante</button><button class=stbtn type=button onclick="stCancelaAnexo()">Cancelar</button></div>';
+    h+='<div class=stnota>Vale pra reserva '+(g.length>1?'dos stands '+esc(g.join(' + ')):'do '+esc(code))+'. A gestão confere o comprovante e confirma o sinal; o stand continua segurado.</div>';
+    return h+'</form></div>';
+  }
+  window.stAnexar=function(){anexando=true;editando=false;detalhe();};
+  window.stCancelaAnexo=function(){anexando=false;detalhe();};
   window.stVender=function(){vendendo=true;detalhe();};
   window.stCancelaVenda=function(){vendendo=false;detalhe();};
   window.stVendaOk=function(form){
@@ -9987,7 +10001,7 @@ _STANDS_JS = r"""
     h+=campo('fantasia','Nome fantasia',c,1,'autocomplete=organization');
     h+=campo('razao','Razão social',c,1,'placeholder="Como sai no contrato"');
     h+='<div class=stlin>'+campo('doc','CNPJ / CPF',c,1,'inputmode=numeric placeholder="00.000.000/0000-00"')+
-       '<button class=strec type=button onclick="stReceita(this)">Receita</button></div>';
+       '<button class=strec type=button onclick="stReceita(this)">Buscar</button></div>';
     h+=campo('rep','Representante legal',c,1,'placeholder="Quem assina pelo lojista"');
     h+=campo('whats','WhatsApp',c,1,'inputmode=tel autocomplete=tel');
     h+=campo('email','E-mail',c,0,'inputmode=email');
@@ -10020,14 +10034,14 @@ _STANDS_JS = r"""
   window.stReceita=function(btn){
     var form=document.getElementById('stform'), msg=document.getElementById('strecmsg');
     var doc=form.elements['doc'].value.trim(); msg.hidden=false;
-    if(!doc){msg.textContent='Digite o CNPJ antes.';return;}
+    if(!doc){msg.textContent='Digite o CNPJ ou CPF antes.';return;}
     if(!receitaTrava(btn))return;
-    msg.textContent='Consultando a Receita…';
+    msg.textContent='Buscando em Clientes e na Receita…';
     zapFetch(BASE_STANDS+'/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
       receitaSolta(btn);
       if(!j){msg.textContent='Não consegui consultar agora — digite os dados.';return;}
       if(!j.ok){msg.textContent=j.erro||'Não consegui consultar agora.';return;}
-      msg.textContent=receitaMsg(receitaPreenche(form,j));
+      msg.textContent=receitaMsg(receitaPreenche(form,j),j);
       stProg();
     });
   };
@@ -10147,9 +10161,12 @@ def _dados_do_mapa(request: Request, pool, conta_id: int, meu_id, g):
         except Exception:  # noqa: BLE001 — sem isso a planta continua servindo
             contratos, fin = {}, {}
     grupos: dict = {}
+    por_orc: dict = {}
     for s in stands:
         if s.get("grupo_id") and s["status"] != "livre":
             grupos.setdefault(s["grupo_id"], []).append(s["codigo"])
+        if s.get("orcamento_id") and s["status"] == "pre_reservado":
+            por_orc.setdefault(s["orcamento_id"], []).append(s["codigo"])
 
     tot = {"livre": 0, "pre_reservado": 0, "vendido": 0}
     dados = {}
@@ -10178,7 +10195,10 @@ def _dados_do_mapa(request: Request, pool, conta_id: int, meu_id, g):
             dados[s["codigo"]].update({
                 "ct": ct.get("token"), "ct_ok": bool(ct.get("assinado")),
                 "aberto": int(f.get("aberto", 0)), "pago": int(f.get("pago", 0)),
-                "gcods": grupos.get(s.get("grupo_id")) or [s["codigo"]]})
+                "gcods": grupos.get(s.get("grupo_id")) or [s["codigo"]],
+                # os stands que recebem o comprovante anexado (a mesma proposta)
+                "rcods": por_orc.get(s.get("orcamento_id")) or grupos.get(s.get("grupo_id"))
+                or [s["codigo"]]})
         if minha and s["status"] != "livre":
             dados[s["codigo"]]["minha"] = True
     return dados, tot, gestao
@@ -10197,7 +10217,7 @@ _STANDS_AUTO_JS = r"""
   (function(){
     var pedindo=false, ultimo=JSON.stringify(STANDS), manterDetalhe=false, denovo=false;
     function digitando(){
-      if(editando||vendendo)return true;
+      if(editando||vendendo||anexando)return true;
       var a=document.activeElement;
       return !!(a&&a.closest&&a.closest('#stdet')&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
     }
@@ -10214,7 +10234,7 @@ _STANDS_AUTO_JS = r"""
           var novo=JSON.stringify(j.stands);
           if(novo===ultimo)return;
           ultimo=novo; STANDS=j.stands;
-          if(sel&&!STANDS[sel]){sel=null;editando=false;vendendo=false;}
+          if(sel&&!STANDS[sel]){sel=null;editando=false;vendendo=false;anexando=false;}
           render();legenda();minhas();
           if(!digitando()&&!manterDetalhe)detalhe();
           manterDetalhe=false;
@@ -10336,10 +10356,17 @@ def cockpit_stands_consulta_cnpj(request: Request, doc: str = ""):
     """"Receita" do formulário do cliente do stand e do "+ Novo cliente": o cadastro
     que o contrato pede, pelo CNPJ (es.receita_do_cnpj) — razão social, nome
     fantasia, representante, endereço, CEP, cidade, UF e e-mail."""
-    if not (_sessao(request) or _gerencia(request)):
+    sess = _sessao(request) or _gerencia(request)
+    if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     from finance import evento_stands as _es
-    return JSONResponse(_es.receita_do_cnpj(doc))
+    # 03/10/2026: primeiro o cadastro que a conta já tem em Clientes (cliente ou
+    # fornecedor feito à mão), depois a Receita
+    try:
+        pool = get_pool()
+    except Exception:  # noqa: BLE001 — sem banco, só a Receita
+        pool = None
+    return JSONResponse(_es.buscar_dados_do_documento(pool, sess[0], doc))
 
 
 @router.post("/cockpit/stands/{codigo}/cliente")
@@ -10644,15 +10671,15 @@ __RECEITA_JS__
 window.cliReceita=function(){
   var f=document.getElementById('cliform'), m=document.getElementById('clirecmsg');
   var doc=(f.elements['doc'].value||'').trim(); m.hidden=false;
-  if(!doc){m.textContent='Digite o CNPJ antes.';return;}
+  if(!doc){m.textContent='Digite o CNPJ ou CPF antes.';return;}
   var btn=f.querySelector('.strec');
   if(!receitaTrava(btn))return;
-  m.textContent='Consultando a Receita…';
+  m.textContent='Buscando em Clientes e na Receita…';
   zapFetch('__BASE__/stands/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
     receitaSolta(btn);
     if(!j){m.textContent='Não consegui consultar agora — digite os dados.';return;}
     if(!j.ok){m.textContent=j.erro||'Não consegui consultar agora.';return;}
-    m.textContent=receitaMsg(receitaPreenche(f,j));
+    m.textContent=receitaMsg(receitaPreenche(f,j),j);
   });
 };
 </script>"""
@@ -10673,7 +10700,7 @@ def _pagina_cliente_novo(dados: dict, erro: str = "") -> HTMLResponse:
             + campo("whats", "WhatsApp", True, "inputmode=tel autocomplete=tel")
             + "<div class=stlin>"
             + campo("doc", "CNPJ / CPF", False, "inputmode=numeric placeholder='00.000.000/0000-00'")
-            + "<button class=strec type=button onclick='cliReceita()'>Receita</button></div>"
+            + "<button class=strec type=button onclick='cliReceita()'>Buscar</button></div>"
             + "<div class=stnota id=clirecmsg hidden></div>"
             + campo("razao", "Razão social", False, "placeholder='Como sai no contrato'")
             + campo("rep", "Representante legal", False, "placeholder='Quem assina pelo lojista'")
@@ -10787,6 +10814,52 @@ def _registrar_venda_sync(request: Request, codigo: str, nome: str, whatsapp: st
     request.session["ck_ok"] = (f"Venda registrada: {' + '.join(codigos)} reservado"
                                 f"{'s' if len(codigos) > 1 else ''} no seu nome. A gestão "
                                 "confere o comprovante e confirma o sinal.")
+    return volta
+
+
+@router.post("/cockpit/stands/{codigo}/comprovante")
+async def cockpit_stand_anexar_comprovante(request: Request, codigo: str,
+                                           arquivo: UploadFile = File(...)):
+    """O comprovante do sinal numa reserva que JÁ EXISTE (03/10/2026, relato do dono:
+    a vendedora não conseguia anexar o comprovante na reserva lançada pela lista —
+    "Registrar venda" só existe pra stand livre). Só o read do arquivo fica no event
+    loop (tests/test_event_loop_nao_trava.py)."""
+    conteudo = await arquivo.read()
+    return await run_in_threadpool(_anexar_comprovante_sync, request, codigo, conteudo,
+                                   arquivo.content_type or "")
+
+
+def _anexar_comprovante_sync(request: Request, codigo: str, conteudo: bytes,
+                             content_type: str):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not (sess or g):
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, meu_id = sess if sess else g
+    pool = get_pool()
+    from finance import evento_stands as _es
+    volta = RedirectResponse(f"{_BASE}/stands?abrir={codigo}", status_code=303)
+    stand = _es.buscar(pool, conta_id, codigo)
+    if not stand:
+        request.session["ck_err"] = "Stand não encontrado."
+        return volta
+    if not _eh_gestao(request, g):
+        # a posse é conferida aqui, no servidor — o app só esconde o botão
+        dono = None
+        if stand.get("prospeccao_id"):
+            with pool.connection() as c:
+                r = c.execute("select vendedor_id from prospeccao where conta_id=%s and id=%s",
+                              (conta_id, stand["prospeccao_id"])).fetchone()
+            dono = r[0] if r else None
+        if not meu_id or dono != meu_id:
+            request.session["ck_err"] = "Este stand não é de uma venda sua."
+            return volta
+    r = _es.anexar_comprovante_da_reserva(pool, conta_id, codigo, conteudo, content_type)
+    if not r.get("ok"):
+        request.session["ck_err"] = r.get("erro") or "Não deu pra anexar o comprovante."
+        return volta
+    request.session["ck_ok"] = (f"Comprovante anexado à reserva {' + '.join(r['codigos'])}. "
+                                "A gestão confere e confirma o sinal.")
     return volta
 
 

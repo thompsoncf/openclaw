@@ -50,7 +50,7 @@ def test_o_claro_tem_todas_as_cores_do_escuro():
         f"sobram: {sorted(set(claro) - set(escuro))}")
 
 
-@pytest.mark.parametrize("texto", ["--text", "--text-dim", "--neon", "--ambar", "--coral", "--azul"])
+@pytest.mark.parametrize("texto", ["--text", "--text-2", "--text-dim", "--neon", "--ambar", "--coral", "--azul", "--roxo"])
 def test_texto_do_claro_se_le(texto):
     c = _tokens(tema._CLARO)
     for fundo in ("--bg", "--bg-2", "--surface"):
@@ -63,7 +63,8 @@ def test_botao_verde_do_claro_se_le():
 
 
 @pytest.mark.parametrize("cor,fundo", [("--ambar", "--ambar-fundo"), ("--coral", "--coral-fundo"),
-                                       ("--azul", "--azul-fundo"), ("--neon", "--neon-fundo")])
+                                       ("--azul", "--azul-fundo"), ("--neon", "--neon-fundo"),
+                                       ("--roxo", "--roxo-fundo")])
 def test_aviso_do_claro_se_le(cor, fundo):
     c = _tokens(tema._CLARO)
     assert _contraste(c[cor], c[fundo]) >= 4.5
@@ -307,3 +308,11 @@ def test_falha_na_leitura_da_piloto_nao_fica_5_minutos():
     restante = ap._PILOTO_TTL - (time.monotonic() - quando)
     assert restante <= ap._FALHA_TTL + 1, "a falha ficou guardada tempo demais"
     ap.esquecer_cache()
+
+
+@pytest.mark.parametrize("texto", ["--text", "--text-2", "--text-dim"])
+def test_texto_do_escuro_se_le(texto):
+    """Os tons de apoio da fase 2 também passam no escuro (o --text-2 é novo)."""
+    e = _tokens(tema._ESCURO_CORES)
+    for fundo in ("--bg", "--bg-2", "--surface"):
+        assert _contraste(e[texto], e[fundo]) >= 4.5, f"{texto} sobre {fundo}"

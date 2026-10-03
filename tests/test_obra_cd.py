@@ -39,6 +39,10 @@ _MIGRACOES = ("016_unidade_medida.sql", "018_chave_nfce_lancamentos.sql", "019_c
               "371_obra_etapa_pagamentos.sql", "478_obra_quadras.sql", "484_obra_material.sql",
               "550_obra_mestre_e_campo.sql", "670_obra_pedidos_cd.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+# as migrações com prefixo de data (db/nova_migracao.py): acha pelo nome — o
+# "Saiu" do painel agora monta a viagem (obra_romaneio, PR 3c)
+_MIGRACOES += tuple(p.name for _n in ("obra_ferramentas", "obra_conferencia_nota", "obra_inventario_rotativo",
+                                      "obra_romaneio_e_onde") for p in sorted(_BASE.glob(f"*_{_n}.sql")))
 
 
 @pytest.fixture(scope="module")

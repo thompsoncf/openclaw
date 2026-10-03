@@ -164,7 +164,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
 .bloco h4 small{font:500 .62rem var(--mono);color:var(--text-faint)}
 .bloco p{margin:0;font-size:.8rem;color:var(--text-dim)}
 .bloco p b{color:var(--text);font-weight:500}
-.bloco .acha{font-size:.76rem;color:#F0DCA6;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:8px;padding:.4rem .55rem}
+.bloco .acha{font-size:.76rem;color:var(--ambar);background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:8px;padding:.4rem .55rem}
 .bloco .vazio{font-size:.76rem;color:var(--text-faint)}
 .duas{display:flex;flex-direction:column;gap:.28rem;font-size:.72rem}
 .duas div{display:grid;grid-template-columns:46px 1fr 1fr;gap:.4rem;align-items:center}
@@ -183,7 +183,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
 .tipos i{display:block;height:8px;border-radius:999px;background:var(--roxo);opacity:.8;min-width:2px}
 .perdas{display:flex;flex-wrap:wrap;gap:.3rem}
 .perdas span{font:500 .66rem var(--mono);border:1px solid var(--line);border-radius:999px;padding:.15rem .5rem;color:var(--text-dim)}
-.perdas span.on{border-color:var(--coral-borda);background:var(--coral-fundo);color:#F2BDB9}
+.perdas span.on{border-color:var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
 .rx-vend{width:100%;border-collapse:collapse;font-size:.8rem}
 .rx-vend th{font:500 .62rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--line)}
 .rx-vend td{padding:.5rem;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;vertical-align:top}

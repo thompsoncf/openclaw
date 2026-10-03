@@ -95,7 +95,7 @@ def _regras(request: Request, escolhas: dict):
 _TPL = r"""{% extends "base" %}{% block conteudo %}
 <style>
 .fu-pag{width:100%;max-width:var(--pag,1180px);margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
-.fu-sub{color:var(--texto-2,#6b7280);font-size:.92rem;max-width:72ch}
+.fu-sub{color:var(--texto-2,var(--text-faint));font-size:.92rem;max-width:72ch}
 .fu-passos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8rem;margin-top:1rem}
 @media (max-width:900px){.fu-passos{grid-template-columns:1fr}}
 .fu-cx{border:1px solid var(--borda);border-radius:12px;padding:.9rem 1rem;display:grid;gap:.6rem;align-content:start;min-width:0}

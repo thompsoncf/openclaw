@@ -313,6 +313,50 @@ def test_sem_os_perdidos(pool, equipe):
         assert rg.fila(c, EMPRESA) == []
 
 
+# ══════════════════════════════════════════════ um lead por número
+
+def test_o_mesmo_numero_em_dois_leads_recebe_uma_retomada_so(pool, equipe, duble, monkeypatch):
+    """03/10/2026, Prime: a Renata Teixeira era o #1479 e o #1480, cada um numa conversa
+    de um chip. Sem isto, duas retomadas — de dois números da Prime — pra mesma pessoa.
+    O mesmo número escrito de dois jeitos (com 55 e nono dígito, e sem) é o mesmo."""
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        a, _ = _lead(c, equipe["JACQUELINE"], dias=10, numero="5586994867388")
+        b, _ = _lead(c, equipe["JACQUELINE"], dias=9, numero="(86) 9486-7388", chip=CHIP2)
+        assert {x["id"] for x in rg.fila(c, EMPRESA)} == {a, b}     # antes: os dois na fila
+    monkeypatch.setattr(rg, "ESPACO_MIN", -60)                      # sem espaçamento no teste
+    rg.rodar(pool)
+    rg.rodar(pool)
+    rg.rodar(pool)
+    retomadas = [s for s in duble["saiu"] if "voltei" in s["texto"]]
+    assert len(retomadas) == 1
+    with pool.connection() as c:
+        assert c.execute("select count(*) from resgate_leads").fetchone()[0] == 1
+        assert rg.fila(c, EMPRESA) == []                            # o gêmeo saiu da fila
+
+
+def test_o_numero_descartado_noutro_lead_nao_e_chamado(pool, equipe, duble, monkeypatch):
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        a, _ = _lead(c, equipe["JACQUELINE"], dias=10, numero="5586994867388")
+        b, _ = _lead(c, equipe["JACQUELINE"], dias=9, numero="8694867388")
+        c.execute("insert into resgate_envios (conta_id, prospeccao_id, tipo, texto) "
+                  "values (%s,%s,'descartado','cancelou o evento')", (EMPRESA, a))
+        c.commit()
+        assert rg.fila(c, EMPRESA) == []
+
+
+def test_numeros_diferentes_seguem_os_dois(pool, equipe):
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        a, _ = _lead(c, equipe["JACQUELINE"], dias=10, numero="5586994867388")
+        b, _ = _lead(c, equipe["JACQUELINE"], dias=9, numero="5586994867399")
+        c.execute("insert into resgate_leads (prospeccao_id, conta_id, membro_id) values (%s,%s,%s)",
+                  (a, EMPRESA, equipe["ZAQ"]))
+        c.commit()
+        assert [x["id"] for x in rg.fila(c, EMPRESA)] == [b]
+
+
 # ══════════════════════════════════════════════ o cartão
 
 def test_ligar_exige_a_regra_do_membro_com_a_ia(pool, equipe):

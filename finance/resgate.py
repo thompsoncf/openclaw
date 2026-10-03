@@ -369,6 +369,9 @@ def _perfil_eventos(c, conta_id: int) -> bool:
 def _sql_leads(festa: bool) -> str:
     from finance import funil_regua as fr
     from finance import visita as vis
+
+    def chave(a: str) -> str:
+        return sql_chave(f"coalesce(nullif({a}.whatsapp,''), nullif({a}.telefone,''))")
     return f"""
     with l as (
       select p.id, p.status, p.vendedor_id, p.evento_em, p.criado_em, p.orcamento_id,
@@ -416,7 +419,19 @@ def _sql_leads(festa: bool) -> str:
                             and d.tipo = 'descartado')
          and (%(lead)s::bigint is null or p.id = %(lead)s::bigint)
          and not exists (select 1 from resgate_leads r
-                          where r.prospeccao_id = p.id and (r.ativo or r.opt_out))),
+                          where r.prospeccao_id = p.id and (r.ativo or r.opt_out))
+         -- UM LEAD POR NÚMERO (03/10/2026, Prime: a Renata Teixeira era o #1479 e o
+         -- #1480, cada um numa conversa de um chip — seriam duas retomadas, de dois
+         -- números da Prime, pra mesma pessoa; 5 pares assim na fila): o número que o
+         -- resgate já chamou, ou já descartou, noutro lead fica de fora
+         and not exists (select 1 from resgate_leads r3
+                           join prospeccao p3 on p3.id = r3.prospeccao_id
+                          where r3.conta_id = p.conta_id and p3.id <> p.id
+                            and {chave('p')} <> '' and {chave('p3')} = {chave('p')})
+         and not exists (select 1 from resgate_envios d3
+                           join prospeccao p4 on p4.id = d3.prospeccao_id
+                          where d3.conta_id = p.conta_id and d3.tipo = 'descartado' and p4.id <> p.id
+                            and {chave('p')} <> '' and {chave('p4')} = {chave('p')})),
     msg as (
       select cv.prospeccao_id lead,
              max(m.criado_em) filter (where m.direcao = 'out') ult_out,

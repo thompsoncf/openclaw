@@ -1,7 +1,7 @@
--- 610_novidade_clinica_funil_tela.sql
+-- 640_novidade_clinica_funil_tela.sql
 -- O aviso da tela "Funil da clínica" (rascunho "Ligar o funil da Pelle", decisões A a D,
--- aprovado em 03/10/2026), seguindo a seção 5 do CLAUDE.md. Número 610 com folga (regra
--- de numeração: o maior em uso era 581).
+-- aprovado em 03/10/2026), seguindo a seção 5 do CLAUDE.md. Número 640 com folga (regra
+-- de numeração: o maior em uso era 610, o das travas).
 --
 -- PÚBLICO `clinica`. PRA QUEM: dono e gestor (só eles aplicam o funil e ligam as regras).
 -- QUEM RECEBE, conferido na produção em 03/10/2026 (só leitura, nicho clinica):

@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from contas import equipe as eq
 from db.conexao import get_pool
+from finance import obra_ferramentas as fer
 from finance import obra_pedidos as op
 from finance import obras as ob
 from finance import raio_x_perfil as rxp
@@ -32,7 +33,8 @@ router = APIRouter()
 _log = logging.getLogger("openclaw.painel_deposito")
 _BASE = "/painel/obras/deposito"
 _ABAS = (("geral", "Visão geral"), ("pedidos", "Pedidos das obras"), ("estoque", "Estoque"),
-         ("entradas", "Entradas"), ("sobras", "Sobras das casas prontas"))
+         ("entradas", "Entradas"), ("ferramentas", "Ferramentas"),
+         ("sobras", "Sobras das casas prontas"))
 
 
 def _acesso(request: Request):
@@ -75,12 +77,17 @@ def deposito(request: Request):
     v = op.visao(pool, conta[0])
     colunas = {s: [p for p in v["pedidos"] if p["status"] == s]
                for s in ("pedido", "separando", "saiu", "recebido")}
+    ferramentas = fer.listar(pool, conta[0])
+    obras_abertas = [o for o in ob.listar_obras(pool, conta[0], com_custos=False)
+                     if o["status"] not in ("vendida", "entregue", "arquivada")]
     return _render("obras_deposito", request, titulo="Depósito (CD)", secao_ativa="obras_deposito",
                    aba=aba, abas=_ABAS, v=v, colunas=colunas, rotulo=op.ROTULO,
                    ve_dinheiro=papel in ("dono", "gestor"), brl=ob._brl,
                    rotulo_mat=_rotulo_mat(),
                    sobras=op.sobras(pool, conta[0]) if aba in ("geral", "sobras") else [],
                    entradas=op.entradas(pool, conta[0]) if aba == "entradas" else [],
+                   ferramentas=ferramentas, rf=fer.resumo(ferramentas), obras_abertas=obras_abertas,
+                   ferr_prontas=[f for f in ferramentas if f["obra_pronta"]],
                    ok=(request.query_params.get("ok") or "").strip(),
                    erro=(request.query_params.get("erro") or "").strip())
 
@@ -120,10 +127,52 @@ def devolver(request: Request, obra_id: int):
         return redir
     conta, _ = ac
     try:
-        msg = op.devolver(get_pool(), conta[0], obra_id, request.session.get("membro_id"))
+        msg = fer.devolver_tudo(get_pool(), conta[0], obra_id,
+                                por=request.session.get("membro_id"))
     except ValueError as e:
         return _volta("sobras", erro=str(e))
     return _volta("sobras", ok=msg)
+
+
+# ── as ferramentas (PR 2 do CD) ───────────────────────────────────────────
+@router.post(_BASE + "/ferramenta/nova")
+def ferramenta_nova(request: Request, nome: str = Form(""), quantidade: str = Form("1"),
+                    obs: str = Form("")):
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, _ = ac
+    try:
+        cods = fer.cadastrar(get_pool(), conta[0], nome, quantidade, obs)
+    except ValueError as e:
+        return _volta("ferramentas", erro=str(e))
+    return _volta("ferramentas", ok="Cadastrada: " + ", ".join(cods) + " — escreva o código nela.")
+
+
+@router.post(_BASE + "/ferramenta/{ferramenta_id}/{acao}")
+def ferramenta_acao(request: Request, ferramenta_id: int, acao: str, obra_id: str = Form(""),
+                    com_quem: str = Form(""), motivo: str = Form("")):
+    """emprestar (mandar pra obra, ou pra outra obra) / devolver / baixa."""
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, _ = ac
+    por = request.session.get("membro_id")
+    try:
+        if acao == "emprestar":
+            if not obra_id.isdigit():
+                raise ValueError("Escolha a obra.")
+            msg = fer.emprestar(get_pool(), conta[0], ferramenta_id, int(obra_id),
+                                com_quem=com_quem, por=por)
+        elif acao == "devolver":
+            msg = fer.devolver(get_pool(), conta[0], ferramenta_id, por=por)
+        elif acao == "baixa":
+            msg = fer.baixar(get_pool(), conta[0], ferramenta_id, motivo)
+        else:
+            raise ValueError("Ação desconhecida.")
+    except ValueError as e:
+        return _volta("ferramentas", erro=str(e))
+    return _volta("ferramentas", ok=msg)
 
 
 @router.post(_BASE + "/minimo")
@@ -216,6 +265,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   {% if ve_dinheiro %}<div class="dp-kpi"><span class="r">Dinheiro parado</span><span class="v">{{ brl(v.dinheiro) if v.dinheiro else '—' }}</span><span class="x">{{ 'pelo preço da nota' if v.dinheiro else 'sem preço de nota ainda' }}</span></div>{% endif %}
   <div class="dp-kpi{{ ' alerta' if v.urgentes }}"><span class="r">Pedidos das obras</span><span class="v">{{ v.abertos }} aberto{{ 's' if v.abertos != 1 }}</span><span class="x">{{ v.urgentes }} urgente{{ 's' if v.urgentes != 1 }}</span></div>
   <div class="dp-kpi{{ ' alerta' if v.abaixo }}"><span class="r">Abaixo do mínimo</span><span class="v">{{ v.abaixo|length }}</span><span class="x">{{ v.abaixo|map(attribute='nome')|join(' · ')|truncate(40) if v.abaixo else 'nada' }}</span></div>
+  {% if rf.total %}<div class="dp-kpi{{ ' alerta' if rf.alertas }}"><span class="r">Ferramentas fora</span><span class="v">{{ rf.fora }} de {{ rf.total }}</span><span class="x">{{ rf.alertas|length }} pra conferir</span></div>{% endif %}
   <div class="dp-kpi{{ ' alerta' if sobras }}"><span class="r">Sobra em casa pronta</span><span class="v">{{ sobras|length }}</span><span class="x">casa{{ 's' if sobras|length != 1 }} com material</span></div>
 </div>
 <div class="dp-duas">
@@ -224,7 +274,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     {% for p in v.pedidos if p.status == 'pedido' %}<tr><td>{{ '🔴' if p.urgente else '📝' }} <b>{{ p.obra|e }}</b> pediu {{ p.itens|map(attribute='texto')|join(', ')|e }}</td><td class="v"><a class="dp-bt prim" href="?aba=pedidos">Ver</a></td></tr>{% endfor %}
     {% for r in v.abaixo %}<tr><td>🟠 <b>{{ r.nome|e }}</b> abaixo do mínimo</td><td class="v"><a class="dp-bt" href="?aba=estoque">Ver</a></td></tr>{% endfor %}
     {% for s in sobras %}<tr><td>🏁 <b>{{ s.obra|e }}</b> está pronta com material</td><td class="v"><a class="dp-bt" href="?aba=sobras">Ver</a></td></tr>{% endfor %}
-    {% if not (v.pedidos|selectattr('status', 'equalto', 'pedido')|list or v.abaixo or sobras) %}<tr><td class="dp-mut">Nada pendente. ✅</td></tr>{% endif %}
+    {% for f in rf.alertas %}<tr><td>🔧 <b>{{ f.nome|e }}</b> ({{ f.codigo|e }}) na {{ f.obra|e }} — {{ f.alerta|e }}</td><td class="v"><a class="dp-bt" href="?aba=ferramentas">Ver</a></td></tr>{% endfor %}
+    {% if not (v.pedidos|selectattr('status', 'equalto', 'pedido')|list or v.abaixo or sobras or rf.alertas) %}<tr><td class="dp-mut">Nada pendente. ✅</td></tr>{% endif %}
     </table></div>
   <div class="dp-box"><b>Quanto dura o que tem no CD</b>
     <div class="dp-mut">Pelo que saiu nas últimas 4 semanas.</div>
@@ -264,13 +315,49 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 {% if not entradas %}<tr><td colspan="4" class="dp-mut">Nada entrou no CD ainda.</td></tr>{% endif %}
 </table></div>
 
+{% elif aba == 'ferramentas' %}
+<p class="dp-mut">Ferramenta não se gasta: sai e volta. A lista diz onde está cada uma, com quem e há quantos dias — e destaca a que ficou em casa pronta ou está fora há mais de 7 dias.</p>
+{% for f in rf.alertas %}<div class="dp-msg erro" style="margin:.4rem 0">🔧 <b>{{ f.nome|e }}</b> ({{ f.codigo|e }}) na {{ f.obra|e }}: {{ f.alerta|e }}</div>{% endfor %}
+<div class="dp-rolo"><table class="dp-tab">
+<tr><th>Ferramenta</th><th>Código</th><th>Onde está</th><th>Com quem</th><th>Desde</th><th></th></tr>
+{% for f in ferramentas %}<tr{% if f.alerta %} class="alerta"{% endif %}>
+  <td><b>{{ f.nome|e }}</b>{% if f.obs %}<div class="dp-mut">{{ f.obs|e }}</div>{% endif %}</td>
+  <td>{{ f.codigo|e }}</td>
+  <td>{% if f.fora %}{{ f.obra|e }}{% if f.obra_pronta %} <span class="dp-chip v">pronta</span>{% endif %}{% else %}<span class="dp-mut">no CD</span>{% endif %}</td>
+  <td>{{ f.com_quem|e or ('—' if f.fora else '') }}</td>
+  <td>{% if f.fora %}{% if f.alerta and not f.obra_pronta %}<span class="dp-chip a">{{ f.ha }}</span>{% else %}{{ f.ha }}{% endif %}{% endif %}</td>
+  <td class="v" style="white-space:normal">
+    {% if f.fora %}<form method="post" action="/painel/obras/deposito/ferramenta/{{ f.id }}/devolver" style="display:inline"><button class="dp-bt prim">{{ 'Recolher' if f.obra_pronta else 'Devolver ao CD' }}</button></form>{% endif %}
+    {% if obras_abertas %}<details style="display:inline-block;text-align:left"><summary class="dp-bt" style="list-style:none">{{ 'Outra obra' if f.fora else 'Mandar pra obra' }}</summary>
+      <form method="post" action="/painel/obras/deposito/ferramenta/{{ f.id }}/emprestar" style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.3rem">
+        <select name="obra_id" required style="width:auto">{% for o in obras_abertas %}{% if o.id != f.obra_id %}<option value="{{ o.id }}">{{ o.nome|e }}</option>{% endif %}{% endfor %}</select>
+        <input name="com_quem" placeholder="com quem" style="width:7.5rem"><button class="dp-bt prim">Mandar</button></form></details>{% endif %}
+    <details style="display:inline-block;text-align:left"><summary class="dp-bt" style="list-style:none">Baixa</summary>
+      <form method="post" action="/painel/obras/deposito/ferramenta/{{ f.id }}/baixa" style="display:flex;gap:.3rem;margin-top:.3rem" onsubmit="return confirm('Dar baixa em {{ f.nome|e }} ({{ f.codigo|e }})? Ela sai da lista.')">
+        <input name="motivo" required placeholder="quebrou, sumiu…" style="width:8.5rem"><button class="dp-bt">Dar baixa</button></form></details>
+  </td></tr>{% endfor %}
+{% if not ferramentas %}<tr><td colspan="6" class="dp-mut">Nenhuma ferramenta cadastrada ainda.</td></tr>{% endif %}
+</table></div>
+<details class="dp-box" style="margin-top:.8rem"{% if not ferramentas %} open{% endif %}><summary style="cursor:pointer;font-weight:700">+ Cadastrar ferramenta ou equipamento</summary>
+<form method="post" action="/painel/obras/deposito/ferramenta/nova" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.5rem;align-items:end;margin-top:.6rem">
+  <div><label class="dp-mut">Nome</label><input name="nome" required placeholder="Betoneira 400 L" style="width:100%"></div>
+  <div><label class="dp-mut">Quantas</label><input name="quantidade" value="1" inputmode="numeric" style="width:100%"></div>
+  <div><label class="dp-mut">Observação (opcional)</label><input name="obs" placeholder="motor novo em 09/2026" style="width:100%"></div>
+  <div><button class="dp-bt prim" style="padding:.5rem .9rem">Cadastrar</button></div>
+</form>
+<p class="dp-mut" style="margin:.5rem 0 0">Cada uma ganha um código (FER-01, FER-02…). Escreva o código na ferramenta — com tinta ou etiqueta.</p></details>
+
 {% elif aba == 'sobras' %}
-<p class="dp-mut">Casa pronta com material ainda nela é dinheiro parado no lugar errado. Um toque traz tudo de volta pro CD.</p>
+<p class="dp-mut">Casa pronta com material ainda nela é dinheiro parado no lugar errado. Um toque traz tudo de volta pro CD — o material e as ferramentas.</p>
+{% for f in ferr_prontas %}<div class="dp-box" style="display:flex;justify-content:space-between;gap:.8rem;align-items:center;flex-wrap:wrap">
+  <div><b>🔧 {{ f.nome|e }}</b> ({{ f.codigo|e }}) <span class="dp-mut">na {{ f.obra|e }}, pronta — saiu {{ 'hoje' if f.ha == 'hoje' else 'há ' ~ f.ha }}</span></div>
+  <form method="post" action="/painel/obras/deposito/ferramenta/{{ f.id }}/devolver"><button class="dp-bt prim">Recolher</button></form>
+</div>{% endfor %}
 {% for s in sobras %}<div class="dp-box" style="display:flex;justify-content:space-between;gap:.8rem;align-items:center;flex-wrap:wrap">
   <div><b>🏁 {{ s.obra|e }}</b><div class="dp-mut">{{ s.itens|map(attribute='texto')|join(' · ')|e }}</div></div>
   <form method="post" action="/painel/obras/deposito/devolver/{{ s.obra_id }}" onsubmit="return confirm('Trazer todo o material de {{ s.obra|e }} de volta pro CD?')"><button class="dp-bt prim">Devolver ao CD</button></form>
 </div>{% endfor %}
-{% if not sobras %}<div class="dp-box dp-mut">Nenhuma casa pronta com material. ✅</div>{% endif %}
+{% if not sobras and not ferr_prontas %}<div class="dp-box dp-mut">Nenhuma casa pronta com material ou ferramenta. ✅</div>{% endif %}
 {% endif %}
 </div>
 {% endblock %}"""

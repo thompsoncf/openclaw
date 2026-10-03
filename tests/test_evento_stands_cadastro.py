@@ -2438,3 +2438,33 @@ def test_anexar_na_reserva_sem_proposta_mantem_o_cadastro_ja_salvo(pool, conta_i
     assert (emp, cnpj, cid) == ("EM ESSENCE COMERCIO LTDA", CNPJ_VALIDO, empresa)
     assert cli.obter_cliente(pool, conta_id, empresa)["nome"] == "EM ESSENCE"       # não rebatizou
     assert n_cli == n_antes                                                        # nenhum cadastro novo
+
+
+def test_a_lista_do_painel_busca_por_loja_e_cnpj_e_filtra_por_vendedor(pool, conta_id, monkeypatch):
+    # o dono (03/10/2026): o "Buscar código" também acha pelo nome da loja e pelo CNPJ,
+    # e um seletor deixa só os stands da lista de uma vendedora
+    import re
+    from web import painel_eventos_stands as pes
+    _config_evento(pool, conta_id)
+    cass = _membro(pool, conta_id, "Cassandra")
+    _venda(pool, conta_id, "G60", nome="Boutique Nova Era")
+    _dono_da_venda(pool, conta_id, "G60", cass)
+    assert es.salvar_cadastro_stand(pool, conta_id, "G60", _dados())["ok"]
+    _criar_stand(pool, conta_id, "G61")
+    monkeypatch.setattr(pes, "get_pool", lambda: pool)
+    monkeypatch.setattr(pes, "conta_logada", lambda r: (
+        conta_id, "pj", "OUTLET CHIC", "x@x.com", "pj_pro", "ativa", None, "Teresina", False,
+        None, False, True, True, False, True, False, "eventos"))
+    monkeypatch.setattr(pes, "nicho_da_conta", lambda conta: "eventos")
+    req = _Req(papel="dono")
+    req.query_params = {}
+    html = pes.painel_eventos_stands(req).body.decode("utf-8")
+    linha = re.search(r'<div class="oc-hist" data-st="pre_reservado" data-cod="g60"[^>]*>', html).group(0)
+    assert 'data-busca="g60 boutique nova era' in linha and "11.444.777/0001-61" in linha
+    assert 'data-doc="11444777000161"' in linha and f'data-vend="{cass}"' in linha
+    livre = re.search(r'<div class="oc-hist" data-st="livre" data-cod="g61"[^>]*>', html).group(0)
+    assert 'data-vend=""' in livre
+    assert 'placeholder="Buscar código, loja ou CNPJ…"' in html
+    assert '<select id="lst-vend"' in html and f'<option value="{cass}">Cassandra</option>' in html
+    assert '<option value="0">Sem vendedor</option>' in html
+    assert "qd.length >= 3" in html and "el.dataset.vend === v" in html

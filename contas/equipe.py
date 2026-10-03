@@ -420,7 +420,11 @@ def listar_equipe(pool, conta_id: int) -> list[dict]:
         rows = c.execute(
             """select id, nome, email, papel, ativo, (convite_token is not null),
                       coalesce(whatsapp,''), comissao_pct, coalesce(pode_campanha,false)
-                 from membros where conta_id=%s and email is not null
+                 from membros where conta_id=%s
+                   -- o e-mail separa a equipe dos membros antigos do chat (modelo
+                   -- família); o MESTRE DE OBRAS entra sem e-mail (link mágico pelo
+                   -- WhatsApp, finance/obra_acesso.py) e tem que aparecer aqui
+                   and (email is not null or papel = 'mestre')
                 order by id""", (conta_id,)).fetchall()
     # 'pendente' = convite por LINK ainda não aceito (inativo + com token). Quem já
     # tinha login Zaq entra ativo sem senha/token — NÃO é pendente.

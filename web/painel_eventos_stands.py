@@ -428,7 +428,12 @@ def consulta_cnpj(request: Request, doc: str = ""):
     if conta is None:
         return _J({"ok": False, "erro": "Sua sessão expirou — entre de novo e repita a busca."},
                   status_code=401)
-    return _J(es.receita_do_cnpj(doc))
+    # 03/10/2026: primeiro o cadastro que a conta já tem em Clientes, depois a Receita
+    try:
+        pool = get_pool()
+    except Exception:  # noqa: BLE001 — sem banco, só a Receita
+        pool = None
+    return _J(es.buscar_dados_do_documento(pool, conta[0], doc))
 
 
 @router.post("/painel/eventos/estandes/{codigo}/cliente")
@@ -540,10 +545,30 @@ async def anexar_comprovante(request: Request, codigo: str, nome: str = Form("")
 def _anexar_comprovante_sync(request: Request, codigo: str, nome: str,
                              whatsapp: str, conteudo: bytes, content_type: str,
                              vendedor: str = ""):
+    from urllib.parse import quote
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
         return cfg_ou_redir
     pool = get_pool()
+    stand = es.buscar(pool, conta[0], codigo)
+    if stand and stand["status"] == "pre_reservado":
+        # a reserva já existe (a da lista, ou o arquivo veio errado): o comprovante
+        # entra nela — em todos os stands da mesma reserva — e a proposta que faltar
+        # nasce (03/10/2026)
+        r = es.anexar_comprovante_da_reserva(pool, conta[0], codigo, conteudo, content_type)
+        if not r.get("ok"):
+            return RedirectResponse(
+                f"/painel/eventos/estandes?erro={quote(r.get('erro') or 'Não deu pra anexar.')}",
+                status_code=303)
+        return RedirectResponse(
+            f"/painel/eventos/estandes?ok={quote('Comprovante anexado à reserva ' + ' + '.join(r['codigos']) + '.')}",
+            status_code=303)
+    if stand and stand["status"] == "livre" and not (nome or "").strip():
+        # sem o nome do lojista o stand ficava reservado sem reserva registrada: sem
+        # proposta, sem contrato, sem vendedora (S116, S78 e i14 em 02/10/2026)
+        return RedirectResponse(
+            f"/painel/eventos/estandes?erro={quote('Informe o nome do lojista — sem ele não nascem a proposta e o contrato.')}&abrir={codigo}",
+            status_code=303)
     pid = None
     if (nome or "").strip():
         from web.loja_stands import _criar_prospeccao_simples
@@ -555,12 +580,12 @@ def _anexar_comprovante_sync(request: Request, codigo: str, nome: str,
                                          content_type, prospeccao_id=pid)
     if not r.get("ok"):
         return RedirectResponse(
-            f"/painel/eventos/estandes?erro={r.get('erro') or 'Não deu pra anexar.'}",
+            f"/painel/eventos/estandes?erro={quote(r.get('erro') or 'Não deu pra anexar.')}",
             status_code=303)
     msg = f"Comprovante anexado — estande {codigo} reservado."
     if r.get("contrato_token"):
         msg += " Proposta e contrato criados."
-    return RedirectResponse(f"/painel/eventos/estandes?ok={msg}", status_code=303)
+    return RedirectResponse(f"/painel/eventos/estandes?ok={quote(msg)}", status_code=303)
 
 
 @router.get("/painel/eventos/estandes/{codigo}/comprovante")
@@ -957,7 +982,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         <span class="sub">{% if d.status == 'livre' %}Venda fechada por fora (WhatsApp/presencial)? Anexa o comprovante e o stand fica reservado igual ao da página — com proposta e contrato.{% else %}Substitui o arquivo atual (comprovante melhor, ou parcela seguinte) — o prazo da reserva não muda.{% endif %}</span>
         {% if d.status == 'livre' %}
         <div class="campos">
-          <input type="text" name="nome" placeholder="Nome do lojista (pra nascer o contrato)" maxlength="200">
+          <input type="text" name="nome" placeholder="Nome do lojista *" maxlength="200" required>
           <input type="text" name="whatsapp" placeholder="WhatsApp (opcional)" maxlength="40">
           {% if vendedores %}<select name="vendedor"><option value="">— venda sem vendedor —</option>
             {% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select>{% endif %}
@@ -1039,7 +1064,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
           <label class="fld{{ falta('fantasia') }}"><span>Nome fantasia <i>*</i></span><input name="fantasia" data-req="1" maxlength="200" value="{{ cad.get('fantasia','') }}" required></label>
           <label class="fld{{ falta('razao') }}"><span>Razão social <i>*</i></span><input name="razao" data-req="1" maxlength="200" value="{{ cad.get('razao','') }}" placeholder="Como sai no contrato"></label>
           <div class="cad-linha"><label class="fld{{ falta('doc') }}"><span>CNPJ / CPF <i>*</i></span><input name="doc" data-req="1" maxlength="20" value="{{ cad.get('doc','') }}" placeholder="00.000.000/0000-00"></label>
-            <button type="button" class="oc-ghost-btn" onclick="esReceita(this)">Buscar na Receita</button></div>
+            <button type="button" class="oc-ghost-btn" onclick="esReceita(this)">Buscar dados</button></div>
           <label class="fld{{ falta('rep') }}"><span>Representante legal <i>*</i></span><input name="rep" data-req="1" maxlength="200" value="{{ cad.get('rep','') }}" placeholder="Quem assina pelo lojista"></label>
           <label class="fld{{ falta('whats') }}"><span>WhatsApp <i>*</i></span><input name="whats" data-req="1" maxlength="40" value="{{ cad.get('whats','') }}"></label>
           <label class="fld"><span>E-mail</span><input name="email" type="email" maxlength="200" value="{{ cad.get('email','') }}" placeholder="contato@loja.com.br"></label>
@@ -1387,15 +1412,15 @@ function esReceita(btn){
   var msg = form.querySelector('.cad-receita');
   var doc = form.elements['doc'].value.trim();
   msg.hidden = false;
-  if (!doc){ msg.textContent = 'Digite o CNPJ antes de buscar.'; return; }
+  if (!doc){ msg.textContent = 'Digite o CNPJ ou CPF antes de buscar.'; return; }
   if (!receitaTrava(btn)) return;
-  msg.textContent = 'Consultando a Receita…';
+  msg.textContent = 'Buscando em Clientes e na Receita…';
   fetch('/painel/eventos/estandes/consulta-cnpj?doc=' + encodeURIComponent(doc), {headers:{'x-requested-with':'fetch'}})
     .then(function(r){ return r.json(); })
     .then(function(j){
       receitaSolta(btn);
       if (!j.ok){ msg.textContent = j.erro || 'Não consegui consultar agora.'; return; }
-      msg.textContent = receitaMsg(receitaPreenche(form, j));
+      msg.textContent = receitaMsg(receitaPreenche(form, j), j);
       esCadProg(form);
     })
     .catch(function(){ receitaSolta(btn); msg.textContent = 'Não consegui consultar agora — digite os dados.'; });

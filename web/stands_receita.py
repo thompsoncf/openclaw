@@ -34,6 +34,7 @@ RECEITA_JS = r"""
     poe('cidade', j.cidade, 'cidade', true);
     poe('uf', j.uf, 'UF', true);
     poe('email', j.email, 'e-mail');
+    poe('whats', j.whats, 'WhatsApp');
     return feito;
   }
   // Um clique por vez: toque duplo disparava duas consultas e a segunda resposta
@@ -45,9 +46,14 @@ RECEITA_JS = r"""
     return true;
   }
   function receitaSolta(btn){ if (btn) btn.disabled = false; }
-  function receitaMsg(feito){
+  // j.fonte === 'clientes': os dados vieram do cadastro que a conta já tem em Clientes
+  // (cliente ou fornecedor), não da Receita
+  function receitaMsg(feito, j){
+    var cad = (j && j.fonte === 'clientes'), nome = cad && j.cliente ? ' "' + j.cliente + '"' : '';
     return feito.length
-      ? '✓ A Receita preencheu: ' + feito.join(', ') + '. Confira antes de salvar.'
-      : '✓ Consultei a Receita: não há nada novo além do que já está preenchido.';
+      ? '✓ ' + (cad ? 'Puxei do cadastro' + nome + ' em Clientes' : 'A Receita preencheu') + ': ' +
+        feito.join(', ') + '. Confira antes de salvar.'
+      : '✓ Consultei ' + (cad ? 'o cadastro' + nome + ' em Clientes' : 'a Receita') +
+        ': não há nada novo além do que já está preenchido.';
   }
 """

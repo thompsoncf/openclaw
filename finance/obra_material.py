@@ -75,6 +75,34 @@ def _qtd(v) -> str:
     return s.replace(".", ",") if "." in s else s
 
 
+def quantidade_br(txt) -> Decimal:
+    """A quantidade como se digita no Brasil: "1,5" é um e meio, "1.000" é mil
+    (ponto de milhar), "1.250,5" também vale. Sem vírgula o ponto é decimal
+    ("1.5"), menos no milhar óbvio ("1.000", "12.500"). Recusa com ValueError o
+    que não é quantidade (vazio, texto, nan/inf, negativo, grande demais pro
+    numeric(12,3)) e arredonda em 3 casas — a precisão do banco, pra comparar
+    igual ao que fica gravado ("10.0004" é 10)."""
+    s = str(txt if txt is not None else "").strip().replace(" ", "")
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"[1-9]\d{0,2}(\.\d{3})+", s):
+        s = s.replace(".", "")
+    try:
+        d = Decimal(s)
+    except Exception:  # noqa: BLE001
+        raise ValueError("Quantidade inválida.")
+    if not d.is_finite():
+        raise ValueError("Quantidade inválida.")
+    if d < 0:
+        raise ValueError("Quantidade não pode ser negativa.")
+    if d >= Decimal("1e9"):
+        raise ValueError("Quantidade grande demais.")
+    d = d.quantize(Decimal("0.001"))
+    if d >= Decimal("1e9"):                   # 999999999,9996 arredonda pra 1 bilhão
+        raise ValueError("Quantidade grande demais.")
+    return d
+
+
 def rotulo(qtd, unidade: str) -> str:
     u = unidade or "unidade"
     q = Decimal(str(qtd or 0))

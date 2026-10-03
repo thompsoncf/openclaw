@@ -1883,17 +1883,23 @@ def test_cair_no_meio_e_salvar_de_novo_arquiva_o_provisorio(pool, conta_id, monk
         assert c.execute("select cnpj from orcamentos where id=%s", (o2,)).fetchone()[0] == CNPJ_VALIDO
 
 
-def test_stand_sem_reserva_registrada_nao_entra_em_outra_empresa(pool, conta_id):
-    _duas_lojas(pool, conta_id)
+def test_stand_sem_reserva_registrada_ganha_a_reserva_e_entra_na_empresa(pool, conta_id):
+    # 03/10/2026: antes recusava ("não tem a reserva registrada"); agora salvar o
+    # cadastro registra a reserva com a marca, e o stand entra na empresa
+    empresa, _p, _o1, _o2 = _duas_lojas(pool, conta_id)
     _criar_stand(pool, conta_id, "S79", status="vendido")
     with pool.connection() as c:
         cid = cli.salvar_cliente(pool, conta_id, "PITCHUKINHA LOJA II")["id"]
         c.execute("update evento_stands set cliente_id=%s where conta_id=%s and codigo='S79'",
                   (cid, conta_id))
         c.commit()
+    r = es.salvar_cadastro_stand(pool, conta_id, "S97", _so_cnpj())        # 2 de 2 na empresa
+    assert r["ok"]
     r = es.salvar_cadastro_stand(pool, conta_id, "S79", _so_cnpj("PITCHUKINHA LOJA II"))
-    assert r["ok"] is False and "não tem a reserva registrada" in r["erro"]
-    assert es.buscar(pool, conta_id, "S79")["cliente_id"] == cid
+    assert r["ok"] is False and "máximo é 2" in r["erro"]                 # a regra do limite vale
+    s = es.buscar(pool, conta_id, "S79")
+    assert s["cliente_id"] == cid and s["prospeccao_id"]                 # a reserva ficou registrada
+    assert _cads(pool, conta_id, "S79")["S79"]["fantasia"] == "PITCHUKINHA LOJA II"
 
 
 def test_pelo_whatsapp_o_link_publico_tambem_nao_entra_em_outra_loja(pool, conta_id):
@@ -2224,3 +2230,211 @@ def test_a_pagina_da_outlet_chic_mostra_o_nome_do_reservado_e_do_vendido(pool, c
     # outra página de stands: só o vendido com contrato assinado (nenhum aqui)
     _html, st = dados("outra-feira")
     assert st["G60"]["expositor"] is None and st["G61"]["expositor"] is None
+
+# ---- 03/10/2026: anexar comprovante na reserva que já existe, reserva sem prospecção
+# e o botão de busca que puxa o cadastro de Clientes
+
+def _sem_storage(monkeypatch):
+    from finance import comprovantes as comprov
+    from finance import contrato as ctr
+    from finance import vendas
+    monkeypatch.setattr(comprov, "subir_em", lambda *a, **k: None)
+    monkeypatch.setattr(vendas, "modo_do_orcamento", lambda p, c: "evento")
+    monkeypatch.setattr(ctr, "criar_para_orcamento",
+                        lambda *a, **k: {"id": 1, "token": "tok-contrato"})
+
+
+def _lista_sem_comprovante(pool, conta_id, codigos=("S113", "S114"), nome="SÓ SPORTS", vendedora=None):
+    """Como a lista do dono deixou: reservado, com prospecção e proposta, SEM comprovante."""
+    oid = _venda(pool, conta_id, codigos[0], nome=nome, zap="86999268073")
+    for cod in codigos[1:]:
+        _criar_stand(pool, conta_id, cod, status="pre_reservado")
+        with pool.connection() as c:
+            c.execute("update evento_stands set orcamento_id=%s, prospeccao_id=(select "
+                      "prospeccao_id from evento_stands where conta_id=%s and codigo=%s) "
+                      "where conta_id=%s and codigo=%s", (oid, conta_id, codigos[0], conta_id, cod))
+            c.commit()
+    if vendedora:
+        _dono_da_venda(pool, conta_id, codigos[0], vendedora)
+    return oid
+
+
+def test_o_comprovante_entra_na_reserva_da_lista_nos_dois_stands(pool, conta_id, monkeypatch):
+    _sem_storage(monkeypatch)
+    oid = _lista_sem_comprovante(pool, conta_id)
+    r = es.anexar_comprovante_da_reserva(pool, conta_id, "S113", b"%PDF-1.4 x", "application/pdf")
+    assert r["ok"] and r["codigos"] == ["S113", "S114"], r
+    for cod in ("S113", "S114"):
+        s = es.buscar(pool, conta_id, cod)
+        assert s["comprovante_url"] and s["status"] == "pre_reservado" and s["orcamento_id"] == oid
+    with pool.connection() as c:                       # nenhuma proposta nova
+        assert c.execute("select count(*) from orcamentos where conta_id=%s",
+                         (conta_id,)).fetchone()[0] == 1
+    # livre e vendido: não é por aqui
+    _criar_stand(pool, conta_id, "G60")
+    assert "Registrar venda" in es.anexar_comprovante_da_reserva(
+        pool, conta_id, "G60", b"%PDF-1.4 x", "application/pdf")["erro"]
+    _venda(pool, conta_id, "G61", status="vendido")
+    assert "vendido" in es.anexar_comprovante_da_reserva(
+        pool, conta_id, "G61", b"%PDF-1.4 x", "application/pdf")["erro"]
+    # arquivo inválido: nada muda
+    assert es.anexar_comprovante_da_reserva(pool, conta_id, "S113", b"", "application/pdf")["ok"] is False
+
+
+def test_a_vendedora_anexa_pelo_app_so_na_venda_dela(pool, conta_id, monkeypatch):
+    _sem_storage(monkeypatch)
+    cass, rob = _membro(pool, conta_id, "Cassandra"), _membro(pool, conta_id, "Roberta")
+    _lista_sem_comprovante(pool, conta_id, vendedora=cass)
+    pc, req = _cockpit(pool, conta_id, monkeypatch, rob)
+    r = pc._anexar_comprovante_sync(req, "S113", b"%PDF-1.4 x", "application/pdf")
+    assert r.status_code == 303 and "não é de uma venda sua" in req.session["ck_err"]
+    assert not es.buscar(pool, conta_id, "S113")["comprovante_url"]
+    pc, req = _cockpit(pool, conta_id, monkeypatch, cass)
+    pc._anexar_comprovante_sync(req, "S113", b"%PDF-1.4 x", "application/pdf")
+    assert "S113 + S114" in req.session["ck_ok"]
+    assert es.buscar(pool, conta_id, "S114")["comprovante_url"]
+    # o app mostra o botão na reserva dela e o formulário
+    assert "stAnexar()" in pc._STANDS_JS and "/comprovante" in pc._STANDS_JS
+    assert "Anexar comprovante do sinal" in pc._STANDS_JS
+
+
+def test_o_painel_nao_reserva_sem_o_nome_do_lojista(pool, conta_id, monkeypatch):
+    from urllib.parse import parse_qs, urlparse
+    from web import painel_eventos_stands as painel
+    _sem_storage(monkeypatch)
+    monkeypatch.setattr(painel, "get_pool", lambda: pool)
+    monkeypatch.setattr(painel, "_acesso", lambda request, *a, **k: ((conta_id,), {}))
+    _criar_stand(pool, conta_id, "S78")
+    r = painel._anexar_comprovante_sync(object(), "S78", "", "", b"%PDF-1.4 x", "application/pdf")
+    erro = parse_qs(urlparse(r.headers["location"]).query)["erro"][0]
+    assert "nome do lojista" in erro and es.buscar(pool, conta_id, "S78")["status"] == "livre"
+    # na reserva que já existe, o comprovante entra nela
+    _lista_sem_comprovante(pool, conta_id)
+    r = painel._anexar_comprovante_sync(object(), "S114", "", "", b"%PDF-1.4 x", "application/pdf")
+    ok = parse_qs(urlparse(r.headers["location"]).query)["ok"][0]
+    assert "S113 + S114" in ok and es.buscar(pool, conta_id, "S113")["comprovante_url"]
+    assert 'name="nome" placeholder="Nome do lojista *" maxlength="200" required' in painel._TPL
+
+
+def _sem_reserva(pool, conta_id, codigo="S78", status="pre_reservado"):
+    """Como o S78/i14/S116 ficaram: o comprovante entrou sem o nome — sem prospecção."""
+    _criar_stand(pool, conta_id, codigo, status=status)
+    with pool.connection() as c:
+        c.execute("update evento_stands set comprovante_url='stands/x.pdf', comprovante_em=now() "
+                  "where conta_id=%s and codigo=%s", (conta_id, codigo))
+        c.commit()
+
+
+def test_salvar_o_cadastro_do_stand_sem_reserva_registra_a_reserva_e_a_proposta(
+        pool, conta_id, monkeypatch):
+    _sem_storage(monkeypatch)
+    _sem_reserva(pool, conta_id, "S78")
+    r = es.salvar_cadastro_stand(pool, conta_id, "S78", _dados(fantasia="CAMUFLE", doc=OUTRO_CNPJ,
+                                                                razao="CAMUFLE MODAS LTDA"))
+    assert r["ok"], r
+    s = es.buscar(pool, conta_id, "S78")
+    assert s["prospeccao_id"] and s["orcamento_id"] and s["status"] == "pre_reservado"
+    with pool.connection() as c:
+        marca = c.execute("select empresa from prospeccao where id=%s", (s["prospeccao_id"],)).fetchone()[0]
+        emp, cnpj, cid = c.execute("select empresa, cnpj, cliente_id from orcamentos where id=%s",
+                                   (s["orcamento_id"],)).fetchone()
+    assert marca == "CAMUFLE"
+    assert (emp, cnpj, cid) == ("CAMUFLE MODAS LTDA", OUTRO_CNPJ, r["cliente_id"])
+    assert _cads(pool, conta_id, "S78")["S78"]["fantasia"] == "CAMUFLE"
+    # vendido sem proposta (o sinal já foi confirmado, o valor é com a gestão): a reserva
+    # é registrada, mas a proposta não nasce sozinha
+    _sem_reserva(pool, conta_id, "S116", status="vendido")
+    assert es.salvar_cadastro_stand(pool, conta_id, "S116", _dados(fantasia="PAULAS COLLECTION",
+                                                                    doc=""))["ok"]
+    s = es.buscar(pool, conta_id, "S116")
+    assert s["prospeccao_id"] and not s["orcamento_id"]
+
+
+def test_o_stand_sem_reserva_que_entra_na_empresa_nao_rebatiza_ela(pool, conta_id, monkeypatch):
+    _sem_storage(monkeypatch)
+    empresa, _prov, _o1, _o2 = _duas_lojas(pool, conta_id)
+    _sem_reserva(pool, conta_id, "i14")
+    r = es.salvar_cadastro_stand(pool, conta_id, "i14", _so_cnpj("BELA COSMÉTICOS"))
+    assert r["ok"] and r["cliente_id"] == empresa and r["acao"] == "juntado", r
+    assert cli.obter_cliente(pool, conta_id, empresa)["nome"] == "EM ESSENCE"
+    s = es.buscar(pool, conta_id, "i14")
+    with pool.connection() as c:
+        emp, cid = c.execute("select empresa, cliente_id from orcamentos where id=%s",
+                             (s["orcamento_id"],)).fetchone()
+    assert (emp, cid) == ("EM ESSENCE COMERCIO LTDA", empresa)
+    assert _cads(pool, conta_id, "i14")["i14"]["fantasia"] == "BELA COSMÉTICOS"
+
+
+def test_o_botao_de_busca_puxa_o_cadastro_feito_a_mao_em_clientes(pool, conta_id, monkeypatch):
+    casa = cli.salvar_cliente(pool, conta_id, "FORNECEDOR DA CASA", telefone="86900001111",
+                              cnpj=OUTRO_CNPJ, email="casa@x.com")["id"]
+    cli.atualizar_cliente(pool, conta_id, casa, razao_social="CASA LTDA", representante="Dono",
+                          endereco="Av. Central, 1", cep="64000123", cidade="Teresina", uf="PI")
+    j = es.buscar_dados_do_documento(pool, conta_id, OUTRO_CNPJ)
+    assert j["ok"] and j["fonte"] == "clientes" and j["cliente"] == "FORNECEDOR DA CASA"
+    assert (j["razao"], j["rep"], j["end"], j["cep"], j["cidade"], j["uf"], j["email"], j["whats"]) == (
+        "CASA LTDA", "Dono", "Av. Central, 1", "64000-123", "Teresina", "PI", "casa@x.com", "86900001111")
+    # CPF: só o cadastro (a Receita não consulta pessoa física)
+    cli.salvar_cliente(pool, conta_id, "Ana Sabino", cpf="52998224725", telefone="86998500915")
+    assert es.buscar_dados_do_documento(pool, conta_id, "529.982.247-25")["whats"] == "86998500915"
+    assert "não está em Clientes" in es.buscar_dados_do_documento(pool, conta_id, "111.444.777-35")["erro"]
+    # CNPJ que a conta não tem: vai pra Receita
+    monkeypatch.setattr(es, "receita_do_cnpj", lambda doc: {"ok": True, "razao": "DA RECEITA"})
+    assert es.buscar_dados_do_documento(pool, conta_id, CNPJ_VALIDO)["razao"] == "DA RECEITA"
+    # cliente de OUTRA conta não vem; e quem é das duas não traz o contato da outra
+    outra, la = _prime(pool)
+    assert es.buscar_dados_do_documento(pool, conta_id, CNPJ_VALIDO)["razao"] == "DA RECEITA"
+    cid = cli.puxar_ou_criar_cliente(pool, conta_id, cnpj="11444777000161")
+    j = es.buscar_dados_do_documento(pool, conta_id, CNPJ_VALIDO)
+    assert j["fonte"] == "clientes" and j["whats"] is None and j["email"] is None
+
+
+def test_as_telas_usam_a_busca_nova(pool, conta_id, monkeypatch):
+    import json
+    from web import painel_cockpit as pc
+    from web import painel_eventos_stands as painel
+    from web.stands_receita import RECEITA_JS
+    assert "poe('whats', j.whats" in RECEITA_JS and "em Clientes" in RECEITA_JS
+    assert "receitaMsg(receitaPreenche(form,j),j)" in pc._STANDS_JS
+    assert "receitaMsg(receitaPreenche(f,j),j)" in pc._CLI_NOVO_JS
+    assert "receitaMsg(receitaPreenche(form, j), j)" in painel._TPL and "Buscar dados" in painel._TPL
+    cli.salvar_cliente(pool, conta_id, "FORNECEDOR DA CASA", cnpj=OUTRO_CNPJ)
+    cass = _membro(pool, conta_id, "Cassandra")
+    pc2, req = _cockpit(pool, conta_id, monkeypatch, cass)
+    j = json.loads(pc2.cockpit_stands_consulta_cnpj(req, OUTRO_CNPJ).body)
+    assert j["fonte"] == "clientes" and j["cliente"] == "FORNECEDOR DA CASA"
+
+
+def test_anexar_na_reserva_sem_proposta_mantem_o_cadastro_ja_salvo(pool, conta_id, monkeypatch):
+    # a verificação do #1000: sem proposta, anexar chamava o caminho de "quem reserva
+    # vira cadastro" pelo WhatsApp e tirava o stand da empresa
+    _sem_storage(monkeypatch)
+    empresa, _p, _o1, _o2 = _duas_lojas(pool, conta_id)
+    for cod in ("S113", "S114"):                           # S113 + S114, sem proposta
+        _criar_stand(pool, conta_id, cod)
+    pid = _reserva_da_lista(pool, conta_id, "S113", "SÓ SPORTS")
+    with pool.connection() as c:
+        c.execute("update evento_stands set status='pre_reservado', prospeccao_id=%s, "
+                  "grupo_id='lista-sports' where conta_id=%s and codigo in ('S113','S114')",
+                  (pid, conta_id))
+        c.commit()
+    with pool.connection() as c:
+        assert c.execute("select orcamento_id from evento_stands where conta_id=%s and "
+                         "codigo='S113'", (conta_id,)).fetchone()[0] is None
+    r = es.salvar_cadastro_stand(pool, conta_id, "S113", _so_cnpj("SÓ SPORTS"))
+    assert r["ok"] and r["cliente_id"] == empresa, r
+    with pool.connection() as c:
+        n_antes = c.execute("select count(*) from clientes where dono_id=%s and ativo",
+                            (conta_id,)).fetchone()[0]
+    r = es.anexar_comprovante_da_reserva(pool, conta_id, "S113", b"%PDF-1.4 x", "application/pdf")
+    assert r["ok"] and r["codigos"] == ["S113", "S114"], r
+    s = es.buscar(pool, conta_id, "S113")
+    assert s["cliente_id"] == empresa and s["orcamento_id"]
+    with pool.connection() as c:
+        emp, cnpj, cid = c.execute("select empresa, cnpj, cliente_id from orcamentos where id=%s",
+                                   (s["orcamento_id"],)).fetchone()
+        n_cli = c.execute("select count(*) from clientes where dono_id=%s and ativo",
+                          (conta_id,)).fetchone()[0]
+    assert (emp, cnpj, cid) == ("EM ESSENCE COMERCIO LTDA", CNPJ_VALIDO, empresa)
+    assert cli.obter_cliente(pool, conta_id, empresa)["nome"] == "EM ESSENCE"       # não rebatizou
+    assert n_cli == n_antes                                                        # nenhum cadastro novo

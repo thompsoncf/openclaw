@@ -60,7 +60,7 @@ TETO = {
     "painel_clinica_planos.py": 18,
     "painel_clinica_produtos.py": 1,
     "painel_clinica_prontuario.py": 4,
-    "painel_cockpit.py": 279,
+    "painel_cockpit.py": 283,
     "painel_conteudo.py": 17,
     "painel_deposito.py": 4,
     "painel_equipe.py": 19,
@@ -70,7 +70,7 @@ TETO = {
     "painel_obras.py": 41,
     "painel_obras_mapa.py": 98,
     "painel_origens.py": 3,
-    "painel_prospeccao.py": 351,
+    "painel_prospeccao.py": 353,
     "painel_raio_x.py": 2,
     "painel_relatorios.py": 1,
     "painel_respostas.py": 5,
@@ -81,13 +81,21 @@ TETO = {
 }
 
 
+#: Os pedaços de texto que contam. Até o Python 3.11 uma f-string inteira é um
+#: STRING; do 3.12 em diante ela vem quebrada, e o texto fica em FSTRING_MIDDLE.
+#: Sem os dois, a mesma árvore dava 279 cores no Cockpit numa máquina (3.14) e
+#: 283 no CI (3.11), e o teto dependia de onde o teste rodou.
+_TIPOS_DE_TEXTO = {tokenize.STRING} | (
+    {tokenize.FSTRING_MIDDLE} if hasattr(tokenize, "FSTRING_MIDDLE") else set())
+
+
 def cores_fixas(caminho: Path) -> int:
-    """Quantas cores `#rgb`/`#rrggbb` o arquivo tem dentro de string, sem contar
-    comentário Jinja."""
+    """Quantas cores `#rgb`/`#rrggbb` o arquivo tem dentro de string (f-string
+    inclusive), sem contar comentário Jinja."""
     n = 0
     fonte = caminho.read_text(encoding="utf-8")
     for tok in tokenize.generate_tokens(io.StringIO(fonte).readline):
-        if tok.type == tokenize.STRING:
+        if tok.type in _TIPOS_DE_TEXTO:
             n += len(_HEX.findall(_COMENTARIO_JINJA.sub("", tok.string)))
     return n
 
@@ -113,8 +121,11 @@ def test_a_contagem_ignora_comentario_e_numero_de_pr():
         arq.write_text('# comentário #fff não conta\n'
                        'A = """{# desde o #490 #}<p style="color:#490">a</p>"""\n'
                        'B = "background:#1E2A23;color:#EAF2ED"\n'
-                       'C = "#ic-novidades #menu-links"\n', encoding="utf-8")
-        assert cores_fixas(arq) == 3
+                       'C = "#ic-novidades #menu-links"\n'
+                       'x = 1\n'
+                       'D = f"<b style=\'color:#abc\'>{x}</b>"\n', encoding="utf-8")
+        # a f-string conta igual nas duas versões do Python (3.11 no CI, 3.12+ fora dele)
+        assert cores_fixas(arq) == 4
 
 
 def test_o_teto_so_lista_arquivo_que_existe():

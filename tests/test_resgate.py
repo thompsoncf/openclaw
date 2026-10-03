@@ -582,6 +582,84 @@ def test_resposta_normal_conta_como_respondeu(pool, equipe, duble):
                          (lid,)).fetchone()[0] == "respondeu"
 
 
+URA = ("Desculpe, mas não entendi. Tente digitar só o assunto que você precisa, por exemplo, "
+       "\"fatura\".\n\n*Vamos tentar de outra forma.*\n*Em que posso te ajudar?*")
+
+
+def test_robo_que_responde_nao_e_cliente_e_a_ia_nao_responde(pool, equipe, duble):
+    """03/10/2026, Prime, lead #1431: a retomada caiu na URA de uma empresa, a IA
+    respondeu o robô e o resumo contou como cliente que respondeu."""
+    lid, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead',%s)", (cv, URA))
+        c.commit()
+        assert rg.so_robo_sem_resposta(c, cv)          # a IA da regra fica calada
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select estado, respondeu_em from resgate_leads where prospeccao_id=%s",
+                         (lid,)).fetchone() == ("robo", None)
+        txt = rg.resumo(c, EMPRESA, rg.config(c, EMPRESA), datetime.now(timezone.utc))
+    assert "0 responderam" in txt and "1 era atendimento automático" in txt
+    avisos = [s["texto"] for s in duble["saiu"] if "atendimento automático" in s["texto"]]
+    assert len(avisos) == 1 and f"#{lid}" in avisos[0]
+    rg.rodar(pool)                                     # o aviso sai uma vez só
+    assert len([s for s in duble["saiu"] if "atendimento automático" in s["texto"]]) == 1
+    # uma PESSOA escreve depois do robô: aí é resposta, e a IA atende
+    with pool.connection() as c:
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead','oi, sou eu, a Carla! ainda tem data?')", (cv,))
+        c.commit()
+        assert not rg.so_robo_sem_resposta(c, cv)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select estado from resgate_leads where prospeccao_id=%s",
+                         (lid,)).fetchone()[0] == "respondeu"
+
+
+def test_a_ia_da_regra_nao_responde_o_robo_e_responde_a_pessoa(pool, equipe, duble, monkeypatch):
+    """A porta de verdade: `agente._regra_antes`, o que roda antes da IA da regra falar."""
+    from finance import agente as ag
+    monkeypatch.setattr(ag, "_RAJADA_S", 0)
+    _, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em) "
+                  "values (%s,'whatsapp','in','lead',%s, now() + interval '1 second')", (cv, URA))
+        c.commit()
+        regra = cr.regra_da_conversa(c, EMPRESA, cv)
+        assert regra.get("resgate")
+        assert ag._regra_antes(c, EMPRESA, cv, regra, lambda *a, **k: None) is False
+        c.commit()
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em) "
+                  "values (%s,'whatsapp','in','lead','oi, sou eu!', now() + interval '2 seconds')", (cv,))
+        c.commit()
+        assert ag._regra_antes(c, EMPRESA, cv, regra, lambda *a, **k: None) is True
+        c.commit()
+
+
+def test_sem_mensagem_nova_nao_e_robo(pool, equipe, duble):
+    _, cv = _resgatado(pool, equipe, duble)
+    with pool.connection() as c:
+        assert not rg.so_robo_sem_resposta(c, cv)      # nada chegou depois da retomada
+
+
+@pytest.mark.parametrize("txt", [
+    URA, "Esta é uma mensagem automática.", "Opção inválida. Tente de novo.",
+    "1 - Fatura\n2 - Segunda via\n3 - Falar com atendente", "1️⃣ Vendas\n2️⃣ Suporte\n3️⃣ Financeiro",
+    "Agradecemos o seu contato! Em breve retornaremos.", "Digite 1 para vendas",
+    "Olá! Estamos fora do horário de atendimento."])
+def test_atendimento_automatico(txt):
+    assert rg.e_robo(txt)
+
+
+@pytest.mark.parametrize("txt", [
+    "oi! ainda tem a data?", "obrigada pelo contato", "não entendi, qual o valor?",
+    "1. sábado\n2. domingo", "Tenho 2 filhos: 1) Pedro 2) Ana", "pare",
+    "vou digitar o endereço depois", "", None])
+def test_gente_nao_e_robo(txt):
+    assert not rg.e_robo(txt)
+
+
 def test_gente_da_equipe_falou_a_ia_sai_e_o_supervisor_sabe(pool, equipe, duble):
     lid, cv = _resgatado(pool, equipe, duble)
     with pool.connection() as c:

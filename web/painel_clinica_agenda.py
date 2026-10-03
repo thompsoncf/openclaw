@@ -606,16 +606,16 @@ table.ag th{position:sticky;top:0;background:var(--card);padding:.45rem .4rem;te
 table.ag th small{display:block;font-weight:400;color:var(--txt-mut);font-size:.7rem}
 table.ag td{border-top:1px solid var(--borda);padding:2px 4px;vertical-align:top;height:34px}
 table.ag td.h{width:52px;color:var(--txt-mut);font-variant-numeric:tabular-nums;white-space:nowrap}
-td.fora{background:repeating-linear-gradient(135deg,transparent,transparent 5px,rgba(255,255,255,.02) 5px,rgba(255,255,255,.02) 10px)}
-td.continua{background:rgba(255,255,255,.02)}
+td.fora{background:repeating-linear-gradient(135deg,transparent,transparent 5px,var(--hover) 5px,var(--hover) 10px)}
+td.continua{background:var(--hover)}
 a.livre{display:block;height:100%;min-height:28px;border-radius:6px;color:var(--txt-mut);text-decoration:none;font-size:.74rem;padding:.25rem .4rem;border:1px dashed transparent}
 a.livre:hover{border-color:var(--neon-borda);color:var(--verde-claro)}
 a.ev{display:block;border-radius:7px;padding:.25rem .45rem;margin:1px 0;text-decoration:none;color:var(--txt);border:1px solid var(--borda);border-left:4px solid var(--borda)}
 a.ev b{font-size:.8rem}a.ev span{display:block;font-size:.7rem;color:var(--txt-mut)}
-.s-agendado{background:#122019}.s-confirmado{background:#10241A;border-color:#25D366!important}
-.s-presente{background:#0D1B23;border-color:#229ED9!important}.s-atendimento{background:#241C0F;border-color:#E0A32E!important}
-.s-finalizado{background:#121614;color:#8b9a92!important}.s-faltou{background:#241313;border-color:#E0574F!important}
-.s-cancelou{background:#1a1414;text-decoration:line-through;color:#a07a77!important}
+.s-agendado{background:var(--neon-fundo)}.s-confirmado{background:var(--neon-fundo);border-color:var(--neon)!important}
+.s-presente{background:var(--azul-fundo);border-color:var(--azul)!important}.s-atendimento{background:var(--ambar-fundo);border-color:var(--ambar)!important}
+.s-finalizado{background:var(--bg-2);color:var(--text-dim)!important}.s-faltou{background:var(--coral-fundo);border-color:var(--coral)!important}
+.s-cancelou{background:var(--coral-fundo);text-decoration:line-through;color:var(--text-dim)!important}
 .ag-leg{display:flex;gap:.5rem;flex-wrap:wrap;font-size:.72rem;margin:.6rem 0;color:var(--txt-mut)}
 .ag-leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:.25rem;vertical-align:-1px;border:1px solid var(--borda)}
 .ag-caixa{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.7rem .9rem;margin-top:.9rem}

@@ -136,7 +136,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .as-l{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.2rem .6rem;padding:.5rem .1rem;border-top:1px solid var(--borda)}
 .as-m{font-size:.8rem;color:var(--txt-mut)}
 .as-chip{font-size:.7rem;padding:.08rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut);margin-left:.3rem}
-.as-chip.al{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}
+.as-chip.al{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
 .as-acoes{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}.as-acoes form{margin:0}
 .as-acoes a,.as-acoes button{width:auto;margin:0;min-height:36px;padding:.3rem .7rem;font-size:.82rem;border-radius:8px}
 .as-acoes .sec,.as-acoes a{background:transparent;border:1px solid var(--borda);color:var(--txt);text-decoration:none;display:inline-flex;align-items:center}

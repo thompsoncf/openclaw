@@ -2403,3 +2403,38 @@ def test_as_telas_usam_a_busca_nova(pool, conta_id, monkeypatch):
     pc2, req = _cockpit(pool, conta_id, monkeypatch, cass)
     j = json.loads(pc2.cockpit_stands_consulta_cnpj(req, OUTRO_CNPJ).body)
     assert j["fonte"] == "clientes" and j["cliente"] == "FORNECEDOR DA CASA"
+
+
+def test_anexar_na_reserva_sem_proposta_mantem_o_cadastro_ja_salvo(pool, conta_id, monkeypatch):
+    # a verificação do #1000: sem proposta, anexar chamava o caminho de "quem reserva
+    # vira cadastro" pelo WhatsApp e tirava o stand da empresa
+    _sem_storage(monkeypatch)
+    empresa, _p, _o1, _o2 = _duas_lojas(pool, conta_id)
+    for cod in ("S113", "S114"):                           # S113 + S114, sem proposta
+        _criar_stand(pool, conta_id, cod)
+    pid = _reserva_da_lista(pool, conta_id, "S113", "SÓ SPORTS")
+    with pool.connection() as c:
+        c.execute("update evento_stands set status='pre_reservado', prospeccao_id=%s, "
+                  "grupo_id='lista-sports' where conta_id=%s and codigo in ('S113','S114')",
+                  (pid, conta_id))
+        c.commit()
+    with pool.connection() as c:
+        assert c.execute("select orcamento_id from evento_stands where conta_id=%s and "
+                         "codigo='S113'", (conta_id,)).fetchone()[0] is None
+    r = es.salvar_cadastro_stand(pool, conta_id, "S113", _so_cnpj("SÓ SPORTS"))
+    assert r["ok"] and r["cliente_id"] == empresa, r
+    with pool.connection() as c:
+        n_antes = c.execute("select count(*) from clientes where dono_id=%s and ativo",
+                            (conta_id,)).fetchone()[0]
+    r = es.anexar_comprovante_da_reserva(pool, conta_id, "S113", b"%PDF-1.4 x", "application/pdf")
+    assert r["ok"] and r["codigos"] == ["S113", "S114"], r
+    s = es.buscar(pool, conta_id, "S113")
+    assert s["cliente_id"] == empresa and s["orcamento_id"]
+    with pool.connection() as c:
+        emp, cnpj, cid = c.execute("select empresa, cnpj, cliente_id from orcamentos where id=%s",
+                                   (s["orcamento_id"],)).fetchone()
+        n_cli = c.execute("select count(*) from clientes where dono_id=%s and ativo",
+                          (conta_id,)).fetchone()[0]
+    assert (emp, cnpj, cid) == ("EM ESSENCE COMERCIO LTDA", CNPJ_VALIDO, empresa)
+    assert cli.obter_cliente(pool, conta_id, empresa)["nome"] == "EM ESSENCE"       # não rebatizou
+    assert n_cli == n_antes                                                        # nenhum cadastro novo

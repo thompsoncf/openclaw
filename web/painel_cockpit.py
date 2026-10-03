@@ -9922,7 +9922,7 @@ _STANDS_JS = r"""
     return h+'</form></div>';
   }
   function formAnexo(code,s){
-    var g=(s.gcods||[code]);
+    var g=(s.rcods||s.gcods||[code]);
     var h='<div class=stcad><form class=stvenda method=post enctype="multipart/form-data" action="'+BASE_STANDS+'/'+encodeURIComponent(code)+'/comprovante">';
     h+='<label class=stfld><span>Comprovante do sinal <i>*</i></span><input name=arquivo type=file required accept="image/*,application/pdf"></label>';
     h+='<div class=stac><button class=stsalvar type=submit>Anexar comprovante</button><button class=stbtn type=button onclick="stCancelaAnexo()">Cancelar</button></div>';
@@ -10161,9 +10161,12 @@ def _dados_do_mapa(request: Request, pool, conta_id: int, meu_id, g):
         except Exception:  # noqa: BLE001 — sem isso a planta continua servindo
             contratos, fin = {}, {}
     grupos: dict = {}
+    por_orc: dict = {}
     for s in stands:
         if s.get("grupo_id") and s["status"] != "livre":
             grupos.setdefault(s["grupo_id"], []).append(s["codigo"])
+        if s.get("orcamento_id") and s["status"] == "pre_reservado":
+            por_orc.setdefault(s["orcamento_id"], []).append(s["codigo"])
 
     tot = {"livre": 0, "pre_reservado": 0, "vendido": 0}
     dados = {}
@@ -10192,7 +10195,10 @@ def _dados_do_mapa(request: Request, pool, conta_id: int, meu_id, g):
             dados[s["codigo"]].update({
                 "ct": ct.get("token"), "ct_ok": bool(ct.get("assinado")),
                 "aberto": int(f.get("aberto", 0)), "pago": int(f.get("pago", 0)),
-                "gcods": grupos.get(s.get("grupo_id")) or [s["codigo"]]})
+                "gcods": grupos.get(s.get("grupo_id")) or [s["codigo"]],
+                # os stands que recebem o comprovante anexado (a mesma proposta)
+                "rcods": por_orc.get(s.get("orcamento_id")) or grupos.get(s.get("grupo_id"))
+                or [s["codigo"]]})
         if minha and s["status"] != "livre":
             dados[s["codigo"]]["minha"] = True
     return dados, tot, gestao

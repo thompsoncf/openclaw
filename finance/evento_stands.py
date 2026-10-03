@@ -305,18 +305,26 @@ def anexar_comprovante_da_reserva(pool, conta_id: int, codigo: str, conteudo: by
     caminho, erro = _subir_comprovante(conta_id, codigo, conteudo, content_type, subir)
     if erro:
         return {"ok": False, "erro": erro}
-    oid = stand.get("orcamento_id")
+    oid, grupo = stand.get("orcamento_id"), stand.get("grupo_id")
     with pool.connection() as c:
+        # a reserva: os stands da mesma proposta (ou, sem proposta ainda, do mesmo grupo)
         rows = c.execute(
             "update evento_stands set comprovante_url=%s, comprovante_em=%s, atualizado_em=now() "
             "where conta_id=%s and status='pre_reservado' and (codigo=%s or "
-            "(%s::bigint is not null and orcamento_id=%s::bigint)) returning codigo",
-            (caminho, _ag.agora_brt(), conta_id, codigo, oid, oid)).fetchall()
+            "(%s::bigint is not null and orcamento_id=%s::bigint) or "
+            "(%s::bigint is null and %s::text is not null and grupo_id=%s::text)) returning codigo",
+            (caminho, _ag.agora_brt(), conta_id, codigo, oid, oid, oid, grupo, grupo)).fetchall()
         c.commit()
     r = {"ok": True, "codigos": sorted(x[0] for x in rows) or [codigo]}
     if not oid:
         try:
-            extra = garantir_orcamento_e_contrato(pool, conta_id, buscar(pool, conta_id, codigo))
+            # a proposta nasce no cadastro que o stand JÁ TEM (salvo antes pela
+            # vendedora/gestão) — sem isso o `_garantir_cliente_do_stand` acharia ou
+            # criaria outro cliente pelo WhatsApp e tiraria o stand da empresa
+            st = buscar(pool, conta_id, codigo)
+            extra = garantir_orcamento_e_contrato(
+                pool, conta_id, st, cliente_id=st.get("cliente_id"),
+                cadastro_pronto=bool(st.get("cliente_id")))
             if extra:
                 r.update(extra)
         except Exception as e:  # noqa: BLE001 — o comprovante já está no stand

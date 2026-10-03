@@ -2766,12 +2766,12 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <h2 style="margin:0 0 .3rem">🏢 Complete os dados da sua empresa</h2>
   <div class="mut" style="font-size:.82rem;margin-bottom:1rem">Precisamos disso pra organizar seu financeiro PJ direito. É rápido — digite o CNPJ e busque.</div>
-  {% if erro %}<div style="background:#3a2020;border:1px solid #e07a5f55;color:#f0b0a0;padding:.6rem .9rem;border-radius:8px;font-size:.82rem;margin-bottom:1rem">{{ erro }}</div>{% endif %}
+  {% if erro %}<div style="background:var(--coral-fundo);border:1px solid #e07a5f55;color:var(--coral);padding:.6rem .9rem;border-radius:8px;font-size:.82rem;margin-bottom:1rem">{{ erro }}</div>{% endif %}
   <form method="post" action="/painel/empresa/dados">
     <label>CNPJ</label>
     <div style="display:flex;gap:.5rem">
       <input id="cnpj" name="documento" value="{{ dados.documento }}" inputmode="numeric" placeholder="00.000.000/0001-00" required style="flex:1 1 auto;width:auto;min-width:0">
-      <button type="button" onclick="buscarCnpj()" style="flex:0 0 auto;width:auto;margin-top:0;background:#1d3a2e;color:var(--verde-claro);border:1px solid var(--verde)44;border-radius:7px;padding:0 1.1rem;cursor:pointer;white-space:nowrap">🔍 Buscar</button>
+      <button type="button" onclick="buscarCnpj()" style="flex:0 0 auto;width:auto;margin-top:0;background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--verde)44;border-radius:7px;padding:0 1.1rem;cursor:pointer;white-space:nowrap">🔍 Buscar</button>
     </div>
     <div id="cnpj-msg" class="mut" style="font-size:.72rem;margin-top:.25rem"></div>
     <label>Razão social</label>
@@ -2840,7 +2840,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
       </label>
     </div>
   </div>
-  <div id="emp-id-status" style="font-size:.78rem;color:#888780;margin-top:.5rem"></div>
+  <div id="emp-id-status" style="font-size:.78rem;color:var(--text-dim);margin-top:.5rem"></div>
   <form method="post" action="/painel/empresa/identidade" style="margin-top:1rem">
     <label>Frase da marca (1 linha)</label>
     <input name="bio" value="{{ identidade.bio }}" maxlength="120" placeholder="Ex: Hortifrúti — do produtor à sua mesa.">
@@ -3280,47 +3280,47 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
 <style>
   .cli-item{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;overflow:hidden}
   .cli-head{display:flex;align-items:center;gap:.6rem;padding:.7rem .9rem;cursor:pointer}
-  .cli-head:hover{background:#212125}
-  .cli-head .chev{color:#8a8a82;font-size:1.1rem;line-height:1;transition:transform .18s;flex:none}
+  .cli-head:hover{background:var(--hover)}
+  .cli-head .chev{color:var(--text-dim);font-size:1.1rem;line-height:1;transition:transform .18s;flex:none}
   .cli-head[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--verde-claro)}
   .tbadge{font-size:.62rem;font-weight:700;letter-spacing:.03em;padding:.08rem .4rem;border-radius:5px;vertical-align:1px;margin-left:.3rem}
-  .tbadge.pf{background:#22303f;color:#7fb2e6}.tbadge.pj{background:#1f3a2b;color:#69cf9a}
-  .tbadge.cli{background:#233026;color:#9fcf9a}.tbadge.forn{background:#2a1f3a;color:#c9a3e0}
-  .wa{position:relative;flex:none;font-size:.76rem;font-weight:600;cursor:pointer;color:#128c4b;
+  .tbadge.pf{background:var(--azul-fundo);color:var(--azul)}.tbadge.pj{background:var(--neon-fundo);color:var(--neon)}
+  .tbadge.cli{background:var(--neon-fundo);color:var(--neon)}.tbadge.forn{background:var(--roxo-fundo);color:var(--roxo)}
+  .wa{position:relative;flex:none;font-size:.76rem;font-weight:600;cursor:pointer;color:var(--neon);
       background:rgba(37,211,102,.16);border:1px solid rgba(37,211,102,.34);padding:.35rem .7rem;border-radius:999px;white-space:nowrap}
   .wa:hover{background:rgba(37,211,102,.28)}
-  .wa-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;background:#232327;border:1px solid var(--borda);
+  .wa-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;background:var(--line);border:1px solid var(--borda);
       border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.5);padding:.3rem;min-width:200px;display:none}
   .wa-menu.on{display:block}
   .wa-menu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--txt);
       font-size:.8rem;padding:.5rem .6rem;border-radius:7px;cursor:pointer;width:100%}
-  .wa-menu button:hover{background:#2c2c31}
+  .wa-menu button:hover{background:var(--hover)}
   .cli-panel{display:none;padding:.2rem .9rem 1rem;border-top:1px solid var(--card-2)}
   .cli-panel.on{display:block}
   .ptabs{display:flex;gap:.3rem;margin:.7rem 0}
-  .ptab{border:1px solid var(--borda);background:#232327;color:var(--mut);font-size:.76rem;font-weight:600;
+  .ptab{border:1px solid var(--borda);background:var(--line);color:var(--mut);font-size:.76rem;font-weight:600;
       padding:.35rem .8rem;border-radius:999px;cursor:pointer}
-  .ptab.on{background:#1f3a2b;color:#69cf9a;border-color:transparent}
+  .ptab.on{background:var(--neon-fundo);color:var(--neon);border-color:transparent}
   .pane{display:none}.pane.on{display:block}
   .mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
   .mini-grid .col-2{grid-column:1/-1}
   .mini-grid label{font-size:.68rem;color:var(--mut)}.mini-grid input{width:100%}
   .pfoot{display:flex;gap:.5rem;margin-top:.6rem;align-items:center;flex-wrap:wrap}
   .btn-primary{background:var(--verde);color:var(--sobre-verde);padding:.45rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:600;width:auto}
-  .btn-danger{background:transparent;border:1px solid #7a3b3b;color:#d98a8a;padding:.45rem 1rem;border-radius:6px;cursor:pointer;width:auto}
+  .btn-danger{background:transparent;border:1px solid var(--coral-borda);color:var(--coral);padding:.45rem 1rem;border-radius:6px;cursor:pointer;width:auto}
   .hi-row{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.5rem 0;border-top:1px solid var(--card-2)}
   .hi-row:first-child{border-top:0}.hi-t{color:var(--txt);font-size:.85rem}
   .hi-v{font-family:var(--mono);color:var(--verde-claro);font-weight:600;font-size:.82rem;white-space:nowrap}
-  .doc-badge{font-size:.7rem;font-weight:600;padding:.15rem .5rem;border-radius:6px;margin-left:.4rem;color:#8a8a82}
-  .doc-badge.ok{color:#69cf9a}.doc-badge.err{color:#d98a8a}
-  #zaq-toast{position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);background:#111;color:#fff;
+  .doc-badge{font-size:.7rem;font-weight:600;padding:.15rem .5rem;border-radius:6px;margin-left:.4rem;color:var(--text-dim)}
+  .doc-badge.ok{color:var(--neon)}.doc-badge.err{color:var(--coral)}
+  #zaq-toast{position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);background:var(--bg-2);color:var(--text);
       font-size:.82rem;font-weight:600;padding:.7rem 1.1rem;border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.5);
       z-index:60;opacity:0;pointer-events:none;transition:opacity .2s}
   #zaq-toast.on{opacity:1}
 </style>
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
-    <h2 style="margin:0">👥 {{ voc.clientes|capitalize }}/Fornecedores <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
+    <h2 style="margin:0">👥 {{ voc.clientes|capitalize }}/Fornecedores <span style="color:var(--text-faint);font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
     <button type="button" onclick="var e=document.getElementById('cli-novo');e.style.display=e.style.display==='block'?'none':'block'" style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo {{ voc.cliente }}</button>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
@@ -3328,8 +3328,8 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
   {% if dup_n %}
   <a href="/painel/clientes/duplicados" style="display:flex;justify-content:space-between;
      align-items:center;gap:.6rem;text-decoration:none;margin-top:.8rem;padding:.6rem .8rem;
-     border:1px solid #5a4a2a;border-radius:9px;background:rgba(201,162,39,.07)">
-    <span style="color:#c9a227;font-size:.82rem">🔗 {{ dup_n }} cadastro{{ 's' if dup_n != 1 }} parece{{ 'm' if dup_n != 1 }} estar repetido{{ 's' if dup_n != 1 }} na base.</span>
+     border:1px solid var(--ambar-borda);border-radius:9px;background:rgba(201,162,39,.07)">
+    <span style="color:var(--ambar);font-size:.82rem">🔗 {{ dup_n }} cadastro{{ 's' if dup_n != 1 }} parece{{ 'm' if dup_n != 1 }} estar repetido{{ 's' if dup_n != 1 }} na base.</span>
     <span style="color:var(--verde-claro);font-size:.8rem;white-space:nowrap">revisar →</span>
   </a>
   {% endif %}
@@ -3360,7 +3360,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
           <label>CPF ou CNPJ</label>
           <div style="display:flex;gap:.4rem;align-items:center">
             <input id="nc-doc" name="documento" inputmode="numeric" placeholder="CPF (11) ou CNPJ (14) dígitos" oninput="ncDoc()" style="flex:1">
-            <button type="button" id="nc-buscar" onclick="ncBuscar()" style="display:none;background:rgba(37,211,102,.16);color:#128c4b;border:1px solid rgba(37,211,102,.34);border-radius:6px;padding:.5rem .8rem;cursor:pointer;font-weight:600;width:auto;white-space:nowrap">🔎 Buscar CNPJ</button>
+            <button type="button" id="nc-buscar" onclick="ncBuscar()" style="display:none;background:rgba(37,211,102,.16);color:var(--neon);border:1px solid rgba(37,211,102,.34);border-radius:6px;padding:.5rem .8rem;cursor:pointer;font-weight:600;width:auto;white-space:nowrap">🔎 Buscar CNPJ</button>
           </div>
           <span id="nc-badge" class="doc-badge"></span>
         </div>
@@ -3393,7 +3393,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
       </div>
       <div class="pfoot" style="margin-top:.8rem">
         <button class="btn-primary" type="submit">Salvar</button>
-        <button type="button" onclick="document.getElementById('cli-novo').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:6px;padding:.45rem 1rem;cursor:pointer;width:auto">Cancelar</button>
+        <button type="button" onclick="document.getElementById('cli-novo').style.display='none'" style="background:transparent;border:1px solid var(--line-2);color:var(--text-dim);border-radius:6px;padding:.45rem 1rem;cursor:pointer;width:auto">Cancelar</button>
       </div>
     </form>
   </div>
@@ -3548,18 +3548,18 @@ var _tt;function toast(m){var t=document.getElementById('zaq-toast');t.textConte
 _CLIENTES_DUP = """{% extends "base" %}{% block conteudo %}
 <style>
   .dup-grp{border:1px solid var(--borda);border-radius:12px;padding:.9rem;margin-bottom:1rem;background:var(--card-2)}
-  .dup-por{font-size:.72rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#c9a227}
+  .dup-por{font-size:.72rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--ambar)}
   .dup-lin{display:flex;gap:.7rem;align-items:flex-start;padding:.6rem 0;border-top:1px solid var(--borda)}
   .dup-lin:first-of-type{border-top:0}
   .dup-dados{flex:1;min-width:0}
   .dup-nome{color:var(--txt);font-weight:600;font-size:.9rem}
-  .dup-campo{color:#8a938a;font-size:.75rem;margin-top:.15rem}
+  .dup-campo{color:var(--text-dim);font-size:.75rem;margin-top:.15rem}
   .dup-fica{background:var(--verde);color:var(--sobre-verde);font-size:.66rem;font-weight:700;
       border-radius:5px;padding:.1rem .4rem;margin-left:.4rem;letter-spacing:.03em}
   .dup-btn{background:transparent;border:1px solid var(--verde);color:var(--verde-claro);
       border-radius:7px;padding:.35rem .7rem;font-size:.76rem;cursor:pointer;width:auto;white-space:nowrap}
-  .dup-hist{font-size:.78rem;color:#8a938a;padding:.4rem 0;border-bottom:1px solid var(--card-2)}
-  .dup-selo-fica{border:1px solid var(--verde);background:#10241A;color:var(--verde-claro);
+  .dup-hist{font-size:.78rem;color:var(--text-dim);padding:.4rem 0;border-bottom:1px solid var(--card-2)}
+  .dup-selo-fica{border:1px solid var(--verde);background:var(--neon-fundo);color:var(--verde-claro);
       border-radius:7px;padding:.35rem .7rem;font-size:.76rem;font-weight:600;white-space:nowrap}
   .dup-btn .dup-alvo{color:var(--txt)}
   /* o `hidden` tem que ganhar de qualquer coisa que dê display a estes dois:
@@ -3662,13 +3662,13 @@ _CLIENTES_DUP = """{% extends "base" %}{% block conteudo %}
     <span>
       {{ h.criado_em.strftime('%d/%m %H:%M') if h.criado_em else '' }} ·
       <b>{{ h.perdedor_nome }}</b> (#{{ h.perdedor_id }}) → <b>{{ h.vencedor_nome }}</b> (#{{ h.vencedor_id }})
-      {% if h.desfeita_em %}<span style="color:#d98a8a"> · desfeita</span>{% endif %}
+      {% if h.desfeita_em %}<span style="color:var(--coral)"> · desfeita</span>{% endif %}
     </span>
     {% if not h.desfeita_em %}
     <form method="post" action="/painel/clientes/duplicados/desfazer" style="margin:0"
           onsubmit="return confirm('Separar de novo os dois cadastros?')">
       <input type="hidden" name="fusao_id" value="{{ h.id }}">
-      <button class="dup-btn" style="border-color:#5a4a2a;color:#c9a227">desfazer</button>
+      <button class="dup-btn" style="border-color:var(--ambar-borda);color:var(--ambar)">desfazer</button>
     </form>
     {% endif %}
   </div>
@@ -3682,7 +3682,7 @@ _CLIENTES_DUP_REVISAR = """{% extends "base" %}{% block conteudo %}
 <style>
   .rev-col{border:1px solid var(--borda);border-radius:10px;padding:.8rem;background:var(--card-2)}
   .rev-tit{font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:.3rem}
-  .rev-l{font-size:.78rem;color:#8a938a;padding:.12rem 0}
+  .rev-l{font-size:.78rem;color:var(--text-dim);padding:.12rem 0}
   .rev-l b{color:var(--txt);font-weight:600}
   .rev-par{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin:.8rem 0}
   /* no celular os dois cadastros empilham: lado a lado em 360px vira duas
@@ -3703,7 +3703,7 @@ _CLIENTES_DUP_REVISAR = """{% extends "base" %}{% block conteudo %}
       <div class="rev-l">{{ p.vencedor.email or 'sem e-mail' }}</div>
     </div>
     <div class="rev-col">
-      <div class="rev-tit" style="color:#c9a227">→ vai ser arquivado</div>
+      <div class="rev-tit" style="color:var(--ambar)">→ vai ser arquivado</div>
       <div class="rev-l"><b>{{ p.perdedor.nome }}</b> · #{{ p.perdedor.id }}</div>
       <div class="rev-l">{{ p.perdedor.documento_fmt or 'sem documento' }}</div>
       <div class="rev-l">{{ p.perdedor.telefone or 'sem telefone' }}</div>
@@ -3722,11 +3722,11 @@ _CLIENTES_DUP_REVISAR = """{% extends "base" %}{% block conteudo %}
          style="color:var(--verde-claro);font-size:.85rem;text-decoration:none">↔ inverter: deixar o outro ficar</a>
       {% endif %}
       <a href="/painel/clientes/duplicados"
-         style="color:#8a938a;font-size:.82rem;text-decoration:none">voltar</a>
+         style="color:var(--text-dim);font-size:.82rem;text-decoration:none">voltar</a>
     </div>
   {% else %}
     <h3 style="font-size:.9rem;margin:.9rem 0 .3rem">O que vai acontecer</h3>
-    <ul style="font-size:.82rem;color:#b4b2a9;line-height:1.7;padding-left:1.1rem;margin:0">
+    <ul style="font-size:.82rem;color:var(--text-2);line-height:1.7;padding-left:1.1rem;margin:0">
       {% for t, n in p.refs_resumo %}
         <li>{{ n }} {{ t }} pass{{ 'a' if n == 1 else 'am' }} pra <b>{{ p.vencedor.nome }}</b></li>
       {% endfor %}
@@ -3758,7 +3758,7 @@ _CLIENTES_DUP_REVISAR = """{% extends "base" %}{% block conteudo %}
       </form>
       <a href="/painel/clientes/duplicados/revisar?fica={{ p.perdedor.id }}&sai={{ p.vencedor.id }}"
          style="color:var(--verde-claro);font-size:.82rem;text-decoration:none">↔ inverter</a>
-      <a href="/painel/clientes/duplicados" style="color:#8a938a;font-size:.82rem;text-decoration:none">cancelar</a>
+      <a href="/painel/clientes/duplicados" style="color:var(--text-dim);font-size:.82rem;text-decoration:none">cancelar</a>
     </div>
   {% endif %}
 </div>
@@ -3776,7 +3776,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
     <div><div class="mut" style="font-size:.75rem">Ticket médio</div><div style="font-size:1.1rem">R$ {{ "%.2f"|format(resumo.ticket_centavos/100) }}</div></div>
     <div><div class="mut" style="font-size:.75rem">Última</div><div style="font-size:1.1rem">{{ resumo.ultima or '—' }}</div></div>
   </div>
-  <details style="margin-bottom:1rem"><summary style="cursor:pointer;color:#b4b2a9">✏️ Editar cadastro</summary>
+  <details style="margin-bottom:1rem"><summary style="cursor:pointer;color:var(--text-2)">✏️ Editar cadastro</summary>
     <form method="post" action="/painel/clientes/{{ cliente.id }}/editar" style="margin-top:.7rem">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
         <div><label>Nome</label><input name="nome" value="{{ cliente.nome or '' }}" style="width:100%"></div>
@@ -3796,16 +3796,16 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
     </form>
   </details>
   {% if fiados %}
-  <div style="background:var(--card);border:1px solid #3a2f17;border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
+  <div style="background:var(--card);border:1px solid var(--ambar-borda);border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
-      <span style="color:#e0b878;font-weight:600">{{ rotulo_receber or 'A receber' }} em aberto</span>
-      <span style="color:#e0b878;font-weight:700">R$ {{ "%.2f"|format(fiado_total/100) }}</span>
+      <span style="color:var(--ambar);font-weight:600">{{ rotulo_receber or 'A receber' }} em aberto</span>
+      <span style="color:var(--ambar);font-weight:700">R$ {{ "%.2f"|format(fiado_total/100) }}</span>
     </div>
     {% for f in fiados %}
     <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-top:1px solid var(--card-2)">
-      <div style="font-size:.82rem;color:#cfcfcf">{{ rotulo_receber or 'A receber' }} #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:var(--txt)">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
+      <div style="font-size:.82rem;color:var(--text-2)">{{ rotulo_receber or 'A receber' }} #{{ f.id }} <span style="color:var(--text-dim);font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:var(--txt)">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
       <div style="display:flex;gap:.4rem;align-items:center">
-        {% if f.link %}<a href="{{ f.link }}" target="_blank" style="color:#c99536;font-size:.76rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/cobrar" style="display:inline"><button style="background:none;border:1px solid #c99536;color:#c99536;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">cobrar Pix</button></form>{% endif %}
+        {% if f.link %}<a href="{{ f.link }}" target="_blank" style="color:var(--ambar);font-size:.76rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/cobrar" style="display:inline"><button style="background:none;border:1px solid var(--ambar);color:var(--ambar);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">cobrar Pix</button></form>{% endif %}
         {% if papel in ('dono','gestor') %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento?')"><button style="background:none;border:1px solid var(--verde);color:var(--verde-claro);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>{% endif %}
       </div>
     </div>
@@ -3818,7 +3818,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
     {% for v in compras %}
     <div style="display:flex;justify-content:space-between;background:var(--card-2);border:1px solid var(--borda);border-radius:6px;padding:.5rem .8rem">
       <div><span class="mut" style="font-size:.8rem">{{ v.data }}</span>{% if v.pagamento %}<span class="mut" style="font-size:.72rem"> · {{ v.pagamento }}</span>{% endif %}</div>
-      <div style="color:#cfcfcf">R$ {{ "%.2f"|format(v.valor_centavos/100) }}</div>
+      <div style="color:var(--text-2)">R$ {{ "%.2f"|format(v.valor_centavos/100) }}</div>
     </div>
     {% endfor %}
   </div>
@@ -3827,7 +3827,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
   {% endif %}
   {% if papel in ('dono','gestor') %}
   <form method="post" action="/painel/clientes/{{ cliente.id }}/arquivar" style="margin-top:1.2rem" onsubmit="return confirm('Arquivar este {{ voc.cliente }}?')">
-    <button style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;padding:.4rem .8rem;border-radius:6px;cursor:pointer;font-size:.85rem;width:auto">Arquivar {{ voc.cliente }}</button>
+    <button style="background:transparent;border:1px solid var(--coral-borda);color:var(--coral);padding:.4rem .8rem;border-radius:6px;cursor:pointer;font-size:.85rem;width:auto">Arquivar {{ voc.cliente }}</button>
   </form>
   {% endif %}
 </div>
@@ -4013,24 +4013,24 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   .emp-cab h2{margin:0}
   .emp-quem{font-size:.82rem}
   .emp-quem a{color:var(--verde-claro);font-size:.76rem;text-decoration:none;white-space:nowrap}
-  .emp-selo{margin-left:auto;background:#15301f;color:var(--verde-claro);font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid var(--verde)44}
+  .emp-selo{margin-left:auto;background:var(--neon-fundo);color:var(--verde-claro);font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid var(--verde)44}
   .emp-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem;margin-top:1rem}
   @media (max-width:560px){.emp-tiles{grid-template-columns:1fr 1fr}.emp-tile{padding:.6rem .65rem}.emp-tile .v{font-size:.95rem}}
   .emp-tile{display:flex;flex-direction:column;gap:.1rem;min-width:0;padding:.7rem .85rem;border:1px solid var(--borda);border-radius:11px;background:var(--card-2);color:var(--txt);text-decoration:none}
-  .emp-tile:hover{border-color:#2f4439}
+  .emp-tile:hover{border-color:var(--neon-borda)}
   .emp-tile .r{font-size:.72rem;color:var(--txt-mut)}
   .emp-tile .v{font-family:var(--mono);font-size:1.12rem;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .emp-tile .d{font-size:.72rem;color:var(--txt-mut)}
-  .emp-tile .ruim{color:#E0574F}
-  .emp-tile .aviso{color:#f0c05a}
+  .emp-tile .ruim{color:var(--coral)}
+  .emp-tile .aviso{color:var(--ambar)}
   .emp-tile .bom{color:var(--verde-claro)}
   .emp-tile .v.mut{font-family:var(--body);font-size:.95rem;color:var(--txt-mut)}
   .emp-pend{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.75rem;font-size:.72rem;color:var(--txt-mut)}
-  .emp-pend a{font-size:.76rem;border:1px solid #5A4520;background:#241C0F;color:#f0dca6;border-radius:999px;padding:.2rem .65rem;text-decoration:none;white-space:nowrap}
+  .emp-pend a{font-size:.76rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar);border-radius:999px;padding:.2rem .65rem;text-decoration:none;white-space:nowrap}
   .emp-nav{position:sticky;top:0;z-index:30;display:flex;gap:.25rem;overflow-x:auto;margin:0 0 .9rem;padding:.35rem;border:1px solid var(--borda);border-radius:11px;background:var(--bg);scrollbar-width:none}
   .emp-nav::-webkit-scrollbar{display:none}
   .emp-nav a{font-size:.8rem;padding:.35rem .8rem;border-radius:8px;color:var(--txt-mut);text-decoration:none;white-space:nowrap}
-  .emp-nav a.on{background:#10241A;color:var(--verde-claro)}
+  .emp-nav a.on{background:var(--neon-fundo);color:var(--verde-claro)}
   .emp-nav small{font-family:var(--mono);color:var(--text-faint);margin-left:.25rem}
   /* configurações: os três recolhíveis viram linhas de UM cartão, no fim */
   .emp-full .card.larga.emp-conf{padding:0;overflow:hidden}
@@ -4138,14 +4138,14 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   .pc-gcode{font-family:var(--mono);font-size:.72rem;color:var(--txt-mut);min-width:1.2rem}
   .pc-gname{font-weight:700;font-size:.78rem;flex:1;text-transform:uppercase;letter-spacing:.03em}
   .pc-gmeta{font-size:.7rem;color:var(--txt-mut);white-space:nowrap}
-  .pc-acc{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem .5rem 1.4rem;border-bottom:1px solid #1c1c1e}
+  .pc-acc{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem .5rem 1.4rem;border-bottom:1px solid var(--line)}
   .pc-code{font-family:var(--mono);font-size:.72rem;color:var(--txt-mut);min-width:2.8rem}
   .pc-name{flex:1;font-size:.85rem}
   .pc-acc.off .pc-name,.pc-acc.off .pc-code{opacity:.45}
   .pc-tag{font-size:.6rem;font-weight:700;padding:.1rem .5rem;border-radius:10px;white-space:nowrap}
-  .pc-tag.receita{background:#12291f;color:var(--verde-claro)}
-  .pc-tag.despesa{background:#2c1a1a;color:#c98080}
-  .pc-sw{width:38px;height:22px;border-radius:20px;border:0;background:#33332f;position:relative;cursor:pointer;padding:0;flex:none}
+  .pc-tag.receita{background:var(--neon-fundo);color:var(--verde-claro)}
+  .pc-tag.despesa{background:var(--coral-fundo);color:var(--coral)}
+  .pc-sw{width:38px;height:22px;border-radius:20px;border:0;background:var(--line);position:relative;cursor:pointer;padding:0;flex:none}
   .pc-sw.on{background:var(--verde)}
   .pc-sw .knob{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#ddd;transition:.15s}
   .pc-sw.on .knob{transform:translateX(16px);background:#fff}
@@ -4156,10 +4156,10 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   .cc-info{flex:1 1 200px;font-size:.88rem}
   .cc-item.off .cc-info{opacity:.55}
   .cc-acoes{display:flex;gap:.4rem}
-  .cc-btn{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt)}
+  .cc-btn{background:none;border:1px solid var(--line);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt)}
   .cc-edit{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
-  .cc-edit input{flex:1 1 140px;font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
-  .cc-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
+  .cc-edit input{flex:1 1 140px;font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid var(--line-2);background:var(--bg);color:var(--txt)}
+  .cc-edit button{border:1px solid var(--line);border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
   .dre-tbl td{padding:.32rem .2rem}
   .dre-grp td:first-child{padding-left:.2rem}
   .dre-subtotal td{border-top:1px solid var(--borda);font-weight:600}
@@ -4194,10 +4194,10 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     </div>
   </div>{% endif %}
   <style>
-    .rcb-faixa{border:1px solid #1E4A3A;background:rgba(62,207,142,.07);border-radius:9px;padding:.55rem .75rem;margin:.5rem 0;font-size:.82rem;display:flex;flex-wrap:wrap;gap:.45rem .8rem;align-items:center;justify-content:space-between}
+    .rcb-faixa{border:1px solid var(--neon-borda);background:rgba(62,207,142,.07);border-radius:9px;padding:.55rem .75rem;margin:.5rem 0;font-size:.82rem;display:flex;flex-wrap:wrap;gap:.45rem .8rem;align-items:center;justify-content:space-between}
     .rcb-faixa form{margin:0}
-    .rcb-faixa button,.rcb-acoes a{border:1px solid #2f2f31;border-radius:7px;padding:.3rem .65rem;font-size:.76rem;cursor:pointer;width:auto;background:none;color:var(--txt);text-decoration:none;display:inline-block}
-    .rcb-faixa button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
+    .rcb-faixa button,.rcb-acoes a{border:1px solid var(--line);border-radius:7px;padding:.3rem .65rem;font-size:.76rem;cursor:pointer;width:auto;background:none;color:var(--txt);text-decoration:none;display:inline-block}
+    .rcb-faixa button.pr{border-color:var(--neon-borda);color:var(--verde-claro)}
     .rcb-acoes{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
   </style>
   <style>
@@ -4207,14 +4207,14 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
        justamente a soma "autorizado + atrasado". */
     .selo{display:inline-block;font-size:.66rem;font-weight:700;border-radius:5px;
       padding:.08rem .4rem;letter-spacing:.02em;white-space:nowrap;vertical-align:.05em}
-    .selo.esp{border:1px solid #5A4520;background:#241C0F;color:#E0A32E}
-    .selo.rec{border:1px solid #5A2B2B;background:#241313;color:#E0574F}
-    .selo.falta{border:1px solid #5A4520;background:#241C0F;color:#E0A32E}
-    .selo.furo{border:1px solid #5A2B2B;background:#241313;color:#E0574F}
-    .selo.rep{border:1px solid #3A3260;background:#191630;color:#B3A7EA}
+    .selo.esp{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+    .selo.rec{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+    .selo.falta{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+    .selo.furo{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+    .selo.rep{border:1px solid var(--roxo-borda);background:var(--roxo-fundo);color:var(--roxo)}
     .tit-lote{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;
-      margin:.6rem 0 .2rem;padding:.6rem .7rem;border:1px solid #5A4520;
-      background:#241C0F;border-radius:10px;font-size:.8rem}
+      margin:.6rem 0 .2rem;padding:.6rem .7rem;border:1px solid var(--ambar-borda);
+      background:var(--ambar-fundo);border-radius:10px;font-size:.8rem}
     .tit-lote button{background:var(--verde);color:var(--sobre-verde);border:0;
       border-radius:7px;padding:.34rem .8rem;font-size:.78rem;font-weight:600;
       cursor:pointer;width:auto}
@@ -4223,15 +4223,15 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
        verde é "pode pagar", âmbar é "ainda depende de você". */
     .tit-bloco{border:1px solid var(--borda);border-radius:11px;overflow:hidden;
       margin:.7rem 0}
-    .tit-bloco.ok{border-color:#1E4A3A}
-    .tit-bloco.esp{border-color:#5A4520}
+    .tit-bloco.ok{border-color:var(--neon-borda)}
+    .tit-bloco.esp{border-color:var(--ambar-borda)}
     .tit-bcab{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;
       padding:.55rem .8rem;background:var(--card-2);border-bottom:1px solid var(--borda)}
-    .tit-bloco.ok .tit-bcab{background:#10241A}
-    .tit-bloco.esp .tit-bcab{background:#241C0F}
+    .tit-bloco.ok .tit-bcab{background:var(--neon-fundo)}
+    .tit-bloco.esp .tit-bcab{background:var(--ambar-fundo)}
     .tit-bt{font-weight:600;font-size:.88rem}
-    .tit-bloco.ok .tit-bt{color:#9fe8c9}
-    .tit-bloco.esp .tit-bt{color:#f0dca6}
+    .tit-bloco.ok .tit-bt{color:var(--neon)}
+    .tit-bloco.esp .tit-bt{color:var(--ambar)}
     .tit-bs{font-size:.76rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
     .tit-bd{font-size:.74rem;color:var(--txt-mut);flex:1 1 100%}
     .tit-blote{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .7rem;font-size:.76rem}
@@ -4344,38 +4344,38 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .tit-nova[open]>.tit-nova-bt .fechado{display:none}
     @media (max-width:700px){.tit-nova-bt{display:block}}
     .tit-nova-f{border:1px solid var(--borda);border-radius:12px;padding:.75rem;background:var(--card-2);display:flex;flex-direction:column;gap:.6rem}
-    .tit-nova-f label{display:flex;flex-direction:column;gap:.2rem;font-size:.72rem;color:#8a938a;min-width:0;margin:0}
+    .tit-nova-f label{display:flex;flex-direction:column;gap:.2rem;font-size:.72rem;color:var(--text-dim);min-width:0;margin:0}
     .tit-nova-f input:not([type=radio]):not([type=checkbox]),.tit-nova-f .tn-l select{width:100%;min-width:0;margin:0;height:2.5rem;min-height:0;box-sizing:border-box;padding:.4rem .6rem;font-size:.86rem}
     .tn-l{display:grid;gap:.5rem;align-items:end}
     .tn-l1{grid-template-columns:auto minmax(0,2fr) minmax(0,.8fr) minmax(0,1fr)}
     .tn-l2{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
     .tn-l2 .tit-classe-nova{display:contents}
     .tn-tipo{display:flex;flex-direction:column;gap:.2rem}
-    .tn-rot{font-size:.72rem;color:#8a938a}
-    .tn-tog{display:inline-flex;border:1px solid #2f3a33;border-radius:8px;overflow:hidden}
+    .tn-rot{font-size:.72rem;color:var(--text-dim)}
+    .tn-tog{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
     .tn-tog label{flex-direction:row;cursor:pointer}
     .tn-tog input{position:absolute;opacity:0;width:1px;height:1px;min-height:0;pointer-events:none}
     .tn-tog span{display:block;padding:0 .8rem;line-height:2.4rem;font-size:.84rem;color:var(--txt-mut);white-space:nowrap}
-    .tn-tog input:checked+span{background:#2a1512;color:#f2a79f;font-weight:600}
-    .tn-tog input[value=receber]:checked+span{background:#10241A;color:var(--verde-claro)}
+    .tn-tog input:checked+span{background:var(--coral-fundo);color:var(--coral);font-weight:600}
+    .tn-tog input[value=receber]:checked+span{background:var(--neon-fundo);color:var(--verde-claro)}
     .tn-tog input:focus-visible+span{outline:2px solid var(--verde-claro);outline-offset:-2px}
     .tn-l3{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem}
     .tn-add{margin-left:auto;width:auto;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.6rem 1.1rem;font-weight:700;cursor:pointer;white-space:nowrap}
-    #tit-mem-dica{font-size:.7rem;color:#9fe8c9;min-height:0}
+    #tit-mem-dica{font-size:.7rem;color:var(--neon);min-height:0}
     #tit-mem-dica:empty{display:none}
-    .tit-classe-nova select.lembrado{border-color:#1E4A3A;background:#10241A}
-    .tit-rep-nova{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;font-size:.76rem;color:#8a938a}
+    .tit-classe-nova select.lembrado{border-color:var(--neon-borda);background:var(--neon-fundo)}
+    .tit-rep-nova{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;font-size:.76rem;color:var(--text-dim)}
     .tit-rep-nova label{flex-direction:row!important;align-items:center;gap:.35rem!important;color:var(--txt)!important;font-size:.78rem!important}
     .tit-rep-nova label[hidden]{display:none}
     .tit-rep-nova select{font-size:.78rem;padding:.25rem .4rem;width:auto!important;height:auto;min-height:0;margin:0}
     .tit-rep-nova input[type=checkbox]{width:auto}
     .tit-tipo-d{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .6rem}
-    .tit-tipo-d .rot{font-size:.72rem;color:#8a938a}
+    .tit-tipo-d .rot{font-size:.72rem;color:var(--text-dim)}
     .tit-tipo-d .chips{display:flex;flex-wrap:wrap;gap:.35rem}
     .chip-td{display:inline-flex!important;flex-direction:row!important;align-items:center;cursor:pointer;margin:0}
     .chip-td input{position:absolute;opacity:0;width:1px;height:1px;min-height:0;pointer-events:none}
-    .chip-td span{border:1px solid #2f2f31;border-radius:999px;padding:.28rem .75rem;font-size:.76rem;color:var(--txt-mut)}
-    .chip-td input:checked+span{border-color:#1E4A3A;background:#10241A;color:var(--verde-claro);font-weight:600}
+    .chip-td span{border:1px solid var(--line);border-radius:999px;padding:.28rem .75rem;font-size:.76rem;color:var(--txt-mut)}
+    .chip-td input:checked+span{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--verde-claro);font-weight:600}
     .chip-td input:focus-visible+span{outline:2px solid var(--verde-claro);outline-offset:1px}
     .tit-tipo-d.lembrado .chip-td input:checked+span{border-style:dashed}
     @media (max-width:700px){
@@ -4500,7 +4500,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .tit-meta{font-size:.7rem;margin-top:3px;color:var(--txt-mut)}
     .tit-classe{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.35rem}
     .tit-classe select{flex:1 1 150px;min-width:0;font-size:.74rem;padding:.25rem .35rem}
-    .tit-cls{color:#9fb8ad}
+    .tit-cls{color:var(--text-2)}
     .tit-val{flex:0 0 auto;margin-left:auto;text-align:right;white-space:nowrap;font-weight:600;font-variant-numeric:tabular-nums}
     /* os botões ficam NA linha da conta (no máximo dois + o ▾); em tela
        estreita descem sozinhos pra baixo da descrição */
@@ -4509,7 +4509,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .tit-acoes button,.tit-acoes a{min-height:0;height:auto;margin:0;line-height:1.3}
     .tit-acoes form{margin:0}
     .tit-mais{flex:1 1 100%;display:flex;flex-direction:column;gap:.45rem;margin-top:.25rem;
-      background:var(--card-2);border:1px solid #26332b;border-radius:10px;padding:.6rem .7rem}
+      background:var(--card-2);border:1px solid var(--neon-borda);border-radius:10px;padding:.6rem .7rem}
     .tit-mais[hidden]{display:none}
     .tit-mais .tit-edit{display:flex;margin-top:0}
     .tit-mais button,.tit-mais select,.tit-mais input{min-height:0;height:auto;margin:0}
@@ -4518,38 +4518,38 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .tm-f{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem;border-top:1px solid var(--borda);padding-top:.5rem}
     .tm-f form{display:inline;margin:0}
     .tm-d{font-size:.76rem;color:var(--txt-mut)}
-    .tm-f button{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt)}
-    .tm-f .tm-apaga{color:#c98080}
+    .tm-f button{background:none;border:1px solid var(--line);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt)}
+    .tm-f .tm-apaga{color:var(--coral)}
     .tm-f form:last-child{margin-left:auto}
     @media (max-width:700px){.tit-acoes{flex:1 1 100%}}
-    .tit-acoes button,.tit-acoes a{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;text-decoration:none}
+    .tit-acoes button,.tit-acoes a{background:none;border:1px solid var(--line);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;text-decoration:none}
     .tit-acoes form{display:inline;margin:0}
     .tit-rep{display:inline-flex!important;align-items:center;gap:.35rem;font-size:.75rem;color:var(--txt-mut)}
-    .tit-rep select{font-size:.75rem;padding:.24rem .35rem;width:auto;border-radius:7px;border:1px solid #2f2f31;background:var(--bg);color:var(--txt)}
+    .tit-rep select{font-size:.75rem;padding:.24rem .35rem;width:auto;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--txt)}
     .tit-rep label{display:inline-flex;align-items:center;gap:.25rem;white-space:nowrap}
     .tit-rep input[type=checkbox]{width:auto}
     .tit-edit{flex:1 1 100%;flex-wrap:wrap;gap:.4rem;margin-top:.3rem;align-items:center}
-    .tit-edit input{font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
-    .tit-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
+    .tit-edit input{font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid var(--line-2);background:var(--bg);color:var(--txt)}
+    .tit-edit button{border:1px solid var(--line);border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
     .tit-baixa{flex:1 1 100%;flex-wrap:wrap;gap:.5rem .8rem;margin-top:.4rem;align-items:end;
-      background:var(--card-2);border:1px solid #5A4520;border-radius:9px;padding:.6rem .7rem}
-    .tit-bx{display:flex;flex-direction:column;gap:.15rem;font-size:.68rem;color:#8a938a}
-    .tit-dif{flex:1 1 100%;min-width:0;max-width:100%;box-sizing:border-box;flex-direction:column;gap:.35rem;border:1px solid #5a4a22;background:rgba(240,192,90,.07);border-radius:8px;padding:.5rem .65rem;font-size:.78rem}
-    .tit-dif p{margin:0;color:#F2E2C4}
-    .tit-dif p.falta{color:#f0c05a;font-weight:600}
+      background:var(--card-2);border:1px solid var(--ambar-borda);border-radius:9px;padding:.6rem .7rem}
+    .tit-bx{display:flex;flex-direction:column;gap:.15rem;font-size:.68rem;color:var(--text-dim)}
+    .tit-dif{flex:1 1 100%;min-width:0;max-width:100%;box-sizing:border-box;flex-direction:column;gap:.35rem;border:1px solid var(--ambar-borda);background:rgba(240,192,90,.07);border-radius:8px;padding:.5rem .65rem;font-size:.78rem}
+    .tit-dif p{margin:0;color:var(--text)}
+    .tit-dif p.falta{color:var(--ambar);font-weight:600}
     .tit-dif-menos,.tit-dif-mais{flex-direction:column;gap:.3rem}
     .tit-dif label{display:flex;flex-wrap:nowrap;align-items:flex-start;gap:.45rem;cursor:pointer;margin:0;font-size:.8rem;color:var(--txt);line-height:1.35}
     .tit-dif input[type=radio]{width:auto;min-height:0;height:auto;margin:.15rem 0 0;padding:0;border:0;flex:0 0 auto;max-width:none}
     .tit-dif select{font-size:.76rem;width:calc(100% - 1.4rem);max-width:calc(100% - 1.4rem);min-height:0;padding:.3rem .45rem;margin-left:1.4rem;box-sizing:border-box;text-overflow:ellipsis}
     .tit-dif-nota{font-size:.7rem}
-    .tit-cred{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .5rem;margin:.3rem 0;font-size:.74rem;color:#F2E2C4;border:1px solid #5a4a22;background:rgba(240,192,90,.07);border-radius:7px;padding:.35rem .5rem}
+    .tit-cred{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .5rem;margin:.3rem 0;font-size:.74rem;color:var(--text);border:1px solid var(--ambar-borda);background:rgba(240,192,90,.07);border-radius:7px;padding:.35rem .5rem}
     .tit-cred select{font-size:.72rem;max-width:100%;min-width:0;width:auto;min-height:0;padding:.25rem .4rem}
-    .tit-cred button{border:1px solid #5a4a22;border-radius:7px;padding:.25rem .6rem;font-size:.74rem;cursor:pointer;width:auto;background:none;color:#f0c05a}
-    .tit-baixa input{font-size:.8rem;padding:.32rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt);width:auto;max-width:140px}
-    .tit-baixa button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
-    .tit-bx-dica{flex:1 1 100%;font-size:.72rem;color:#8a938a;order:9}
-    .tit-bx-tot{font-size:.82rem;font-weight:600;font-variant-numeric:tabular-nums;color:#f0dca6;align-self:center}
-    .selo.jur{border:1px solid #5A2B2B;background:#241313;color:#E0A32E}
+    .tit-cred button{border:1px solid var(--ambar-borda);border-radius:7px;padding:.25rem .6rem;font-size:.74rem;cursor:pointer;width:auto;background:none;color:var(--ambar)}
+    .tit-baixa input{font-size:.8rem;padding:.32rem .5rem;border-radius:7px;border:1px solid var(--line-2);background:var(--bg);color:var(--txt);width:auto;max-width:140px}
+    .tit-baixa button{border:1px solid var(--line);border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
+    .tit-bx-dica{flex:1 1 100%;font-size:.72rem;color:var(--text-dim);order:9}
+    .tit-bx-tot{font-size:.82rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ambar);align-self:center}
+    .selo.jur{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--ambar)}
   </style>
   {% if pode_liberar and n_aguardando %}
   {# LOTE. Não é conveniência: ligar a liberação numa empresa que já tem 30
@@ -4577,19 +4577,19 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       border-radius:9px;border:1px solid var(--borda);background:var(--card-2);
       color:var(--txt-mut);text-decoration:none;font-size:.78rem;line-height:1.35}
     .tit-filtro a b{display:block;font-family:var(--mono);font-size:.86rem;color:var(--txt)}
-    .tit-filtro a.on{background:#241C0F;border-color:#5A4520;color:#f0dca6}
-    .tit-filtro a.on b{color:#f0dca6}
-    .tit-filtro a.ok.on{background:#10241A;border-color:#1E4A3A;color:#9fe8c9}
-    .tit-filtro a.ok.on b{color:#9fe8c9}
+    .tit-filtro a.on{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:var(--ambar)}
+    .tit-filtro a.on b{color:var(--ambar)}
+    .tit-filtro a.ok.on{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--neon)}
+    .tit-filtro a.ok.on b{color:var(--neon)}
     .tit-filtro a.rec.on{background:var(--card-2);border-color:var(--verde-claro);color:var(--verde-claro)}
     .tit-filtro a.rec.on b{color:var(--verde-claro)}
     /* A LENTE DAS ATRASADAS. A pílula nasce coral mesmo DESLIGADA — as outras só
        ganham cor quando selecionadas. É de propósito: as outras três dizem em que
        gaveta a conta está, esta diz que tem dinheiro vencido, e isso não depende
        de alguém clicar pra ser verdade. */
-    .tit-filtro a.atr{border-color:#5A2B2B;background:#1C0F0F;color:#c98a85}
-    .tit-filtro a.atr b{color:#E0574F}
-    .tit-filtro a.atr.on{background:#241313;border-color:#E0574F;color:#F0A9A2}
+    .tit-filtro a.atr{border-color:var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+    .tit-filtro a.atr b{color:var(--coral)}
+    .tit-filtro a.atr.on{background:var(--coral-fundo);border-color:var(--coral);color:var(--coral)}
     /* Ligada, o bloco continua inteiro e só as linhas atrasadas ficam — ver o
        comentário de `_atrasadas` na rota: elas atravessam os três blocos. */
     .tit-bloco.so-atr .tit-lin:not(.atr){display:none}
@@ -4636,17 +4636,17 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         {% if t.folha_parte %} <span class="selo rep" title="gerada pela folha (Equipe e folha › Datas de pagamento): o valor acompanha a folha, e a baixa entra no holerite sozinha">📅 folha · {{ t.folha_parte }}</span>{% endif %}
         {% if not t.valor_centavos %} <span class="selo falta">falta o valor</span>{% endif %}
         {% if t.sem_fornecedor %} <span class="selo falta">sem fornecedor</span>{% endif %}</div>
-      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span>{% if t.tipo=='pagar' and t.referencia %} · <span title="mês de referência{{ '' if t.referencia_anotada else ' (o anterior ao vencimento — dá pra mudar no editar)' }}">ref. {{ t.referencia.strftime('%m/%Y') }}</span>{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
+      <div class="tit-meta"><span style="{% if t.atrasado %}color:var(--ambar){% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span>{% if t.tipo=='pagar' and t.referencia %} · <span title="mês de referência{{ '' if t.referencia_anotada else ' (o anterior ao vencimento — dá pra mudar no editar)' }}">ref. {{ t.referencia.strftime('%m/%Y') }}</span>{% endif %} · {% if t.tipo=='pagar' %}<span style="color:var(--coral)">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:var(--coral)">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
-      seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
+      seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:var(--roxo)" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
       "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}{#- o PORQUÊ de um valor mexido pelo painel da diferença (323): sem isto,
       "por que outubro é R$ 1.067 e não R$ 1.142?" não teria resposta na tela. -#}{% if t.tipo_despesa %} · <span class="tit-cls" style="color:{{ TIPO_DESPESA_COR[t.tipo_despesa] }}">{{ TIPO_DESPESA_ROTULO[t.tipo_despesa] }}</span>{% endif %}{% set _aj = (ajustes or {}).get(t.id) %}{% if _aj and _aj.tipo == 'abatimento' %} · <span class="selo jur" title="valor combinado: {{ _aj.antes|brl }}">− {{ (_aj.antes - _aj.depois)|brl }} de crédito abatido</span>{% elif _aj and _aj.tipo == 'restante' %} · <span class="selo jur">o que faltou de um {{ 'pagamento' if t.tipo=='pagar' else 'recebimento' }}</span>{% endif %}</div>
     </div>
     {#- R$ 0,00 seria mentira de dois jeitos: diz que a conta é de graça e some
        na soma da lista. A conta de valor variável (196) nasce sem valor de
        propósito — o boleto da água ainda não chegou. -#}
-    {% if t.valor_centavos %}<div class="tit-val" style="color:{{ '#e07a5f' if t.tipo=='pagar' else 'var(--verde-claro)' }}">{{ t.valor_centavos|brl }}</div>
-    {% else %}<div class="tit-val" style="color:#f0c05a;font-weight:500" title="esta conta repete a data, não o valor">— informar</div>{% endif %}
+    {% if t.valor_centavos %}<div class="tit-val" style="color:{{ 'var(--coral)' if t.tipo=='pagar' else 'var(--verde-claro)' }}">{{ t.valor_centavos|brl }}</div>
+    {% else %}<div class="tit-val" style="color:var(--ambar);font-weight:500" title="esta conta repete a data, não o valor">— informar</div>{% endif %}
     {#- OS BOTÕES DA CONTA MOSTRAM O PRÓXIMO PASSO DELA (24/09/2026, mockup
        docs/mockups/empresa_layout.html, seção "Cada conta mostra o próximo passo
        dela"). Eram seis botões iguais em toda conta — dar baixa, liberar,
@@ -4678,24 +4678,24 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
          registra na segunda tem uma data pra informar. Custa um clique a mais;
          em troca, o caixa passa a bater com o banco. -#}
       {% if not t.valor_centavos %}
-      <button type="button" onclick="titEditToggle(this,'valor')" style="color:#f0c05a;border-color:#5A4520">✎ pôr o valor</button>
+      <button type="button" onclick="titEditToggle(this,'valor')" style="color:var(--ambar);border-color:var(--ambar-borda)">✎ pôr o valor</button>
       {% elif _decide %}
       <form method="post" action="/painel/empresa/titulo/aprovacao">
         <input type="hidden" name="titulo_id" value="{{ t.id }}">
         <input type="hidden" name="decisao" value="autorizado">
-        <button style="color:var(--verde-claro);border-color:#1E4A3A">✓ liberar</button></form>
+        <button style="color:var(--verde-claro);border-color:var(--neon-borda)">✓ liberar</button></form>
       <form method="post" action="/painel/empresa/titulo/aprovacao"
             onsubmit="var m=prompt('Por que está recusando? (o motivo vai pra quem lançou)');
                       if(m===null)return false; this.motivo.value=m; return true">
         <input type="hidden" name="titulo_id" value="{{ t.id }}">
         <input type="hidden" name="decisao" value="recusado">
         <input type="hidden" name="motivo" value="">
-        <button style="color:#c98080">✕ recusar</button></form>
+        <button style="color:var(--coral)">✕ recusar</button></form>
       {% elif _reve %}
       <form method="post" action="/painel/empresa/titulo/aprovacao">
         <input type="hidden" name="titulo_id" value="{{ t.id }}">
         <input type="hidden" name="decisao" value="autorizado">
-        <button style="color:var(--verde-claro);border-color:#1E4A3A">✓ liberar</button></form>
+        <button style="color:var(--verde-claro);border-color:var(--neon-borda)">✓ liberar</button></form>
       {% else %}
       {#- "JÁ FOI PAGA": liga esta conta a um pagamento que JÁ ESTÁ no caixa, em
          vez de lançar um novo. Veio do relatório em 04/09/2026, junto com a
@@ -4719,11 +4719,11 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/conciliar"
             data-confirmar="{{ t.conciliar.confirmar|e }}">
         <input type="hidden" name="lancamento_id" value="{{ t.conciliar.lancamento_id }}">
-        <button style="color:var(--verde-claro);border-color:#1E4A3A"
+        <button style="color:var(--verde-claro);border-color:var(--neon-borda)"
           title="{{ t.conciliar.titulo|e }}">✓ já foi paga — {{ t.conciliar.resumo }}</button></form>
       {% endif %}
       <button type="button" onclick="titBaixaToggle(this)"{% if not t.conciliar %} style="color:var(--verde-claro)"{% endif %}>dar baixa ✓</button>
-      {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar"><button style="color:#c99536">cobrar via Pix →</button></form>{% endif %}{% endif %}
+      {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:var(--ambar)">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar"><button style="color:var(--ambar)">cobrar via Pix →</button></form>{% endif %}{% endif %}
       {% endif %}
       <button type="button" class="tit-mais-bt" onclick="titMais(this)" aria-expanded="false" title="editar, repetir, apagar">▾</button>
     </div>
@@ -4788,8 +4788,8 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         </div>
       </div>
       {% endif %}
-      <button style="color:var(--verde-claro);border-color:#1E4A3A">confirmar baixa</button>
-      <button type="button" onclick="titBaixaToggle(this)" style="color:#8a938a">cancelar</button>
+      <button style="color:var(--verde-claro);border-color:var(--neon-borda)">confirmar baixa</button>
+      <button type="button" onclick="titBaixaToggle(this)" style="color:var(--text-dim)">cancelar</button>
     </form>
     {% endif %}
     {#- O PAINEL DO ▾: o que se faz de vez em quando, com nome. Apagar fica no
@@ -4852,7 +4852,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         </select>{% endif %}
       </div>
       <button style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
-      <button type="button" onclick="titMais(this)" style="color:#8a938a">fechar</button>
+      <button type="button" onclick="titMais(this)" style="color:var(--text-dim)">fechar</button>
     </form>
       <div class="tm-f">
         <span class="tm-r">Repete</span>
@@ -4879,7 +4879,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/conciliar"
             data-confirmar="{{ t.conciliar.confirmar|e }}">
         <input type="hidden" name="lancamento_id" value="{{ t.conciliar.lancamento_id }}">
-        <button style="color:var(--verde-claro);border-color:#1E4A3A"
+        <button style="color:var(--verde-claro);border-color:var(--neon-borda)"
           title="{{ t.conciliar.titulo|e }}">✓ já foi paga — {{ t.conciliar.resumo }}</button></form>
       {% endif %}
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" class="tm-apaga">🗑 apagar conta</button></form>
@@ -5097,7 +5097,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
           <select name="alvo_id">{% for a in _cp.alvos %}<option value="{{ a.id }}">{{ a.vencimento.strftime('%d/%m') if a.vencimento else '' }} · {{ a.valor_centavos|brl }} · {{ a.descricao|e }}</option>{% endfor %}</select>
           <button>abater</button>
         </form>{% endif %}
-        <div class="tit-meta">baixado {% if t.pago_em %}{{ t.pago_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}{% if t.acrescimo_centavos and t.pago_em and t.vencimento and t.pago_em > t.vencimento %} · <span style="color:#f0c05a">{{ (t.pago_em - t.vencimento).days }} dias de atraso</span>{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">pago</span>{% else %}<span style="color:var(--verde-claro)">recebido</span>{% endif %}</div>
+        <div class="tit-meta">baixado {% if t.pago_em %}{{ t.pago_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}{% if t.acrescimo_centavos and t.pago_em and t.vencimento and t.pago_em > t.vencimento %} · <span style="color:var(--ambar)">{{ (t.pago_em - t.vencimento).days }} dias de atraso</span>{% endif %} · {% if t.tipo=='pagar' %}<span style="color:var(--coral)">pago</span>{% else %}<span style="color:var(--verde-claro)">recebido</span>{% endif %}</div>
       </div>
       <div class="tit-val" style="opacity:.75">{{ (t.valor_centavos + t.acrescimo_centavos)|brl }}{% if t.acrescimo_centavos %}<div style="font-size:.66rem;font-weight:400;color:var(--txt-mut)">conta {{ t.valor_centavos|brl }}</div>{% endif %}</div>
       <div class="tit-acoes">
@@ -5108,7 +5108,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         <a href="/painel/financeiro" class="mut" style="font-size:.72rem;text-decoration:none"
            title="a baixa lançou no livro-caixa: pra desfazer, apague o lançamento no financeiro">no caixa ↗</a>
         {% else %}
-        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título baixado? Ele não tem lançamento no caixa, então nada de dinheiro é afetado.')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
+        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título baixado? Ele não tem lançamento no caixa, então nada de dinheiro é afetado.')"><button title="apagar título" style="color:var(--coral)">apagar ✕</button></form>
         {% endif %}
       </div>
     </div>{% endfor %}
@@ -5129,25 +5129,25 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   .plj-l{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;padding:.3rem 0;font-size:.88rem}
   .plj-l span i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
   .plj-l b{font-family:var(--mono);font-weight:600;white-space:nowrap}
-  .plj-l.ruim b,.plj-l.ruim span{color:#e07a5f}
-  .plj-l.aviso b,.plj-l.aviso span{color:#f0c05a}
+  .plj-l.ruim b,.plj-l.ruim span{color:var(--coral)}
+  .plj-l.aviso b,.plj-l.aviso span{color:var(--ambar)}
   .plj-l.tot{border-top:1px solid var(--borda);margin-top:.3rem;padding-top:.55rem;font-weight:600}
   .plj-l.tot.bom b{color:var(--verde-claro)}
   .plj-l .falta{color:var(--txt-mut);font-weight:400}
-  .plj-dica{margin:.5rem 0 0;font-size:.8rem;color:#f0c05a;line-height:1.4}
+  .plj-dica{margin:.5rem 0 0;font-size:.8rem;color:var(--ambar);line-height:1.4}
   .plj-bancos{margin-top:.8rem;border-top:1px dashed var(--borda);padding-top:.6rem;display:flex;flex-direction:column;gap:.4rem}
   .plj-banco{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem;font-size:.8rem;margin:0}
   .plj-banco .nome{font-weight:600;min-width:7rem}
   .plj-banco .idade{flex:1 1 9rem;color:var(--txt-mut);font-size:.72rem}
-  .plj-banco.velho .idade{color:#f0c05a}
+  .plj-banco.velho .idade{color:var(--ambar)}
   .plj-banco.velho .nome{color:var(--txt-mut)}
   .plj-banco input{width:auto;flex:0 1 9rem;min-width:0;font-size:.8rem;padding:.3rem .45rem}
   .plj-banco button{width:auto;background:none;border:1px solid var(--borda);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;color:var(--txt)}
-  .plj-banco button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
-  .plj-banco button.tira{color:#c98080}
+  .plj-banco button.pr{border-color:var(--neon-borda);color:var(--verde-claro)}
+  .plj-banco button.tira{color:var(--coral)}
   .plj-banco label.neg{display:inline-flex;align-items:center;gap:.25rem;margin:0;font-size:.74rem;color:var(--txt-mut);cursor:pointer;white-space:nowrap}
   .plj-banco label.neg input{width:auto;flex:none;margin:0;padding:0}
-  .plj-banco label.neg:has(input:checked){color:#e07a5f}
+  .plj-banco label.neg:has(input:checked){color:var(--coral)}
   .plj-banco.novo input[name=banco]{flex:1 1 9rem}
   .plj-edita{margin-top:.7rem}
   .plj-edita>summary{cursor:pointer;color:var(--verde-claro);font-size:.78rem}
@@ -5204,7 +5204,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
 <div class="card larga" id="carteira">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
     <strong>👥 Carteira de {{ voc.clientes }}</strong>
-    <span class="mut" style="font-size:.72rem">{{ (rotulo_receber or 'A receber') }} em aberto: <b style="color:var(--verde-claro)">{{ carteira.total_centavos|brl }}</b>{% if carteira.atrasado_centavos %} · <b style="color:#f0c05a">{{ carteira.atrasado_centavos|brl }} atrasado</b>{% endif %}</span>
+    <span class="mut" style="font-size:.72rem">{{ (rotulo_receber or 'A receber') }} em aberto: <b style="color:var(--verde-claro)">{{ carteira.total_centavos|brl }}</b>{% if carteira.atrasado_centavos %} · <b style="color:var(--ambar)">{{ carteira.atrasado_centavos|brl }} atrasado</b>{% endif %}</span>
   </div>
   <style>
     .cart-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .8rem;padding:.6rem 0;border-top:1px solid var(--card-2)}
@@ -5217,8 +5217,8 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
        empurrava a página (14 clientes na Prime em 24/09/2026). O resto abre. -#}
     {% macro cart_lin(c) %}<div class="cart-lin">
       <div class="cart-nome">{% if c.cliente_id %}<a href="/painel/clientes/{{ c.cliente_id }}" style="color:var(--txt);text-decoration:none">👤 {{ c.nome }}</a>{% else %}<span class="mut">{{ c.nome }}</span>{% endif %}
-        <span class="mut" style="font-size:.7rem">· {{ c.n }} título(s){% if c.atrasado %} · <span style="color:#f0c05a">⚠ {{ c.atrasado_centavos|brl }} atrasado</span>{% endif %}</span></div>
-      <div class="cart-val" style="color:{{ '#f0c05a' if c.atrasado else 'var(--verde-claro)' }}">{{ c.total_centavos|brl }}</div>
+        <span class="mut" style="font-size:.7rem">· {{ c.n }} título(s){% if c.atrasado %} · <span style="color:var(--ambar)">⚠ {{ c.atrasado_centavos|brl }} atrasado</span>{% endif %}</span></div>
+      <div class="cart-val" style="color:{{ 'var(--ambar)' if c.atrasado else 'var(--verde-claro)' }}">{{ c.total_centavos|brl }}</div>
     </div>{% endmacro %}
     {% for c in carteira.clientes[:5] %}{{ cart_lin(c) }}{% endfor %}
     {% if carteira.clientes|length > 5 %}<details class="cart-mais"><summary>ver os {{ carteira.clientes|length }} {{ voc.clientes }}</summary>
@@ -5241,8 +5241,8 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   <table class="dre-tbl" style="width:100%;margin-top:.6rem;font-size:.86rem">
     {% for l in dre.estrutura.linhas %}
     <tr class="dre-{{ l.tipo }}">
-      <td class="{% if l.tipo=='grupo' %}mut{% endif %}">{{ l.nome }}{% if l.n %} <span class="mut" style="font-size:.7rem">({{ l.n }} lanç.)</span>{% if a_classificar %} <a href="#a-classificar" style="color:#f0c05a;font-size:.74rem;white-space:nowrap">classificar →</a>{% endif %}{% endif %}</td>
-      <td style="text-align:right;font-variant-numeric:tabular-nums;{% if l.valor_centavos < 0 %}color:#e07a5f{% elif l.tipo in ('subtotal','total') %}color:var(--verde-claro){% endif %}">{{ l.valor_centavos|brl }}{% if l.margem_pct is defined %} · {{ l.margem_pct }}%{% endif %}</td>
+      <td class="{% if l.tipo=='grupo' %}mut{% endif %}">{{ l.nome }}{% if l.n %} <span class="mut" style="font-size:.7rem">({{ l.n }} lanç.)</span>{% if a_classificar %} <a href="#a-classificar" style="color:var(--ambar);font-size:.74rem;white-space:nowrap">classificar →</a>{% endif %}{% endif %}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums;{% if l.valor_centavos < 0 %}color:var(--coral){% elif l.tipo in ('subtotal','total') %}color:var(--verde-claro){% endif %}">{{ l.valor_centavos|brl }}{% if l.margem_pct is defined %} · {{ l.margem_pct }}%{% endif %}</td>
     </tr>
     {% endfor %}
   </table>
@@ -5251,7 +5251,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     <tr><td class="mut">Receitas</td><td style="text-align:right;color:var(--verde-claro)">{{ dre.receitas_centavos|brl }}</td></tr>
     <tr><td class="mut">(−) Despesas</td><td style="text-align:right">{{ dre.despesas_centavos|brl }}</td></tr>
     <tr style="border-top:1px solid var(--borda)"><td style="font-weight:600">Resultado</td>
-      <td style="text-align:right;font-weight:600;color:{{ 'var(--verde-claro)' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
+      <td style="text-align:right;font-weight:600;color:{{ 'var(--verde-claro)' if dre.resultado_centavos>=0 else 'var(--coral)' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
   </table>
   {% endif %}
 
@@ -5271,9 +5271,9 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   {% endif %}
 
   {% if dre.a_definir_n %}
-  <div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin-top:.7rem;color:#f0c05a;font-size:.78rem;line-height:1.35">
+  <div style="background:var(--ambar-fundo);border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin-top:.7rem;color:var(--ambar);font-size:.78rem;line-height:1.35">
     ⚠️ <b>{{ dre.a_definir_centavos|brl }}</b> em <b>{{ dre.a_definir_n }}</b> lançamento(s) ainda a classificar <b>não entraram</b> neste DRE.
-    <a href="/painel/financeiro?mes={{ dre.mes }}&natureza=a_definir" style="color:#f0c05a;text-decoration:underline">classificar agora →</a>
+    <a href="/painel/financeiro?mes={{ dre.mes }}&natureza=a_definir" style="color:var(--ambar);text-decoration:underline">classificar agora →</a>
   </div>
   {% endif %}
 
@@ -5288,14 +5288,14 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   .ac-info{flex:1 1 190px;min-width:0}
   .ac-info .d{font-size:.9rem}
   .ac-info .m{font-size:.7rem;color:var(--txt-mut);margin-top:2px}
-  .ac-sel{background:var(--bg);border:1px solid #2a3a33;border-radius:7px;color:var(--txt);font-size:.75rem;padding:.28rem .5rem;font-family:inherit;outline:none;max-width:180px}
+  .ac-sel{background:var(--bg);border:1px solid var(--neon-borda);border-radius:7px;color:var(--txt);font-size:.75rem;padding:.28rem .5rem;font-family:inherit;outline:none;max-width:180px}
   .ac-sel:focus{border-color:var(--verde)}
   .ac-sel.miss{border-color:#f0c05a66}
   .ac-sel.done{border-color:var(--verde-claro)}
   .ac-ok{color:var(--verde-claro);font-weight:600;font-size:.75rem;white-space:nowrap}
 </style>
 <details class="card larga sec-pc ac-card" id="a-classificar">
-  <summary><span id="ac-titulo" style="color:#f0c05a"><span id="ac-rotulo">⚠️ Lançamentos a classificar</span> <span id="ac-count">({{ a_classificar|length }})</span>
+  <summary><span id="ac-titulo" style="color:var(--ambar)"><span id="ac-rotulo">⚠️ Lançamentos a classificar</span> <span id="ac-count">({{ a_classificar|length }})</span>
     <span id="ac-sub" class="mut" style="font-weight:400;font-size:.76rem">· sem conta contábil — fora da DRE</span></span><span class="chev">▾</span></summary>
   <div class="sec-body">
   <p class="mut" style="font-size:.75rem;margin:0 0 .6rem">Escolha a conta contábil (e o centro, se quiser) — some daqui e entra na DRE na hora.</p>
@@ -5363,24 +5363,24 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   .qtd-mes{margin-top:.7rem}
   .qtd-cab{display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap;font-size:.84rem}
   .qtd-cab .pct{font-family:var(--mono);font-size:.74rem;color:var(--txt-mut)}
-  .qtd-cab .pct.baixo{color:#f0c05a}
-  .qtd-barra{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--card-2,#1b1b1d);margin:.35rem 0 .2rem}
+  .qtd-cab .pct.baixo{color:var(--ambar)}
+  .qtd-barra{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--card-2,var(--surface));margin:.35rem 0 .2rem}
   .qtd-barra span{display:block;height:100%}
   .qtd-l{display:flex;justify-content:space-between;gap:.5rem;padding:.28rem 0;border-bottom:1px solid var(--borda);font-size:.8rem}
   .qtd-l:last-of-type{border-bottom:0}
   .qtd-l b{font-family:var(--mono);font-weight:500;white-space:nowrap}
   .qtd-l .pt{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.4rem}
   .qtd-l i{font-style:normal;color:var(--txt-mut);font-size:.72rem}
-  .qtd-l.sem,.qtd-l.sem b{color:#f0c05a}
+  .qtd-l.sem,.qtd-l.sem b{color:var(--ambar)}
   .qtd-cls{margin-top:.35rem}
-  .qtd-cls summary{cursor:pointer;font-size:.78rem;color:#f0c05a}
+  .qtd-cls summary{cursor:pointer;font-size:.78rem;color:var(--ambar)}
   .qtd-it{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.35rem .6rem;padding:.4rem 0;border-bottom:1px solid var(--borda);font-size:.78rem}
   .qtd-it .d{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
   .qtd-it .d i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
   .qtd-it .bts{display:flex;gap:.3rem;flex-wrap:wrap}
-  .qtd-it button{width:auto;min-height:0;margin:0;border:1px solid #2f2f31;border-radius:999px;padding:.24rem .65rem;font-size:.74rem;background:none;color:var(--txt-mut);cursor:pointer}
-  .qtd-it button.sug{border-style:dashed;border-color:#1E4A3A;color:var(--verde-claro)}
-  .qtd-it button.on{border-style:solid;border-color:#1E4A3A;background:#10241A;color:var(--verde-claro);font-weight:600}
+  .qtd-it button{width:auto;min-height:0;margin:0;border:1px solid var(--line);border-radius:999px;padding:.24rem .65rem;font-size:.74rem;background:none;color:var(--txt-mut);cursor:pointer}
+  .qtd-it button.sug{border-style:dashed;border-color:var(--neon-borda);color:var(--verde-claro)}
+  .qtd-it button.on{border-style:solid;border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--verde-claro);font-weight:600}
   .qtd-it.feito{opacity:.55}
 </style>
 <div class="card larga" id="despesas-por-tipo">
@@ -5428,19 +5428,19 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
 </div>
 <details class="card larga sec-pc" id="folha"{% if folha.itens or erro or folha_aviso %} open{% endif %}>
   <summary><span><strong>Equipe e folha</strong>
-    {% if folha.itens %}<span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · FGTS do mês {{ folha.total_fgts_centavos|brl }} · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span>{% else %}<span class="mut" style="font-size:.76rem;font-weight:400">· nenhum funcionário cadastrado</span>{% endif %}</span><span class="chev">▾</span></summary>
+    {% if folha.itens %}<span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:var(--coral)">{{ folha.total_a_pagar_centavos|brl }}</b> · FGTS do mês {{ folha.total_fgts_centavos|brl }} · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span>{% else %}<span class="mut" style="font-size:.76rem;font-weight:400">· nenhum funcionário cadastrado</span>{% endif %}</span><span class="chev">▾</span></summary>
   {# recusa do excluir (e qualquer outro aviso da aba) — fora do {% if folha.itens %}
      de propósito: excluir o último funcionário esvazia a lista, e a mensagem
      explicando por que a exclusão NÃO aconteceu não pode sumir junto. #}
-  {% if erro %}<div style="background:#241313;border:1px solid #5a2b2b;color:#f0b3ad;font-size:.78rem;line-height:1.6;padding:.6rem .8rem;border-radius:9px;margin:.7rem 0">{{ erro }}</div>{% endif %}
+  {% if erro %}<div style="background:var(--coral-fundo);border:1px solid var(--coral-borda);color:var(--coral);font-size:.78rem;line-height:1.6;padding:.6rem .8rem;border-radius:9px;margin:.7rem 0">{{ erro }}</div>{% endif %}
   {% if folha_aviso %}<div class="ok" style="margin:.7rem 0">{{ folha_aviso }}</div>{% endif %}
   <form method="post" action="/painel/empresa/funcionario" class="emp-form" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
-    <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a" title="Classificação Brasileira de Ocupações (opcional, aparece no holerite)">CBO<input name="cbo" placeholder="Opcional" style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a">Dia pgto<input name="dia" type="number" min="1" max="28" value="5" style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a;text-align:center" title="Descontar 6% de vale-transporte (opcional — a cargo do empregador). Dá pra mudar depois.">Desc. VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
+    <label style="font-size:.72rem;color:var(--text-dim)">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
+    <label style="font-size:.72rem;color:var(--text-dim)">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
+    <label style="font-size:.72rem;color:var(--text-dim)" title="Classificação Brasileira de Ocupações (opcional, aparece no holerite)">CBO<input name="cbo" placeholder="Opcional" style="width:100%"></label>
+    <label style="font-size:.72rem;color:var(--text-dim)">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
+    <label style="font-size:.72rem;color:var(--text-dim)">Dia pgto<input name="dia" type="number" min="1" max="28" value="5" style="width:100%"></label>
+    <label style="font-size:.72rem;color:var(--text-dim);text-align:center" title="Descontar 6% de vale-transporte (opcional — a cargo do empregador). Dá pra mudar depois.">Desc. VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
     <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   {% if folha.itens %}
@@ -5449,24 +5449,24 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     details.folha-lin{border-top:1px solid var(--card-2)}
     details.folha-lin > summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:.9rem;padding:.8rem .25rem}
     details.folha-lin > summary::-webkit-details-marker{display:none}
-    details.folha-lin > summary:hover{background:#141416}
+    details.folha-lin > summary:hover{background:var(--hover)}
     .folha-sum-id{display:flex;align-items:center;gap:.5rem;min-width:0}
     .folha-chev{color:var(--txt-mut);font-size:.7rem;transition:transform .15s;flex:none}
     details.folha-lin[open] .folha-chev{transform:rotate(90deg)}
     .folha-body{padding:0 .25rem .9rem}
     .folha-nome{font-size:.95rem;font-weight:600}
     .folha-bd{font-size:.7rem;margin-top:4px;line-height:1.6;color:var(--txt-mut)}
-    .folha-bd .neg{color:#e07a5f}.folha-bd .amb{color:#f0c05a}.folha-bd .pos{color:#7fb48f}
+    .folha-bd .neg{color:var(--coral)}.folha-bd .amb{color:var(--ambar)}.folha-bd .pos{color:var(--neon)}
     .folha-val{text-align:right;white-space:nowrap;flex:0 0 auto}
     .folha-rot{font-size:.66rem;text-transform:uppercase;letter-spacing:.03em;color:var(--txt-mut)}
     .folha-apagar{font-size:1.05rem;font-weight:700;font-variant-numeric:tabular-nums}
-    .badge-dem{display:inline-block;background:#3a1e1e;color:#e08a8a;font-size:.62rem;padding:.1rem .45rem;border-radius:6px;margin-left:.35rem;vertical-align:middle}
+    .badge-dem{display:inline-block;background:var(--coral-fundo);color:var(--coral);font-size:.62rem;padding:.1rem .45rem;border-radius:6px;margin-left:.35rem;vertical-align:middle}
     /* área de ações em grupos.
        RESETS: o CSS global do app tem button{width:100%;margin-top:1.4rem},
        label{display:block;margin:.9rem 0 .3rem} e input{width:100%} — aqui a
        gente zera isso pra os campos ficarem "no esquadro". */
     .fa{margin-top:.7rem;display:flex;flex-direction:column;gap:.5rem}
-    .fa-grp{background:#141416;border:1px solid var(--card-2);border-radius:9px;padding:.6rem .75rem}
+    .fa-grp{background:var(--bg-2);border:1px solid var(--card-2);border-radius:9px;padding:.6rem .75rem}
     .fa-tit{font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut);margin-bottom:.6rem}
     .fa form{margin:0}
     .fa label{display:inline;margin:0;font-size:.74rem;color:var(--txt-mut)}
@@ -5475,30 +5475,30 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .fa-row + .fa-row{margin-top:.5rem}
     .fa-row > .lbl{flex:0 0 150px;max-width:150px;font-size:.74rem;color:var(--txt-mut)}
     @media (max-width:560px){.fa-row > .lbl{flex-basis:100%;max-width:100%;margin-bottom:.1rem}}
-    .fa input{font-size:.78rem;padding:.34rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt);margin:0;width:auto}
+    .fa input{font-size:.78rem;padding:.34rem .5rem;border-radius:7px;border:1px solid var(--line-2);background:var(--bg);color:var(--txt);margin:0;width:auto}
     .fa input.money{width:96px}.fa input.date{width:150px}.fa input.org{width:78px}
-    .fa button{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.36rem .75rem;font-size:.78rem;cursor:pointer;color:var(--txt);width:auto;margin:0}
-    .fa button.add{border-color:#2f5a41;color:var(--verde-claro)}
-    .fa button.amb{border-color:#5a4a1e;color:#f0c05a}
+    .fa button{background:none;border:1px solid var(--line);border-radius:7px;padding:.36rem .75rem;font-size:.78rem;cursor:pointer;color:var(--txt);width:auto;margin:0}
+    .fa button.add{border-color:var(--neon-borda);color:var(--verde-claro)}
+    .fa button.amb{border-color:var(--ambar-borda);color:var(--ambar)}
     .fa button.pay{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde);font-weight:600}
     /* pílula VT */
-    .vt-pill{display:inline-flex;align-items:center;gap:.5rem;border:1px solid #2f2f31;background:none;border-radius:999px;padding:.28rem .55rem .28rem .7rem;cursor:pointer;color:var(--txt);font-size:.76rem;width:auto}
+    .vt-pill{display:inline-flex;align-items:center;gap:.5rem;border:1px solid var(--line);background:none;border-radius:999px;padding:.28rem .55rem .28rem .7rem;cursor:pointer;color:var(--txt);font-size:.76rem;width:auto}
     .vt-sw{width:34px;height:19px;border-radius:999px;position:relative;flex:none;transition:background .15s}
     .vt-sw::after{content:"";position:absolute;top:2px;width:15px;height:15px;border-radius:50%;background:#fff;transition:left .15s}
     .vt-sw.on{background:var(--verde)}.vt-sw.on::after{left:17px}
-    .vt-sw.off{background:#3a3a3d}.vt-sw.off::after{left:2px}
+    .vt-sw.off{background:var(--line)}.vt-sw.off::after{left:2px}
     .vt-st{font-size:.68rem;color:var(--txt-mut)}
     .fa-tool{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
-    .fa-ln{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.76rem;text-decoration:none;color:var(--txt);display:inline-flex;gap:.3rem}
+    .fa-ln{border:1px solid var(--line);border-radius:7px;padding:.32rem .7rem;font-size:.76rem;text-decoration:none;color:var(--txt);display:inline-flex;gap:.3rem}
     /* histórico "corrigir" */
     .fa-hist{border:1px solid var(--card-2);border-radius:9px;overflow:hidden}
     .fa-hist summary{list-style:none;cursor:pointer;padding:.5rem .7rem;font-size:.76rem;color:var(--verde-claro)}
     .fa-hist summary::-webkit-details-marker{display:none}
     .fa-ev{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.45rem .7rem;border-top:1px solid var(--card-2);font-size:.78rem}
     .ev-tag{font-size:.6rem;padding:.08rem .4rem;border-radius:5px;margin-right:.4rem}
-    .ev-tag.ev-vale{background:#3a2f14;color:#f0c05a}.ev-tag.ev-beneficio{background:#14301f;color:var(--verde-claro)}
-    .ev-tag.ev-extra{background:#153025;color:#7fb48f}.ev-tag.ev-desconto{background:#332314;color:#e0b878}
-    .ev-rm{border:1px solid #5a2e2e !important;color:#e08a8a !important;padding:.24rem .55rem !important}
+    .ev-tag.ev-vale{background:var(--ambar-fundo);color:var(--ambar)}.ev-tag.ev-beneficio{background:var(--neon-fundo);color:var(--verde-claro)}
+    .ev-tag.ev-extra{background:var(--neon-fundo);color:var(--neon)}.ev-tag.ev-desconto{background:var(--ambar-fundo);color:var(--ambar)}
+    .ev-rm{border:1px solid var(--coral-borda) !important;color:var(--coral) !important;padding:.24rem .55rem !important}
     /* editar / dar baixa: dobrados por padrão — são ação ocasional, não podem
        competir com o "pagar" nem esticar o card de quem só quer conferir a folha */
     .fa-ed{border:1px solid var(--card-2);border-radius:9px}
@@ -5506,7 +5506,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .fa-ed summary::-webkit-details-marker{display:none}
     .fa-ed[open] summary{color:var(--verde-claro);border-bottom:1px solid var(--card-2)}
     .fa input.wide{width:210px}
-    .fa button.dang{border-color:#5a2e2e;color:#e08a8a}
+    .fa button.dang{border-color:var(--coral-borda);color:var(--coral)}
     .fa-aviso{font-size:.7rem;color:var(--txt-mut);line-height:1.6;margin-top:.55rem}
     .sal-hist{list-style:none;margin:.55rem 0 0;font-size:.72rem;color:var(--txt-mut)}
     .sal-hist li{display:flex;justify-content:space-between;gap:10px;padding:.28rem 0;border-top:1px solid var(--card-2)}
@@ -5515,10 +5515,10 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .ag-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .55rem;font-size:.76rem}
     .ag-rot{color:var(--txt-mut);min-width:96px}
     .ag-lin b{font-variant-numeric:tabular-nums}
-    .ag-st{font-size:.66rem;padding:.06rem .42rem;border-radius:5px;background:#1d1d20;color:var(--txt-mut)}
-    .ag-st.ag-pago{background:#14301f;color:var(--verde-claro)}
-    .ag-st.ag-aberto{background:#3a2f14;color:#f0c05a}
-    .ag-lin.ag-ant .ag-rot{color:#f0c05a}
+    .ag-st{font-size:.66rem;padding:.06rem .42rem;border-radius:5px;background:var(--surface);color:var(--txt-mut)}
+    .ag-st.ag-pago{background:var(--neon-fundo);color:var(--verde-claro)}
+    .ag-st.ag-aberto{background:var(--ambar-fundo);color:var(--ambar)}
+    .ag-lin.ag-ant .ag-rot{color:var(--ambar)}
     .ag-regra{font-size:.68rem;color:var(--txt-mut)}
     .fp-op{display:inline-flex !important;align-items:center;gap:.3rem;font-size:.74rem !important;color:var(--txt) !important;cursor:pointer}
     .fp-op input{width:auto !important;margin:0 !important}
@@ -5737,8 +5737,8 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     <div class="cc-item{% if not c.ativo %} off{% endif %}">
       <div class="cc-info"><b>{{ c.nome }}</b>{% if c.descricao %} <span class="mut">· {{ c.descricao }}</span>{% endif %}{% if not c.ativo %} <span class="mut">(inativo)</span>{% endif %}</div>
       <div class="cc-acoes">
-        <button type="button" onclick="ccEditToggle(this)" class="cc-btn" style="color:#8a938a">editar ✎</button>
-        {% if c.ativo %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="0"><button class="cc-btn" style="color:#c98080">desativar</button></form>
+        <button type="button" onclick="ccEditToggle(this)" class="cc-btn" style="color:var(--text-dim)">editar ✎</button>
+        {% if c.ativo %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="0"><button class="cc-btn" style="color:var(--coral)">desativar</button></form>
         {% else %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="1"><button class="cc-btn" style="color:var(--verde-claro)">reativar</button></form>{% endif %}
       </div>
       <form method="post" action="/painel/empresa/centro-custo" class="cc-edit" style="display:none">
@@ -5746,7 +5746,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         <input name="nome" value="{{ c.nome }}" required placeholder="nome">
         <input name="descricao" value="{{ c.descricao }}" placeholder="descrição">
         <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
-        <button type="button" onclick="ccEditToggle(this)" style="color:#8a938a">cancelar</button>
+        <button type="button" onclick="ccEditToggle(this)" style="color:var(--text-dim)">cancelar</button>
       </form>
     </div>
     {% endfor %}
@@ -5890,19 +5890,19 @@ _NOVIDADES = """{% extends "base" %}{% block conteudo %}
 <style>
 .nv{background:var(--bg);border:1px solid var(--borda);border-left:3px solid var(--borda);
  border-radius:10px;padding:.9rem 1rem;margin-top:.7rem}
-.nv.mud{border-left-color:#c99a2e}
+.nv.mud{border-left-color:var(--ambar)}
 .nv.nova{border-left-color:var(--verde)}
 .nv.lida{opacity:.62}
 .nv-tp{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.45rem}
 .nv-tag{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.72rem;
  border:1px solid var(--borda);color:var(--txt-mut)}
-.nv-tag.m{border-color:#6e5a22;color:#f0dca6;background:#332a12}
+.nv-tag.m{border-color:var(--ambar-borda);color:var(--ambar);background:var(--ambar-fundo)}
 .nv-tag.n{border-color:var(--verde);color:var(--verde-claro);background:rgba(29,158,117,.14)}
-.nv-tag.p{border-color:#3a2b52;color:#c9a3e0;background:#1a1226}
+.nv-tag.p{border-color:var(--roxo-borda);color:var(--roxo);background:var(--roxo-fundo)}
 .nv-ti{font-size:1rem;font-weight:600;margin-bottom:.3rem}
 .nv-ver{display:inline-block;padding:.4rem .95rem;border-radius:8px;font-size:.85rem;font-weight:600;
  border:1px solid var(--verde);color:var(--verde-claro);background:rgba(29,158,117,.14);text-decoration:none}
-.nv-co{font-size:.9rem;color:#c5c5c0;line-height:1.5;white-space:pre-line}
+.nv-co{font-size:.9rem;color:var(--text-2);line-height:1.5;white-space:pre-line}
 .nv-pe{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-top:.8rem}
 .nv-pe button{width:auto;margin:0;padding:.4rem .95rem;font-size:.85rem}
 .nv-vazio{color:var(--txt-mut);font-size:.9rem;padding:1.4rem 0}
@@ -7709,19 +7709,19 @@ _DASH_BLOCO = """<style>
 
 _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 <style>
-  .rel-aviso{background:#1a2233;border:1px solid #29354d;color:#9db3d6;border-radius:8px;
+  .rel-aviso{background:var(--azul-fundo);border:1px solid var(--azul-borda);color:var(--text-2);border-radius:8px;
    padding:.6rem .85rem;font-size:.82rem;margin:.9rem 0 1rem;line-height:1.5}
   /* o rodapé do dinheiro que saiu da aba. Âmbar e não vermelho de proposito:
      não é erro, é dinheiro que existe e mora em outro lugar. */
-  .rel-fora{margin-top:1rem;border:1px solid #5a4520;background:#241c0f;
+  .rel-fora{margin-top:1rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);
    border-radius:10px;padding:.8rem 1rem}
-  .rel-fora-tit{font-size:.85rem;font-weight:600;color:#e0a32e;margin-bottom:.55rem}
+  .rel-fora-tit{font-size:.85rem;font-weight:600;color:var(--ambar);margin-bottom:.55rem}
   .rel-fora ul{list-style:none;margin:0;padding:0;display:grid;gap:.4rem}
   .rel-fora li{display:flex;justify-content:space-between;gap:1rem;font-size:.82rem;
-   color:#c9bda6;border-bottom:1px dashed #5a4520;padding-bottom:.4rem}
+   color:var(--text-2);border-bottom:1px dashed var(--ambar-borda);padding-bottom:.4rem}
   .rel-fora li:last-child{border-bottom:0;padding-bottom:0}
   .rel-fora li b{color:var(--txt);font-weight:600}
-  .rel-fora-pe{font-size:.77rem;color:#8a7f6c;margin-top:.55rem}
+  .rel-fora-pe{font-size:.77rem;color:var(--text-faint);margin-top:.55rem}
   .rel-filtros{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.9rem 0 1.1rem}
   .rel-filtros select,.rel-filtros input[type=search]{width:auto;margin:0}
   /* Espécie é o corte mais grosso da aba Agenda (visita ou festa são perguntas
@@ -7746,10 +7746,10 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
    background:#1d6e9e;color:#fff;text-decoration:none;border-radius:8px;font-size:.9rem;font-weight:600}
   .rel-pdf:hover{background:#2480b5}
   .rel-tag{display:inline-block;padding:.15rem .6rem;border-radius:999px;font-size:.74rem;font-weight:600;white-space:nowrap}
-  .rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
-  .rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
-  .rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
-  .rel-tag.neutro{background:#20242a;color:#c7ccd6;border:1px solid #3a4048}
+  .rel-tag.ok{background:var(--neon-fundo);color:var(--neon);border:1px solid var(--verde)}
+  .rel-tag.aviso{background:var(--ambar-fundo);color:var(--ambar);border:1px solid var(--ambar-borda)}
+  .rel-tag.erro{background:var(--coral-fundo);color:var(--coral);border:1px solid var(--coral-borda)}
+  .rel-tag.neutro{background:var(--line);color:var(--text-2);border:1px solid var(--line-2)}
   /* nome lido do título: apagado e em itálico, pra ler como palpite mesmo de
      longe. O selo diz de onde veio; o link diz que dá pra resolver. */
   .rel-cli{text-decoration:none;color:inherit;border-bottom:1px dotted var(--borda)}
@@ -7757,12 +7757,12 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-deriv{color:var(--txt-mut);font-style:italic}
   .rel-selo{display:inline-block;margin-left:.35rem;font-size:.62rem;font-weight:700;
       letter-spacing:.03em;font-style:normal;border-radius:4px;padding:.02rem .3rem;
-      border:1px solid #5a4a2a;background:rgba(201,162,39,.10);color:#c9a227}
+      border:1px solid var(--ambar-borda);background:rgba(201,162,39,.10);color:var(--ambar)}
   /* dedução vinda do LEAD: azul, pra distinguir da leitura do título. As duas
      são palpite (por isso o itálico apagado é o mesmo), mas vêm de lugares
      diferentes e se resolvem diferente — e o dono precisa ver qual é qual. */
-  .rel-selo.lead{border-color:#1d5570;background:rgba(143,208,234,.10);color:#8fd0ea}
-  .rel-tag.info{background:#0f2836;color:#8fd0ea;border:1px solid #1d5570}
+  .rel-selo.lead{border-color:var(--azul-borda);background:rgba(143,208,234,.10);color:var(--azul)}
+  .rel-tag.info{background:var(--azul-fundo);color:var(--azul);border:1px solid var(--azul-borda)}
   .rel-act{width:1%;white-space:nowrap;text-align:center}
   .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
    border:1px solid var(--borda);background:var(--bg);border-radius:6px;text-decoration:none;font-size:.85rem}
@@ -7801,7 +7801,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
      Contas a pagar. Só existe onde há ressalva — 1 linha em 30 na Prime —, então
      29 linhas continuam com a altura de sempre. Corta no fim igual à de cima. */
   .rel-tbl-wrap table td.rel-flex .rel-sub{display:block;font-size:.75rem;
-   font-weight:500;color:#f0dca6;overflow:hidden;text-overflow:ellipsis}
+   font-weight:500;color:var(--ambar);overflow:hidden;text-overflow:ellipsis}
   /* A célula de vencimento de Contas a pagar/receber: data + prazo, pintada.
      Ela substituiu a coluna Status, que cobrava 278px (medidos no Chromium) pra
      repetir o que a data já dizia. O prazo é o que a palavra "Vencida" não
@@ -7818,8 +7818,8 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
    cursor:pointer}
   .rel-lote-aviso{margin:.2rem 0 .6rem;padding:.6rem .8rem;border-radius:10px;
    border:1px solid var(--ambar-borda);background:var(--ambar-fundo);
-   color:#f0dca6;font-size:.82rem;line-height:1.5}
-  .rel-lote-aviso b{color:#fff0cf}
+   color:var(--ambar);font-size:.82rem;line-height:1.5}
+  .rel-lote-aviso b{color:var(--ambar)}
   /* [hidden] ANTES e mais específico que a regra de display: o atributo sozinho
      perde pro `display:flex` da classe (a folha do navegador tem menos peso), e a
      barra ficava visível com "0 marcadas" pra sempre. */
@@ -7874,8 +7874,8 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   {% elif dados.aviso_config %}
   <div class="rel-aviso">⚠️ {{ dados.aviso_config }}</div>
   {% endif %}
-  {% if aviso %}<div class="rel-aviso" style="border-color:#2c5a3f;background:#122a1d;color:#9fe8c9">✓ {{ aviso }}</div>{% endif %}
-  {% if erro %}<div class="rel-aviso" style="border-color:#6e2b2b;background:#2a1414;color:#f0b8b8">✕ {{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="rel-aviso" style="border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon)">✓ {{ aviso }}</div>{% endif %}
+  {% if erro %}<div class="rel-aviso" style="border-color:var(--coral-borda);background:var(--coral-fundo);color:var(--coral)">✕ {{ erro }}</div>{% endif %}
 
   <div class="abas" id="rel-abas">
     {% for k, r in tipos.items() %}<a class="aba{% if k==tipo %} ativa{% endif %}"

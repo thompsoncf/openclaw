@@ -477,7 +477,7 @@ def passagem_cancelar(request: Request, prof: str = Form(""), data: str = Form("
                                            request.session.get("membro_id"))
         (c.rollback if erro else c.commit)()
     if erro:
-        return _ir(request, "/painel/clinica/agenda", erro=erro)
+        return _ir(request, f"/painel/clinica/agenda?data={dia.isoformat()}", erro=erro)
     return RedirectResponse(f"/painel/clinica/agenda/passagem/cancelada?data={dia.isoformat()}&prof={_int(prof)}",
                             status_code=303)
 

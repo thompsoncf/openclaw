@@ -453,7 +453,8 @@ def saiu_sem_atendimento(c, conta_id: int, evento_id: int, membro_id: int | None
     if lead:
         st = c.execute("select status from prospeccao where id=%s and conta_id=%s for update", (lead, conta_id)).fetchone()
         chaves = _chaves_do_funil(c, conta_id)
-        if st and st[0] == "consulta" and "follow_up" in chaves and not _segura_em_consulta(c, conta_id, lead, evento_id)                 and not _outra_marcada(c, conta_id, lead, evento_id):
+        fica = _segura_em_consulta(c, conta_id, lead, evento_id) or _outra_marcada(c, conta_id, lead, evento_id)
+        if st and st[0] == "consulta" and "follow_up" in chaves and not fica:
             c.execute("update prospeccao set status='follow_up', atualizado_em=now() where id=%s and conta_id=%s",
                       (lead, conta_id))
             fr.registrar_movimento(c, conta_id, lead, "consulta", "follow_up", "agenda", membro_id)

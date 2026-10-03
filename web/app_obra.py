@@ -39,16 +39,32 @@ _BASE = "/obra"
 
 
 def _acesso(request: Request):
-    """(conta, papel, membro_id) ou (None, redirect)."""
+    """(conta, papel, membro_id) ou (None, redirect).
+
+    Sem sessão, tenta o CELULAR LEMBRADO (o cookie do link mágico — finance/
+    obra_acesso.py) antes de mandar pro login: o mestre não tem senha."""
+    if not request.session.get("conta_id"):
+        _sessao_do_lembrete(request)
     conta = conta_logada(request)
     if conta is None:
-        return None, RedirectResponse("/login", status_code=303)
+        return None, RedirectResponse(f"{_BASE}/sem-acesso", status_code=303)
     papel = request.session.get("papel", "dono")
     if not eq.caps_do_papel(papel).get("campo"):
         return None, RedirectResponse(eq.destino_barrado(papel), status_code=303)
     if rxp.perfil_por_nicho(nicho_da_conta(conta)) != "obras":
         return None, RedirectResponse("/painel", status_code=303)
     return (conta, papel, request.session.get("membro_id")), None
+
+
+def _sessao_do_lembrete(request: Request) -> bool:
+    from finance import obra_acesso as oa
+    d = oa.lembrete_valido(get_pool(), request.cookies.get(oa.COOKIE) or "")
+    if not d:
+        return False
+    request.session["conta_id"] = d["conta_id"]
+    request.session["membro_id"] = d["membro_id"]
+    request.session["papel"] = d["papel"]
+    return True
 
 
 def _volta(url: str, ok: str = "", erro: str = "") -> RedirectResponse:
@@ -110,19 +126,22 @@ input,select{width:100%;font:inherit;color:var(--txt);background:#0a120f;border:
 """
 
 
-def _pagina(titulo: str, corpo: str, request: Request, voltar: str = "") -> HTMLResponse:
+def _pagina(titulo: str, corpo: str, request: Request, voltar: str = "",
+            logado: bool = True) -> HTMLResponse:
     ok = request.query_params.get("ok") or ""
     erro = request.query_params.get("erro") or ""
     msg = ((f"<div class='msg ok'>✓ {esc(ok)}</div>" if ok else "") +
            (f"<div class='msg erro'>⚠️ {esc(erro)}</div>" if erro else ""))
-    esq = f"<a href='{voltar}'>← voltar</a>" if voltar else "<b>🏗️ Minhas obras</b>"
+    esq = f"<a href='{voltar}'>← voltar</a>" if voltar else (
+        "<b>🏗️ Minhas obras</b>" if logado else "<b>🏗️ Zaq Obra</b>")
+    sair = f"<a href='{_BASE}/sair'>sair</a>" if logado else ""
     html = ("<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
             "<meta name=theme-color content='#0a120f'>"
             f"<link rel=manifest href='{_BASE}/manifest.webmanifest'>"
             f"<link rel=icon href='{_BASE}/icon.svg'><link rel=apple-touch-icon href='{_BASE}/icon.svg'>"
             f"<title>{esc(titulo)} · Zaq Obra</title><style>{_CSS}</style></head><body>"
-            f"<div class=topo>{esq}<a href='/sair'>sair</a></div>"
+            f"<div class=topo>{esq}{sair}</div>"
             f"<div class=pag>{msg}{corpo}</div>"
             f"<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('{_BASE}/sw.js',{{scope:'{_BASE}'}})</script>"
             "</body></html>")
@@ -144,6 +163,59 @@ def _com_lote(pool, conta_id: int, obras: list[dict]) -> list[dict]:
         g = mapa.get(o["id"]) or {}
         o["lote"], o["grupo_id"] = g.get("lote", ""), g.get("grupo_id")
     return obras
+
+
+# ─────────────────────────────────────────────────────────────── a entrada
+@router.get("/obra/entrar/{token}")
+def entrar(request: Request, token: str):
+    """O link mágico que o dono mandou pelo WhatsApp: entra e lembra o celular."""
+    from finance import obra_acesso as oa
+    d = oa.validar_token(get_pool(), token)
+    if not d:
+        return RedirectResponse(f"{_BASE}/sem-acesso?expirou=1", status_code=303)
+    request.session.clear()
+    request.session["conta_id"] = d["conta_id"]
+    request.session["membro_id"] = d["membro_id"]
+    request.session["papel"] = d["papel"]
+    resp = RedirectResponse(_BASE, status_code=303)
+    lembrete = oa.lembrar(get_pool(), d["conta_id"], d["membro_id"],
+                          (request.headers.get("user-agent") or "")[:120])
+    if lembrete:
+        # só no caminho /obra, só por HTTPS em produção, invisível pro JavaScript
+        resp.set_cookie(oa.COOKIE, lembrete, max_age=10 * 365 * 24 * 3600, path=_BASE,
+                        httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https")
+    return resp
+
+
+@router.get("/obra/sair")
+def sair(request: Request):
+    """Sair DE VERDADE: esquece este celular antes de limpar a sessão — senão o
+    cookie de lembrete entraria de novo no request seguinte."""
+    from finance import obra_acesso as oa
+    token = request.cookies.get(oa.COOKIE)
+    if token:
+        oa.esquecer(get_pool(), token)
+    request.session.clear()
+    resp = RedirectResponse(f"{_BASE}/sem-acesso?saiu=1", status_code=303)
+    resp.delete_cookie(oa.COOKIE, path=_BASE)
+    return resp
+
+
+@router.get("/obra/sem-acesso", response_class=HTMLResponse)
+def sem_acesso(request: Request):
+    if request.query_params.get("saiu"):
+        tit, txt = "Você saiu", "Pra entrar de novo, peça um link novo pro dono da obra."
+    elif request.query_params.get("expirou"):
+        tit, txt = ("Esse link venceu", "O link de entrada vale 48 horas. Peça um novo pro "
+                    "dono da obra — ele manda pelo WhatsApp.")
+    else:
+        tit, txt = "Entre pelo seu link", ("O app da obra abre pelo link que o dono manda no "
+                                           "seu WhatsApp. Tem login com senha? Entre por aqui:")
+    corpo = (f"<div class=card><div class=nm>{esc(tit)}</div><p class=mut>{esc(txt)}</p>"
+             "<a class='bt sec' style='text-align:center;text-decoration:none' href='/login'>"
+             "Entrar com e-mail e senha</a></div>")
+    return _pagina(tit, corpo, request, logado=False)
 
 
 @router.get("/obra", response_class=HTMLResponse)

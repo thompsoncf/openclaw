@@ -16,8 +16,11 @@ até `POR_DIA`, A primeiro e o mais atrasado primeiro; o que já foi contado hoj
 continua nela, com o resultado.
 
 CONTAR: o sistema é lido NA HORA, com a linha do material travada (`for update`)
-— clique duplo ou duas pessoas contando o mesmo material não ajustam duas vezes:
-a segunda vê o sistema já ajustado e bate. A diferença vira `ajuste` no
+— duas pessoas contando o mesmo material não ajustam duas vezes: a segunda vê o
+sistema já ajustado e bate; e o clique duplo (a mesma contagem de novo, hoje)
+nem grava. Material com NOTA AINDA SEM CONFERIR no CD espera a conferência:
+contar antes descontaria a mesma falta duas vezes (o ajuste do inventário e a
+correção da entrada que a conferência faz). A diferença vira `ajuste` no
 `estoque_mov` (com sinal, como no motor do fornecedor, `catalogo.movimentar`),
 no CD (`obra_id` vazio), e o motivo é obrigatório. O valor da diferença fica
 gravado pelo preço de nota DA HORA.
@@ -72,6 +75,22 @@ def curva(pool, conta_id: int, linhas: list[dict] | None = None) -> tuple[dict[i
     return classes, ordem
 
 
+def _notas_sem_conferir(c, conta_id: int) -> dict[int, str]:
+    """{produto_id: fornecedor} do material com nota no CD ainda sem conferir —
+    a mesma janela da lista "Falta conferir" (`obra_conferencia.pendentes`)."""
+    rows = c.execute(
+        """select distinct on (m.produto_id) m.produto_id,
+                  coalesce(nullif(trim(l.descricao), ''), 'Nota sem nome')
+             from estoque_mov m
+             join lancamentos l on l.id = m.lancamento_id and l.conta_id = m.fornecedor_id
+            where m.fornecedor_id=%s and m.tipo='entrada' and m.obra_id is null
+              and m.item_id is not null and l.data > %s
+              and not exists (select 1 from obra_conferencia_itens i
+                               where i.conta_id = m.fornecedor_id and i.mov_id = m.id)
+            order by m.produto_id, m.id desc""", (conta_id, _conf._desde(60))).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
 # ── a contagem do dia ─────────────────────────────────────────────────────
 def _contagens(pool, conta_id: int, dias: int) -> list[dict]:
     """As contagens dos últimos `dias`, a mais nova primeiro."""
@@ -104,12 +123,18 @@ def _contagens(pool, conta_id: int, dias: int) -> list[dict]:
 
 def contagem_do_dia(pool, conta_id: int, *, linhas: list[dict] | None = None,
                     abc: dict | None = None, n: int = POR_DIA) -> dict:
-    """{itens, faltam, vencidos, recentes}: a lista de hoje — o que já foi contado
-    hoje (com o resultado) e os vencidos que completam `n`, A primeiro."""
+    """{itens, faltam, vencidos, recentes, esperando}: a lista de hoje — o que já
+    foi contado hoje (com o resultado) e os vencidos que completam `n`, A
+    primeiro. O material com nota sem conferir espera (`esperando`)."""
     from .relogio import hoje
     linhas = _om.deposito(pool, conta_id) if linhas is None else linhas
     abc = curva(pool, conta_id, linhas)[0] if abc is None else abc
     recentes = _contagens(pool, conta_id, 40)
+    try:
+        with pool.connection() as c:
+            sem_conferir = _notas_sem_conferir(c, conta_id)
+    except Exception:  # noqa: BLE001 — sem a conferência (#1001)
+        sem_conferir = {}
     dia = hoje()
     ultima: dict[int, object] = {}
     for k in recentes:
@@ -127,10 +152,13 @@ def contagem_do_dia(pool, conta_id: int, *, linhas: list[dict] | None = None,
         itens.append({"produto_id": pid, "nome": k["nome"], "unidade": k["unidade"],
                       "classe": abc.get(pid, "C"), "sistema": k["sistema"],
                       "contagem": dict(k, pode_desfazer=mais_nova.get(pid) == k["id"])})
-    vencidos = []
+    vencidos, esperando = [], []
     for r in linhas:
         pid = r["produto_id"]
         if pid in ja or r["saldo"] == 0:
+            continue
+        if pid in sem_conferir:
+            esperando.append({"nome": r["nome"], "fornecedor": sem_conferir[pid]})
             continue
         classe = abc.get(pid, "C")
         ult = ultima.get(pid)
@@ -145,7 +173,7 @@ def contagem_do_dia(pool, conta_id: int, *, linhas: list[dict] | None = None,
     faltam = [i for i in itens if i["contagem"] is None]
     return {"itens": itens, "faltam": len(faltam),
             "faltam_a": sum(1 for i in faltam if i["classe"] == "A"),
-            "vencidos": len(vencidos), "recentes": recentes[:15]}
+            "vencidos": len(vencidos), "recentes": recentes[:15], "esperando": esperando}
 
 
 # ── contar e desfazer ─────────────────────────────────────────────────────
@@ -153,6 +181,7 @@ def contar(pool, conta_id: int, produto_id: int, contado, *, motivo: str | None 
            por=None) -> dict:
     """Conta um material do CD. Bateu: só registra. Não bateu: o motivo é
     obrigatório e a diferença vira `ajuste` no CD. Devolve {frase, dif}."""
+    from .relogio import dia_br, hoje
     q = _dec(contado)
     motivo = (motivo or "").strip() or None
     preco = _op._precos(pool, conta_id).get(produto_id)
@@ -164,7 +193,19 @@ def contar(pool, conta_id: int, produto_id: int, contado, *, motivo: str | None 
         if not p:
             raise ValueError("Material não encontrado.")
         nome, un = p
+        nota = _notas_sem_conferir(c, conta_id).get(produto_id)
+        if nota:
+            c.rollback()
+            raise ValueError(f"{nome}: tem nota sem conferir ({nota}). Confira a nota primeiro, na aba "
+                             "Entradas — contar antes descontaria a mesma falta duas vezes.")
         sistema = _om._saldo_em(c, conta_id, produto_id, None)
+        ult = c.execute("""select contado, contado_em from obra_contagens
+                            where conta_id=%s and produto_id=%s order by id desc limit 1""",
+                        (conta_id, produto_id)).fetchone()
+        if ult and Decimal(ult[0]) == q == sistema and dia_br(ult[1]) == hoje():
+            c.rollback()                        # o mesmo formulário de novo (clique duplo)
+            return {"frase": f"{nome}: já contado hoje ({_om.rotulo(q, un)}) — o estoque já está com isso. ✓",
+                    "dif": Decimal(0)}
         dif = q - sistema
         mov_id = valor = None
         if dif != 0:
@@ -198,7 +239,8 @@ def contar(pool, conta_id: int, produto_id: int, contado, *, motivo: str | None 
 
 def desfazer(pool, conta_id: int, contagem_id: int) -> str:
     """Errou a contagem (digitou 360 em vez de 306): apaga a contagem e o ajuste.
-    Só a de hoje e só a última daquele material — depois dela o sistema já andou."""
+    Só a de hoje e só a última daquele material — depois dela o sistema já andou.
+    E não desfaz o "achou a mais" que já saiu do CD (ficaria negativo)."""
     from .relogio import dia_br, hoje
     with pool.connection() as c:
         r = c.execute("select produto_id from obra_contagens where id=%s and conta_id=%s",
@@ -224,6 +266,15 @@ def desfazer(pool, conta_id: int, contagem_id: int) -> str:
                      (conta_id, pid, contagem_id)).fetchone():
             c.rollback()
             raise ValueError(f"{nome} foi contado de novo depois. Conte de novo — a nova corrige.")
+        aj = c.execute("""select quantidade from estoque_mov
+                           where id=%s and fornecedor_id=%s and tipo='ajuste'""",
+                       (mov_id, conta_id)).fetchone() if mov_id else None
+        if aj and Decimal(aj[0]) > 0:
+            saldo = _om._saldo_em(c, conta_id, pid, None)
+            if saldo - Decimal(aj[0]) < 0:
+                c.rollback()
+                raise ValueError(f"{nome}: o que foi achado a mais já saiu do CD (tem "
+                                 f"{_om._qtd(max(saldo, Decimal(0)))}) — não dá pra desfazer. Conte de novo.")
         c.execute("delete from obra_contagens where id=%s and conta_id=%s", (contagem_id, conta_id))
         if mov_id:
             c.execute("delete from estoque_mov where id=%s and fornecedor_id=%s and tipo='ajuste'",

@@ -75,8 +75,9 @@ def conta(pool):
     return cid
 
 
-def _nota(pool, conta, itens, fornecedor="Constrular"):
-    """Uma nota de material lida pelo leitor e absorvida no CD: [(descrição, qtd, unidade, centavos)]."""
+def _nota(pool, conta, itens, fornecedor="Constrular", conferir=True):
+    """Uma nota de material lida pelo leitor e absorvida no CD: [(descrição, qtd, unidade, centavos)].
+    Conferida ("bateu") por padrão — material com nota sem conferir espera a conferência."""
     with pool.connection() as c:
         lid = c.execute("""insert into lancamentos (conta_id, tipo, valor_centavos, categoria,
                                descricao, data, natureza)
@@ -88,6 +89,8 @@ def _nota(pool, conta, itens, fornecedor="Constrular"):
                          values (%s,%s,%s,%s,0,%s)""", (lid, desc, q, preco, un))
         c.commit()
     omat.absorver_lancamento(pool, conta, lid)
+    if conferir:
+        conf.conferir(pool, conta, lid)
     return lid
 
 
@@ -167,9 +170,9 @@ def test_contar_bateu_e_nao_bateu_com_motivo(pool, conta):
     assert "ajuste de −14 (quebra)" in r["frase"] and _cd(pool, conta, "telha") == 306
     k = inv.contagem_do_dia(pool, conta)["recentes"][0]
     assert k["dif"] == -14 and k["valor"] == -14 * 180 and k["motivo"] == "quebra"
-    assert "bateu" in inv.contar(pool, conta, pid, "306")["frase"]
+    assert "já contado hoje" in inv.contar(pool, conta, pid, "306")["frase"]   # não grava de novo
     ind = inv.indicadores(pool, conta)
-    assert ind["contagens"] == 2 and ind["acuracidade"] == 50
+    assert ind["contagens"] == 1 and ind["acuracidade"] == 0
     assert ind["perdas_valor"] == 14 * 180 and ind["perdas"][0]["qtd"] == 14
     assert ind["perdas"][0]["motivo"] == "quebra"
 
@@ -179,7 +182,11 @@ def test_clique_duplo_nao_ajusta_duas_vezes(pool, conta):
     pid = _pid(pool, conta, "telha")
     inv.contar(pool, conta, pid, "306", motivo="quebra")
     r = inv.contar(pool, conta, pid, "306", motivo="quebra")     # o mesmo formulário de novo
-    assert "bateu" in r["frase"] and _cd(pool, conta, "telha") == 306
+    assert "já contado hoje" in r["frase"] and _cd(pool, conta, "telha") == 306
+    # nem grava: a acuracidade não sobe com o clique duplo e a lista mostra a quebra
+    dia = inv.contagem_do_dia(pool, conta)
+    assert len(dia["recentes"]) == 1 and inv.indicadores(pool, conta)["acuracidade"] == 0
+    assert dia["itens"][0]["contagem"]["rotulo_dif"] == "−14 · quebra"
 
 
 def test_achou_a_mais_e_mil_como_se_digita(pool, conta):
@@ -187,7 +194,7 @@ def test_achou_a_mais_e_mil_como_se_digita(pool, conta):
     pid = _pid(pool, conta, "tijolo")
     inv.contar(pool, conta, pid, "1.000", motivo="achado")       # "1.000" é mil
     assert _cd(pool, conta, "tijolo") == 1000
-    assert "bateu" in inv.contar(pool, conta, pid, Decimal("1000.000"))["frase"]   # número não é texto
+    assert "já contado hoje" in inv.contar(pool, conta, pid, Decimal("1000.000"))["frase"]   # número ≠ texto
     assert inv.indicadores(pool, conta)["perdas"] == []           # achado não é perda
     for ruim in ("nan", "-3", "", "1e12"):
         with pytest.raises(ValueError):
@@ -214,6 +221,20 @@ def test_outra_conta_e_ferramenta_nao_contam(pool, conta):
     assert _cd(pool, conta, "cal") == 9
 
 
+def test_nota_sem_conferir_espera_a_conferencia(pool, conta):
+    # a nota diz 60, a prateleira tem 58: contar E conferir tiraria 4
+    lid = _nota(pool, conta, [("CIMENTO CP II 50KG", 60, "sc", 3290)], conferir=False)
+    pid = _pid(pool, conta, "cimento")
+    with pytest.raises(ValueError, match="nota sem conferir"):
+        inv.contar(pool, conta, pid, "58", motivo="perda")
+    dia = inv.contagem_do_dia(pool, conta)
+    assert dia["itens"] == [] and dia["esperando"][0]["fornecedor"] == "Constrular"
+    mov = conf.pendentes(pool, conta)[0]["itens"][0]["mov_id"]
+    conf.conferir(pool, conta, lid, chegou={mov: "58"})
+    assert "bateu" in inv.contar(pool, conta, pid, "58")["frase"] and _cd(pool, conta, "cimento") == 58
+    assert inv.indicadores(pool, conta)["perdas"] == []                  # a falta conta uma vez só
+
+
 # ── desfazer ──────────────────────────────────────────────────────────────
 def test_desfazer_so_a_ultima_de_hoje(pool, conta):
     _nota(pool, conta, [("TELHA CERAMICA", 320, "un", 180)])
@@ -238,6 +259,18 @@ def test_desfazer_so_a_ultima_de_hoje(pool, conta):
         inv.desfazer(pool, conta, velha)
 
 
+def test_desfazer_achado_que_ja_saiu_recusa(pool, conta):
+    _nota(pool, conta, [("TIJOLO 8 FUROS", 100, "un", 90)])
+    pid = _pid(pool, conta, "tijolo")
+    inv.contar(pool, conta, pid, "110", motivo="achado")               # +10
+    o = ob.criar_obra(pool, conta, "Casa T", "casa")
+    omat.mover(pool, conta, acao="levei", produto_id=pid, quantidade=110, obra_id=o["id"])
+    kid = inv.contagem_do_dia(pool, conta)["recentes"][0]["id"]
+    with pytest.raises(ValueError, match="já saiu do CD"):
+        inv.desfazer(pool, conta, kid)
+    assert _cd(pool, conta, "tijolo") == 0
+
+
 # ── os indicadores ────────────────────────────────────────────────────────
 def test_indicadores_divergencia_pedido_e_giro(pool, conta):
     o = _cd_padrao(pool, conta)
@@ -246,7 +279,7 @@ def test_indicadores_divergencia_pedido_e_giro(pool, conta):
     assert ind["giro"]["vezes"] == Decimal("3.0") and "CIMENTO" in ind["giro"]["nome"].upper()
     assert ind["acuracidade"] is None and ind["pedido_recebido"] is None and ind["divergentes"] == 0
     # uma nota com diferença
-    lid = _nota(pool, conta, [("BRITA 1", 6, "m3", 11000)], fornecedor="Pedreira Boa")
+    lid = _nota(pool, conta, [("BRITA 1", 6, "m3", 11000)], fornecedor="Pedreira Boa", conferir=False)
     mov = conf.pendentes(pool, conta)[0]["itens"][0]["mov_id"]
     conf.conferir(pool, conta, lid, chegou={mov: "5"})
     # um pedido que levou 5 horas pra chegar

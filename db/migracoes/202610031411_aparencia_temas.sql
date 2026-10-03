@@ -1,6 +1,7 @@
--- 680_aparencia_temas.sql
--- Temas do Zaq, fase 1 (docs/mockups/zaq_temas.html, aprovado pelo dono em 03/10/2026).
--- contas/aparencia.py e web/tema.py.
+-- 202610031411_aparencia_temas.sql
+-- O QUE FAZ: guarda o tema do painel (da empresa e de cada pessoa) e marca a conta piloto.
+-- POR QUÊ: Temas do Zaq, fase 1 (docs/mockups/zaq_temas.html, aprovado pelo dono em
+-- 03/10/2026). contas/aparencia.py e web/tema.py.
 --
 -- contas.tema          o tema da empresa: escuro, claro, misto ou auto. Vazio = escuro.
 -- contas.temas_piloto  o portão da fase 1: só conta marcada vê a tela Aparência e recebe

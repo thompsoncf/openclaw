@@ -201,8 +201,8 @@ def pool():
     with p.connection() as c:
         # Sem criar `nichos` nem `contas.nicho_id` aqui: o banco de teste é COMPARTILHADO
         # e uma `nichos` mínima viraria a definitiva pros arquivos seguintes (a 031
-        # semeia `nome`/`tipo`). A 680 pula a marca da piloto quando elas não existem.
-        c.execute((RAIZ / "db" / "migracoes" / "680_aparencia_temas.sql").read_text(encoding="utf-8"))
+        # semeia `nome`/`tipo`). A migração de aparência pula a marca da piloto quando elas não existem.
+        c.execute((RAIZ / "db" / "migracoes" / "202610031411_aparencia_temas.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()

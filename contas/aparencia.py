@@ -10,7 +10,7 @@ AS REGRAS:
 
 O PORTÃO (fase 1). Enquanto as telas ainda têm cor escrita à mão (~2.800 em
 `web/`, ver o mockup), o claro mostra pedaços escuros. Por isso a escolha só
-existe pra conta com `contas.temas_piloto` (migração 680 marca o Espaço Pelle,
+existe pra conta com `contas.temas_piloto` (a migração 202610031411_aparencia_temas marca o Espaço Pelle,
 conta 39). Pra qualquer outra conta tudo aqui devolve "escuro" e a tela
 Aparência nem aparece no menu.
 

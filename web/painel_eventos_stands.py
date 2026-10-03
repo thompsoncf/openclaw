@@ -503,21 +503,36 @@ def trocar_vendedor(request: Request, codigo: str, vendedor_id: str = Form("")):
                     f"/painel/eventos/estandes?erro={quote('Vendedor inválido.')}&abrir={codigo}",
                     status_code=303)
             vid = r[0]
-    if not s.get("prospeccao_id"):
+    pid = s.get("prospeccao_id")
+    if not pid:
         # STAND OCUPADO SEM RESERVA REGISTRADA (S78 e i14, 03/10/2026: "não consigo
         # vincular ao vendedor"): o comprovante entrou sem o nome do lojista e não
         # havia onde gravar a vendedora. A reserva nasce agora, com o nome do cadastro
+        if vid is None:
+            return RedirectResponse(
+                f"/painel/eventos/estandes?ok={quote(f'Venda do {codigo} continua sem vendedor.')}&abrir={codigo}",
+                status_code=303)
         cad = es.cadastros_dos_stands(pool, conta[0], [s]).get(codigo) or {}
-        if not (cad.get("fantasia") or "").strip():
+        fora = False
+        if s.get("cliente_id"):
+            from finance import clientes as _cli
+            c1 = _cli.obter_clientes(pool, conta[0], [s["cliente_id"]])
+            fora = bool(es._clientes_de_outra_conta(pool, conta[0], c1))
+        if fora or not (cad.get("fantasia") or "").strip():
+            # sem nome — ou o nome do cadastro é o que OUTRA conta registrou pra essa
+            # pessoa: o nome fantasia do stand vem de quem salva "Dados do cliente"
             return RedirectResponse(
                 f"/painel/eventos/estandes?erro={quote('Preencha o nome do cliente em Dados do cliente e salve — depois atribua o vendedor.')}&abrir={codigo}",
                 status_code=303)
-        es._registrar_reserva_do_stand(pool, conta[0], s, cad["fantasia"], cad.get("whats"), vid)
-    else:
+        pid = es._registrar_reserva_do_stand(pool, conta[0], s, cad["fantasia"],
+                                             cad.get("whats"), vid)
+    if pid:
+        # também quando outro clique registrou a reserva no meio tempo: a vendedora
+        # escolhida vai pra reserva que ficou no stand
         with pool.connection() as c:
             c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() "
                       "where id=%s and conta_id=%s",
-                      (vid, s["prospeccao_id"], conta[0]))
+                      (vid, pid, conta[0]))
             c.commit()
     msg = f"Venda do {codigo} sem vendedor." if vid is None else f"Venda do {codigo} atribuída."
     return RedirectResponse(f"/painel/eventos/estandes?ok={quote(msg)}&abrir={codigo}",
@@ -1113,7 +1128,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="oc-field" style="margin-bottom:12px">
         <span>Vendedor</span>
         {% if pode_gerir %}
-        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/vendedor" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px">
+        <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/vendedor" onsubmit="this.querySelector('button').disabled=true" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px">
           <select name="vendedor_id" style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--fg);font-family:inherit;font-size:12.5px;padding:7px 10px">
             <option value="0"{% if not cli.get('vendedor_id') %} selected{% endif %}>— Sem vendedor —</option>
             {% for v in vendedores %}<option value="{{ v.id }}"{% if cli.get('vendedor_id') == v.id %} selected{% endif %}>{{ v.nome }}</option>{% endfor %}

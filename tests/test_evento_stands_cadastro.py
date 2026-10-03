@@ -2508,3 +2508,49 @@ def test_a_gestao_atribui_vendedor_ao_stand_sem_reserva_registrada(pool, conta_i
     assert "livre" in parse_qs(urlparse(r.headers["location"]).query)["erro"][0]
     # a tela mostra o seletor pra gestão mesmo sem reserva registrada
     assert "{% if d.status != 'livre' and (d.prospeccao_id or pode_gerir) %}" in pes._TPL
+
+
+def test_atribuir_vendedor_sem_reserva_clique_duplo_sem_vendedor_e_cliente_de_outra_conta(
+        pool, conta_id, monkeypatch):
+    # a verificação do #1012: clique duplo não deixa prospecção órfã; "Sem vendedor"
+    # num stand sem reserva não grava nada; o nome de quem é de outra conta não vira marca
+    from urllib.parse import parse_qs, urlparse
+    from web import painel_eventos_stands as pes
+    cass, bia = _membro(pool, conta_id, "Cassandra"), _membro(pool, conta_id, "Bia")
+    monkeypatch.setattr(pes, "get_pool", lambda: pool)
+    monkeypatch.setattr(pes, "_acesso", lambda request, *a, **k: ((conta_id,), {}))
+    _sem_reserva(pool, conta_id, "S78")
+    cid = cli.salvar_cliente(pool, conta_id, "CAMUFLE", telefone="86995015123")["id"]
+    with pool.connection() as c:
+        c.execute("update evento_stands set cliente_id=%s where conta_id=%s and codigo='S78'",
+                  (cid, conta_id))
+        n0 = c.execute("select count(*) from prospeccao where conta_id=%s", (conta_id,)).fetchone()[0]
+        c.commit()
+    # "Sem vendedor": nada muda
+    r = pes.trocar_vendedor(object(), "S78", vendedor_id="0")
+    assert "continua sem vendedor" in parse_qs(urlparse(r.headers["location"]).query)["ok"][0]
+    assert es.buscar(pool, conta_id, "S78")["prospeccao_id"] is None
+    # o segundo clique perdeu a corrida: a prospecção dele não fica, e a vendedora vale
+    stand = es.buscar(pool, conta_id, "S78")
+    p1 = es._registrar_reserva_do_stand(pool, conta_id, stand, "CAMUFLE", None, cass)
+    p2 = es._registrar_reserva_do_stand(pool, conta_id, stand, "CAMUFLE", None, bia)   # leu antes
+    assert p1 and p2 == p1
+    with pool.connection() as c:
+        assert c.execute("select count(*) from prospeccao where conta_id=%s",
+                         (conta_id,)).fetchone()[0] == n0 + 1
+    # pela rota, com a reserva já registrada: só troca a vendedora dela
+    pes.trocar_vendedor(object(), "S78", vendedor_id=str(bia))
+    with pool.connection() as c:
+        assert c.execute("select vendedor_id from prospeccao where id=%s", (p1,)).fetchone()[0] == bia
+    # cliente que também é de outra conta: pede o nome em "Dados do cliente"
+    _outra, _la = _prime(pool)
+    _sem_reserva(pool, conta_id, "i14")
+    cid2 = cli.puxar_ou_criar_cliente(pool, conta_id, cnpj="11444777000161")
+    with pool.connection() as c:
+        c.execute("update evento_stands set cliente_id=%s where conta_id=%s and codigo='i14'",
+                  (cid2, conta_id))
+        c.commit()
+    r = pes.trocar_vendedor(object(), "i14", vendedor_id=str(cass))
+    assert "Dados do cliente" in parse_qs(urlparse(r.headers["location"]).query)["erro"][0]
+    assert es.buscar(pool, conta_id, "i14")["prospeccao_id"] is None
+    assert "this.querySelector('button').disabled=true" in pes._TPL

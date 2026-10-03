@@ -36,6 +36,7 @@ from . import obras as _ob
 TIPOS_PLANTA = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/jpg": "jpg",
                 "image/png": "png", "image/webp": "webp"}
 MAX_BYTES = 10 * 1024 * 1024
+MAX_OBS = 600               # o "O que tem no arquivo" (migração 202610031642)
 SITUACOES = ("meu", "vago", "terceiro")
 _ALTURA_PADRAO = 520        # a proporção do mockup aprovado (1000 × 520)
 
@@ -92,7 +93,8 @@ def listar(pool, conta_id: int) -> list[dict]:
                 return []
             rows = c.execute(
                 """select m.id, m.nome, m.cidade, m.planta_caminho is not null, m.altura,
-                          (select count(*) from obra_mapa_lotes l where l.mapa_id = m.id)
+                          (select count(*) from obra_mapa_lotes l
+                            where l.mapa_id = m.id and l.conta_id = m.conta_id)
                      from obra_mapas m where m.conta_id=%s
                     order by lower(m.nome), m.id""", (conta_id,)).fetchall()
     except Exception:  # noqa: BLE001 — instalação sem a 482
@@ -105,21 +107,47 @@ def obter(pool, conta_id: int, mapa_id: int) -> dict | None:
     with pool.connection() as c:
         r = c.execute("""select id, nome, cidade, planta_caminho, altura from obra_mapas
                           where id=%s and conta_id=%s""", (mapa_id, conta_id)).fetchone()
-    if not r:
-        return None
+        if not r:
+            return None
+        try:                                # o que tem no arquivo (202610031642)
+            with c.transaction():
+                extra = c.execute("""select planta_obs, planta_nome from obra_mapas
+                                      where id=%s and conta_id=%s""", (mapa_id, conta_id)).fetchone()
+        except Exception:  # noqa: BLE001 — sem a migração
+            extra = ("", "")
     return {"id": r[0], "nome": r[1], "cidade": r[2], "planta_caminho": r[3],
-            "altura": int(r[4]), "tem_planta": bool(r[3])}
+            "altura": int(r[4]), "tem_planta": bool(r[3]),
+            "planta_obs": (extra or ("", ""))[0] or "", "planta_nome": (extra or ("", ""))[1] or ""}
+
+
+def salvar_obs(pool, conta_id: int, mapa_id: int, obs: str | None) -> None:
+    """O "O que tem no arquivo": o que o desenho não deixa claro (quais quadras,
+    quais casas são nossas, o que é vago ou de terceiro, onde é a entrada) — quem
+    risca os lotes lê isso no editor. Linhas mantidas, espaços sobrando não."""
+    linhas = [" ".join(ln.split()) for ln in (obs or "").replace("\r", "").split("\n")]
+    texto = "\n".join(ln for ln in linhas if ln)[:MAX_OBS]
+    with pool.connection() as c:
+        if c.execute("update obra_mapas set planta_obs=%s where id=%s and conta_id=%s",
+                     (texto, mapa_id, conta_id)).rowcount == 0:
+            raise ValueError("Área não encontrada.")
+        c.commit()
 
 
 # ── a planta (o fundo do mapa) ────────────────────────────────────────────
-def _pdf_pra_png(conteudo: bytes) -> tuple[bytes, int, int]:
-    """A 1ª página do PDF como PNG (bytes, largura, altura). ValueError se o
-    arquivo não abrir — a mensagem vai pra tela."""
+def _pdf_pra_png(conteudo: bytes, pagina: int = 1) -> tuple[bytes, int, int]:
+    """A página `pagina` (1, 2, …) do PDF como PNG (bytes, largura, altura).
+    ValueError se o arquivo não abrir ou a página não existir — a mensagem vai
+    pra tela."""
     try:
         import pymupdf
         doc = pymupdf.open(stream=conteudo, filetype="pdf")
         try:
-            pag = doc[0]
+            n = doc.page_count
+            if not 1 <= pagina <= n:
+                raise ValueError(f"Esse PDF tem {n} página{'s' if n != 1 else ''} — "
+                                 f"escolha a página de 1 a {n}." if n > 1 else
+                                 "Esse PDF tem uma página só — deixe a página 1.")
+            pag = doc[pagina - 1]
             # ~2000 px de largura: nítido no zoom do editor sem estourar o bucket
             zoom = min(4.0, max(1.0, 2000.0 / float(pag.rect.width or 600)))
             pix = pag.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
@@ -142,10 +170,12 @@ def _tamanho_imagem(conteudo: bytes) -> tuple[int, int]:
 
 
 def guardar_planta(pool, conta_id: int, mapa_id: int, conteudo: bytes,
-                   content_type: str, *, subir=None, remover=None) -> dict:
-    """Sobe a planta (PDF vira PNG aqui) pro bucket privado e guarda o caminho e
-    a proporção. `subir`/`remover` são o cano do Storage, injetáveis nos testes;
-    por padrão, os de finance/comprovantes.py."""
+                   content_type: str, *, pagina: int = 1, nome_arquivo: str = "",
+                   subir=None, remover=None) -> dict:
+    """Sobe a planta (PDF vira PNG aqui, na página `pagina`) pro bucket privado e
+    guarda o caminho, a proporção e o nome do arquivo. `subir`/`remover` são o
+    cano do Storage, injetáveis nos testes; por padrão, os de
+    finance/comprovantes.py."""
     m = obter(pool, conta_id, mapa_id)
     if not m:
         raise ValueError("Área não encontrada.")
@@ -156,8 +186,9 @@ def guardar_planta(pool, conta_id: int, mapa_id: int, conteudo: bytes,
     ct = (content_type or "").lower().split(";")[0].strip()
     if ct not in TIPOS_PLANTA:
         raise ValueError("Aceito a planta em PDF ou imagem (JPG, PNG, WEBP).")
-    if ct == "application/pdf":
-        conteudo, w, h = _pdf_pra_png(conteudo)
+    pdf = ct == "application/pdf"
+    if pdf:
+        conteudo, w, h = _pdf_pra_png(conteudo, pagina)
         ct = "image/png"
     else:
         w, h = _tamanho_imagem(conteudo)
@@ -168,9 +199,18 @@ def guardar_planta(pool, conta_id: int, mapa_id: int, conteudo: bytes,
     caminho = (f"mapas/{conta_id}/{mapa_id}-{int(time.time())}-"
                f"{uuid.uuid4().hex[:10]}.{TIPOS_PLANTA.get(ct, 'png')}")
     subir(caminho, conteudo, ct)
+    nome = " ".join((nome_arquivo or "").replace("\\", "/").split("/")[-1].split())[:100]
+    if nome and pdf and pagina > 1:
+        nome += f" · página {pagina}"
     with pool.connection() as c:
         c.execute("update obra_mapas set planta_caminho=%s, altura=%s where id=%s and conta_id=%s",
                   (caminho, altura, mapa_id, conta_id))
+        try:                                # o nome do arquivo (202610031642)
+            with c.transaction():
+                c.execute("update obra_mapas set planta_nome=%s where id=%s and conta_id=%s",
+                          (nome, mapa_id, conta_id))
+        except Exception:  # noqa: BLE001 — sem a migração
+            pass
         c.commit()
     if m["planta_caminho"] and m["planta_caminho"] != caminho:
         if remover is None:

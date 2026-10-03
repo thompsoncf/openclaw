@@ -489,7 +489,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
   display:inline-flex;align-items:center;gap:.35rem}
 .mrow button:hover{border-color:var(--verde)}
 .mrow .ebtn{padding:.44rem .6rem}                 /* botão-ícone do nome (✓) */
-.mrow .danger:hover{border-color:var(--coral);color:#f0917f;background:#2a1414}
+.mrow .danger:hover{border-color:var(--coral);color:var(--coral);background:var(--coral-fundo)}
 .memail summary{cursor:pointer;color:var(--txt-mut);font-size:.74rem;list-style:none}
 .memail summary::-webkit-details-marker{display:none}
 .memail summary:hover{color:var(--verde-claro)}
@@ -501,11 +501,11 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 .memail input:focus{outline:none;border-color:var(--verde)}
 .mtag{padding:.1rem .5rem;border-radius:999px;font-size:.72rem;border:1px solid var(--borda);color:var(--txt-mut)}
 .mtag.on{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
-.mtag.pend{color:#e0b25a;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
-.mtag.off{color:#e07a5f;border-color:var(--coral-borda);background:var(--coral-fundo)}
+.mtag.pend{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.mtag.off{color:var(--coral);border-color:var(--coral-borda);background:var(--coral-fundo)}
 /* o selo de quem não recebe aviso: mesma família dos outros, mas com o ponto
    vermelho — é o único da linha que pede ação de quem está lendo */
-.mtag.mudo{color:#F2BDB9;border-color:var(--coral-borda);background:var(--coral-fundo)}
+.mtag.mudo{color:var(--coral);border-color:var(--coral-borda);background:var(--coral-fundo)}
 .mmotivo{display:block;font-size:.74rem;color:var(--txt-mut);margin-top:.15rem}
 @media (max-width:640px){.macts{width:100%}}
 /* legenda: o que cada papel acessa */
@@ -515,9 +515,9 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 .ph-row:first-of-type{border-top:0}
 .ph-nome{flex-shrink:0;min-width:88px;font-size:.78rem;font-weight:700;padding:.16rem .55rem;border-radius:999px;
   border:1px solid var(--borda);text-align:center}
-.ph-nome.vend{color:#7bb8e6;border-color:#1e3a52;background:#0f1d2b}
+.ph-nome.vend{color:var(--azul);border-color:var(--azul-borda);background:var(--azul-fundo)}
 .ph-nome.gest{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
-.ph-nome.fin{color:#e0b25a;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.ph-nome.fin{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
 .ph-desc{flex:1;min-width:200px;font-size:.82rem;color:var(--txt-mut);line-height:1.5}
 .ph-desc b{color:var(--txt);font-weight:600}
 </style>
@@ -530,7 +530,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
   <div class="mut" style="font-size:.82rem">Convide sua equipe por link. Cada pessoa entra com o próprio login, com o acesso do papel. Você acompanha o time no <b>Cockpit</b> — sem precisar de outro cadastro.</div>
 
   {% if novo_link %}
-  <div style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d">
+  <div style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:var(--neon-fundo)">
     <div class="mut" style="font-size:.8rem">{{ novo_link_cap or "Link de convite gerado — mande pra pessoa (vale 7 dias):" }}</div>
     <div style="display:flex;gap:.5rem;margin-top:.4rem">
       <input id="lk" value="{{ novo_link }}" readonly onclick="this.select()"
@@ -541,7 +541,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
   </div>
   {% endif %}
   {% if senha_temp %}
-  <div style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d">
+  <div style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:var(--neon-fundo)">
     <div class="mut" style="font-size:.8rem">Senha provisória — mande pra pessoa e peça pra trocar em Perfil. Ela aparece <b>só desta vez</b>:</div>
     <div style="display:flex;gap:.5rem;margin-top:.4rem">
       <input id="sqt" value="{{ senha_temp }}" readonly onclick="this.select()"
@@ -552,7 +552,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
   </div>
   {% endif %}
   {% if link_mestre %}
-  <div id="link-mestre" style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d">
+  <div id="link-mestre" style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:var(--neon-fundo)">
     <div style="font-weight:700">🏗️ Link de entrada de {{ link_mestre.nome|e }}</div>
     <div class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">Ele toca no link e já entra no app da obra, sem senha. Vale 48 horas; depois de entrar, o celular dele fica lembrado. Um link novo invalida o anterior.</div>
     {% if link_mestre.whatsapp_url %}<a href="{{ link_mestre.whatsapp_url }}" target="_blank" rel="noopener"
@@ -565,8 +565,8 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     </div>
   </div>
   {% endif %}
-  {% if aviso %}<div style="margin-top:.8rem;padding:.7rem .8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d;font-size:.85rem;color:var(--verde-claro)">{{ aviso }}</div>{% endif %}
-  {% if erro %}<div class="mut" style="margin-top:.8rem;color:#e07a5f">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div style="margin-top:.8rem;padding:.7rem .8rem;border:1px solid var(--verde);border-radius:10px;background:var(--neon-fundo);font-size:.85rem;color:var(--verde-claro)">{{ aviso }}</div>{% endif %}
+  {% if erro %}<div class="mut" style="margin-top:.8rem;color:var(--coral)">{{ erro }}</div>{% endif %}
 
   <form method="post" action="/painel/equipe/convidar" style="margin-top:1rem;display:grid;grid-template-columns:1.2fr 1.5fr 1.1fr .95fr auto;gap:.5rem;align-items:end">
     <div><label class="mut" style="font-size:.72rem">Nome</label><input name="nome" placeholder="Nome" style="width:100%"></div>
@@ -666,7 +666,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
           <input type="hidden" name="membro_id" value="{{ m.id }}">
           <input type="hidden" name="pode" value="{{ '0' if m.pode_campanha else '1' }}">
           <button title="{{ 'Tirar a permissão de criar campanhas' if m.pode_campanha else 'Deixar este vendedor criar as próprias campanhas e enriquecer leads' }}"
-                  {% if m.pode_campanha %}style="border-color:var(--ok,#2ea043);color:var(--ok,#2ea043)"{% endif %}>
+                  {% if m.pode_campanha %}style="border-color:var(--ok,var(--neon));color:var(--ok,var(--neon))"{% endif %}>
             {{ '📣 Campanhas ✓' if m.pode_campanha else '📣 Liberar campanhas' }}</button></form>
         {% endif %}
         {% if m.papel == 'mestre' and m.ativo %}

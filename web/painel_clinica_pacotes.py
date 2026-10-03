@@ -154,7 +154,7 @@ _CSS = r"""<style>
 .pk-l{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.2rem .6rem;padding:.5rem .1rem;border-top:1px solid var(--borda)}
 .pk-l a.q{font-weight:600;color:var(--txt);text-decoration:none}.pk-m{font-size:.8rem;color:var(--txt-mut)}
 .pk-chip{font-size:.7rem;padding:.08rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut);margin-left:.3rem}
-.pk-chip.al{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}
+.pk-chip.al{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
 .pk-bar{display:flex;gap:3px;margin-top:.3rem}.pk-bar i{width:14px;height:8px;border-radius:3px;background:var(--borda)}
 .pk-bar i.u{background:var(--verde)}
 .pk-acoes{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}.pk-acoes form{margin:0}

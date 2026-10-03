@@ -147,7 +147,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .pr-l{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.2rem .6rem;padding:.5rem .1rem;border-top:1px solid var(--borda);align-items:center}
 .pr-m{font-size:.8rem;color:var(--txt-mut)}
 .pr-chip{font-size:.7rem;padding:.08rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut);margin-left:.3rem}
-.pr-chip.al{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}
+.pr-chip.al{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
 .pr-acoes{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}.pr-acoes form{margin:0;display:flex;gap:.3rem;align-items:center}
 .pr-acoes a,.pr-acoes button{width:auto;margin:0;min-height:36px;padding:.3rem .7rem;font-size:.82rem;border-radius:8px}
 .pr-acoes .sec,.pr-acoes a{background:transparent;border:1px solid var(--borda);color:var(--txt);text-decoration:none;display:inline-flex;align-items:center}

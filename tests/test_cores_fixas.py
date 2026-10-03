@@ -38,7 +38,7 @@ ISENTOS = {
     "recibo_publico.py", "ficha_publica.py",
 }
 
-#: O teto de cada arquivo (contagem de 03/10/2026, depois da fase 2b). Arquivo que
+#: O teto de cada arquivo (contagem de 03/10/2026, depois da fase 2b e das telas da clínica). Arquivo que
 #: não está aqui tem teto zero.
 TETO = {
     "admin.py": 43,
@@ -52,26 +52,18 @@ TETO = {
     "painel_agenda.py": 49,
     "painel_aparencia.py": 11,   # as miniaturas dos temas: desenham as cores de cada um
     "painel_apolices.py": 18,
-    "painel_clinica_agenda.py": 13,
-    "painel_clinica_assinaturas.py": 1,
-    "painel_clinica_funil.py": 1,
-    "painel_clinica_pacientes.py": 4,
-    "painel_clinica_pacotes.py": 1,
-    "painel_clinica_planos.py": 18,
-    "painel_clinica_produtos.py": 1,
-    "painel_clinica_prontuario.py": 4,
+    "painel_clinica_pacientes.py": 1,   # o QR do balcão, que precisa de fundo branco
+    "painel_clinica_planos.py": 17,   # a página pública do plano, que o paciente abre
     "painel_cockpit.py": 283,
     "painel_conteudo.py": 17,
     "painel_deposito.py": 4,
-    "painel_equipe.py": 19,
+    "painel_equipe.py": 3,   # o botão do WhatsApp
     "painel_eventos_stands.py": 40,
     "painel_follow_up.py": 12,
-    "painel_hoje.py": 7,
     "painel_obras.py": 41,
     "painel_obras_mapa.py": 98,
     "painel_origens.py": 3,
     "painel_prospeccao.py": 353,
-    "painel_raio_x.py": 2,
     "painel_relatorios.py": 1,
     "painel_respostas.py": 5,
     "painel_servicos.py": 59,

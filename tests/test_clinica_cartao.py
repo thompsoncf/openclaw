@@ -7,6 +7,9 @@ cidade nem origem.
 from __future__ import annotations
 
 import os
+import re
+import shutil
+import subprocess
 from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -303,6 +306,22 @@ def test_valor_e_motivo_da_perda_tambem_na_ficha_da_clinica(clinica):
     assert _linha(clinica, lid, "valor_estimado_centavos", "perda_motivo") == (150000, "achou_caro")
     _salvar(lid, valor="1.500,00", perda_motivo="")
     assert _linha(clinica, lid, "perda_motivo") == ("achou_caro",)
+
+
+def test_o_js_da_ficha_da_clinica_compila(clinica, tmp_path):
+    """O JS do "outra pessoa" só existe na ficha da clínica, e o teste geral de
+    sintaxe (test_painel_js_sintaxe) renderiza a ficha sem conta de clínica."""
+    if not shutil.which("node"):
+        pytest.skip("sem node no ambiente")
+    html = _ficha(_lead(clinica))
+    bloco = next(b for b in re.findall(r"<script[^>]*>(.*?)</script>", html, re.S) if "function clQuem" in b)
+    for nome in ("clPill", "clMoverNome", "clDevolver", "clCidade"):
+        assert f"function {nome}" in bloco
+    alvo = tmp_path / "clinica.js"
+    alvo.write_text(bloco, encoding="utf-8")
+    r = subprocess.run(["node", "--check", str(alvo)], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=60)
+    assert r.returncode == 0, r.stderr
 
 
 def test_nome_com_aspas_e_tags_sai_escapado(clinica):

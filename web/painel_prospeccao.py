@@ -14331,7 +14331,8 @@ function perdaDesc(sel){
               </div></div>
             <div class="full"><label class="lbl">Nome do paciente</label><input class="fld" name="empresa" value="{{ (a.empresa or '')|e }}"></div>
             <div data-cl-outro{% if not clinica.outra_pessoa %} style="display:none"{% endif %}><label class="lbl">Responsável (quem fala pelo WhatsApp)</label><input class="fld" name="responsavel_nome" value="{{ (clinica.responsavel_nome or '')|e }}"></div>
-            <div class="full mut" id="cl-dados-paciente" style="display:none;font-size:.76rem">CPF e nascimento agora são do paciente: os de quem fala foram tirados deste cartão.</div>
+            <div class="full" id="cl-mover" style="display:none;font-size:.8rem"><a href="#" id="cl-mover-link" onclick="clMoverNome(event)" style="color:var(--verde)"></a></div>
+            <div class="full mut" id="cl-dados-paciente" style="display:none;font-size:.76rem">O nome, o CPF e o nascimento de quem fala saíram do cartão: preencha os do paciente. Voltar para "quem está falando" desfaz.</div>
             <div data-cl-outro{% if not clinica.outra_pessoa %} style="display:none"{% endif %}><label class="lbl">Parentesco</label><select class="fld" name="responsavel_parentesco"><option value="">—</option>{% for k, r in clinica.parentescos %}<option value="{{ k }}" {% if clinica.responsavel_parentesco==k %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
             <div><label class="lbl">Nascimento</label><input class="fld" type="date" name="nascimento" value="{{ clinica.nascimento_iso }}"></div>
             <div><label class="lbl">CPF</label><input class="fld" name="documento" inputmode="numeric" placeholder="000.000.000-00" value="{{ clinica.cpf_fmt|e }}"></div>
@@ -14357,24 +14358,44 @@ function perdaDesc(sel){
         </form>
         <script>
         function clPill(r){var g=r.closest('[data-cl-grupo]');if(!g)return;g.querySelectorAll('input').forEach(function(x){x.parentNode.classList.toggle('on',x.checked);});}
+        // O nome do cartão pode ser de quem fala (veio do perfil do WhatsApp) ou do
+        // próprio paciente (a agenda grava o nome digitado). Por isso nada muda
+        // sozinho: a recepção escolhe "usar como responsável", e voltar para "quem
+        // está falando" devolve o que estava.
+        var clGuardado=null;
         function clQuem(r){
           clPill(r);
-          var f=r.form,el=f.elements,outro=(r.value==='outro'),aviso=document.getElementById('cl-dados-paciente');
+          var f=r.form,el=f.elements,outro=(r.value==='outro');
+          var mover=document.getElementById('cl-mover'),link=document.getElementById('cl-mover-link');
           f.querySelectorAll('[data-cl-outro]').forEach(function(d){d.style.display=outro?'':'none';});
-          if(outro&&!el.responsavel_nome.value){
-            el.responsavel_nome.value=el.empresa.value;
-            el.empresa.value='';
-            // o CPF e o nascimento que estavam eram de quem fala, não do paciente
-            if(el.documento.value||el.nascimento.value){
-              el.documento.value='';el.nascimento.value='';
-              if(aviso)aviso.style.display='';
-            }
-            el.empresa.focus();
+          if(outro&&!el.responsavel_nome.value&&el.empresa.value&&mover&&link){
+            link.textContent='Quem fala é '+el.empresa.value+'? Usar como responsável';
+            mover.style.display='';
           }
           if(!outro){
-            if(!el.empresa.value)el.empresa.value=el.responsavel_nome.value;
-            if(aviso)aviso.style.display='none';
+            if(mover)mover.style.display='none';
+            clDevolver(f);
           }
+        }
+        function clMoverNome(ev){
+          ev.preventDefault();
+          var f=document.getElementById('edit-dados'),el=f.elements;
+          clGuardado={empresa:el.empresa.value,documento:el.documento.value,
+                      nascimento:el.nascimento.value,responsavel:el.responsavel_nome.value};
+          el.responsavel_nome.value=el.empresa.value;
+          el.empresa.value='';el.documento.value='';el.nascimento.value='';
+          document.getElementById('cl-mover').style.display='none';
+          var av=document.getElementById('cl-dados-paciente');if(av)av.style.display='';
+          el.empresa.focus();
+        }
+        function clDevolver(f){
+          var el=f.elements,av=document.getElementById('cl-dados-paciente');
+          if(clGuardado){
+            el.empresa.value=clGuardado.empresa;el.documento.value=clGuardado.documento;
+            el.nascimento.value=clGuardado.nascimento;el.responsavel_nome.value=clGuardado.responsavel;
+            clGuardado=null;
+          }
+          if(av)av.style.display='none';
         }
         function clCidade(s){var d=document.getElementById('cl-cidade-outra');if(d)d.style.display=(s.value==='{{ clinica.outra_cidade }}')?'':'none';}
         </script>

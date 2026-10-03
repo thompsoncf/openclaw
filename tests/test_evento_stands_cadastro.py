@@ -2468,3 +2468,43 @@ def test_a_lista_do_painel_busca_por_loja_e_cnpj_e_filtra_por_vendedor(pool, con
     assert '<select id="lst-vend"' in html and f'<option value="{cass}">Cassandra</option>' in html
     assert '<option value="0">Sem vendedor</option>' in html
     assert "qd.length >= 3" in html and "el.dataset.vend === v" in html
+
+
+def test_a_gestao_atribui_vendedor_ao_stand_sem_reserva_registrada(pool, conta_id, monkeypatch):
+    # o dono (03/10/2026): "2 stands reservados sem vendedor e no sistema não consigo
+    # vincular ao vendedor" — S78 e i14, sem prospecção (o comprovante veio sem nome)
+    from urllib.parse import parse_qs, urlparse
+    from web import painel_eventos_stands as pes
+    cass = _membro(pool, conta_id, "Cassandra")
+    monkeypatch.setattr(pes, "get_pool", lambda: pool)
+    monkeypatch.setattr(pes, "_acesso", lambda request, *a, **k: ((conta_id,), {}))
+    _sem_reserva(pool, conta_id, "S78")
+    # sem o nome do cliente ainda: pede o cadastro antes, e nada é gravado
+    r = pes.trocar_vendedor(object(), "S78", vendedor_id=str(cass))
+    assert "Dados do cliente" in parse_qs(urlparse(r.headers["location"]).query)["erro"][0]
+    assert es.buscar(pool, conta_id, "S78")["prospeccao_id"] is None
+    # com o cadastro (como o S78 tem em produção): a reserva nasce com a vendedora
+    cid = cli.salvar_cliente(pool, conta_id, "CAMUFLE", telefone="86995015123")["id"]
+    with pool.connection() as c:
+        c.execute("update evento_stands set cliente_id=%s where conta_id=%s and codigo='S78'",
+                  (cid, conta_id))
+        c.commit()
+    r = pes.trocar_vendedor(object(), "S78", vendedor_id=str(cass))
+    assert "atribuída" in parse_qs(urlparse(r.headers["location"]).query)["ok"][0]
+    s = es.buscar(pool, conta_id, "S78")
+    with pool.connection() as c:
+        emp, zap, vid = c.execute("select empresa, whatsapp, vendedor_id from prospeccao where id=%s",
+                                  (s["prospeccao_id"],)).fetchone()
+    assert (emp, zap, vid) == ("CAMUFLE", "86995015123", cass)
+    # trocar de novo usa a mesma reserva (não nasce outra)
+    pid = s["prospeccao_id"]
+    pes.trocar_vendedor(object(), "S78", vendedor_id="0")
+    assert es.buscar(pool, conta_id, "S78")["prospeccao_id"] == pid
+    with pool.connection() as c:
+        assert c.execute("select vendedor_id from prospeccao where id=%s", (pid,)).fetchone()[0] is None
+    # stand livre: não há venda
+    _criar_stand(pool, conta_id, "G60")
+    r = pes.trocar_vendedor(object(), "G60", vendedor_id=str(cass))
+    assert "livre" in parse_qs(urlparse(r.headers["location"]).query)["erro"][0]
+    # a tela mostra o seletor pra gestão mesmo sem reserva registrada
+    assert "{% if d.status != 'livre' and (d.prospeccao_id or pode_gerir) %}" in pes._TPL

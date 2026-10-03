@@ -481,15 +481,15 @@ def trocar_vendedor(request: Request, codigo: str, vendedor_id: str = Form("")):
     """Atribui/corrige o vendedor da venda — grava vendedor_id na prospecção do
     stand. `vendedor_id` vazio ou '0' = tira o vendedor (venda sem dono). Só
     aceita membro válido da conta; o resto vira None (mesma trava do link)."""
+    from urllib.parse import quote
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
         return cfg_ou_redir
     pool = get_pool()
     s = es.buscar(pool, conta[0], codigo)
-    if not s or not s.get("prospeccao_id"):
+    if not s or s["status"] == "livre":
         return RedirectResponse(
-            "/painel/eventos/estandes?erro=Sem cadastro de interessado pra atribuir "
-            "vendedor — anexe um comprovante com o nome do lojista primeiro.",
+            f"/painel/eventos/estandes?erro={quote('Stand livre não tem venda pra atribuir vendedor.')}",
             status_code=303)
     with pool.connection() as c:
         vid = None
@@ -500,14 +500,28 @@ def trocar_vendedor(request: Request, codigo: str, vendedor_id: str = Form("")):
                 (vendedor_id.strip(), conta[0])).fetchone()
             if not r:
                 return RedirectResponse(
-                    "/painel/eventos/estandes?erro=Vendedor inválido.", status_code=303)
+                    f"/painel/eventos/estandes?erro={quote('Vendedor inválido.')}&abrir={codigo}",
+                    status_code=303)
             vid = r[0]
-        c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() "
-                  "where id=%s and conta_id=%s",
-                  (vid, s["prospeccao_id"], conta[0]))
-        c.commit()
+    if not s.get("prospeccao_id"):
+        # STAND OCUPADO SEM RESERVA REGISTRADA (S78 e i14, 03/10/2026: "não consigo
+        # vincular ao vendedor"): o comprovante entrou sem o nome do lojista e não
+        # havia onde gravar a vendedora. A reserva nasce agora, com o nome do cadastro
+        cad = es.cadastros_dos_stands(pool, conta[0], [s]).get(codigo) or {}
+        if not (cad.get("fantasia") or "").strip():
+            return RedirectResponse(
+                f"/painel/eventos/estandes?erro={quote('Preencha o nome do cliente em Dados do cliente e salve — depois atribua o vendedor.')}&abrir={codigo}",
+                status_code=303)
+        es._registrar_reserva_do_stand(pool, conta[0], s, cad["fantasia"], cad.get("whats"), vid)
+    else:
+        with pool.connection() as c:
+            c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() "
+                      "where id=%s and conta_id=%s",
+                      (vid, s["prospeccao_id"], conta[0]))
+            c.commit()
     msg = f"Venda do {codigo} sem vendedor." if vid is None else f"Venda do {codigo} atribuída."
-    return RedirectResponse(f"/painel/eventos/estandes?ok={msg}", status_code=303)
+    return RedirectResponse(f"/painel/eventos/estandes?ok={quote(msg)}&abrir={codigo}",
+                            status_code=303)
 
 
 @router.post("/painel/eventos/estandes/{codigo}/liberar")
@@ -1092,7 +1106,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       <p class="fld-nota" style="margin:0 0 10px">Só dono/gestor edita os dados do contrato.</p>
       {% endif %}
       {% endif %}
-      {% if d.prospeccao_id and d.status != 'livre' %}
+      {% if d.status != 'livre' and (d.prospeccao_id or pode_gerir) %}
       <div style="border-top:1px solid var(--line);margin:16px 0 4px"></div>
       {#- vendedor da venda: mostra o atual e (pra gestão) deixa trocar/corrigir.
           O automático vem do link do vendedor; isto é a correção manual. -#}
@@ -1108,7 +1122,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         </form>
         {% else %}<b>{{ vend_nomes.get(cli.get('vendedor_id')) or 'Sem vendedor' }}</b>{% endif %}
       </div>
-      <a class="oc-ghost-btn" href="/painel/prospeccao">Abrir no Funil →</a>
+      {% if d.prospeccao_id %}<a class="oc-ghost-btn" href="/painel/prospeccao">Abrir no Funil →</a>{% endif %}
       {% elif d.status != 'livre' %}<p class="oc-vazio" style="margin:0">Este envio veio sem nome — o interessado não preencheu o cadastro.</p>{% endif %}
     </div>
   </div>

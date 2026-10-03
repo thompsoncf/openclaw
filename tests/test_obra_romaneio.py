@@ -15,6 +15,7 @@ from psycopg_pool import ConnectionPool
 from starlette.middleware.sessions import SessionMiddleware
 
 from db.conexao import init_schema
+from finance import obra_conferencia as conf
 from finance import obra_material as omat
 from finance import obra_pedidos as op
 from finance import obra_romaneio as rom
@@ -86,6 +87,7 @@ def _cd(pool, conta):
                          values (%s,%s,%s,3290,0,%s)""", (lid, desc, q, un))
         c.commit()
     omat.absorver_lancamento(pool, conta, lid)
+    conf.conferir(pool, conta, lid)                   # bateu: a nota não fica esperando
     c4 = ob.criar_obra(pool, conta, "Casa 4", "casa")
     c1 = ob.criar_obra(pool, conta, "Casa 1", "casa")
     return c4["id"], c1["id"]

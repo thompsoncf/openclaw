@@ -38,7 +38,7 @@ ISENTOS = {
     "recibo_publico.py", "ficha_publica.py",
 }
 
-#: O teto de cada arquivo (contagem de 03/10/2026, depois da fase 2a). Arquivo que
+#: O teto de cada arquivo (contagem de 03/10/2026, depois da fase 2b). Arquivo que
 #: não está aqui tem teto zero.
 TETO = {
     "admin.py": 43,
@@ -75,7 +75,7 @@ TETO = {
     "painel_relatorios.py": 1,
     "painel_respostas.py": 5,
     "painel_servicos.py": 59,
-    "portal.py": 1090,
+    "portal.py": 803,      # 2a: a base; 2b: Empresa, Relatórios, Clientes, Novidades
     "versao.py": 1,
     "zap_fetch.py": 13,
 }

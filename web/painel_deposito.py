@@ -489,6 +489,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       {{ motivo_sel() }}<button class="dp-bt prim">Contar</button></form>{% endif %}</td></tr>{% endfor %}
   </table></div>
   {% else %}<p class="dp-mut" style="margin:.5rem 0 0">Nada pra contar hoje — o CD está em dia. ✅</p>{% endif %}
+  {% if dia.esperando %}<p class="dp-mut" style="margin:.6rem 0 0">⏳ Esperando a conferência da nota: {% for x in dia.esperando %}<b>{{ x.nome|e }}</b> ({{ x.fornecedor|e }}){{ ', ' if not loop.last }}{% endfor %}. <a href="?aba=entradas">Confira na aba Entradas</a> — depois eles entram na contagem.</p>{% endif %}
   <p class="dp-mut" style="margin:.6rem 0 0">Conte o que está na prateleira e digite. Não bateu? Escolha o motivo — a diferença vira ajuste no estoque. A classe A é contada toda semana, a B a cada 15 dias, a C uma vez por mês.</p>
 </div>
 

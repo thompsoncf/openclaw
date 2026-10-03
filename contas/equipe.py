@@ -29,37 +29,42 @@ from core import esquema_runtime
 # conversa e cliente) nem `financeiro` (abriria caixa e relatório), então a única
 # saída honesta era uma capacidade própria, estreita de propósito.
 #
+# `deposito` é a SEXTA (03/10/2026, o CD das obras): a aba Depósito (CD). Quem
+# tem financeiro já via o depósito dentro de Obras; o almoxarife vê SÓ ela.
+#
 # `campo` é a QUINTA, e nasceu pro mestre de obras (02/10/2026, PR 3 do mapa): ele
 # marca etapa, tira foto e aponta material no app /obra — e não vê dinheiro
 # nenhum. Não dava pra reusar `financeiro` (abriria custo, caixa e relatório) nem
 # `vendas`; de novo, a saída honesta é uma capacidade própria e estreita.
 CAPS = {
-    "dono":       {"vendas": True,  "financeiro": True,  "gerir": True,  "origens": True,  "campo": True},
-    "gestor":     {"vendas": True,  "financeiro": True,  "gerir": False, "origens": True,  "campo": True},
-    "vendedor":   {"vendas": True,  "financeiro": False, "gerir": False, "origens": False, "campo": False},
-    "financeiro": {"vendas": False, "financeiro": True,  "gerir": False, "origens": False, "campo": False},
+    "dono":       {"vendas": True,  "financeiro": True,  "gerir": True,  "origens": True,  "campo": True, "deposito": True},
+    "gestor":     {"vendas": True,  "financeiro": True,  "gerir": False, "origens": True,  "campo": True, "deposito": True},
+    "vendedor":   {"vendas": True,  "financeiro": False, "gerir": False, "origens": False, "campo": False, "deposito": False},
+    "financeiro": {"vendas": False, "financeiro": True,  "gerir": False, "origens": False, "campo": False, "deposito": True},
     # a agência: entra, vê a tela de Origens e mais nada. Não é gente da casa.
-    "convidado":  {"vendas": False, "financeiro": False, "gerir": False, "origens": True,  "campo": False},
+    "convidado":  {"vendas": False, "financeiro": False, "gerir": False, "origens": True,  "campo": False, "deposito": False},
+    # o almoxarife: a aba do CD (Depósito) e mais nada — sem caixa, sem custo das obras
+    "almoxarife": {"vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": False, "deposito": True},
     # o mestre de obras: o app /obra e mais nada (só as obras dele, sem valor)
-    "mestre":     {"vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": True},
+    "mestre":     {"vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": True, "deposito": False},
     # compat com o modelo família (chat): nunca acessam Vendas nem gerem a conta.
-    "membro":     {"vendas": False, "financeiro": True,  "gerir": False, "origens": False, "campo": False},
-    "restrito":   {"vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": False},
+    "membro":     {"vendas": False, "financeiro": True,  "gerir": False, "origens": False, "campo": False, "deposito": False},
+    "restrito":   {"vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": False, "deposito": False},
 }
 # papéis que o dono pode atribuir a um membro de equipe (o dono é o titular).
 # `convidado` entra aqui pra reusar o convite por link que já existe: o dono manda
 # o link, a agência cria a própria senha (o dono nunca a vê) e a revogação é a
 # mesma de qualquer membro.
-PAPEIS_PJ = ("gestor", "vendedor", "financeiro", "convidado", "mestre")
+PAPEIS_PJ = ("gestor", "vendedor", "financeiro", "convidado", "mestre", "almoxarife")
 # o papel que só existe num nicho: quem oferece e quem aceita é a tela da equipe
 # (web/painel_equipe.py), que conhece o nicho da conta — este módulo não conhece
-PAPEIS_DO_NICHO = {"mestre": "construcao"}
+PAPEIS_DO_NICHO = {"mestre": "construcao", "almoxarife": "construcao"}
 _ROTULOS = {"dono": "Dono", "gestor": "Gestor", "vendedor": "Vendedor",
             "financeiro": "Financeiro", "convidado": "Convidado (agência)",
-            "mestre": "Mestre de obras",
+            "mestre": "Mestre de obras", "almoxarife": "Almoxarife (CD)",
             "membro": "Membro", "restrito": "Restrito"}
 _SEM_ACESSO = {"vendas": False, "financeiro": False, "gerir": False, "origens": False,
-               "campo": False}
+               "campo": False, "deposito": False}
 
 
 def caps_do_papel(papel: str | None) -> dict:
@@ -101,6 +106,9 @@ def home_do_papel(papel: str | None, membro_id=None) -> str:
     # o mestre de obras vai pro app dele, feito pro celular e pro canteiro
     if papel == "mestre":
         return "/obra"
+    # o almoxarife vai pro CD, que é a única tela dele
+    if papel == "almoxarife":
+        return "/painel/obras/deposito"
     return "/painel"
 
 
@@ -126,6 +134,8 @@ def destino_barrado(papel: str | None) -> str:
         return "/painel/origens"
     if caps["campo"]:
         return "/obra"
+    if caps["deposito"]:
+        return "/painel/obras/deposito"
     return "/trocar"
 
 
@@ -215,6 +225,10 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # mestre barrado (`destino_barrado`) constar da lista dele, como manda o contrato.
     if caps["campo"]:
         permitido += ["/obra"]
+    # o CD (Depósito): quem tem financeiro já entra por /painel/obras; o
+    # almoxarife entra SÓ aqui. Quem barra conta de outro nicho é a rota.
+    if caps["deposito"]:
+        permitido += ["/painel/obras/deposito"]
     if caps["gerir"]:
         permitido += ["/painel/equipe", "/membros"]
     if recebe_novidades(papel):

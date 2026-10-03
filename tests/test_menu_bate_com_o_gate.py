@@ -36,7 +36,8 @@ _CONTA_PJ = [1, "pj", "Buffet", "doc", "app_pro", None, None, None,
              False, None, None, True, None, None, True, None, "eventos"]
 
 #: papéis de MEMBRO — o dono passa em tudo e é conferido à parte
-_MEMBROS = ["gestor", "vendedor", "financeiro", "restrito", "membro", "convidado"]
+_MEMBROS = ["gestor", "vendedor", "financeiro", "restrito", "membro", "convidado",
+            "mestre", "almoxarife"]
 
 #: rotas que o gate deixa passar pra qualquer um, e que por isso não precisam
 #: aparecer no menu (nem podem ser cobradas dele)

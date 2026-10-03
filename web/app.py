@@ -138,6 +138,7 @@ from web.painel_clinica import router as clinica_router
 from web.painel_obras import router as obras_router
 from web.painel_obras_mapa import router as obras_mapa_router
 from web.app_obra import router as app_obra_router
+from web.painel_deposito import router as deposito_router
 from web.painel_clinica_agenda import router as clinica_agenda_router
 from web.painel_clinica_vagas import router as clinica_vagas_router
 from web.painel_clinica_planos import router as clinica_planos_router
@@ -342,6 +343,7 @@ app.include_router(hoje_router)
 app.include_router(clinica_router)
 # o mapa ANTES da ficha: /painel/obras/mapa bateria em /painel/obras/{obra_id}
 app.include_router(obras_mapa_router)
+app.include_router(deposito_router)          # o CD, antes da ficha /painel/obras/{obra_id}
 app.include_router(app_obra_router)          # o app do mestre (/obra), fora do /painel
 app.include_router(obras_router)
 app.include_router(clinica_agenda_router)

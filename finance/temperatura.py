@@ -197,28 +197,26 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     Best-effort por conta: um lead torto numa conta não pode travar as outras.
     """
     total = {"contas": 0, "avaliados": 0, "mudados": 0, "ensaios": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "temperatura", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                contas = [r[0] for r in c.execute(
-                    """select conta_id from funil_regua
-                        where coalesce(temperatura_modo,'off') <> 'off'""").fetchall()]
-            for cid in contas:
-                try:
-                    with pool.connection() as c:
-                        cfg = config(c, cid)
-                        linhas = avaliar(c, cid, agora, cfg)
-                        total["contas"] += 1
-                        total["avaliados"] += len(linhas)
-                        if cfg["temperatura_modo"] == "ligado":
-                            total["mudados"] += aplicar(c, cid, linhas)
-                            c.commit()
-                        else:
-                            total["ensaios"] += sum(1 for x in linhas if x["muda"])
-                except Exception:  # noqa: BLE001
-                    _log.warning("temperatura falhou na conta %s", cid, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            contas = [r[0] for r in c.execute(
+                """select conta_id from funil_regua
+                    where coalesce(temperatura_modo,'off') <> 'off'""").fetchall()]
+        for cid in contas:
+            try:
+                with pool.connection() as c:
+                    cfg = config(c, cid)
+                    linhas = avaliar(c, cid, agora, cfg)
+                    total["contas"] += 1
+                    total["avaliados"] += len(linhas)
+                    if cfg["temperatura_modo"] == "ligado":
+                        total["mudados"] += aplicar(c, cid, linhas)
+                        c.commit()
+                    else:
+                        total["ensaios"] += sum(1 for x in linhas if x["muda"])
+            except Exception:  # noqa: BLE001
+                _log.warning("temperatura falhou na conta %s", cid, exc_info=True)
     return total

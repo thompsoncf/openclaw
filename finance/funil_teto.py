@@ -370,25 +370,23 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     """Uma passada em todas as contas que ligaram. Chamada pelo poller, junto de
     campanha, lembrete, régua e follow-up — sem cron novo no Render."""
     total = {"contas": 0, "avisos": 0, "simulados": 0, "renovados": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "funil_teto", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                contas = [r[0] for r in c.execute(
-                    "select conta_id from funil_regua where teto_modo <> 'off'").fetchall()]
-            for conta_id in contas:
-                try:
-                    with pool.connection() as c:
-                        r = avaliar(c, conta_id, agora)
-                        c.commit()
-                    total["contas"] += 1
-                    for k in ("avisos", "simulados", "renovados"):
-                        total[k] += r[k]
-                    # a mensagem sai DEPOIS do commit: push não tem como ser desfeito
-                    notificar(pool, conta_id, r["pendentes"])
-                except Exception:  # noqa: BLE001
-                    _log.warning("teto falhou na conta %s", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            contas = [r[0] for r in c.execute(
+                "select conta_id from funil_regua where teto_modo <> 'off'").fetchall()]
+        for conta_id in contas:
+            try:
+                with pool.connection() as c:
+                    r = avaliar(c, conta_id, agora)
+                    c.commit()
+                total["contas"] += 1
+                for k in ("avisos", "simulados", "renovados"):
+                    total[k] += r[k]
+                # a mensagem sai DEPOIS do commit: push não tem como ser desfeito
+                notificar(pool, conta_id, r["pendentes"])
+            except Exception:  # noqa: BLE001
+                _log.warning("teto falhou na conta %s", conta_id, exc_info=True)
     return total

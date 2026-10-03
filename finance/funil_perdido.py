@@ -248,24 +248,22 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     """Uma passada em todas as contas que ligaram. Chamada pelo poller, junto da
     régua, do teto e do follow-up — sem cron novo no Render."""
     total = {"contas": 0, "fechados": 0, "simulados": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "funil_perdido", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                contas = [r[0] for r in c.execute(
-                    "select conta_id from funil_regua where perdido_modo <> 'off'").fetchall()]
-            for conta_id in contas:
-                try:
-                    with pool.connection() as c:
-                        r = avaliar(c, conta_id, agora)
-                        c.commit()
-                    total["contas"] += 1
-                    total["fechados"] += r["fechados"]
-                    total["simulados"] += r["simulados"]
-                except Exception:  # noqa: BLE001
-                    _log.warning("perdido automático falhou na conta %s", conta_id,
-                                 exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            contas = [r[0] for r in c.execute(
+                "select conta_id from funil_regua where perdido_modo <> 'off'").fetchall()]
+        for conta_id in contas:
+            try:
+                with pool.connection() as c:
+                    r = avaliar(c, conta_id, agora)
+                    c.commit()
+                total["contas"] += 1
+                total["fechados"] += r["fechados"]
+                total["simulados"] += r["simulados"]
+            except Exception:  # noqa: BLE001
+                _log.warning("perdido automático falhou na conta %s", conta_id,
+                             exc_info=True)
     return total

@@ -334,27 +334,14 @@ def da_ia(pool, conta_id: int, orc_id: int) -> dict | None:
 @contextmanager
 def trava_do_dia(pool, conta_id: int, dia: date):
     """Uma reserva de data por vez no MESMO DIA da mesma conta: duas aprovações no
-    mesmo segundo não seguram a mesma data duas vezes. Trava de sessão numa conexão
-    só dela, com prazo (não prende o pool esperando)."""
-    import time
+    mesmo segundo não seguram a mesma data duas vezes. A trava é uma LINHA (db/trava.py):
+    a de sessão não segurava atrás do pooler do Supabase. Espera a vez com prazo, sem
+    prender conexão do pool."""
+    from db import trava as _trava
     chave = int(conta_id) * 100000 + (dia.toordinal() % 100000)
-    with pool.connection() as lk:
-        prazo = time.monotonic() + 15
-        pegou = False
-        while not pegou:
-            pegou = lk.execute("select pg_try_advisory_lock(%s::int, %s::int)",
-                               (_LOCK_DIA, chave % 2147483647)).fetchone()[0]
-            if not pegou:
-                if time.monotonic() > prazo:
-                    break
-                time.sleep(0.3)
-        try:
-            yield pegou
-        finally:
-            if pegou:
-                lk.execute("select pg_advisory_unlock(%s::int, %s::int)",
-                           (_LOCK_DIA, chave % 2147483647))
-            lk.commit()
+    with _trava.esperar(pool, f"orcamento_dia:{int(conta_id)}:{dia.isoformat()}",
+                        (_LOCK_DIA, chave % 2147483647)) as pegou:
+        yield pegou
 
 
 def festa_no_dia(pool, conta_id: int, inicio: datetime) -> bool:
@@ -545,125 +532,120 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     """Um ciclo do relógio do sinal. Janelas, não minutos exatos (o poller atrasa)."""
     agora = agora or datetime.now(timezone.utc)
     out = {"aprovados": 0, "lembretes": 0, "liberadas": 0, "confirmadas": 0}
-    with pool.connection() as lk:
-        try:
-            if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-                return out
-        except Exception:  # noqa: BLE001
+    from db import trava as _trava
+    with _trava.ciclo(pool, "ia_orcamento", _LOCK) as pegou:
+        if not pegou:
             return out
         try:
+            with pool.connection() as c:
+                rows = c.execute(
+                    """select i.orcamento_id, i.conta_id, i.conversa_id, i.aprovado_msg_em,
+                              i.lembrete_24_em, i.lembrete_48_em, i.liberada_msg_em,
+                              i.confirmada_msg_em, i.bloqueio, o.aprovada_em, o.sinal_pago_em,
+                              o.parcelas, e.status, e.pre_reserva_ate, o.evento_agenda_id,
+                              cr.aviso_agenda_membro_id,
+                              coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'O cliente'),
+                              coalesce(cr.orc_reserva_h, 72), coalesce(md.nome, '')
+                         from ia_orcamentos i
+                         left join membros md on md.id = (
+                           select cr2.aviso_dono_membro_id from chip_regra cr2
+                            join conversas cv2 on cv2.id = i.conversa_id
+                           where cr2.conta_id = cv2.conta_id
+                             and cr2.chip_id = coalesce(cv2.chip_id, cv2.conta_id))
+                         join orcamentos o on o.id = i.orcamento_id and o.conta_id = i.conta_id
+                         join conversas cv on cv.id = i.conversa_id and cv.conta_id = i.conta_id
+                         left join chip_regra cr on cr.conta_id = cv.conta_id
+                          and cr.chip_id = coalesce(cv.chip_id, cv.conta_id)
+                         left join eventos_agenda e on e.id = o.evento_agenda_id
+                         left join prospeccao p on p.id = i.prospeccao_id and p.conta_id = i.conta_id
+                        where i.estado='enviado' and o.aprovada_em is not null
+                          and o.aprovada_em > %s
+                          and cv.agente_ativo and cv.status <> 'pendente'
+                          and i.envio_falhas < %s
+                          and (i.envio_falhou_em is null or i.envio_falhou_em < %s)""",
+                    (agora - timedelta(days=15), MAX_FALHAS, agora - INTERVALO_FALHA)).fetchall()
+        except Exception:  # noqa: BLE001
+            return out
+        from finance import vendas
+        # A MENSAGEM QUE O RELÓGIO INICIA SÓ SAI DAS 8H ÀS 20H: o lembrete das 24h de
+        # uma aprovação às 23h caía às 23h do dia seguinte, e a data liberada saía
+        # na hora em que a reserva vencia — de madrugada (revisão de 27/09/2026). A
+        # resposta à aprovação sai na hora: foi o cliente que acabou de agir.
+        loc_h = agora.astimezone(ag.BRT).hour
+        janela = HORAS_CLIENTE[0] <= loc_h < HORAS_CLIENTE[1]
+        for r in rows:
+            i = dict(zip(("id", "conta_id", "conversa_id", "aprovado_msg_em", "l24", "l48",
+                          "liberada_msg_em", "confirmada_msg_em", "bloqueio", "aprovada_em",
+                          "sinal_pago_em", "parcelas", "ev_status", "pre_ate", "ev_id",
+                          "agenda_id", "quem", "reserva_h", "dono"), r))
+            conta = i["conta_id"]
             try:
-                with pool.connection() as c:
-                    rows = c.execute(
-                        """select i.orcamento_id, i.conta_id, i.conversa_id, i.aprovado_msg_em,
-                                  i.lembrete_24_em, i.lembrete_48_em, i.liberada_msg_em,
-                                  i.confirmada_msg_em, i.bloqueio, o.aprovada_em, o.sinal_pago_em,
-                                  o.parcelas, e.status, e.pre_reserva_ate, o.evento_agenda_id,
-                                  cr.aviso_agenda_membro_id,
-                                  coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'O cliente'),
-                                  coalesce(cr.orc_reserva_h, 72), coalesce(md.nome, '')
-                             from ia_orcamentos i
-                             left join membros md on md.id = (
-                               select cr2.aviso_dono_membro_id from chip_regra cr2
-                                join conversas cv2 on cv2.id = i.conversa_id
-                               where cr2.conta_id = cv2.conta_id
-                                 and cr2.chip_id = coalesce(cv2.chip_id, cv2.conta_id))
-                             join orcamentos o on o.id = i.orcamento_id and o.conta_id = i.conta_id
-                             join conversas cv on cv.id = i.conversa_id and cv.conta_id = i.conta_id
-                             left join chip_regra cr on cr.conta_id = cv.conta_id
-                              and cr.chip_id = coalesce(cv.chip_id, cv.conta_id)
-                             left join eventos_agenda e on e.id = o.evento_agenda_id
-                             left join prospeccao p on p.id = i.prospeccao_id and p.conta_id = i.conta_id
-                            where i.estado='enviado' and o.aprovada_em is not null
-                              and o.aprovada_em > %s
-                              and cv.agente_ativo and cv.status <> 'pendente'
-                              and i.envio_falhas < %s
-                              and (i.envio_falhou_em is null or i.envio_falhou_em < %s)""",
-                        (agora - timedelta(days=15), MAX_FALHAS, agora - INTERVALO_FALHA)).fetchall()
-            except Exception:  # noqa: BLE001
-                return out
-            from finance import vendas
-            # A MENSAGEM QUE O RELÓGIO INICIA SÓ SAI DAS 8H ÀS 20H: o lembrete das 24h de
-            # uma aprovação às 23h caía às 23h do dia seguinte, e a data liberada saía
-            # na hora em que a reserva vencia — de madrugada (revisão de 27/09/2026). A
-            # resposta à aprovação sai na hora: foi o cliente que acabou de agir.
-            loc_h = agora.astimezone(ag.BRT).hour
-            janela = HORAS_CLIENTE[0] <= loc_h < HORAS_CLIENTE[1]
-            for r in rows:
-                i = dict(zip(("id", "conta_id", "conversa_id", "aprovado_msg_em", "l24", "l48",
-                              "liberada_msg_em", "confirmada_msg_em", "bloqueio", "aprovada_em",
-                              "sinal_pago_em", "parcelas", "ev_status", "pre_ate", "ev_id",
-                              "agenda_id", "quem", "reserva_h", "dono"), r))
-                conta = i["conta_id"]
-                try:
-                    sinal = vendas.valor_do_sinal(i["parcelas"])
-                    if i["sinal_pago_em"]:
-                        if not i["confirmada_msg_em"] and i["aprovado_msg_em"] and janela:
-                            if _passo(pool, conta, i, "confirmada_msg_em",
-                                      "Sinal confirmado! 🎉 A sua data está garantida. "
-                                      "Qualquer coisa, é só me chamar aqui.", agora):
-                                out["confirmadas"] += 1
+                sinal = vendas.valor_do_sinal(i["parcelas"])
+                if i["sinal_pago_em"]:
+                    if not i["confirmada_msg_em"] and i["aprovado_msg_em"] and janela:
+                        if _passo(pool, conta, i, "confirmada_msg_em",
+                                  "Sinal confirmado! 🎉 A sua data está garantida. "
+                                  "Qualquer coisa, é só me chamar aqui.", agora):
+                            out["confirmadas"] += 1
+                    continue
+                if not i["aprovado_msg_em"]:
+                    # a reserva nasce em segundo plano logo depois da aprovação:
+                    # espera ela (ou o bloqueio) antes de dizer até quando vale
+                    if not i["ev_id"] and not i["bloqueio"] \
+                            and agora - i["aprovada_em"] < timedelta(minutes=10):
                         continue
-                    if not i["aprovado_msg_em"]:
-                        # a reserva nasce em segundo plano logo depois da aprovação:
-                        # espera ela (ou o bloqueio) antes de dizer até quando vale
-                        if not i["ev_id"] and not i["bloqueio"] \
-                                and agora - i["aprovada_em"] < timedelta(minutes=10):
-                            continue
-                        from finance.voltar_a_chamar import primeiro_nome
-                        dono = primeiro_nome(i["dono"]) if i["dono"] else ""
-                        dono = dono[:1].upper() + dono[1:].lower() if dono else ""
-                        pix_txt = _pix(pool, conta, sinal, i["id"]) if sinal else ""
-                        # a resposta à aprovação: na hora, se o cliente acabou de aprovar;
-                        # atrasada (o poller parado, a reserva demorando), espera a janela
-                        if not janela and agora - i["aprovada_em"] > timedelta(minutes=30):
-                            continue
-                        if _passo(pool, conta, i, "aprovado_msg_em",
-                                  _texto_aprovado(sinal, i["pre_ate"], pix_txt, i["bloqueio"],
-                                                  bool(i["ev_id"]), dono),
-                                  agora, automatica=False):
-                            out["aprovados"] += 1
+                    from finance.voltar_a_chamar import primeiro_nome
+                    dono = primeiro_nome(i["dono"]) if i["dono"] else ""
+                    dono = dono[:1].upper() + dono[1:].lower() if dono else ""
+                    pix_txt = _pix(pool, conta, sinal, i["id"]) if sinal else ""
+                    # a resposta à aprovação: na hora, se o cliente acabou de aprovar;
+                    # atrasada (o poller parado, a reserva demorando), espera a janela
+                    if not janela and agora - i["aprovada_em"] > timedelta(minutes=30):
                         continue
-                    # LIBERADA = a reserva VENCEU. O dono cancelar antes ("apareceu quem
-                    # paga hoje") ou cancelar à mão não é "o seu prazo acabou"
-                    if (i["ev_status"] == "cancelado" and not i["liberada_msg_em"]
-                            and i["pre_ate"] and i["pre_ate"] <= agora):
-                        if janela and _passo(pool, conta, i, "liberada_msg_em",
-                                  "Oi! O prazo pra garantir a sua data acabou e ela foi liberada 😕 "
-                                  "Se ainda quiser, me chama que eu vejo se continua livre.",
-                                  agora):
-                            out["liberadas"] += 1
-                            if i["agenda_id"]:
-                                from finance import chip_regra as _cr
-                                _cr.notificar(pool, conta, i["agenda_id"], "📅 Data liberada sem sinal",
-                                              f"{i['quem']}: a reserva de 72h venceu sem sinal.",
-                                              f"/cockpit/orcamentos/{i['id']}")
-                        continue
-                    if i["ev_status"] != "pre_reservado" or i["bloqueio"] or not sinal \
-                            or not janela:
-                        continue
-                    desde = agora - i["aprovada_em"]
-                    ate = i["pre_ate"]
-                    # os lembretes acompanham a reserva: com 72h, aos 24h e aos 48h
-                    terco = timedelta(hours=int(i["reserva_h"]) / 3)
-                    if not i["l24"] and desde >= terco:
-                        if _passo(pool, conta, i, "lembrete_24_em",
-                                  f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊 A sua "
-                                  f"data está segurada até {ate.astimezone(ag.BRT):%d/%m às %Hh}."
-                                  if ate else f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊",
-                                  agora):
-                            out["lembretes"] += 1
-                    elif i["l24"] and not i["l48"] and desde >= 2 * terco:
-                        if _passo(pool, conta, i, "lembrete_48_em",
-                                  "Oi! Último lembrete: a reserva da sua data vence "
-                                  + (f"{ate.astimezone(ag.BRT):%d/%m às %Hh}" if ate else "em breve")
-                                  + ". Se precisar de ajuda com o pagamento, me chama 🙏",
-                                  agora):
-                            out["lembretes"] += 1
-                except Exception as e:  # noqa: BLE001
-                    _log.warning("ia_orcamento.rodar: orçamento %s: %s", i["id"], e)
-        finally:
-            lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                    if _passo(pool, conta, i, "aprovado_msg_em",
+                              _texto_aprovado(sinal, i["pre_ate"], pix_txt, i["bloqueio"],
+                                              bool(i["ev_id"]), dono),
+                              agora, automatica=False):
+                        out["aprovados"] += 1
+                    continue
+                # LIBERADA = a reserva VENCEU. O dono cancelar antes ("apareceu quem
+                # paga hoje") ou cancelar à mão não é "o seu prazo acabou"
+                if (i["ev_status"] == "cancelado" and not i["liberada_msg_em"]
+                        and i["pre_ate"] and i["pre_ate"] <= agora):
+                    if janela and _passo(pool, conta, i, "liberada_msg_em",
+                              "Oi! O prazo pra garantir a sua data acabou e ela foi liberada 😕 "
+                              "Se ainda quiser, me chama que eu vejo se continua livre.",
+                              agora):
+                        out["liberadas"] += 1
+                        if i["agenda_id"]:
+                            from finance import chip_regra as _cr
+                            _cr.notificar(pool, conta, i["agenda_id"], "📅 Data liberada sem sinal",
+                                          f"{i['quem']}: a reserva de 72h venceu sem sinal.",
+                                          f"/cockpit/orcamentos/{i['id']}")
+                    continue
+                if i["ev_status"] != "pre_reservado" or i["bloqueio"] or not sinal \
+                        or not janela:
+                    continue
+                desde = agora - i["aprovada_em"]
+                ate = i["pre_ate"]
+                # os lembretes acompanham a reserva: com 72h, aos 24h e aos 48h
+                terco = timedelta(hours=int(i["reserva_h"]) / 3)
+                if not i["l24"] and desde >= terco:
+                    if _passo(pool, conta, i, "lembrete_24_em",
+                              f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊 A sua "
+                              f"data está segurada até {ate.astimezone(ag.BRT):%d/%m às %Hh}."
+                              if ate else f"Oi! Passando pra lembrar do sinal de {_reais(sinal)} 😊",
+                              agora):
+                        out["lembretes"] += 1
+                elif i["l24"] and not i["l48"] and desde >= 2 * terco:
+                    if _passo(pool, conta, i, "lembrete_48_em",
+                              "Oi! Último lembrete: a reserva da sua data vence "
+                              + (f"{ate.astimezone(ag.BRT):%d/%m às %Hh}" if ate else "em breve")
+                              + ". Se precisar de ajuda com o pagamento, me chama 🙏",
+                              agora):
+                        out["lembretes"] += 1
+            except Exception as e:  # noqa: BLE001
+                _log.warning("ia_orcamento.rodar: orçamento %s: %s", i["id"], e)
     return out
 
 

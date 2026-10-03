@@ -125,27 +125,22 @@ def rodar(pool, agora: datetime | None = None) -> dict:
         return out
     hoje = loc.date()
     segunda = datetime(loc.year, loc.month, loc.day, HORA_SEGUNDA, tzinfo=ag.BRT)
-    with pool.connection() as lk:
-        try:
-            if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-                return out
-        except Exception:  # noqa: BLE001
+    from db import trava as _trava
+    with _trava.ciclo(pool, "festa_aconteceu", _LOCK) as pegou:
+        if not pegou:
             return out
         try:
+            with pool.connection() as c:
+                contas = [r[0] for r in c.execute(
+                    """select distinct conta_id from funil_etapas
+                        where gatilho='festa_passou' and coalesce(gatilho_ativo, true)""").fetchall()]
+        except Exception:  # noqa: BLE001
+            return out
+        for conta in contas:
             try:
-                with pool.connection() as c:
-                    contas = [r[0] for r in c.execute(
-                        """select distinct conta_id from funil_etapas
-                            where gatilho='festa_passou' and coalesce(gatilho_ativo, true)""").fetchall()]
-            except Exception:  # noqa: BLE001
-                return out
-            for conta in contas:
-                try:
-                    out["perguntas"] += _uma_conta(pool, conta, hoje, agora, segunda)
-                except Exception as e:  # noqa: BLE001 — uma conta não segura as outras
-                    _log.warning("festa_aconteceu: conta %s: %s", conta, e)
-        finally:
-            lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                out["perguntas"] += _uma_conta(pool, conta, hoje, agora, segunda)
+            except Exception as e:  # noqa: BLE001 — uma conta não segura as outras
+                _log.warning("festa_aconteceu: conta %s: %s", conta, e)
     return out
 
 

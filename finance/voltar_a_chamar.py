@@ -735,31 +735,29 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     (web/app.py), depois do follow-up. Best-effort por conta."""
     agora = agora or datetime.now(timezone.utc)
     total = {"contas": 0, "novos": 0, "enviados": 0, "falhas": 0}
-    with pool.connection() as lockc:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "voltar_a_chamar", _LOCK) as pegou:
         # dois workers no Render: sem o lock, os dois mandam o mesmo toque
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                try:
-                    with c.transaction():
-                        contas = [r[0] for r in c.execute(
-                            "select conta_id from voltar_a_chamar_config where modo <> 'off'"
-                        ).fetchall()]
-                except Exception:  # noqa: BLE001 — migração 346 ainda não rodou
-                    contas = []
-            for conta_id in contas:
-                try:
-                    with pool.connection() as c:
-                        r = passar_conta(c, conta_id, agora)
-                        c.commit()
-                    total["contas"] += 1
-                    for k in ("novos", "enviados", "falhas"):
-                        total[k] += r[k]
-                except Exception:  # noqa: BLE001
-                    _log.warning("voltar a chamar falhou na conta %s", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            try:
+                with c.transaction():
+                    contas = [r[0] for r in c.execute(
+                        "select conta_id from voltar_a_chamar_config where modo <> 'off'"
+                    ).fetchall()]
+            except Exception:  # noqa: BLE001 — migração 346 ainda não rodou
+                contas = []
+        for conta_id in contas:
+            try:
+                with pool.connection() as c:
+                    r = passar_conta(c, conta_id, agora)
+                    c.commit()
+                total["contas"] += 1
+                for k in ("novos", "enviados", "falhas"):
+                    total[k] += r[k]
+            except Exception:  # noqa: BLE001
+                _log.warning("voltar a chamar falhou na conta %s", conta_id, exc_info=True)
     return total
 
 

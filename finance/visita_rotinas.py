@@ -673,40 +673,35 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     out = {"ao_marcar": 0, "vesperas": 0, "duas_horas": 0, "confirmadas": 0, "remarcar": 0,
            "sem_resposta": 0, "veio": 0, "faltou": 0, "lembretes": 0, "agradecimentos": 0,
            "enviadas": 0}
-    with pool.connection() as lk:
-        try:
-            if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-                return out
-        except Exception:  # noqa: BLE001
+    from db import trava as _trava
+    with _trava.ciclo(pool, "visita_rotinas", _LOCK) as pegou:
+        if not pegou:
             return out
         try:
+            with pool.connection() as c:
+                contas = [r[0] for r in c.execute(
+                    """select conta_id from visita_rotinas_config
+                        where confirmar or perguntar_veio or depois_visita
+                        order by conta_id""").fetchall()]
+        except Exception:  # noqa: BLE001 — banco sem a 414
+            return out
+        from finance.cockpit import endereco_empresa
+        for conta_id in contas:
             try:
                 with pool.connection() as c:
-                    contas = [r[0] for r in c.execute(
-                        """select conta_id from visita_rotinas_config
-                            where confirmar or perguntar_veio or depois_visita
-                            order by conta_id""").fetchall()]
-            except Exception:  # noqa: BLE001 — banco sem a 414
-                return out
-            from finance.cockpit import endereco_empresa
-            for conta_id in contas:
+                    cfg = config(c, conta_id)
+                    acompanhar(c, conta_id, agora)
+                    c.commit()
+                    visitas = _visitas(c, conta_id, agora)
+                esp = endereco_empresa(pool, conta_id)
+            except Exception as e:  # noqa: BLE001
+                _log.warning("visita_rotinas.rodar: conta %s: %s", conta_id, e)
+                continue
+            for v in visitas:
                 try:
-                    with pool.connection() as c:
-                        cfg = config(c, conta_id)
-                        acompanhar(c, conta_id, agora)
-                        c.commit()
-                        visitas = _visitas(c, conta_id, agora)
-                    esp = endereco_empresa(pool, conta_id)
+                    _uma_visita(pool, conta_id, cfg, v, agora, esp, out)
                 except Exception as e:  # noqa: BLE001
-                    _log.warning("visita_rotinas.rodar: conta %s: %s", conta_id, e)
-                    continue
-                for v in visitas:
-                    try:
-                        _uma_visita(pool, conta_id, cfg, v, agora, esp, out)
-                    except Exception as e:  # noqa: BLE001
-                        _log.warning("visita_rotinas.rodar: evento %s: %s", v["evento_id"], e)
-        finally:
-            lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                    _log.warning("visita_rotinas.rodar: evento %s: %s", v["evento_id"], e)
     return out
 
 

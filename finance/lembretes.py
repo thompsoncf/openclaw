@@ -1,7 +1,8 @@
 """Lembretes proativos da agenda (etapa 2): "resumo do dia" + "aviso antes".
 
 Roda no ticker de fundo do web (a cada ~2 min). Desenho da idempotência:
-- advisory lock (pg_try_advisory_lock): só um worker processa por tick;
+- a trava de ciclo (db/trava.py, uma linha na tabela `travas`): só um worker processa
+  por tick;
 - tabela lembretes_enviados: cada resumo (1 por conta por dia) e cada aviso
   (1 por evento) sai UMA vez — o ticker pode rodar dezenas de vezes sem repetir.
 
@@ -78,46 +79,43 @@ def _expirar_pre_reservas(pool, agora) -> int:
 
 def _rodar(pool, agora) -> dict:
     n_res = n_avi = n_ani = n_ren = 0
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "lembretes", _LOCK) as pegou:
+        if not pegou:
             return {"resumo": 0, "aviso": 0, "aniversario": 0, "renovacao": 0}
+        _expirar_pre_reservas(pool, agora)
         try:
-            _expirar_pre_reservas(pool, agora)
-            try:
-                from finance import aviso_noite as _an
-                _an.soltar(pool, agora)          # os avisos que esperaram a noite passar
-            except Exception as e:  # noqa: BLE001
-                _log.info("lembretes: soltar avisos da noite falhou: %s", e)
-            with pool.connection() as c:
-                cfgs = c.execute(
-                    "select conta_id, resumo_ativo, hora_resumo, aviso_antes_min, avisar_convidados "
-                    "from agenda_config "
-                    "where resumo_ativo or aviso_antes_min is not null").fetchall()
-            for (conta_id, resumo_ativo, hora_resumo, aviso_antes_min, avisar_convidados) in cfgs:
-                if resumo_ativo and hora_resumo is not None and agora.hour == hora_resumo:
-                    n_res += _resumo_do_dia(pool, conta_id, agora)
-                if aviso_antes_min:
-                    n_avi += _avisos_proximos(pool, conta_id, int(aviso_antes_min), agora,
-                                              bool(avisar_convidados))
-            # FORA do laço acima: o aniversário do lead é do VENDEDOR e não depende de
-            # a conta ter ligado lembrete de agenda — `cfgs` só traz quem configurou.
-            # Envolvido em try próprio pelo mesmo motivo da migração 128: uma exceção
-            # aqui abortaria o tick inteiro, inclusive o resumo das contas seguintes.
-            try:
-                n_ani = _aniversarios(pool, agora)
-            except Exception as e:  # noqa: BLE001
-                _log.info("lembretes: aniversários falhou: %s: %s", type(e).__name__, e)
-                n_ani = 0
-            # A renovação da apólice, pelo MESMO motivo e com o mesmo try próprio:
-            # é a corretora de seguros que entra no ticker, e o tick não é dela.
-            try:
-                n_ren = _renovacoes(pool, agora)
-            except Exception as e:  # noqa: BLE001
-                _log.info("lembretes: renovações falhou: %s: %s", type(e).__name__, e)
-                n_ren = 0
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
-            lockc.commit()
+            from finance import aviso_noite as _an
+            _an.soltar(pool, agora)          # os avisos que esperaram a noite passar
+        except Exception as e:  # noqa: BLE001
+            _log.info("lembretes: soltar avisos da noite falhou: %s", e)
+        with pool.connection() as c:
+            cfgs = c.execute(
+                "select conta_id, resumo_ativo, hora_resumo, aviso_antes_min, avisar_convidados "
+                "from agenda_config "
+                "where resumo_ativo or aviso_antes_min is not null").fetchall()
+        for (conta_id, resumo_ativo, hora_resumo, aviso_antes_min, avisar_convidados) in cfgs:
+            if resumo_ativo and hora_resumo is not None and agora.hour == hora_resumo:
+                n_res += _resumo_do_dia(pool, conta_id, agora)
+            if aviso_antes_min:
+                n_avi += _avisos_proximos(pool, conta_id, int(aviso_antes_min), agora,
+                                          bool(avisar_convidados))
+        # FORA do laço acima: o aniversário do lead é do VENDEDOR e não depende de
+        # a conta ter ligado lembrete de agenda — `cfgs` só traz quem configurou.
+        # Envolvido em try próprio pelo mesmo motivo da migração 128: uma exceção
+        # aqui abortaria o tick inteiro, inclusive o resumo das contas seguintes.
+        try:
+            n_ani = _aniversarios(pool, agora)
+        except Exception as e:  # noqa: BLE001
+            _log.info("lembretes: aniversários falhou: %s: %s", type(e).__name__, e)
+            n_ani = 0
+        # A renovação da apólice, pelo MESMO motivo e com o mesmo try próprio:
+        # é a corretora de seguros que entra no ticker, e o tick não é dela.
+        try:
+            n_ren = _renovacoes(pool, agora)
+        except Exception as e:  # noqa: BLE001
+            _log.info("lembretes: renovações falhou: %s: %s", type(e).__name__, e)
+            n_ren = 0
     return {"resumo": n_res, "aviso": n_avi, "aniversario": n_ani, "renovacao": n_ren}
 
 

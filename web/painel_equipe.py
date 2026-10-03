@@ -86,6 +86,8 @@ def painel_equipe(request: Request):
                    # a tela que dá acesso a todo mundo e não pode deixar de abrir.
                    sem_aviso=_sem_aviso(pool, conta[0]),
                    papeis=[(p, eq.rotulo(p)) for p in _papeis_da_conta(conta)],
+                   tem_mestre="mestre" in _papeis_da_conta(conta),
+                   link_mestre=request.session.pop("equipe_link_mestre", None),
                    novo_link=request.session.pop("equipe_link", None),
                    novo_link_cap=request.session.pop("equipe_link_cap", None),
                    senha_temp=request.session.pop("equipe_senha_temp", None),
@@ -201,6 +203,49 @@ def painel_equipe_convidar(request: Request, nome: str = Form(""),
     else:
         request.session["equipe_erro"] = r.get("erro", "Não consegui convidar.")
     return RedirectResponse("/painel/equipe", status_code=303)
+
+
+def _empresa(conta) -> str:
+    try:
+        return (conta[2] or "").strip()
+    except (IndexError, TypeError):
+        return ""
+
+
+@router.post("/painel/equipe/mestre")
+def painel_equipe_mestre(request: Request, nome: str = Form(""), whatsapp: str = Form("")):
+    """O mestre de obras na equipe, só com nome e WhatsApp (sem e-mail nem
+    senha), e o link mágico já pronto pra mandar (finance/obra_acesso.py)."""
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    if "mestre" not in _papeis_da_conta(conta):
+        request.session["equipe_erro"] = "Esse papel não existe nesta empresa."
+        return RedirectResponse("/painel/equipe", status_code=303)
+    from finance import obra_acesso as oa
+    try:
+        mid = oa.cadastrar_mestre(get_pool(), conta[0], nome, whatsapp)
+        request.session["equipe_link_mestre"] = oa.gerar_link(get_pool(), conta[0], mid,
+                                                              _empresa(conta))
+    except ValueError as e:
+        request.session["equipe_erro"] = str(e)
+    return RedirectResponse("/painel/equipe#link-mestre", status_code=303)
+
+
+@router.post("/painel/equipe/mestre/{membro_id}/link")
+def painel_equipe_mestre_link(request: Request, membro_id: int):
+    """Um link novo pro mestre (o anterior para de valer) — celular trocado,
+    link vencido, ou ele saiu do app."""
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    from finance import obra_acesso as oa
+    try:
+        request.session["equipe_link_mestre"] = oa.gerar_link(get_pool(), conta[0], membro_id,
+                                                              _empresa(conta))
+    except ValueError as e:
+        request.session["equipe_erro"] = str(e)
+    return RedirectResponse("/painel/equipe#link-mestre", status_code=303)
 
 
 @router.post("/painel/equipe/papel")
@@ -506,6 +551,20 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     </div>
   </div>
   {% endif %}
+  {% if link_mestre %}
+  <div id="link-mestre" style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d">
+    <div style="font-weight:700">🏗️ Link de entrada de {{ link_mestre.nome|e }}</div>
+    <div class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">Ele toca no link e já entra no app da obra, sem senha. Vale 48 horas; depois de entrar, o celular dele fica lembrado. Um link novo invalida o anterior.</div>
+    {% if link_mestre.whatsapp_url %}<a href="{{ link_mestre.whatsapp_url }}" target="_blank" rel="noopener"
+       style="display:inline-flex;align-items:center;gap:.4rem;background:#25d366;color:#fff;border-radius:10px;padding:.6rem 1rem;font-weight:700;text-decoration:none">📲 Mandar pelo WhatsApp</a>{% endif %}
+    <div style="display:flex;gap:.5rem;margin-top:.6rem">
+      <input id="lkm" value="{{ link_mestre.link }}" readonly onclick="this.select()"
+             style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.82rem">
+      <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('lkm').value);this.textContent='Copiado!'"
+              style="width:auto;flex:none;margin:0;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.5rem .9rem;font-weight:600;cursor:pointer;white-space:nowrap">Copiar</button>
+    </div>
+  </div>
+  {% endif %}
   {% if aviso %}<div style="margin-top:.8rem;padding:.7rem .8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d;font-size:.85rem;color:var(--verde-claro)">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="mut" style="margin-top:.8rem;color:#e07a5f">{{ erro }}</div>{% endif %}
 
@@ -517,6 +576,14 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
       <select name="papel" style="width:100%">{% for v,l in papeis %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
     <button style="white-space:nowrap;margin:0">Convidar</button>
   </form>
+  {% if tem_mestre %}
+  <form method="post" action="/painel/equipe/mestre" style="margin-top:.8rem;padding:.7rem .8rem;border:1px dashed var(--borda);border-radius:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem;align-items:end">
+    <div style="grid-column:1/-1;font-size:.85rem"><b>🏗️ Mestre de obras</b> <span class="mut">— sem e-mail e sem senha: ele entra pelo link que você manda no WhatsApp dele.</span></div>
+    <div><label class="mut" style="font-size:.72rem">Nome</label><input name="nome" required placeholder="Seu Zé" style="width:100%"></div>
+    <div><label class="mut" style="font-size:.72rem">WhatsApp (com DDD)</label><input name="whatsapp" required inputmode="tel" placeholder="86 9 9999-8888" style="width:100%"></div>
+    <button style="white-space:nowrap;margin:0">Cadastrar e gerar o link</button>
+  </form>
+  {% endif %}
 
   <div class="papeis">
     <div class="ph-tt">O que cada papel acessa <span class="mut" style="font-weight:400">— escolha sabendo o que está liberando</span></div>
@@ -532,6 +599,10 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
       <span class="ph-nome fin">Financeiro</span>
       <span class="ph-desc">Só o <b>financeiro</b> (contas, pagamentos, cobranças). <b>Não</b> entra na prospecção/vendas.</span>
     </div>
+    {% if tem_mestre %}<div class="ph-row">
+      <span class="ph-nome">Mestre de obras</span>
+      <span class="ph-desc">Só o <b>app da obra</b> no celular, e só das casas em que você o escolher como mestre: foto da etapa, marcar etapa, apontar material e o quadro da quadra. <b>Não</b> vê nenhum valor em dinheiro.</span>
+    </div>{% endif %}
     <div class="mut" style="font-size:.74rem;margin-top:.5rem">🔒 Só você (dono) convida, muda papel, desativa ou exclui membros.</div>
   </div>
 
@@ -554,7 +625,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
           {% else %}<span class="mtag on">ativo</span>{% endif %}
           {% set al = (sem_aviso or {}).get(m.id) %}
           {% if al %}<span class="mtag mudo" title="{{ al.detalhe }}">● não recebe aviso</span>{% endif %}
-          <span>{{ m.email }} · {{ m.rotulo }}</span>
+          <span>{{ m.email or ('entra pelo link do WhatsApp' if m.papel == 'mestre' else '') }} · {{ m.rotulo }}</span>
           {% if m.papel != 'dono' %}
           <details class="memail">
             <summary title="Corrigir o e-mail (é o login da pessoa)">✏ e-mail</summary>
@@ -594,6 +665,10 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
           <button title="{{ 'Tirar a permissão de criar campanhas' if m.pode_campanha else 'Deixar este vendedor criar as próprias campanhas e enriquecer leads' }}"
                   {% if m.pode_campanha %}style="border-color:var(--ok,#2ea043);color:var(--ok,#2ea043)"{% endif %}>
             {{ '📣 Campanhas ✓' if m.pode_campanha else '📣 Liberar campanhas' }}</button></form>
+        {% endif %}
+        {% if m.papel == 'mestre' and m.ativo %}
+        <form method="post" action="/painel/equipe/mestre/{{ m.id }}/link" style="margin:0">
+          <button title="Gera um link novo de entrada no app da obra (o anterior para de valer) e abre o seu WhatsApp pra mandar">📲 Link pelo WhatsApp</button></form>
         {% endif %}
         {% if not m.pendente and m.papel != 'dono' %}
         <form method="post" action="/painel/equipe/senha-temp" style="margin:0"

@@ -465,6 +465,45 @@ def _classificacao_valida(pool, conta_id: int, plano_conta_id, centro_custo_id):
             _pc.centro_custo_valido(pool, conta_id, centro_custo_id))
 
 
+# ─────────────────────────────────────────────────── o MÊS DE REFERÊNCIA (484)
+# Pedido do dono em 02/10/2026, e as duas decisões dele: é SÓ INFORMAÇÃO (o DRE
+# continua pela data do pagamento) e, quando ninguém preenche, vale o MÊS
+# ANTERIOR AO VENCIMENTO — a conta que vence 10/11 é a de outubro (aluguel, luz,
+# água, salário). O padrão é calculado na leitura, e não gravado: as contas que
+# já existiam não foram reescritas, e mudar o vencimento de uma conta sem
+# referência anotada leva a referência junto.
+def referencia_padrao(vencimento: date | None) -> date | None:
+    """O mês anterior ao do vencimento (1º dia)."""
+    if not vencimento:
+        return None
+    if vencimento.month == 1:
+        return date(vencimento.year - 1, 12, 1)
+    return date(vencimento.year, vencimento.month - 1, 1)
+
+
+def ler_mes(texto) -> date | None:
+    """'2026-10' (o <input type=month>), '10/2026' ou uma data -> 1º do mês.
+    Vazio ou lixo -> None."""
+    if isinstance(texto, date):
+        return date(texto.year, texto.month, 1)
+    t = str(texto or "").strip()
+    try:
+        if "/" in t:
+            mm, aaaa = t.split("/")[-2:]
+            return date(int(aaaa), int(mm), 1)
+        partes = t.split("-")
+        if len(partes) >= 2:
+            return date(int(partes[0]), int(partes[1]), 1)
+    except (ValueError, TypeError):
+        return None
+    return None
+
+
+def _somar_meses(d: date, n: int) -> date:
+    total = d.year * 12 + (d.month - 1) + n
+    return date(total // 12, total % 12 + 1, 1)
+
+
 def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  valor_centavos: int, vencimento: date,
                  contraparte: str = "", categoria: str = "",
@@ -476,7 +515,8 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  precisa_aprovacao: bool | None = None,
                  plano_conta_id=None,
                  centro_custo_id=None,
-                 tipo_despesa=None) -> dict:
+                 tipo_despesa=None,
+                 mes_referencia=None) -> dict:
     """Cria um título aberto. tipo: 'pagar' | 'receber'. cliente_id LIGA o título
     a um cliente da base (honorário/venda a prazo aparece na ficha dele).
 
@@ -542,6 +582,11 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
     tipo_ok = _norm_tipo(tipo_despesa) if tipo == "pagar" else None
     if tipo_ok:
         cols.append("tipo_despesa"); vals.append(tipo_ok)
+    # o MÊS DE REFERÊNCIA (484), também só quando veio: em branco, a leitura
+    # assume o mês anterior ao vencimento
+    ref = ler_mes(mes_referencia) if mes_referencia else None
+    if ref:
+        cols.append("mes_referencia"); vals.append(ref)
     with pool.connection() as c:
         r = c.execute(
             f"insert into titulos ({', '.join(cols)}) "
@@ -555,7 +600,7 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
             "periodicidade": periodicidade, "valor_variavel": valor_variavel,
             "cliente_id": cli_id, "aprovacao": aprov,
             "plano_conta_id": plano_ok, "centro_custo_id": centro_ok,
-            "tipo_despesa": tipo_ok}
+            "tipo_despesa": tipo_ok, "mes_referencia": ref}
 
 
 def listar_titulos(pool, conta_id: int, status: str = "aberto",
@@ -580,7 +625,9 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
                        t.aprovado_em,
                        t.plano_conta_id, pc.codigo, pc.nome,
                        t.centro_custo_id, cc.nome,
-                       to_jsonb(t)->>'tipo_despesa'
+                       to_jsonb(t)->>'tipo_despesa',
+                       to_jsonb(t)->>'folha_parte',
+                       to_jsonb(t)->>'mes_referencia'
                   from titulos t
                   left join clientes cl on cl.id = t.cliente_id
                   left join pessoas p on p.id = cl.pessoa_id
@@ -639,6 +686,13 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             "centro_custo_id": r[26], "centro_nome": r[27] or "",
             # o TIPO (325): fixa | eventual | investimento | None
             "tipo_despesa": r[28],
+            # conta gerada pela FOLHA (482): 'adiantamento' | 'saldo' | None
+            "folha_parte": r[29],
+            # o MÊS DE REFERÊNCIA (484): o anotado, ou o mês anterior ao
+            # vencimento. `referencia_anotada` diz qual dos dois.
+            "referencia": (date.fromisoformat(r[30]) if r[30]
+                           else referencia_padrao(venc)),
+            "referencia_anotada": bool(r[30]),
         })
     return out
 
@@ -813,7 +867,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                        recorrente, vencimento, criado_por, pago_sem_autorizacao,
                        aprovacao, periodicidade, valor_variavel,
                        plano_conta_id, centro_custo_id,
-                       to_jsonb(titulos)->>'tipo_despesa'""",
+                       to_jsonb(titulos)->>'tipo_despesa',
+                       to_jsonb(titulos)->>'mes_referencia'""",
             (data_pagto, acrescimo_centavos, titulo_id, conta_id),
         ).fetchone()
         if not t:
@@ -873,6 +928,12 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                 where id=%s and conta_id=%s""",
             (salvo.id, acr_id, titulo_id, conta_id),
         )
+        # CONTA DA FOLHA (adiantamento ou saldo, 482): o pagamento vira o evento
+        # da folha na MESMA transação, amarrado a este lançamento. Sem isto o
+        # adiantamento pago no dia 20 não descontaria do saldo do dia 5 — e o
+        # salário sairia duas vezes. Conta que não é da folha: não faz nada.
+        from . import folha_titulos as _ft
+        _ft.registrar_pagamento(c, conta_id, titulo_id, salvo.id)
         if t[5]:  # a conta repete: cria a próxima
             prox = proxima_data(t[6], t[10])
             # O VALOR. Conta de valor variável repete a DATA, não o valor: a
@@ -928,6 +989,15 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                 if t[14]:   # o tipo repete junto: o aluguel fixo continua fixo
                     c.execute("update titulos set tipo_despesa=%s where id=%s",
                               (t[14], proximo_id))
+                if t[15] and t[6]:
+                    # a REFERÊNCIA anotada (484) anda o mesmo tanto que o
+                    # vencimento: o aluguel de outubro vira o de novembro. Sem
+                    # anotação não precisa: o padrão já sai do vencimento novo.
+                    passo = ((prox.year * 12 + prox.month)
+                             - (t[6].year * 12 + t[6].month))
+                    c.execute("update titulos set mes_referencia=%s where id=%s",
+                              (_somar_meses(date.fromisoformat(t[15]), passo),
+                               proximo_id))
         if conn is None:
             c.commit()
     return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id,
@@ -1440,6 +1510,10 @@ def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) ->
         if not feito:
             return {"ok": False, "erro": "Essa conta acabou de mudar de estado. "
                                          "Recarregue a tela."}
+        # Conta da folha (482): o pagamento do extrato vira o evento da folha,
+        # igual à baixa — senão o adiantamento conciliado não desconta do saldo.
+        from . import folha_titulos as _ft
+        _ft.registrar_pagamento(c, conta_id, titulo_id, lancamento_id)
         # A CLASSIFICAÇÃO DO TÍTULO CHEGA AO LANÇAMENTO (317) — mas SÓ ONDE ELE
         # NÃO TEM. O pagamento que já está no caixa pode ter sido classificado à
         # mão por alguém que olhou o comprovante, e essa escolha vale mais que a
@@ -1492,7 +1566,7 @@ def desfazer_conciliacao(pool, conta_id: int, titulo_id: int) -> dict:
     """
     with pool.connection() as c:
         r = c.execute(
-            """select t.status, l.origem from titulos t
+            """select t.status, l.origem, t.lancamento_id from titulos t
                  left join lancamentos l on l.id = t.lancamento_id
                 where t.id=%s and t.conta_id=%s""",
             (titulo_id, conta_id),
@@ -1513,6 +1587,9 @@ def desfazer_conciliacao(pool, conta_id: int, titulo_id: int) -> dict:
         ).fetchone()
         if not feito:
             return {"ok": False, "erro": "Essa conta acabou de mudar de estado."}
+        # conta da folha (482): some o evento que a conciliação tinha criado
+        from . import folha_titulos as _ft
+        _ft.desfazer_pagamento(c, conta_id, titulo_id, r[2])
         c.commit()
     return {"ok": True, "descricao": feito[0]}
 
@@ -1521,10 +1598,16 @@ def cancelar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
     with pool.connection() as c:
         r = c.execute(
             """update titulos set status='cancelado'
-                where id=%s and conta_id=%s and status='aberto' returning id""",
+                where id=%s and conta_id=%s and status='aberto'
+            returning id, to_jsonb(titulos)->>'folha_funcionario_id',
+                      to_jsonb(titulos)->>'folha_competencia'""",
             (titulo_id, conta_id),
         ).fetchone()
         c.commit()
+    if r is not None and r[1] and r[2]:
+        # conta da folha (482): cancelado o adiantamento, o saldo volta a ser
+        # o líquido inteiro — a folha refaz a conta dele
+        _folha_mudou(pool, conta_id, int(r[1]), date.fromisoformat(r[2]))
     return r is not None
 
 
@@ -1542,9 +1625,27 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
                   categoria: str | None = None,
                   plano_conta_id=None,
                   centro_custo_id=None,
-                  tipo_despesa=None) -> bool:
-    """Corrige descrição, valor e/ou FORNECEDOR de um título. NÃO mexe em
-    vencimento nem tipo. Multi-tenant: só o título DESTA conta. Passa só o que
+                  tipo_despesa=None,
+                  vencimento: date | None = None,
+                  mes_referencia=False) -> bool:
+    """Corrige descrição, valor e/ou FORNECEDOR de um título. NÃO mexe no tipo.
+
+    O VENCIMENTO entrou em 02/10/2026 (484, pedido do dono: "preciso de uma opção
+    para editar a data do vencimento, após feito o lançamento"). Só em conta A
+    PAGAR e ABERTA: a paga já tem a data dela no caixa, e a receber pode ser
+    parcela de orçamento ou cobrança com link — mudar a data só aqui deixaria as
+    duas pontas discordando. A mudança marca `vencimento_manual`, que é o que faz a
+    folha em dois dias (482) não mover a data que o dono escolheu. A conta que
+    repete passa a repetir a partir da data nova (a próxima sai dela na baixa).
+
+    `mes_referencia` (484): False = não mexe; None ou vazio = volta ao padrão (o
+    mês anterior ao vencimento); um mês = anota. Também só em conta a pagar. O
+    formulário vem com a referência PREENCHIDA, então "o mesmo mês que o padrão já
+    dava, numa conta sem anotação" não é anotar: é a pessoa não ter mexido. Sem
+    esta regra, corrigir a data digitada errada (10/11 → 10/12) congelaria a
+    referência velha (outubro) em vez de deixá-la seguir a data nova.
+
+    Multi-tenant: só o título DESTA conta. Passa só o que
     quer mudar; campo None é ignorado. Descrição vazia é ignorada (não apaga);
     valor negativo é rejeitado. Retorna True se algo mudou.
 
@@ -1607,6 +1708,25 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
             sets.append("tipo_despesa=null")
         elif _norm_tipo(tipo_despesa):
             sets.append("tipo_despesa=%s"); args.append(_norm_tipo(tipo_despesa))
+    if vencimento is not None:
+        # no UPDATE, o `vencimento` à direita é o valor ANTIGO: a marca só acende
+        # quando a data muda de fato
+        sets.append("vencimento_manual = vencimento_manual or "
+                    "(status='aberto' and tipo='pagar' and vencimento <> %s)")
+        args.append(vencimento)
+        sets.append("vencimento = case when status='aberto' and tipo='pagar' "
+                    "then %s else vencimento end")
+        args.append(vencimento)
+    if mes_referencia is not False:
+        ref = ler_mes(mes_referencia) if mes_referencia else None
+        # à direita, `mes_referencia` e `vencimento` são os valores ANTIGOS
+        sets.append(
+            "mes_referencia = case "
+            "when tipo <> 'pagar' then mes_referencia "
+            "when mes_referencia is null and %s::date = "
+            "(date_trunc('month', vencimento) - interval '1 month')::date then null "
+            "else %s::date end")
+        args.extend([ref, ref])
     if not sets:
         return False
     with pool.connection() as c:
@@ -1720,7 +1840,20 @@ def apagar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
     deixa o titulo pago apontando pra nada. Sem esta regra o registro ficava preso pra
     sempre: nao aparecia na lista de abertos (a tela so' mostra 'aberto') e nenhum
     caminho o removia. Visto em producao numa conta de teste.
+
+    CONTA DA FOLHA EM ABERTO (482) e' CANCELADA, nao apagada: a linha cancelada e'
+    a lembranca de que o dono dispensou aquela parte. Apagada, a sincronizacao da
+    folha a faria nascer de novo no dia seguinte.
     """
+    with pool.connection() as c:
+        folha = c.execute(
+            """select 1 from titulos
+                where id=%s and conta_id=%s and status='aberto'
+                  and to_jsonb(titulos)->>'folha_parte' is not null""",
+            (titulo_id, conta_id),
+        ).fetchone()
+    if folha:
+        return cancelar_titulo(pool, conta_id, titulo_id)
     with pool.connection() as c:
         cur = c.execute(
             "delete from titulos where id=%s and conta_id=%s and lancamento_id is null",
@@ -1754,6 +1887,16 @@ def _mes_seguinte(d: date) -> date:
 # ─────────────────────────────────────────────────────────────────────────
 # Equipe e folha gerencial
 # ─────────────────────────────────────────────────────────────────────────
+def _folha_mudou(pool, conta_id: int, funcionario_id: int | None = None,
+                 comp: date | None = None) -> None:
+    """A folha mudou: as contas a pagar dela (adiantamento e saldo) acompanham —
+    ver finance/folha_titulos.py. Roda DEPOIS do commit da ação e nunca levanta:
+    o extra lançado não pode falhar porque a conta a pagar não se ajustou (o cron
+    da manhã refaz)."""
+    from . import folha_titulos as _ft
+    _ft.ressincronizar(pool, conta_id, funcionario_id, comp)
+
+
 def custo_real_centavos(salario_centavos: int, pro_labore: bool = False) -> int:
     """Custo mensal estimado: salário + FGTS 8% + provisões de 13º e férias+1/3.
 
@@ -1851,6 +1994,10 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
             (*args, funcionario_id, conta_id),
         ).fetchone()
         c.commit()
+    if r is not None and (vale_transporte is not None or dia_pagamento is not None
+                          or demitido_em is not False or admitido_em is not False):
+        # o VT muda o líquido; o dia muda o vencimento do saldo
+        _folha_mudou(pool, conta_id, funcionario_id)
     return r is not None
 
 
@@ -1895,6 +2042,7 @@ def definir_salario(pool, conta_id: int, funcionario_id: int,
             (int(salario_centavos), funcionario_id, conta_id, vigencia_de, relogio.hoje()),
         )
         c.commit()
+    _folha_mudou(pool, conta_id, funcionario_id)   # o aumento muda o saldo
     return True
 
 
@@ -1934,6 +2082,7 @@ def corrigir_salario_atual(pool, conta_id: int, funcionario_id: int,
         c.execute("update funcionarios set salario_centavos=%s where id=%s and conta_id=%s",
                   (int(salario_centavos), funcionario_id, conta_id))
         c.commit()
+    _folha_mudou(pool, conta_id, funcionario_id)
     return True
 
 
@@ -2024,6 +2173,14 @@ def excluir_funcionario(pool, conta_id: int, funcionario_id: int) -> dict:
     if not situacao["pode"]:
         return {**situacao, "excluido": False}
     with pool.connection() as c:
+        # As contas a pagar da folha ainda abertas (482) saem junto, CANCELADAS:
+        # o cadastro nunca devia ter existido, então nada daquilo é devido. O
+        # `on delete set null` da 482 solta o vínculo das que sobram (canceladas).
+        c.execute(
+            """update titulos set status='cancelado'
+                where conta_id=%s and status='aberto'
+                  and to_jsonb(titulos)->>'folha_funcionario_id' = %s""",
+            (conta_id, str(funcionario_id)))
         # as vigências saem junto pelo `on delete cascade` da migração 150
         c.execute("delete from funcionarios where id=%s and conta_id=%s",
                   (funcionario_id, conta_id))
@@ -2111,6 +2268,7 @@ def registrar_evento_folha(pool, conta_id: int, funcionario_id: int, tipo: str,
              descricao, lanc_id),
         ).fetchone()
         c.commit()
+    _folha_mudou(pool, conta_id, funcionario_id, comp)   # o saldo acompanha
     return {"ok": True, "id": r[0], "lancamento_id": lanc_id}
 
 
@@ -2184,6 +2342,13 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
             "custo_real_total_centavos": total_custo}
 
 
+#: O evento nasceu da baixa de uma CONTA A PAGAR da folha (482)? É o título que
+#: carrega o mesmo lançamento. `to_jsonb` pra base sem a 482 ler "não".
+_SQL_EVENTO_DO_TITULO = """exists (
+    select 1 from titulos t
+     where t.conta_id = fe.conta_id and t.lancamento_id = fe.lancamento_id
+       and to_jsonb(t)->>'folha_parte' is not null)"""
+
 # rótulos amigáveis dos lançamentos da folha (pro histórico "corrigir")
 _EVENTO_ROTULO = {"vale": "Adiantamento", "beneficio": "Benefício VR/VA",
                   "extra": "Adicional", "desconto": "Desconto"}
@@ -2197,19 +2362,24 @@ def eventos_folha_do_mes(pool, conta_id: int, ano: int,
     comp = date(ano, mes, 1)
     with pool.connection() as c:
         rows = c.execute(
-            """select funcionario_id, id, tipo, valor_centavos, descricao, criado_em
-                 from folha_eventos
-                where conta_id=%s and competencia=%s
-                  and tipo in ('vale','beneficio','extra','desconto')
-                order by criado_em""",
+            f"""select fe.funcionario_id, fe.id, fe.tipo, fe.valor_centavos,
+                       fe.descricao, fe.criado_em, {_SQL_EVENTO_DO_TITULO}
+                 from folha_eventos fe
+                where fe.conta_id=%s and fe.competencia=%s
+                  and fe.tipo in ('vale','beneficio','extra','desconto')
+                order by fe.criado_em""",
             (conta_id, comp),
         ).fetchall()
     out: dict[int, list[dict]] = {}
-    for fid, eid, tipo, valor, desc, criado in rows:
+    for fid, eid, tipo, valor, desc, criado, do_titulo in rows:
         out.setdefault(fid, []).append({
             "id": eid, "tipo": tipo, "rotulo": _EVENTO_ROTULO.get(tipo, tipo),
             "valor_centavos": int(valor or 0), "descricao": desc or "",
-            "data": criado.date() if criado else None})
+            # o adiantamento pago pela CONTA A PAGAR (482) não se remove daqui:
+            # o dinheiro saiu pela baixa, e é lá que ele se desfaz
+            "do_titulo": bool(do_titulo),
+            # o dia de Brasília: às 22h o evento ainda é de hoje
+            "data": relogio.dia_br(criado) if criado else None})
     return out
 
 
@@ -2221,13 +2391,20 @@ def remover_evento_folha(pool, conta_id: int, evento_id: int,
     'pagamento'. Multi-tenant: só remove da própria conta."""
     with pool.connection() as c:
         row = c.execute(
-            """select lancamento_id, tipo from folha_eventos
-                where id=%s and conta_id=%s
-                  and tipo in ('vale','beneficio','extra','desconto')""",
+            f"""select fe.lancamento_id, fe.tipo, fe.funcionario_id, fe.competencia,
+                       {_SQL_EVENTO_DO_TITULO}
+                  from folha_eventos fe
+                 where fe.id=%s and fe.conta_id=%s
+                   and fe.tipo in ('vale','beneficio','extra','desconto')""",
             (evento_id, conta_id),
         ).fetchone()
         if not row:
             return False
+    if row[4]:
+        # Pago pela CONTA A PAGAR da folha (482). Remover daqui apagaria o
+        # lançamento da baixa (ou o do extrato, na conciliação) e deixaria a conta
+        # "paga" sem dinheiro nenhum atrás. Quem desfaz é a conta a pagar.
+        return False
     lanc_id = row[0]
     if lanc_id is not None:      # reverte a despesa que tinha entrado no caixa
         LivroCaixa(pool, conta_id, membro_id).apagar_lancamento(lanc_id)
@@ -2237,6 +2414,8 @@ def remover_evento_folha(pool, conta_id: int, evento_id: int,
             (evento_id, conta_id),
         ).fetchone()
         c.commit()
+    if r is not None:
+        _folha_mudou(pool, conta_id, int(row[2]), row[3])
     return r is not None
 
 
@@ -2375,6 +2554,10 @@ def pagar_folha(pool, conta_id: int, ano: int, mes: int,
                           "valor_centavos": valor, "lancamento_id": salvo.id})
             total += valor
         c.commit()   # um único commit: ou paga a folha toda, ou nada
+    if pagos:
+        # A folha quitada CANCELA as contas a pagar dela que sobraram abertas
+        # (482): nada ali é devido mais, e pagar de novo seria salário em dobro.
+        _folha_mudou(pool, conta_id, funcionario_id, comp)
     return {"ok": True, "pagos": pagos, "total_centavos": total}
 
 

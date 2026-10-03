@@ -75,7 +75,7 @@ def guardar(pool, conta_id: int, obra_id: int, conteudo: bytes, content_type: st
                                        bytes, legenda, origem, membro_id)
                values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, obra_id, chave, caminho, ct, len(conteudo), (legenda or "").strip()[:200],
-             origem if origem in ("painel", "whatsapp") else "painel", membro_id)).fetchone()[0]
+             origem if origem in ("painel", "whatsapp", "campo") else "painel", membro_id)).fetchone()[0]
         c.commit()
     nome = next((e["nome"] for e in obra["etapas"] if e["chave"] == chave), None)
     return {"id": fid, "obra": obra["nome"], "etapa": nome, "caminho": caminho}

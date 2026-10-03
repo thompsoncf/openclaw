@@ -3,7 +3,10 @@
 Cada ferramenta e' ligada ao livro-caixa de UM usuario. O agente chama elas
 quando voce pede ("lanca 50 de mercado") ou quando le uma nota por foto.
 """
+import logging
 from datetime import date, datetime
+
+from finance import relogio
 
 from core.agent import Ferramenta
 from contas.permissoes import pode_financas, pode_lista
@@ -16,13 +19,13 @@ from .models import (
 
 def _parse_data(s: str | None) -> date:
     if not s:
-        return date.today()
+        return relogio.hoje()
     for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"):
         try:
             return datetime.strptime(s, fmt).date()
         except ValueError:
             continue
-    return date.today()
+    return relogio.hoje()
 
 
 def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
@@ -267,7 +270,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
 
     def relatorio_mes(entrada: dict) -> str:
         livro.materializar_parcelas_devidas()  # parcelas do mes entram no relatorio
-        hoje = date.today()
+        hoje = relogio.hoje()
         ano = int(entrada.get("ano") or hoje.year)
         mes = int(entrada.get("mes") or hoje.month)
         desp = livro.total_por_categoria(Tipo.DESPESA, mes=mes, ano=ano)
@@ -341,18 +344,35 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         n = livro.registrar_itens(int(lanc_id), itens, loja_info=loja_info, anexar=anexar)
         if n == 0:
             return "Nao consegui salvar os itens (lancamento nao encontrado)."
+
+        def _gancho() -> str:
+            """O gancho pós-itens (hoje só a construção liga, em tools_pj: os itens
+            da nota viram o controle de material). Roda também quando os itens JÁ
+            estavam salvos (-1/-2): é idempotente por item, e assim uma absorção
+            que falhou antes se completa. Nunca derruba o registro do cupom."""
+            gancho = getattr(livro, "apos_itens", None)
+            if gancho is None:
+                return ""
+            try:
+                txt = gancho(int(lanc_id)) or ""
+            except Exception:  # noqa: BLE001
+                logging.getLogger("openclaw.tools").exception(
+                    "gancho apos_itens falhou (lanc %s)", lanc_id)
+                return ""
+            return f" {txt}" if txt else ""
+
         if n == -1:
             return ("Esse cupom JA' tem itens salvos - nao registrei de novo pra nao duplicar. "
                     "Se for um cupom GRANDE que voce esta' salvando em LOTES (ou que chegou "
                     "em varias fotos), chame de novo com anexar=true que eu acrescento so' os "
                     "itens que faltam. Se quiser trocar os antigos pelos novos, peca "
-                    "'substituir os itens'.")
+                    "'substituir os itens'.") + _gancho()
         if n == -2:
             return ("Esses itens desse lote ja' estavam salvos nesse cupom - nao dupliquei. "
-                    "Pode mandar o proximo lote / a proxima parte do cupom.")
+                    "Pode mandar o proximo lote / a proxima parte do cupom.") + _gancho()
         sufixo = (" Manda o proximo lote que eu continuo anexando." if anexar
                   else " Agora da' pra perguntar coisas tipo 'quanto gastei em X'.")
-        return f"Salvei {n} itens do cupom.{sufixo}"
+        return f"Salvei {n} itens do cupom.{sufixo}" + _gancho()
 
     def buscar_itens(entrada: dict) -> str:
         termo = (entrada.get("termo") or "").strip()

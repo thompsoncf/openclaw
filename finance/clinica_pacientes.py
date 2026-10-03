@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 
+from finance import relogio
+
 from finance import clinica_agenda as ca
 
 _log = logging.getLogger("clinica.pacientes")
@@ -479,7 +481,7 @@ def salvar_cadastro(pool, conta_id: int, cliente_id: int, form: dict) -> str | N
             nasc = date.fromisoformat(form["nascimento"].strip())
         except ValueError:
             return "Data de nascimento inválida."
-        if nasc > date.today() or nasc.year < 1900:
+        if nasc > relogio.hoje() or nasc.year < 1900:
             return "Data de nascimento inválida."
     if str(form.get("sexo") or "").strip() and form["sexo"].strip() not in dict(SEXO):
         return "Sexo inválido."
@@ -534,7 +536,7 @@ def ler_data(txt) -> date | None:
         if m:
             d, mes, a = (int(x) for x in m.groups())
             if a < 100:
-                a += 2000 if a <= (date.today().year + 1) % 100 else 1900
+                a += 2000 if a <= (relogio.hoje().year + 1) % 100 else 1900
             return date(a, mes, d)
         return date.fromisoformat(t) if t else None
     except ValueError:

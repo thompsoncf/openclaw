@@ -35,6 +35,8 @@ import logging
 import re
 from datetime import date, datetime, timedelta
 
+from finance import relogio
+
 from .empresa import _mes_seguinte
 
 _log = logging.getLogger("openclaw.vendas")
@@ -251,7 +253,6 @@ def pagamentos_do_orcamento(pool, conta_id: int, orcamento_id: int) -> dict:
 
     Cada parcela traz `idx` (o mesmo `parcela_idx` dos títulos e do comprovante),
     rótulo, valor, vencimento, se está paga e quando."""
-    from datetime import date as _date
     with pool.connection() as c:
         r = c.execute("select parcelas, sinal_pago_em, coalesce(status,'') "
                       "  from orcamentos where id=%s and conta_id=%s",
@@ -277,7 +278,7 @@ def pagamentos_do_orcamento(pool, conta_id: int, orcamento_id: int) -> dict:
     n_normais = n - (1 if i_sinal is not None else 0)
     saida, recebido, total = [], 0, 0
     ordem = 0
-    hoje = _date.today()
+    hoje = relogio.hoje()
     for idx, p in enumerate(itens):
         valor = int(p["valor_centavos"])
         total += valor
@@ -414,7 +415,7 @@ def _dias_desde(quando, hoje=None) -> int | None:
     d = quando.date() if isinstance(quando, datetime) else quando
     if not isinstance(d, date):
         return None
-    base = hoje or date.today()
+    base = hoje or relogio.hoje()
     base = base.date() if isinstance(base, datetime) else base
     return max(0, (base - d).days)
 
@@ -1123,7 +1124,7 @@ def fichas_de_eventos(pool, conta_id: int, evento_ids) -> dict[int, dict]:
                 (conta_id, list(por_orc))).fetchall()
 
     pagto: dict[int, dict] = {}
-    hoje = date.today()
+    hoje = relogio.hoje()
     for oid, status, valor, venc, _pago_em in titulos:
         p = pagto.setdefault(oid, {"total": 0, "pago": 0, "aberto": 0,
                                    "vencidas": 0, "vencidas_centavos": 0, "proxima": None})
@@ -1301,7 +1302,7 @@ def baixar_titulo_do_sinal(pool, conta_id: int, orcamento_id: int, parcelas,
 
     O dinheiro entrou quando o Pix caiu, não quando o dono apertou o botão nem
     quando fechou o contrato — e a data do lançamento decide o MÊS da receita.
-    Por isso `pago_em` vem de `orcamentos.sinal_pago_em` e não de `date.today()`.
+    Por isso `pago_em` vem de `orcamentos.sinal_pago_em` e não de `relogio.hoje()`.
 
     Idempotente por baixo (dar_baixa_titulo só age em título 'aberto'), então
     pode ser chamado pelos dois caminhos sem coordenação:
@@ -1407,7 +1408,7 @@ def lancar_sinal_recebido(pool, conta_id: int, orcamento_id: int, parcelas,
             c.execute(
                 _SQL_TITULO,
                 (conta_id, f"{base} · {rotulo}"[:200], contraparte,
-                 p["valor_centavos"], _venc(p["venc"], date.today()),
+                 p["valor_centavos"], _venc(p["venc"], relogio.hoje()),
                  CAT_SERVICOS, False, dono, int(orcamento_id), i))
             c.commit()
     # a baixa abre a própria conexão, então fica fora do `with` — mesmo cuidado
@@ -1475,7 +1476,7 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
     A trava mora AQUI, e não só na tela, pelo motivo de sempre: o pedido vem do
     navegador, e navegador não é fonte confiável.
     """
-    hoje = date.today()
+    hoje = relogio.hoje()
     # lido ANTES da transação de baixo, que não pode ser abortada por uma leitura
     n_setup = _parcelas_do_setup_da_conta(pool, conta_id)
     # a porta do nicho primeiro: conta recorrente nem chega a perguntar por contrato

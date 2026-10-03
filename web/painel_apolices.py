@@ -24,7 +24,9 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
+
+from finance import relogio
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
@@ -133,7 +135,7 @@ def _contexto(request: Request, conta, gerencia: bool, *, aba: str = "fila",
     `conferir` e `form`. Duas montagens de contexto seriam duas telas que divergem."""
     pool = get_pool()
     conta_id = conta[0]
-    hoje = date.today()
+    hoje = relogio.hoje()
     if aba not in dict(ABAS):
         aba = "fila"
     # o vendedor não configura o que a conta inteira usa, nem vê a carteira toda
@@ -245,7 +247,7 @@ def _apolice_para_janela(a: dict) -> dict:
     vi, vf, dias = a.get("vigencia_inicio"), a.get("vigencia_fim"), a.get("dias")
     pct = None
     if vi and vf and vf > vi:
-        pct = round(100 * max(0, min((vf - vi).days, (date.today() - vi).days)) / (vf - vi).days)
+        pct = round(100 * max(0, min((vf - vi).days, (relogio.hoje() - vi).days)) / (vf - vi).days)
     if dias is None:
         regua = ""
     elif dias > ap.DEGRAUS[0]:

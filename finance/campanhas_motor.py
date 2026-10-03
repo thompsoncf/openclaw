@@ -15,7 +15,9 @@ import hashlib
 import hmac
 import logging
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+
+from finance import relogio
 
 from finance import servicos_catalogo as scat
 from finance.email_sender import _app_url, enviar_email
@@ -359,7 +361,7 @@ def _disparar(pool) -> int:
                 camps = c.execute(
                     """select id, conta_id, nome, limite_dia, enviados_hoje, dia_contagem
                          from campanhas where status='ativa'""").fetchall()
-            hoje = date.today()
+            hoje = relogio.hoje()
             for (cid, conta_id, nome, limite, env_hoje, dia) in camps:
                 if dia != hoje:
                     env_hoje = 0
@@ -576,7 +578,7 @@ def _disparar_wa(pool) -> int:
                               coalesce(wa_enviados_hoje,0), wa_dia_contagem,
                               coalesce(wa_template_sid,'')
                          from campanhas where status='ativa' and coalesce(wa_ativo,false)""").fetchall()
-            hoje = date.today()
+            hoje = relogio.hoje()
             for (cid, conta_id, limite, env_hoje, dia, camp_sid) in camps:
                 # decide UMA vez por campanha, não alvo a alvo: se o canal da conta
                 # não manda template (QR) ou falta o SID, nenhum alvo ia sair mesmo —
@@ -855,7 +857,7 @@ def _disparar_reengajamento(pool) -> int:
                               dia_contagem
                          from campanhas
                         where status='ativa' and coalesce(reengajar_ativo,false)""").fetchall()
-            hoje = date.today()
+            hoje = relogio.hoje()
             for (cid, conta_id, dias, wa_ativo, camp_sid, limite, env_hoje, dia_cont) in camps:
                 restante = max(0, (limite or 0) - (0 if dia_cont != hoje else (env_hoje or 0)))
                 if restante <= 0:
@@ -1190,7 +1192,7 @@ def _registrar_e_avancar(pool, conta_id, camp_id, aid, pid, passo_atual, pmap, a
                            ultima_msg_em=now(), proximo_envio_em=now()+(%s || ' days')::interval where id=%s""",
                       (prox, str(gap), aid))
         c.execute("update campanhas set enviados_hoje=enviados_hoje+1, dia_contagem=%s where id=%s",
-                  (date.today(), camp_id))
+                  (relogio.hoje(), camp_id))
         c.commit()
 
 

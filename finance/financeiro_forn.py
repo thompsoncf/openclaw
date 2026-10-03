@@ -13,6 +13,8 @@ Nao grava nada; so leitura. Sem dependencia de migracao nova.
 from __future__ import annotations
 from datetime import date, timedelta
 
+from finance import relogio
+
 _OFFLINE = ("entrega_dinheiro", "entrega_cartao", "entrega_pix")
 
 _PERIODOS = ("mes", "mes_passado", "30dias", "tudo")
@@ -26,7 +28,7 @@ _DIAS_PT = ("segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo"
 
 def _proximo_repasse(hoje: date | None = None) -> date:
     """Proxima data de repasse (proxima ocorrencia de DIA_REPASSE, hoje inclusive)."""
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     dias = (DIA_REPASSE - hoje.weekday()) % 7
     return hoje + timedelta(days=dias)
 
@@ -36,7 +38,7 @@ def _label_repasse(d: date) -> str:
 
 
 def _range(periodo: str):
-    hoje = date.today()
+    hoje = relogio.hoje()
     if periodo == "mes_passado":
         prim = hoje.replace(day=1)
         ult = prim - timedelta(days=1)
@@ -65,8 +67,8 @@ def resumo_financeiro(pool, fornecedor_id: int, periodo: str = "mes") -> dict:
         cc = ["cs.fornecedor_id = %s", "cs.status in ('cobrada','entregue')"]
         pc: list = [fornecedor_id]
         if de:
-            cc.append("coalesce(cs.entregue_em::date, cs.data_entrega, cs.criada_em::date) >= %s")
-            cc.append("coalesce(cs.entregue_em::date, cs.data_entrega, cs.criada_em::date) <= %s")
+            cc.append("coalesce((cs.entregue_em at time zone 'America/Sao_Paulo')::date, cs.data_entrega, (cs.criada_em at time zone 'America/Sao_Paulo')::date) >= %s")
+            cc.append("coalesce((cs.entregue_em at time zone 'America/Sao_Paulo')::date, cs.data_entrega, (cs.criada_em at time zone 'America/Sao_Paulo')::date) <= %s")
             pc += [de, ate]
         row = c.execute(
             "select coalesce(sum(preco_centavos),0), count(*) from cesta_semana cs where "
@@ -77,8 +79,8 @@ def resumo_financeiro(pool, fornecedor_id: int, periodo: str = "mes") -> dict:
         ca = ["ca.fornecedor_id = %s", "ca.pago = true"]
         pa: list = [fornecedor_id]
         if de:
-            ca.append("ca.pago_em::date >= %s")
-            ca.append("ca.pago_em::date <= %s")
+            ca.append("(ca.pago_em at time zone 'America/Sao_Paulo')::date >= %s")
+            ca.append("(ca.pago_em at time zone 'America/Sao_Paulo')::date <= %s")
             pa += [de, ate]
         rows = c.execute(
             "select coalesce(forma_pagamento,''), coalesce(sum(total_centavos),0), count(*) "
@@ -151,12 +153,12 @@ def extrato_financeiro(pool, fornecedor_id: int, periodo: str = "mes",
         cc = ["cs.fornecedor_id = %s", "cs.status in ('cobrada','entregue','confirmada')"]
         pc: list = [fornecedor_id]
         if de:
-            cc.append("coalesce(cs.entregue_em::date, cs.data_entrega, cs.criada_em::date) >= %s")
-            cc.append("coalesce(cs.entregue_em::date, cs.data_entrega, cs.criada_em::date) <= %s")
+            cc.append("coalesce((cs.entregue_em at time zone 'America/Sao_Paulo')::date, cs.data_entrega, (cs.criada_em at time zone 'America/Sao_Paulo')::date) >= %s")
+            cc.append("coalesce((cs.entregue_em at time zone 'America/Sao_Paulo')::date, cs.data_entrega, (cs.criada_em at time zone 'America/Sao_Paulo')::date) <= %s")
             pc += [de, ate]
         for cid, nome, cent, status, quando in c.execute(
             "select cs.id, coalesce(cli.nome,'cliente'), cs.preco_centavos, cs.status, "
-            "coalesce(cs.entregue_em::date, cs.data_entrega, cs.criada_em::date) "
+            "coalesce((cs.entregue_em at time zone 'America/Sao_Paulo')::date, cs.data_entrega, (cs.criada_em at time zone 'America/Sao_Paulo')::date) "
             "from cesta_semana cs left join contas cli on cli.id = cs.cliente_id "
             "where " + " and ".join(cc) + " order by 5 desc limit %s",
             tuple(pc) + (limit,)).fetchall():
@@ -175,13 +177,13 @@ def extrato_financeiro(pool, fornecedor_id: int, periodo: str = "mes",
               "(ca.pago = true or ca.status = 'entregue')"]
         pa: list = [fornecedor_id]
         if de:
-            ca.append("coalesce(ca.pago_em::date, ca.entregue_em::date) >= %s")
-            ca.append("coalesce(ca.pago_em::date, ca.entregue_em::date) <= %s")
+            ca.append("coalesce((ca.pago_em at time zone 'America/Sao_Paulo')::date, (ca.entregue_em at time zone 'America/Sao_Paulo')::date) >= %s")
+            ca.append("coalesce((ca.pago_em at time zone 'America/Sao_Paulo')::date, (ca.entregue_em at time zone 'America/Sao_Paulo')::date) <= %s")
             pa += [de, ate]
         for aid, nome, cent, forma, pago, quando in c.execute(
             "select ca.id, coalesce(cli.nome,'cliente'), ca.total_centavos, "
             "coalesce(ca.forma_pagamento,''), ca.pago, "
-            "coalesce(ca.pago_em::date, ca.entregue_em::date) "
+            "coalesce((ca.pago_em at time zone 'America/Sao_Paulo')::date, (ca.entregue_em at time zone 'America/Sao_Paulo')::date) "
             "from carrinhos ca left join contas cli on cli.id = ca.cliente_id "
             "where " + " and ".join(ca) + " order by 6 desc limit %s",
             tuple(pa) + (limit,)).fetchall():

@@ -136,6 +136,8 @@ from web.painel_apolices import router as apolices_router
 from web.painel_hoje import router as hoje_router
 from web.painel_clinica import router as clinica_router
 from web.painel_obras import router as obras_router
+from web.painel_obras_mapa import router as obras_mapa_router
+from web.app_obra import router as app_obra_router
 from web.painel_clinica_agenda import router as clinica_agenda_router
 from web.painel_clinica_vagas import router as clinica_vagas_router
 from web.painel_clinica_planos import router as clinica_planos_router
@@ -338,6 +340,9 @@ app.include_router(origens_router)
 app.include_router(apolices_router)
 app.include_router(hoje_router)
 app.include_router(clinica_router)
+# o mapa ANTES da ficha: /painel/obras/mapa bateria em /painel/obras/{obra_id}
+app.include_router(obras_mapa_router)
+app.include_router(app_obra_router)          # o app do mestre (/obra), fora do /painel
 app.include_router(obras_router)
 app.include_router(clinica_agenda_router)
 app.include_router(clinica_vagas_router)
@@ -498,8 +503,8 @@ def _iniciar_poller_email() -> None:
                 # O SINAPI (custo médio do m² por estado, IBGE) das contas de
                 # construção: perto da virada da hora, e cada UF no máximo uma vez
                 # por dia — com o IBGE fora do ar, tenta de novo na hora seguinte.
-                from datetime import datetime as _dt
-                if _dt.now().minute < 2:
+                from datetime import datetime as _dt, timezone as _tz
+                if _dt.now(_tz.utc).minute < 2:
                     from finance import sinapi as _sin
                     _sin.atualizar(pool)
             except Exception as e:  # noqa: BLE001
@@ -1430,6 +1435,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
         # não é nota (o telhado pronto) vai pra obra (guardar_foto_da_obra).
         if media_url and imagem_b64 and (media_type or "").startswith("image/"):
             agente.livro.midia_atual = (dados, media_type)
+        agente.livro.canal_interativo = True      # o WhatsApp mostra lista e botões
         resposta = agente.responder(texto, imagem_b64, media_type)
         # Dica de QR SO' pra cupom fiscal (chave lida OU itens registrados);
         # comprovante de Pix/banco nao tem QR - nada de dica de QR nesse caso.
@@ -1437,6 +1443,14 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
         if deve_mandar_dica_qr(dica_qr, chave_nfce, getattr(agente, "_obs_tools", set())):
             resposta = (resposta or "") + DICA_QR_WPP
         _responder_whatsapp(to, resposta)
+        # A escolha com toque (finance/escolhas.py): a lista ou os botões vão depois
+        # do texto. Se o Twilio recusar, as opções vão escritas — nunca some a pergunta.
+        _escolha = getattr(agente.livro, "escolha", None)
+        if _escolha:
+            from finance import escolhas as _esc
+            from finance import whatsapp_interativo as _wi
+            if not _wi.enviar(pool, to, _escolha):
+                _responder_whatsapp(to, _esc.texto_das_opcoes(_escolha))
     except Exception as e:  # noqa: BLE001
         log.exception("erro no whatsapp")
         try:
@@ -1616,7 +1630,8 @@ async def whatsapp(request: Request, background: BackgroundTasks):
     numero = _normalizar_br(form.get("From", "") or "")
     nome = form.get("ProfileName") or None
     # Body vazio + botão tocado (quick reply do template): o texto vem em ButtonText.
-    body = form.get("Body", "") or form.get("ButtonText", "") or form.get("ButtonPayload", "") or ""
+    body = (form.get("Body", "") or form.get("ButtonText", "") or form.get("ListTitle", "")
+            or form.get("ButtonPayload", "") or "")
     media_url = None
     media_ctype = ""
     if int(form.get("NumMedia", "0") or 0) > 0:

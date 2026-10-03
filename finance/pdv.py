@@ -23,6 +23,8 @@ correcao manual. Para o balcao (poucos itens por venda) isso e' aceitavel no v1.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+
+from finance import relogio
 from decimal import Decimal
 
 from .livro_caixa import LivroCaixa
@@ -160,7 +162,7 @@ def registrar_venda_balcao(
     if (pagamento or "").strip().lower() == "fiado":
         if not cliente_id:
             raise ValueError("fiado exige um cliente identificado")
-        venc = _parse_venc(vencimento) or (date.today() + timedelta(days=30))
+        venc = _parse_venc(vencimento) or (relogio.hoje() + timedelta(days=30))
         desc_f = "Venda de balcao (fiado)"
         if nome_lbl:
             desc_f += f" - {nome_lbl}"

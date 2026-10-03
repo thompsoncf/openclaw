@@ -57,6 +57,7 @@ from finance import comprovantes as comprov
 from finance import contrato as ctr
 from finance import evento_stands as es
 from web.loja_stands import PLANTA_CSS, PLANTA_DEFS_JS
+from web.stands_receita import RECEITA_JS
 from web.portal import _env, _render, brl, conta_logada, nicho_da_conta
 
 router = APIRouter()
@@ -417,24 +418,17 @@ def registrar_saldo(request: Request, codigo: str, valor: str = Form("")):
 
 @router.get("/painel/eventos/estandes/consulta-cnpj")
 def consulta_cnpj(request: Request, doc: str = ""):
-    """"Buscar na Receita" do formulário Dados do cliente. É a MESMA consulta da
-    aba Clientes (finance.cnpj_info, BrasilAPI) — mas numa rota daqui porque o
-    gate de papéis só libera ao gestor o prefixo /painel/eventos/estandes; a de
-    Clientes é do dono. Devolve razão social, e-mail, cidade e UF (o que a
-    consulta traz; endereço e CEP o gestor digita)."""
+    """"Buscar na Receita" do formulário Dados do cliente. A consulta é a da
+    BrasilAPI (finance.cnpj_info) — numa rota daqui porque o gate de papéis só
+    libera ao gestor o prefixo /painel/eventos/estandes; a de Clientes é do dono.
+    Devolve o cadastro que o contrato pede (es.receita_do_cnpj): razão social,
+    nome fantasia, representante, endereço, CEP, cidade, UF e e-mail."""
     from fastapi.responses import JSONResponse as _J
-    from finance import cnpj_info, validadoc
     conta, cfg_ou_redir = _acesso(request)
     if conta is None:
-        return _J({"ok": False, "erro": "login"}, status_code=401)
-    ok, tipo, d = validadoc.valida(doc)
-    if tipo != "pj" or not ok:
-        return _J({"ok": False, "erro": "CNPJ inválido"})
-    info = cnpj_info.consultar_cnpj(d)
-    if not info:
-        return _J({"ok": False, "erro": "CNPJ não encontrado na Receita"})
-    return _J({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
-               "cidade": info.get("cidade"), "uf": info.get("uf")})
+        return _J({"ok": False, "erro": "Sua sessão expirou — entre de novo e repita a busca."},
+                  status_code=401)
+    return _J(es.receita_do_cnpj(doc))
 
 
 @router.post("/painel/eventos/estandes/{codigo}/cliente")
@@ -452,19 +446,28 @@ def salvar_cliente_do_stand(request: Request, codigo: str,
         return cfg_ou_redir
     r = es.salvar_cadastro_stand(get_pool(), conta[0], codigo, {
         "fantasia": fantasia, "whats": whats, "razao": razao, "doc": doc, "rep": rep,
-        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf, "obs": obs})
+        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf, "obs": obs},
+        juntar="sempre")
+    from urllib.parse import quote
     if not r["ok"]:
+        # o texto vai na URL: nome de cadastro com "&" ou "#" cortava a frase
         return RedirectResponse(
-            f"/painel/eventos/estandes?erro={r['erro']}&abrir={codigo}", status_code=303)
+            f"/painel/eventos/estandes?erro={quote(r['erro'])}&abrir={codigo}", status_code=303)
     msg = (f"Cliente do {codigo} salvo em Clientes"
            + (" (cadastro novo)." if r["acao"] == "criado" else " (atualizado)."))
+    if r.get("juntou"):
+        j = r["juntou"]
+        msg = (f"O {codigo} entrou no cadastro {j['cliente']}"
+               + (f" (mesma empresa do {', '.join(j['stands'])})" if j["stands"] else "")
+               + f": um {j.get('doc') or 'CNPJ'}, cada stand com a sua marca. "
+               "Os dados que a empresa já tinha ficaram; o que faltava foi completado.")
     if r["congelado"]:
         msg += " O contrato já foi assinado — ele não muda."
     elif r["faltam"]:
         msg += " Ainda falta pro contrato: " + ", ".join(f["l"].lower() for f in r["faltam"]) + "."
     else:
         msg += " Contrato com todos os dados do contratante."
-    return RedirectResponse(f"/painel/eventos/estandes?ok={msg}&abrir={codigo}",
+    return RedirectResponse(f"/painel/eventos/estandes?ok={quote(msg)}&abrir={codigo}",
                             status_code=303)
 
 
@@ -639,7 +642,7 @@ _CSS = r"""<style>
 /* ---- o mapa (cadastro completo — a MESMA planta da página pública, na
         variação "planta técnica": tiles chapados por status) ---- */
 .es-pag .mapa-outer{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow);margin-bottom:12px}
-.es-pag .mapa-grid{position:relative;--pl-dim:var(--fg-dim);--pl-line:var(--line);--pl-surf:var(--surface-2)}
+.es-pag .mapa-grid{position:relative;--pl-dim:var(--fg-dim);--pl-line:rgba(234,242,237,.2);--pl-surf:var(--surface-2)}
 .es-pag .mapa-grid .stand{
   appearance:none;cursor:pointer;border:1px solid var(--line);border-radius:5px;width:auto;min-height:0;margin:0;
   font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;line-height:1;
@@ -1031,6 +1034,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
       {% if pode_gerir %}
       {% macro falta(k) %}{% if cad.get('faltam') and k in (cad.faltam|map(attribute='k')|list) %} falta{% endif %}{% endmacro %}
       <form method="post" action="/painel/eventos/estandes/{{ d.codigo }}/cliente" oninput="esCadProg(this)">
+        {% if cad.get('dividido_com') %}<div class="fld-nota" style="margin:0 0 8px">Mesma empresa do stand {{ cad.dividido_com|join(', ') }}: razão social, documento, endereço e contato valem pros dois — e vão pro contrato dos dois. O nome fantasia é só deste stand. Campo vazio aqui não apaga o que a empresa tem.</div>{% endif %}
         <div class="cad-form">
           <label class="fld{{ falta('fantasia') }}"><span>Nome fantasia <i>*</i></span><input name="fantasia" data-req="1" maxlength="200" value="{{ cad.get('fantasia','') }}" required></label>
           <label class="fld{{ falta('razao') }}"><span>Razão social <i>*</i></span><input name="razao" data-req="1" maxlength="200" value="{{ cad.get('razao','') }}" placeholder="Como sai no contrato"></label>
@@ -1377,25 +1381,24 @@ function esCadProg(form){
     if (faltam.length) b.textContent = 'Cadastro ' + ok + '/' + reqs.length; else b.remove();
   });
 }
+""" + RECEITA_JS + r"""
 function esReceita(btn){
   var form = btn.closest('form');
   var msg = form.querySelector('.cad-receita');
   var doc = form.elements['doc'].value.trim();
   msg.hidden = false;
   if (!doc){ msg.textContent = 'Digite o CNPJ antes de buscar.'; return; }
+  if (!receitaTrava(btn)) return;
   msg.textContent = 'Consultando a Receita…';
   fetch('/painel/eventos/estandes/consulta-cnpj?doc=' + encodeURIComponent(doc), {headers:{'x-requested-with':'fetch'}})
     .then(function(r){ return r.json(); })
     .then(function(j){
+      receitaSolta(btn);
       if (!j.ok){ msg.textContent = j.erro || 'Não consegui consultar agora.'; return; }
-      if (j.nome) form.elements['razao'].value = j.nome;
-      if (j.email && !form.elements['email'].value.trim()) form.elements['email'].value = j.email;
-      if (j.cidade) form.elements['cidade'].value = j.cidade;
-      if (j.uf) form.elements['uf'].value = j.uf;
-      msg.textContent = '✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      msg.textContent = receitaMsg(receitaPreenche(form, j));
       esCadProg(form);
     })
-    .catch(function(){ msg.textContent = 'Não consegui consultar agora — digite os dados.'; });
+    .catch(function(){ receitaSolta(btn); msg.textContent = 'Não consegui consultar agora — digite os dados.'; });
 }
 function esIrCadastro(btn){
   var detail = btn.closest('.oc-detail');

@@ -43,7 +43,7 @@ _log = logging.getLogger(__name__)
 
 _BRT = timezone(timedelta(hours=-3))
 
-#: vizinho da trava do resgate (771180)
+#: a trava advisory de antes da 610 (só no banco sem a tabela `travas`)
 _LOCK = 771181
 
 #: os dias do silêncio — os mesmos do resgate (TOQUE_2_DIAS, TOQUE_3_DIAS e
@@ -87,7 +87,7 @@ def _sql_candidatos() -> str:
                           where io.conta_id = p.conta_id and io.prospeccao_id = p.id
                             and (io.estado = 'conferir'
                                  or (io.bloqueio is not null and io.estado <> 'descartado')))
-         and (p.evento_em is null or p.evento_em >= current_date + 3)
+         and (p.evento_em is null or p.evento_em >= (now() at time zone 'America/Sao_Paulo')::date + 3)
          and not exists (select 1 from eventos_agenda e
                           where e.conta_id = p.conta_id and e.prospeccao_id = p.id
                             and e.inicio >= now() and {vis.sql_conta('e', festa=False)})),
@@ -301,38 +301,28 @@ def _uma_conta(pool, conta_id: int, agora: datetime) -> dict:
 
 
 def rodar(pool, agora: datetime | None = None) -> dict:
-    """Um ciclo em toda empresa com alguma regra que insiste. A trava fica fora de
-    transação, pelo mesmo motivo do resgate (`resgate.rodar`): o ciclo pode passar
-    do `idle_in_transaction_session_timeout` enquanto a IA escreve."""
+    """Um ciclo em toda empresa com alguma regra que insiste. A trava é a mesma linha
+    do resgate (db/trava.py, migração 610): a advisory de sessão não vale atrás do
+    pooler do Supabase, e os dois workers rodavam o ciclo juntos (`resgate.rodar`)."""
+    from db import trava as _trava
     agora = agora or datetime.now(timezone.utc)
     total = {"toques": 0, "perdidos": 0}
-    with pool.connection() as lk:
-        lk.commit()
-        lk.autocommit = True
+    with _trava.ciclo(pool, "ia_insiste", _LOCK) as pegou:
+        if not pegou:
+            return total
         try:
+            with pool.connection() as c:
+                contas = [r[0] for r in c.execute(
+                    """select distinct conta_id from chip_regra
+                        where ativa and ia_ligada and ia_insiste""").fetchall()]
+        except Exception:  # noqa: BLE001 — banco sem a 401
+            return total
+        for conta_id in contas:
             try:
-                if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-                    return total
-            except Exception:  # noqa: BLE001
-                return total
-            try:
-                try:
-                    with pool.connection() as c:
-                        contas = [r[0] for r in c.execute(
-                            """select distinct conta_id from chip_regra
-                                where ativa and ia_ligada and ia_insiste""").fetchall()]
-                except Exception:  # noqa: BLE001 — banco sem a 401
-                    return total
-                for conta_id in contas:
-                    try:
-                        r = _uma_conta(pool, conta_id, agora)
-                        for k in total:
-                            total[k] += r.get(k, 0)
-                    except Exception as e:  # noqa: BLE001
-                        _log.warning("ia_insiste.rodar: conta %s: %s: %s",
-                                     conta_id, type(e).__name__, e)
-            finally:
-                lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
-        finally:
-            lk.autocommit = False
+                r = _uma_conta(pool, conta_id, agora)
+                for k in total:
+                    total[k] += r.get(k, 0)
+            except Exception as e:  # noqa: BLE001
+                _log.warning("ia_insiste.rodar: conta %s: %s: %s",
+                             conta_id, type(e).__name__, e)
     return total

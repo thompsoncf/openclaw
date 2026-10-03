@@ -249,10 +249,12 @@ def _dados_vendas(pool, conta_id, periodo, de=None, ate=None):
     contagem sem explicação.
     """
     ini, fim = _intervalo(periodo, de, ate)
+    estande = _tem_estande(pool, conta_id)
+    vend_est = _sql_vendedor_estande("t.orcamento_id") if estande else "null"
     with pool.connection() as c:
         rows = c.execute(
-            """select l.data, l.descricao, l.categoria, l.origem,
-                      coalesce(m.nome, '-') as vendedor, l.valor_centavos,
+            f"""select l.data, l.descricao, l.categoria, l.origem,
+                      coalesce(m.nome, {vend_est}, '-') as vendedor, l.valor_centavos,
                       p.grupo, coalesce(t.contraparte, cl.nome, '') as cliente
                  from lancamentos l
                  left join membros m on m.id = l.membro_id
@@ -262,7 +264,7 @@ def _dados_vendas(pool, conta_id, periodo, de=None, ate=None):
                 where l.conta_id=%s and l.tipo='receita' and l.natureza='empresa'
                   and l.data >= %s and l.data <= %s
                 order by l.data desc, l.id desc limit 20000""",
-            (conta_id, ini, fim),
+            ((conta_id,) if estande else ()) + (conta_id, ini, fim),
         ).fetchall()
 
     # o dinheiro que entrou pela baixa do título é o registro BOM da venda (ele
@@ -429,6 +431,9 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
             "categoria": t["categoria"] or "—", "status": status, "status_cor": cor,
             "talvez": talvez, "talvez_cor": "aviso",
             "valor_centavos": t["valor_centavos"],
+            # o MÊS DE REFERÊNCIA (484): o anotado, ou o anterior ao vencimento
+            "referencia": (t["referencia"].strftime("%m/%Y")
+                           if t.get("referencia") else "—"),
         })
     total = _soma(linhas, "valor_centavos")
     vencidas = [r for r in linhas if r["status"] == "Vencida"]
@@ -447,12 +452,16 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
         # a tem. Medido no Chromium: com Status como coluna sobravam 949px pros
         # dois nomes numa janela de 1500 e o fornecedor era cortado em toda linha;
         # sem ela sobram 1.155px e não corta nenhum até 1280.
-        "colunas": [_col("vencimento", "Vencimento", venc=True, extra="prazo"),
-                    _col("descricao", "Descrição", flex=True, parte=55,
-                         extra="talvez"),
-                    _col("contraparte", rotulo_col, flex=True, parte=45),
-                    _col("valor_centavos", "Valor", num=True, brl=True,
-                         zero="— informar")],
+        # A REFERÊNCIA (484, pedido do dono em 02/10/2026) entra logo depois do
+        # vencimento, e só em Contas a pagar: "07/2026" tem largura fixa e curta,
+        # não disputa espaço com os dois nomes.
+        "colunas": [_col("vencimento", "Vencimento", venc=True, extra="prazo")]
+                   + ([_col("referencia", "Ref.")] if tipo == "pagar" else [])
+                   + [_col("descricao", "Descrição", flex=True, parte=55,
+                           extra="talvez"),
+                      _col("contraparte", rotulo_col, flex=True, parte=45),
+                      _col("valor_centavos", "Valor", num=True, brl=True,
+                           zero="— informar")],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total em aberto", _brl(total)),
                      ("Vencidas", f"{len(vencidas)} · {_brl(_soma(vencidas, 'valor_centavos'))}"),
@@ -771,6 +780,42 @@ _ORC_CHEGOU = """(coalesce(o.status, 'rascunho') <> 'rascunho'
                         and ex.conta_id = o.conta_id and ex.ok))"""
 
 
+# O VENDEDOR DO APP DE ESTANDES (02/10/2026, relato do dono da Outlet Chic: "o
+# relatório de vendas não tá aparecendo o vendedor"). Lá a proposta nasce pela
+# página dos stands (`criado_por = 'pagina_stands'`) e o recebimento pela baixa do
+# título, sem membro; quem vendeu está na RESERVA do stand (`prospeccao.vendedor_id`,
+# o link da vendedora). Só pra conta com o app de estandes — as demais seguem como
+# eram (o SQL é `null` e nada muda).
+def _sql_vendedor_estande(orcamento_sql: str) -> str:
+    return ("(select m2.nome from evento_stands s2"
+            " join prospeccao pr2 on pr2.id = s2.prospeccao_id and pr2.conta_id = s2.conta_id"
+            " join membros m2 on m2.id = pr2.vendedor_id and m2.conta_id = s2.conta_id"
+            f" where s2.orcamento_id = {orcamento_sql} and s2.conta_id = %s"
+            " order by s2.codigo limit 1)")
+
+
+def _filtro_vendedor(estande: bool) -> str:
+    """O filtro "Vendedor" de Orçamentos e Contratos: quem criou a proposta e, no app
+    de estandes, também quem vendeu a reserva do stand."""
+    if not estande:
+        return "o.criado_por = %s"
+    return ("(o.criado_por = %s or exists (select 1 from evento_stands s3"
+            " join prospeccao pr3 on pr3.id = s3.prospeccao_id and pr3.conta_id = s3.conta_id"
+            " where s3.orcamento_id = o.id and s3.conta_id = %s and pr3.vendedor_id::text = %s))")
+
+
+def _params_vendedor(estande: bool, vendedor_sel, conta_id: int) -> list:
+    return [str(vendedor_sel), conta_id, str(vendedor_sel)] if estande else [str(vendedor_sel)]
+
+
+def _tem_estande(pool, conta_id: int) -> bool:
+    try:
+        from finance import evento_stands as _es
+        return _es.app_de_stands(pool, conta_id)
+    except Exception:  # noqa: BLE001 — sem a resposta, o relatório de sempre
+        return False
+
+
 def _vendedores_da_conta(pool, conta_id: int) -> list[tuple[int, str]]:
     with pool.connection() as c:
         rows = c.execute("select id, nome from membros where conta_id=%s order by nome",
@@ -799,14 +844,15 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     `_espelhar_cliente` (web/painel_servicos.py) já usa: `empresa or
     cliente`."""
     ini, fim = _intervalo(periodo, de, ate)
+    estande = _tem_estande(pool, conta_id)
     where = ["o.conta_id=%s"]
     params: list = [conta_id]
     if periodo != "todos":
         where.append(_DIA_BRT.format("o.criado_em") + " >= %s and " + _DIA_BRT.format("o.criado_em") + " <= %s")
         params += [ini, fim]
     if vendedor_sel:
-        where.append("o.criado_por = %s")
-        params.append(str(vendedor_sel))
+        where.append(_filtro_vendedor(estande))
+        params += _params_vendedor(estande, vendedor_sel, conta_id)
     if busca:
         where.append("(o.empresa ilike %s or o.cliente ilike %s)")
         params += [f"%{busca}%", f"%{busca}%"]
@@ -841,7 +887,8 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                        -- abriu a conta, sem vendedor específico — mesma leitura de
                        -- web/proposta.py). Sem o 2º ramo, esses ficavam "—", como se
                        -- não tivessem dono nenhum.
-                       coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end, '—'),
+                       coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end,
+                                {_sql_vendedor_estande("o.id") if estande else "null"}, '—'),
                        {_VALOR_ORC}, o.token,
                        -- o contrato deste orçamento, se existir — mesma trava de
                        -- `finance.contrato.por_orcamento` (o vivo, não substituído).
@@ -864,7 +911,7 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                   left join contas ct on ct.id = o.conta_id
                  where {where2_sql}
                  order by o.criado_em desc limit 20000""",
-            params2).fetchall()
+            ([conta_id] if estande else []) + params2).fetchall()
 
     linhas = []
     for r in rows:
@@ -960,9 +1007,10 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                if data_por == "assinatura" else "(c.criado_em at time zone 'America/Sao_Paulo')::date")
         where.append(f"{col} >= %s and {col} <= %s")
         params += [ini, fim]
+    estande = _tem_estande(pool, conta_id)
     if vendedor_sel:
-        where.append("o.criado_por = %s")
-        params.append(str(vendedor_sel))
+        where.append(_filtro_vendedor(estande))
+        params += _params_vendedor(estande, vendedor_sel, conta_id)
     if busca:
         where.append("(o.empresa ilike %s or o.cliente ilike %s)")
         params += [f"%{busca}%", f"%{busca}%"]
@@ -1011,7 +1059,8 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                        c.assinado_em,
                        -- mesma leitura de _dados_orcamentos: criado_por é o id do
                        -- membro OU a palavra 'dono'.
-                       coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end, '—'),
+                       coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end,
+                                {_sql_vendedor_estande("o.id") if estande else "null"}, '—'),
                        coalesce(c.valor_centavos, 0), c.token,
                        c.enviado_em, o.numero, c.id
                   from contratos c {join_sql}
@@ -1019,7 +1068,7 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                   left join contas ct on ct.id = c.conta_id
                  where {where2_sql}
                  order by c.criado_em desc limit 20000""",
-            params2).fetchall()
+            ([conta_id] if estande else []) + params2).fetchall()
 
     # O VALOR QUE VALE HOJE, não o congelado na assinatura. Contrato com aditivo
     # assinado aparecendo aqui com o valor velho é o mesmo defeito da folha do
@@ -2248,7 +2297,7 @@ def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str =
     return HTMLResponse(_env.get_template("relatorio_pdf").render(
         dados=dados, tipo=tipo, periodo=periodo,
         periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
-        gerado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
+        gerado_em=_relogio.agora().strftime("%d/%m/%Y %H:%M"),   # a hora de Brasília
         **_letterhead(pool, conta),
     ))
 

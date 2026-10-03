@@ -99,6 +99,7 @@ def pool():
         c.execute((BASE / "409_resgate_teste_chip.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "445_resgate_previa_sem_dobro.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "446_resgate_previa_sem_dobro_de_verdade.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "610_travas.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos')")
         c.execute("insert into contas (id, nome, chip_de, nicho_id) values "
                   "(%s,'Prime',null,1),(%s,'CP Thiago',%s,null),(%s,'Outra',null,1)",
@@ -373,6 +374,30 @@ def test_ensaio_manda_a_previa_pro_supervisor_e_nao_mexe_no_lead(pool, equipe, d
         c.commit()
     rg.rodar(pool)
     assert len(duble["saiu"]) == 1
+
+
+def test_com_a_trava_de_outro_worker_o_ciclo_nao_roda(pool, equipe, duble):
+    """03/10/2026, Prime: os dois workers rodaram o ciclo juntos (a trava advisory, atrás
+    do pooler, era pega numa conexão de servidor e solta em outra) e o lead #881 recebeu
+    a retomada que a IA tinha decidido não mandar. A trava agora é a linha `travas`."""
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"])
+        c.execute("insert into travas (nome, dono, expira_em) "
+                  "values ('resgate', 'outro-worker', now() + interval '10 minutes')")
+        c.commit()
+    rg.rodar(pool)
+    assert duble["saiu"] == []
+    with pool.connection() as c:
+        # a passada que não levou não apaga a trava do outro
+        assert c.execute("select dono from travas where nome='resgate'").fetchone()[0] == "outro-worker"
+        # o outro worker morreu no meio: vencido o prazo, o próximo ciclo leva
+        c.execute("update travas set expira_em = now() - interval '1 second'")
+        c.commit()
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1
+    with pool.connection() as c:
+        assert c.execute("select count(*) from travas").fetchone()[0] == 0   # soltou no fim
 
 
 def test_o_ritmo_espacamento_e_teto(pool, equipe, duble, monkeypatch):

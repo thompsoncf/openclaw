@@ -10,6 +10,8 @@ Reusa o motor do portal: _render/_env (base, nav) + conta_logada.
 import calendar as _cal
 import logging
 from datetime import date, datetime, timedelta
+
+from finance import relogio
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Form
@@ -215,7 +217,7 @@ def _ficha_rot(f: dict | None) -> dict | None:
         "prox_valor": _brl(prox["valor_centavos"]) if prox else "",
         "prox_venc": prox["vencimento"].strftime("%d/%m") if prox and prox.get("vencimento") else "",
         "prox_vencida": bool(prox and prox.get("vencida")),
-        "prox_dias": ((prox["vencimento"] - date.today()).days
+        "prox_dias": ((prox["vencimento"] - relogio.hoje()).days
                       if prox and prox.get("vencimento") else None),
     }
 

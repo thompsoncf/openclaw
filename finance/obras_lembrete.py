@@ -81,7 +81,36 @@ def pendencias(pool, conta_id: int, hoje=None) -> dict:
             except Exception as e:  # noqa: BLE001 — sem a 355, sem parcela
                 _log.info("obras_lembrete: parcelas da obra %s: %s", o["id"], e)
     parado = ov.parado_em_casas(pool, conta_id, obras) if itens else 0
-    return {"itens": itens, "parado": parado}
+    return {"itens": _por_quadra(pool, conta_id, obras, itens), "parado": parado}
+
+
+def _por_quadra(pool, conta_id: int, obras: list[dict], itens: list[str]) -> list[str]:
+    """As linhas das casas de uma mesma quadra viram UMA linha, em ordem de lote
+    ("Quadra 4 — Lote 1: …; Lote 2: …"). Casa sem quadra fica como está. Sem a 478,
+    nada muda."""
+    try:
+        from . import obra_grupos as og
+        grupos = {g["id"]: g["nome"] for g in og.listar_grupos(pool, conta_id)}
+        mapa = og.por_obra(pool, conta_id)
+    except Exception:  # noqa: BLE001
+        return itens
+    if not grupos:
+        return itens
+    por_nome = {o["nome"]: o for o in obras}
+    soltas, juntas = [], {}
+    for linha in itens:
+        nome, _, resto = linha.partition(": ")
+        o = por_nome.get(nome)
+        g = (mapa.get(o["id"]) or {}) if o else {}
+        if not g.get("grupo_id") or g["grupo_id"] not in grupos:
+            soltas.append(linha)
+            continue
+        quem = f"Lote {g['lote']}" if g.get("lote") else nome
+        juntas.setdefault(g["grupo_id"], []).append((og._ordem_lote({"lote": g.get("lote"), "nome": nome}),
+                                                     f"{quem}: {resto.rstrip('.')}"))
+    out = [f"{grupos[gid]} — " + "; ".join(t for _, t in sorted(ls)) + "."
+           for gid, ls in sorted(juntas.items(), key=lambda kv: grupos[kv[0]])]
+    return out + soltas
 
 
 def texto(nome: str, pend: dict) -> str:

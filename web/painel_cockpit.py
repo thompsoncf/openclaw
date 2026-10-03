@@ -9983,6 +9983,7 @@ _STANDS_JS = r"""
   }
   function formHTML(c){
     var h='<form id=stform onsubmit="return stSalvar(this)" oninput="stProg()">';
+    if(c.dividido_com&&c.dividido_com.length)h+='<div class=stnota>Mesma empresa do stand '+esc(c.dividido_com.join(', '))+': razão social, documento, endereço e contato valem pros dois — e vão pro contrato dos dois. O nome fantasia é só deste stand. Campo vazio aqui não apaga o que a empresa tem.</div>';
     h+=campo('fantasia','Nome fantasia',c,1,'autocomplete=organization');
     h+=campo('razao','Razão social',c,1,'placeholder="Como sai no contrato"');
     h+='<div class=stlin>'+campo('doc','CNPJ / CPF',c,1,'inputmode=numeric placeholder="00.000.000/0000-00"')+
@@ -10020,15 +10021,13 @@ _STANDS_JS = r"""
     var form=document.getElementById('stform'), msg=document.getElementById('strecmsg');
     var doc=form.elements['doc'].value.trim(); msg.hidden=false;
     if(!doc){msg.textContent='Digite o CNPJ antes.';return;}
+    if(!receitaTrava(btn))return;
     msg.textContent='Consultando a Receita…';
     zapFetch(BASE_STANDS+'/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+      receitaSolta(btn);
       if(!j){msg.textContent='Não consegui consultar agora — digite os dados.';return;}
       if(!j.ok){msg.textContent=j.erro||'Não consegui consultar agora.';return;}
-      if(j.nome)form.elements['razao'].value=j.nome;
-      if(j.email&&!form.elements['email'].value.trim())form.elements['email'].value=j.email;
-      if(j.cidade)form.elements['cidade'].value=j.cidade;
-      if(j.uf)form.elements['uf'].value=j.uf;
-      msg.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+      msg.textContent=receitaMsg(receitaPreenche(form,j));
       stProg();
     });
   };
@@ -10042,8 +10041,15 @@ _STANDS_JS = r"""
       editando=false; detalhe(); minhas();
       var ok=document.getElementById('stcad');
       if(ok){var m=document.createElement('div');m.className='stok';
-        m.textContent='✓ Salvo em Clientes'+(j.cad.faltam.length?' — ainda falta '+j.cad.faltam.length+' pro contrato.':' — contrato com todos os dados.');
-        ok.appendChild(m);}
+        m.textContent='✓ Salvo em Clientes'+(j.cad.faltam.length?' — ainda falta '+j.cad.faltam.length+' pro contrato.':' — contrato com todos os dados.')+
+          (j.juntou?' Mesmo '+(j.juntou.doc||'CNPJ')+' do cadastro '+j.juntou.cliente+(j.juntou.stands.length?' ('+j.juntou.stands.join(', ')+')':'')+': ficou na mesma empresa, cada stand com a sua marca. Os dados da empresa ficaram; o que faltava foi completado.':'');
+        ok.appendChild(m);
+        // o formulário encolheu: a frase (que explica a junção) fica na tela
+        if(m.scrollIntoView)m.scrollIntoView({block:'center',behavior:'smooth'});}
+      // todo salvar puxa o mapa de novo (sem esperar os 20 s): o outro stand da mesma
+      // empresa mudou junto, e um formulário dele aberto com o cadastro velho
+      // devolveria os dados antigos pra empresa
+      if(window.stAtualizar)window.stAtualizar();
     });
     return false;
   };
@@ -10189,7 +10195,7 @@ def _sub_do_mapa(tot: dict) -> str:
 # aberto não é redesenhado enquanto ele preenche um formulário (cadastro, venda).
 _STANDS_AUTO_JS = r"""
   (function(){
-    var pedindo=false, ultimo=JSON.stringify(STANDS);
+    var pedindo=false, ultimo=JSON.stringify(STANDS), manterDetalhe=false, denovo=false;
     function digitando(){
       if(editando||vendendo)return true;
       var a=document.activeElement;
@@ -10202,17 +10208,26 @@ _STANDS_AUTO_JS = r"""
       zapFetch(BASE_STANDS+'/estado',{headers:{'x-cockpit':'1'},cache:'no-store',silencioso:true})
         .then(function(j){
           pedindo=false;
+          // pedido que saiu ANTES de um salvar: a resposta é velha, pede de novo
+          if(denovo){denovo=false;atualizar();return;}
           if(!j||!j.ok||!j.stands)return;
           var novo=JSON.stringify(j.stands);
           if(novo===ultimo)return;
           ultimo=novo; STANDS=j.stands;
           if(sel&&!STANDS[sel]){sel=null;editando=false;vendendo=false;}
           render();legenda();minhas();
-          if(!digitando())detalhe();
+          if(!digitando()&&!manterDetalhe)detalhe();
+          manterDetalhe=false;
           var sub=document.querySelector('.hdr .tt small');
           if(sub&&j.sub)sub.textContent=j.sub;
         })
-        .catch(function(){pedindo=false;});
+        .catch(function(){pedindo=false;if(denovo){denovo=false;atualizar();}});
+    }
+    // quem salvou um stand pede o mapa na hora (o outro stand da mesma empresa mudou
+    // junto); o stand aberto já está certo (veio na resposta) e mostra o "✓ Salvo":
+    // não redesenha
+    window.stAtualizar=function(){ultimo='';manterDetalhe=true;
+      if(pedindo)denovo=true;else atualizar();
     }
     setInterval(atualizar,20000);
     document.addEventListener('visibilitychange',function(){
@@ -10285,7 +10300,7 @@ def cockpit_stands(request: Request, abrir: str = ""):
             _es.regras_de_pagamento(cfg)["saldo_ate"].strftime("%d/%m")
             if _es.regras_de_pagamento(cfg)["saldo_ate"] else "") + ";"
         + f"var BASE_STANDS='{_BASE}/stands';</script>"
-        + "<script>(function(){" + PLANTA_DEFS_JS + _STANDS_JS
+        + "<script>(function(){" + PLANTA_DEFS_JS + _receita_js() + _STANDS_JS
         + (_STANDS_AUTO_JS if com_abas else "") + "})();</script>"
     )
     return _page("Mapa de stands", corpo)
@@ -10318,19 +10333,13 @@ def cockpit_stands_estado(request: Request):
 
 @router.get("/cockpit/stands/consulta-cnpj")
 def cockpit_stands_consulta_cnpj(request: Request, doc: str = ""):
-    """"Receita" do formulário do cliente do stand: razão social, e-mail, cidade e
-    UF pelo CNPJ (a mesma consulta da aba Clientes). Endereço e CEP o vendedor digita."""
+    """"Receita" do formulário do cliente do stand e do "+ Novo cliente": o cadastro
+    que o contrato pede, pelo CNPJ (es.receita_do_cnpj) — razão social, nome
+    fantasia, representante, endereço, CEP, cidade, UF e e-mail."""
     if not (_sessao(request) or _gerencia(request)):
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    from finance import cnpj_info, validadoc
-    ok, tipo, d = validadoc.valida(doc)
-    if tipo != "pj" or not ok:
-        return JSONResponse({"ok": False, "erro": "CNPJ inválido"})
-    info = cnpj_info.consultar_cnpj(d)
-    if not info:
-        return JSONResponse({"ok": False, "erro": "CNPJ não encontrado na Receita"})
-    return JSONResponse({"ok": True, "nome": info.get("nome"), "email": info.get("email"),
-                         "cidade": info.get("cidade"), "uf": info.get("uf")})
+    from finance import evento_stands as _es
+    return JSONResponse(_es.receita_do_cnpj(doc))
 
 
 @router.post("/cockpit/stands/{codigo}/cliente")
@@ -10366,13 +10375,16 @@ def cockpit_stand_salvar_cliente(request: Request, codigo: str,
         if not meu_id or dono != meu_id:
             return JSONResponse({"ok": False, "erro": "Este stand não é de uma venda sua."},
                                 status_code=403)
+    # mesmo CNPJ de outro stand: a gestão junta sempre; a vendedora, só as vendas dela
     r = _es.salvar_cadastro_stand(pool, conta_id, codigo, {
         "fantasia": fantasia, "whats": whats, "razao": razao, "doc": doc, "rep": rep,
-        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf})
+        "email": email, "end": end, "cep": cep, "cidade": cidade, "uf": uf},
+        juntar="sempre" if _eh_gestao(request, g) else "do_vendedor", vendedor_id=meu_id)
     if not r["ok"]:
         return JSONResponse({"ok": False, "erro": r["erro"]})
     cad = _es.cadastros_dos_stands(pool, conta_id, [_es.buscar(pool, conta_id, codigo)])[codigo]
-    return JSONResponse({"ok": True, "acao": r["acao"], "congelado": r["congelado"], "cad": cad})
+    return JSONResponse({"ok": True, "acao": r["acao"], "congelado": r["congelado"], "cad": cad,
+                         "juntou": r.get("juntou")})
 
 
 @router.get("/cockpit/stands/vendas", response_class=HTMLResponse)
@@ -10525,10 +10537,14 @@ def cockpit_stands_clientes(request: Request):
     for x in meus:
         cad = cads.get(x["codigo"]) or {}
         chave = x.get("cliente_id") or f"p{x['prospeccao_id']}"
-        e = empresas.setdefault(chave, {"cad": cad, "codigos": [], "abrir": x["codigo"]})
+        e = empresas.setdefault(chave, {"cad": cad, "codigos": [], "abrir": x["codigo"],
+                                        "marcas": []})
         e["codigos"].append(x["codigo"])
+        marca = (cad.get("fantasia") or "").strip()
+        if marca and marca not in e["marcas"]:
+            e["marcas"].append(marca)
     cartoes = []
-    for e in sorted(empresas.values(), key=lambda v: (v["cad"].get("fantasia") or "").lower()):
+    for e in sorted(empresas.values(), key=lambda v: (" ".join(v["marcas"]) or "").lower()):
         cad = e["cad"]
         zap = "".join(ch for ch in (cad.get("whats") or "") if ch.isdigit())
         if 10 <= len(zap) <= 11:
@@ -10543,9 +10559,9 @@ def cockpit_stands_clientes(request: Request):
                      f"href='https://wa.me/{zap}'>WhatsApp</a>" if zap else "")
         # o cartão é um div: o WhatsApp é um link PRÓPRIO (link dentro de link parte o cartão)
         cartoes.append(
-            f"<div class=cvd data-nome='{esc((cad.get('fantasia') or '').lower())}'>"
+            f"<div class=cvd data-nome='{esc(' '.join(e['marcas']).lower())}'>"
             f"<a class=abrirv href='{_BASE}/stands?abrir={esc(e['abrir'])}'>"
-            f"<div class=topo><span class=nm>{esc(cad.get('fantasia') or 'Cliente')}</span>"
+            f"<div class=topo><span class=nm>{esc(' · '.join(e['marcas']) or 'Cliente')}</span>"
             f"<span class=ir>→</span></div>"
             f"<div class=sub>{esc(' · '.join(e['codigos']))}"
             f"{('<br>' + esc(' · '.join(linhas))) if linhas else ''}</div></a>"
@@ -10615,21 +10631,28 @@ def _cartao_cliente_novo(cfg: dict, meu_id: int, cad: dict, minimo: int, app_url
             + (f"<div class=acts>{acoes}</div>" if acoes else "") + "</div>")
 
 
+def _receita_js() -> str:
+    """O JS que preenche o formulário com a resposta da Receita — o mesmo do painel e
+    do link do contrato (web/stands_receita)."""
+    from web.stands_receita import RECEITA_JS
+    return RECEITA_JS
+
+
 # O Receita do "Novo cliente": a mesma consulta do formulário do stand
 _CLI_NOVO_JS = r"""<script>
+__RECEITA_JS__
 window.cliReceita=function(){
   var f=document.getElementById('cliform'), m=document.getElementById('clirecmsg');
   var doc=(f.elements['doc'].value||'').trim(); m.hidden=false;
   if(!doc){m.textContent='Digite o CNPJ antes.';return;}
+  var btn=f.querySelector('.strec');
+  if(!receitaTrava(btn))return;
   m.textContent='Consultando a Receita…';
   zapFetch('__BASE__/stands/consulta-cnpj?doc='+encodeURIComponent(doc),{headers:{'x-cockpit':'1'},silencioso:true}).then(function(j){
+    receitaSolta(btn);
     if(!j){m.textContent='Não consegui consultar agora — digite os dados.';return;}
     if(!j.ok){m.textContent=j.erro||'Não consegui consultar agora.';return;}
-    if(j.nome)f.elements['razao'].value=j.nome;
-    if(j.email&&!f.elements['email'].value.trim())f.elements['email'].value=j.email;
-    if(j.cidade)f.elements['cidade'].value=j.cidade;
-    if(j.uf)f.elements['uf'].value=j.uf;
-    m.textContent='✓ Receita: razão social, e-mail, cidade e UF preenchidos — confira. Endereço e CEP você digita.';
+    m.textContent=receitaMsg(receitaPreenche(f,j));
   });
 };
 </script>"""
@@ -10666,7 +10689,7 @@ def _pagina_cliente_novo(dados: dict, erro: str = "") -> HTMLResponse:
     corpo = (_hdr("Novo cliente", "Quando ele reservar pelo seu link, a venda já nasce completa.",
                   voltar=f"{_BASE}/stands/clientes")
              + _STANDS_CSS + "<div class=scroll>" + form + "</div>"
-             + _CLI_NOVO_JS.replace("__BASE__", _BASE))
+             + _CLI_NOVO_JS.replace("__RECEITA_JS__", _receita_js()).replace("__BASE__", _BASE))
     return _page("Novo cliente", corpo)
 
 

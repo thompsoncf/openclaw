@@ -6,7 +6,10 @@ lista. As ferramentas executam de verdade (o dono autorizou execução direta).
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
+
+from finance import relogio
 
 from core.agent import Ferramenta
 from . import empresa as emp
@@ -33,7 +36,7 @@ def bloco_persona_pj(pool, conta_id: int, empresa_nome: str = "") -> str:
     """Contexto empresarial pro prompt: quem é a empresa + o que está aberto.
     Molda ao NICHO/CNAE da empresa: anexa o bloco de persona do ramo (o
     'sentimento') quando houver, pra o bot falar/ajudar como aquele negócio."""
-    hoje = date.today().strftime("%d/%m/%Y")
+    hoje = relogio.hoje().strftime("%d/%m/%Y")
     try:
         res = emp.resumo_titulos(pool, conta_id)
         funcs = emp.listar_funcionarios(pool, conta_id, so_ativos=True)
@@ -151,7 +154,7 @@ REGRAS:
 def _parse_data_pj(s: str | None) -> date:
     s = (s or "").strip()
     if not s:
-        return date.today()
+        return relogio.hoje()
     for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
         try:
             return datetime.strptime(s, fmt).date()
@@ -160,14 +163,14 @@ def _parse_data_pj(s: str | None) -> date:
     # "dia 15" / "15"
     dig = "".join(ch for ch in s if ch.isdigit())
     if dig:
-        hoje = date.today()
+        hoje = relogio.hoje()
         dia = min(int(dig[:2]), 28)
         venc = date(hoje.year, hoje.month, dia)
         if venc < hoje:  # "dia 15" que já passou → rola pro mês seguinte
             ano, mes = (hoje.year + 1, 1) if hoje.month == 12 else (hoje.year, hoje.month + 1)
             venc = date(ano, mes, dia)
         return venc
-    return date.today()
+    return relogio.hoje()
 
 
 def _acha_funcionario(pool, conta_id: int, nome: str):
@@ -305,7 +308,7 @@ def construir_ferramentas_pj(pool, conta_id: int,
                                        membro_id=membro_id)
         if not r.get("ok"):
             return f"Não consegui: {r.get('erro')}"
-        hoje = date.today()
+        hoje = relogio.hoje()
         folha = emp.folha_do_mes(pool, conta_id, hoje.year, hoje.month)
         item = next((i for i in folha["itens"] if i["id"] == f["id"]), None)
         resta = formatar_brl(item["a_pagar_centavos"]) if item else "?"
@@ -314,7 +317,7 @@ def construir_ferramentas_pj(pool, conta_id: int,
                 f"na folha de {hoje.month:02d}/{hoje.year}.")
 
     def consultar_empresa(e: dict) -> str:
-        hoje = date.today()
+        hoje = relogio.hoje()
         res = emp.resumo_titulos(pool, conta_id)
         folha = emp.folha_do_mes(pool, conta_id, hoje.year, hoje.month)
         fluxo = emp.fluxo_projetado(pool, conta_id)
@@ -355,9 +358,8 @@ def construir_ferramentas_pj(pool, conta_id: int,
         return f"Marquei como {rot}. ✅"
 
     def relatorio_separado(e: dict) -> str:
-        from datetime import date as _date
         from .livro_caixa import LivroCaixa
-        hoje = _date.today()
+        hoje = relogio.hoje()
         mes = int(e.get("mes") or hoje.month)
         ano = int(e.get("ano") or hoje.year)
         liv = LivroCaixa(pool, conta_id)
@@ -557,8 +559,15 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                                 membro_id: int | None = None) -> list[Ferramenta]:
     """consultar_obra, dividir_entre_obras, por_na_obra, marcar_etapa e
     gastos_sem_obra — o dia do encarregado (docs/mockups/nicho_construcao.html,
-    seção 07). Nenhuma cria obra: obra nasce no painel (decisão 1 do dono)."""
+    seção 07). Nenhuma cria obra: obra nasce no painel (decisão 1 do dono).
+
+    E o MATERIAL (docs/mockups/obras_mapa_3d.html, seção 3): o gancho
+    `livro.apos_itens` faz os itens da nota virarem quantidade na obra, e
+    apontar_material/consultar_material são o dia a dia falado."""
+    from . import obra_material as omat
     from . import obras as ob
+    if livro is not None:
+        livro.apos_itens = lambda lanc_id: omat.absorver_lancamento(pool, conta_id, lanc_id)
 
     def _obra(ref) -> tuple[dict | None, str]:
         o = ob.obra_por_nome(pool, conta_id, ref)
@@ -579,7 +588,14 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                 sit = ov.situacao_da_casa(pool, conta_id, o)
             except Exception:  # noqa: BLE001 — sem a 353, só o custo
                 sit = None
+        try:
+            from . import obra_grupos as og
+            o = og.com_comum(pool, conta_id, o)        # o custo cheio: o lançado + a parte do comum
+        except Exception:  # noqa: BLE001 — sem a 478
+            pass
         txt = ob.resumo_da_obra(o, venda=sit["venda"] if sit else None)
+        if (o.get("custos") or {}).get("comum"):
+            txt += f" Inclui {ob._brl(o['custos']['comum'])} do custo comum da quadra (pelo m²)."
         if sit:
             txt += " " + ov.resumo_caminho(o, sit)
         try:
@@ -625,7 +641,14 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
         except (TypeError, ValueError):
             return "Preciso do id do lançamento que vai ser dividido."
         nomes = [n for n in (e.get("obras") or []) if str(n).strip()]
-        if e.get("todas") or not nomes:
+        por = "m2" if (e.get("por") == "m2" or e.get("quadra")) else "igual"
+        if (e.get("quadra") or "").strip():
+            from . import obra_grupos as og
+            g = og.grupo_por_nome(pool, conta_id, e["quadra"])
+            if not g:
+                return _sem_quadra(e["quadra"])
+            alvo = [o for o in og.casas(pool, conta_id, g["id"]) if o["status"] != "arquivada"]
+        elif e.get("todas") or not nomes:
             alvo = [o for o in ob.listar_obras(pool, conta_id, com_custos=False)
                     if o["status"] == "em_obra"]
         else:
@@ -639,7 +662,7 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             return ("Pra dividir preciso de pelo menos duas obras em andamento. "
                     "De qual obra é esse gasto?")
         try:
-            partes = ob.dividir(pool, conta_id, lid, [o["id"] for o in alvo])
+            partes = ob.dividir(pool, conta_id, lid, [o["id"] for o in alvo], por=por)
         except ValueError as err:
             return f"Não dividi: {err}"
         return "Dividi: " + "; ".join(
@@ -715,13 +738,15 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
     def pagar_etapa(e: dict) -> str:
         """O pagamento do empreiteiro por etapa (finance/obra_empreita.py): o
         lançamento de mão de obra da obra passa a dizer QUE etapas ele fechou."""
-        o, erro = _obra(e.get("obra"))
-        if not o:
-            return erro
         from . import obra_empreita as oe
         etapas = e.get("etapas") or []
         if isinstance(etapas, str):
             etapas = [x.strip() for x in etapas.replace(" e ", ",").split(",") if x.strip()]
+        if (e.get("quadra") or "").strip():
+            return _pagar_etapa_quadra(e, etapas)
+        o, erro = _obra(e.get("obra"))
+        if not o:
+            return erro
         try:
             r = oe.pagar_etapas(pool, conta_id, o["id"], etapas,
                                 lancamento_id=int(e.get("lancamento_id") or 0),
@@ -737,6 +762,276 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
             txt += " ⚠️ Já tinha pagamento antes: " + "; ".join(r["ja_pagas"]) + \
                    ". Confirme se é parcela combinada ou pagamento em dobro."
         return txt
+
+    def _sem_quadra(ref) -> str:
+        from . import obra_grupos as og
+        nomes = ", ".join(g["nome"] for g in og.listar_grupos(pool, conta_id))
+        if not nomes:
+            return (f"Ainda não tem {og.rotulo(pool, conta_id).lower()} cadastrada. Quem cadastra "
+                    f"é a empresa, no painel: {ob.LINK_OBRAS}")
+        return f"Não achei “{ref}”. As que existem: {nomes}. Qual delas?"
+
+    def _pagar_etapa_quadra(e: dict, etapas: list) -> str:
+        """"Paguei 36 mil pro empreiteiro, fundação da quadra 4": divide o lançamento
+        entre as casas da quadra pelo m² e marca as etapas pagas em cada uma."""
+        from . import obra_empreita as oe
+        from . import obra_grupos as og
+        g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
+        if not g:
+            return _sem_quadra(e.get("quadra"))
+        alvo = [o for o in og.casas(pool, conta_id, g["id"]) if o["status"] != "arquivada"]
+        if not alvo:
+            return f"{g['nome']} ainda não tem casas."
+        try:
+            lid = int(e.get("lancamento_id") or 0)
+            if len(alvo) > 1:
+                ob.dividir(pool, conta_id, lid, [o["id"] for o in alvo], por="m2")
+            else:
+                ob.por_na_obra(pool, conta_id, lid, alvo[0]["id"])
+        except (ValueError, TypeError) as err:
+            return str(err)
+        pagas, adiant, erros = 0, [], []
+        for o in alvo:
+            try:
+                r = oe.pagar_etapas(pool, conta_id, o["id"], etapas, lancamento_id=lid,
+                                    obs=(e.get("obs") or "").strip())
+                pagas += 1
+                if r["adiantadas"]:
+                    adiant.append(f"{o['nome']} ({', '.join(n.lower() for n in r['adiantadas'])})")
+            except ValueError as err:
+                erros.append(f"{o['nome']}: {err}")
+        txt = (f"Dividi o pagamento entre as {len(alvo)} casas de {g['nome']} pelo m² e marquei "
+               f"as etapas como PAGAS em {pagas} delas.")
+        if adiant:
+            txt += (" ⚠️ Ainda não estão concluídas em: " + "; ".join(adiant)
+                    + " — foi adiantamento? Avise, uma vez, sem sermão.")
+        if erros:
+            txt += " Não marquei em: " + "; ".join(erros) + "."
+        return txt
+
+    def marcar_etapa_quadra(e: dict) -> str:
+        """"Terminei a fundação da quadra 5": marca nas casas que começaram (decisão
+        4 do dono: na hora, dizendo quem ficou de fora; "desfaz" volta)."""
+        from . import obra_grupos as og
+        g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
+        if not g:
+            return _sem_quadra(e.get("quadra"))
+        ids = None
+        lotes = [str(x).strip() for x in (e.get("lotes") or []) if str(x).strip()]
+        if lotes:
+            casas = og.casas(pool, conta_id, g["id"])
+            querer = {og._numero(x) or ob._norm(x) for x in lotes}
+            ids = [o["id"] for o in casas
+                   if (og._numero(o.get("lote") or "") or ob._norm(o.get("lote") or o["nome"])) in querer]
+            if not ids:
+                return f"Não achei esses lotes em {g['nome']}."
+        try:
+            r = og.marcar_etapa_grupo(pool, conta_id, g["id"], (e.get("etapa") or "").strip(),
+                                      obra_ids=ids)
+        except ValueError as err:
+            return str(err)
+        if not r["marcadas"]:
+            txt = f"Nada a marcar: {r['etapa'].lower()} já estava feita nas casas de {g['nome']}."
+        else:
+            txt = (f"Marquei {r['etapa'].lower()} em {len(r['marcadas'])} casa(s) de {g['nome']} "
+                   f"({', '.join(r['marcadas'])}). {g['nome']} está em {r['pct']}%.")
+        if r["fora"]:
+            txt += f" Ficaram de fora porque ainda não começaram: {', '.join(r['fora'])}."
+        if r["sem_etapa"]:
+            txt += f" Sem essa etapa: {', '.join(r['sem_etapa'])}."
+        return txt + ' Se errou, é só dizer "desfaz".'
+
+    def por_na_quadra(e: dict) -> str:
+        """"Paguei 8 mil da terraplanagem da quadra 4": o custo comum da quadra."""
+        from . import obra_grupos as og
+        g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
+        if not g:
+            return _sem_quadra(e.get("quadra"))
+        try:
+            r = og.por_na_quadra(pool, conta_id, int(e.get("lancamento_id") or 0), g["id"])
+        except (ValueError, TypeError) as err:
+            return str(err)
+        return (f"Lancei {ob._brl(r['valor_centavos'])} como CUSTO COMUM de {r['quadra']}. Ele entra "
+                "no custo de cada casa pelo m².")
+
+    def desfazer_etapa_quadra(e: dict) -> str:
+        from . import obra_grupos as og
+        g = og.grupo_por_nome(pool, conta_id, e.get("quadra"))
+        if not g:
+            return _sem_quadra(e.get("quadra"))
+        r = og.desfazer_ultima(pool, conta_id, g["id"])
+        if not r:
+            return f"Não tem marcação em lote pra desfazer em {g['nome']}."
+        return (f"Desfeito: {r['etapa'].lower()} voltou a ficar em aberto em "
+                f"{len(r['voltaram'])} casa(s) de {g['nome']}.")
+
+    def oferecer_escolha(e: dict) -> str:
+        """"De qual obra?" e "que etapa ficou pronta?" com toque (finance/escolhas.py,
+        pedido do dono em 02/10/2026)."""
+        from . import escolhas as esc
+        if (e.get("tipo") or "obra") == "etapa":
+            o, erro = _obra(e.get("obra"))
+            if not o:
+                return erro
+            escolha = esc.de_etapa(pool, conta_id, ob.obter_obra(pool, conta_id, o["id"]))
+            if not escolha:
+                return f"Todas as etapas de {o['nome']} já estão feitas."
+        else:
+            escolha = esc.de_obra(pool, conta_id)
+            if not escolha:
+                return (f"Ainda não tem obra cadastrada. Quem cadastra é a empresa, no painel: "
+                        f"{ob.LINK_OBRAS}")
+        titulos = ", ".join(op["titulo"] for op in escolha["opcoes"])
+        if livro is not None and getattr(livro, "canal_interativo", False):
+            livro.escolha = escolha
+            return (f"Os botões vão logo depois da sua resposta, com: {titulos}. Escreva SÓ a "
+                    "pergunta curta (\"É de qual obra?\" / \"Qual etapa ficou pronta?\"), sem "
+                    "listar as opções. O toque chega como o nome da opção.")
+        return "Liste as opções numeradas pra pessoa responder:\n" + esc.texto_das_opcoes(escolha)
+
+    # ── o material (docs/mockups/obras_mapa_3d.html, seção 3) ─────────────
+    def _destinos_do_material(ref: str) -> tuple[list[dict], str]:
+        """A obra dita — ou a QUADRA inteira, que divide entre as casas em obra
+        que começaram (a mesma regra da marcação em lote).
+
+        A quadra só entra quando a pessoa FALOU de quadra ("quadra 5", "Q5", o
+        nome do grupo): "casa 5" ambígua não pode cair na Quadra 5 pelo número
+        e espalhar material por casas erradas — aí a resposta é perguntar."""
+        o = ob.obra_por_nome(pool, conta_id, ref)
+        if o:
+            return [o], ""
+        try:
+            from . import obra_grupos as og
+            alvo = ob._norm(ref)
+            rot = ob._norm(og.rotulo(pool, conta_id))
+            falou_grupo = bool(re.search(r"\b(quadra|setor|bloco)\b", alvo)
+                               or (rot and re.search(rf"\b{re.escape(rot)}\b", alvo))
+                               or re.fullmatch(r"q\s*\d+", alvo)
+                               or any(ob._norm(g["nome"]) == alvo
+                                      for g in og.listar_grupos(pool, conta_id)))
+            g = og.grupo_por_nome(pool, conta_id, ref) if falou_grupo else None
+            if g:
+                casas = og.casas(pool, conta_id, g["id"])
+                if not casas:
+                    return [], f"A {g['nome']} ainda não tem casas."
+                em_obra = [x for x in casas if x["pct"] < 100
+                           and x["status"] not in ("pronta", "vendida", "entregue", "arquivada")]
+                comecaram = [x for x in em_obra if og.comecou(x)]
+                if not comecaram:
+                    return [], (f"Nenhuma casa da {g['nome']} está em obra agora — diga a "
+                                "casa, ou deixe no depósito.")
+                return comecaram, ""
+        except Exception:  # noqa: BLE001 — sem a 478
+            pass
+        _, erro = _obra(ref)
+        return [], erro
+
+    def apontar_material(e: dict) -> str:
+        """'usei 15 sacos na casa 2' / 'levei 10 do depósito pra quadra 5' /
+        'chegou 60 sacos'. Apontar é OPCIONAL (decisão 2 do dono): quem aponta
+        ganha o saldo fino; quem não aponta já tem a comparação entre as irmãs."""
+        from decimal import Decimal
+        acao = (e.get("acao") or "").strip()
+        if acao not in ("usei", "levei", "chegou"):
+            return "Diga a ação: usei, levei (do depósito pra obra) ou chegou."
+        try:
+            q = Decimal(str(e.get("quantidade") or 0).replace(",", "."))
+        except Exception:  # noqa: BLE001
+            q = Decimal(0)
+        if q <= 0:
+            return "Quantas unidades? Preciso do número."
+        destinos: list[dict] = []
+        if (e.get("obra") or "").strip():
+            destinos, erro = _destinos_do_material(e["obra"].strip())
+            if erro:
+                return erro
+        if acao in ("usei", "levei") and not destinos:
+            return "De qual obra? (pode ser a quadra inteira também)"
+        ref = (e.get("material") or "").strip()
+        p = omat.achar_produto(pool, conta_id, ref)
+        if p is not None and "ambiguo" in p:
+            return f"Qual deles? {' · '.join(p['ambiguo'])}. Não registrei nada ainda."
+        if p is None:
+            if acao == "chegou" and ref:
+                with pool.connection() as c:
+                    pid, nome, un = omat._achar_ou_criar(c, conta_id, ref, e.get("unidade") or "")
+                    c.commit()
+                p = {"id": pid, "nome": nome, "unidade": un}
+            else:
+                tem = [r for r in omat.deposito(pool, conta_id) if r["saldo"] > 0]
+                nomes = ", ".join(r["nome"] for r in tem[:8])
+                return (f"Não conheço o material “{ref}”." +
+                        (f" No depósito tem: {nomes}." if nomes else
+                         " Ainda não entrou material — mande a foto da nota que eu guardo os itens."))
+        avisos, partes = [], []
+        try:
+            if not destinos:                      # chegou, sem obra: o depósito
+                r = omat.mover(pool, conta_id, acao="chegou", produto_id=p["id"], quantidade=q)
+                frase = (f"Chegou: {omat.rotulo(q, p['unidade'])} de {p['nome']} no depósito "
+                         f"(agora {omat.rotulo(r['deposito'], p['unidade'])}).")
+            else:
+                # a quadra divide igual; os milésimos que sobram ficam na primeira
+                cota = (q / len(destinos)).quantize(Decimal("0.001"))
+                quotas = [cota] * len(destinos)
+                quotas[0] += q - sum(quotas)
+                r = None
+                for o, qi in zip(destinos, quotas):
+                    r = omat.mover(pool, conta_id, acao=acao, produto_id=p["id"],
+                                   quantidade=qi, obra_id=o["id"])
+                    partes.append(f"{o['nome']} ({omat.rotulo(qi, p['unidade'])})")
+                    if r["furo"]:
+                        avisos.append(f"uso maior que entrada em {o['nome']} — confere se faltou nota")
+                verbo = {"usei": "usados em", "levei": "levados do depósito pra",
+                         "chegou": "recebidos em"}[acao]
+                frase = (f"Apontei: {omat.rotulo(q, p['unidade'])} de {p['nome']} {verbo} "
+                         + (destinos[0]["nome"] if len(destinos) == 1 else
+                            f"{len(destinos)} casas — " + ", ".join(partes)) + ".")
+                if len(destinos) == 1 and acao != "levei":
+                    frase += f" Na obra ficam {omat.rotulo(r['na_obra'], p['unidade'])}."
+                if acao == "levei":
+                    frase += f" No depósito ficam {omat.rotulo(r['deposito'], p['unidade'])}."
+            if r and r.get("abaixo_minimo"):
+                avisos.append(f"{p['nome']} abaixo do mínimo no depósito")
+        except ValueError as err:
+            return str(err)
+        return frase + ("".join(f" ⚠️ {a.capitalize()}." for a in avisos))
+
+    def consultar_material(e: dict) -> str:
+        """'quanto cimento tem na casa 3?' / 'como está o depósito?'. A tabela do
+        mockup: entrou / usado / no local — e os alertas de graça (furo, mínimo,
+        irmãs da quadra)."""
+        ref_obra = (e.get("obra") or "").strip()
+        ref_mat = (e.get("material") or "").strip()
+        if ref_obra:
+            o, erro = _obra(ref_obra)
+            if not o:
+                return erro
+            linhas = omat.quadro_da_obra(pool, conta_id, o["id"])
+            titulo = f"Material de {o['nome']}:"
+        else:
+            linhas = omat.deposito(pool, conta_id)
+            titulo = "No depósito:"
+        if ref_mat:
+            alvo = ob._norm(ref_mat)
+            linhas = [r for r in linhas if alvo in ob._norm(r["nome"])]
+        if not linhas:
+            onde = f"em {o['nome']}" if ref_obra else "no depósito"
+            return (f"Não tem material registrado {onde}. A foto da nota já guarda os "
+                    "itens sozinha; material que chegou SEM nota entra com 'chegou 60 "
+                    "sacos de cimento'.")
+        corpo = "\n".join(
+            f"• {r['nome']}: entrou {omat.rotulo(r['entrou'], r['unidade'])}, "
+            f"usados {omat._qtd(r['usado'])}, "
+            + ("no depósito " if not ref_obra else "na obra ")
+            + omat.rotulo(r["saldo"], r["unidade"])
+            + (" ⚠️ abaixo do mínimo" if r.get("abaixo") else "")
+            for r in linhas[:12])
+        extras = [f"⚠️ {f}" for f in omat.furos(linhas)]
+        if ref_obra:
+            alerta = omat.alerta_irmas(pool, conta_id, o)
+            if alerta:
+                extras.append(f"⚠️ {alerta}")
+        return titulo + "\n" + corpo + ("\n" + "\n".join(extras) if extras else "")
 
     def guardar_foto_da_obra(e: dict) -> str:
         """A foto que NÃO é nota (telhado, parede, piso pronto): guarda na obra e na
@@ -829,9 +1124,10 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
         ),
         Ferramenta(
             nome="dividir_entre_obras",
-            descricao=("Divide um lançamento JÁ REGISTRADO em partes iguais entre obras "
-                       "(a nota de material que é de várias casas). Use o lancamento_id "
-                       "que o registro devolveu. 'todas' = todas as obras em andamento."),
+            descricao=("Divide um lançamento JÁ REGISTRADO entre obras (a nota de material "
+                       "que é de várias casas). Use o lancamento_id que o registro devolveu. "
+                       "'todas' = todas as obras em andamento; 'quadra' = as casas daquela "
+                       "quadra, pelo m²."),
             parametros={
                 "type": "object",
                 "properties": {
@@ -839,6 +1135,10 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                     "obras": {"type": "array", "items": {"type": "string"},
                               "description": "os nomes das obras; vazio com todas=true"},
                     "todas": {"type": "boolean"},
+                    "quadra": {"type": "string",
+                               "description": "a quadra/setor como a pessoa falou (ex: quadra 5): divide entre as casas dela pelo m²"},
+                    "por": {"type": "string", "enum": ["igual", "m2"],
+                            "description": "igual (padrão) ou pelo m² de cada obra"},
                 },
                 "required": ["lancamento_id"],
             },
@@ -920,11 +1220,89 @@ def construir_ferramentas_obras(pool, conta_id: int, livro=None,
                        "e etapa paga duas vezes."),
             parametros={"type": "object",
                         "properties": {"obra": obra_s,
+                                       "quadra": {"type": "string",
+                                                  "description": "no lugar da obra: o pagamento é da quadra inteira (divide pelo m²)"},
                                        "etapas": {"type": "array", "items": {"type": "string"}},
                                        "lancamento_id": {"type": "integer"},
                                        "obs": {"type": "string"}},
-                        "required": ["obra", "etapas", "lancamento_id"]},
+                        "required": ["etapas", "lancamento_id"]},
             executar=pagar_etapa,
+        ),
+        Ferramenta(
+            nome="marcar_etapa_quadra",
+            descricao=("Marca uma etapa em TODAS as casas de uma quadra/setor de uma vez "
+                       "(\"terminei a fundação da quadra 5\"). Só entram as casas que já "
+                       "começaram, salvo se ele disser os lotes. Diga quem ficou de fora."),
+            parametros={"type": "object",
+                        "properties": {"quadra": {"type": "string"},
+                                       "etapa": {"type": "string"},
+                                       "lotes": {"type": "array", "items": {"type": "string"},
+                                                 "description": "só estes lotes (ex: [\"1\", \"2\"]); vazio = as que começaram"}},
+                        "required": ["quadra", "etapa"]},
+            executar=marcar_etapa_quadra,
+        ),
+        Ferramenta(
+            nome="por_na_quadra",
+            descricao=("Põe um lançamento JÁ REGISTRADO no CUSTO COMUM de uma quadra: o que é "
+                       "de todas as casas e de nenhuma (terraplanagem, rede de água e esgoto, "
+                       "poste, muro da quadra). Entra no custo de cada casa pelo m². Não use pra "
+                       "material que vai pra casas — isso é dividir_entre_obras com quadra."),
+            parametros={"type": "object",
+                        "properties": {"lancamento_id": {"type": "integer"},
+                                       "quadra": {"type": "string"}},
+                        "required": ["lancamento_id", "quadra"]},
+            executar=por_na_quadra,
+        ),
+        Ferramenta(
+            nome="desfazer_etapa_quadra",
+            descricao="Desfaz a ÚLTIMA marcação de etapa em lote daquela quadra (\"desfaz\").",
+            parametros={"type": "object", "properties": {"quadra": {"type": "string"}},
+                        "required": ["quadra"]},
+            executar=desfazer_etapa_quadra,
+        ),
+        Ferramenta(
+            nome="oferecer_escolha",
+            descricao=("Mostra BOTÕES pra pessoa escolher, em vez de perguntar por texto: "
+                       "tipo 'obra' (de qual obra é a despesa) ou tipo 'etapa' (que etapa "
+                       "ficou pronta numa obra — precisa da obra). Use sempre que for "
+                       "perguntar uma dessas duas coisas."),
+            parametros={"type": "object",
+                        "properties": {"tipo": {"type": "string", "enum": ["obra", "etapa"]},
+                                       "obra": {"type": "string", "description": "pra tipo etapa"}},
+                        "required": ["tipo"]},
+            executar=oferecer_escolha,
+        ),
+        Ferramenta(
+            nome="apontar_material",
+            descricao=("Registra MATERIAL em quantidade (não mexe em dinheiro): acao 'usei' "
+                       "(consumiu na obra), 'levei' (do depósito pra obra) ou 'chegou' "
+                       "(entrou no depósito, ou na obra se dita). 'chegou' é SÓ pra material "
+                       "SEM NOTA (sobra de outra obra, doação, compra sem nota): a foto da "
+                       "nota já dá entrada sozinha, e apontar as duas coisas conta em dobro. "
+                       "Em 'obra' também vale a QUADRA — divide entre as casas em obra. "
+                       "Apontar é opcional: use quando a pessoa disser, nunca cobre."),
+            parametros={"type": "object",
+                        "properties": {"acao": {"type": "string",
+                                                "enum": ["usei", "levei", "chegou"]},
+                                       "material": {"type": "string",
+                                                    "description": "ex: cimento, ferro 8mm"},
+                                       "quantidade": {"type": "number"},
+                                       "unidade": {"type": "string",
+                                                   "description": "saco, m³, barra… (se disse)"},
+                                       "obra": {"type": "string",
+                                                "description": "a obra ou a quadra, como falou"}},
+                        "required": ["acao", "material", "quantidade"]},
+            executar=apontar_material,
+        ),
+        Ferramenta(
+            nome="consultar_material",
+            descricao=("Quanto material tem: na obra ('quanto cimento tem na casa 3?') ou no "
+                       "depósito (sem obra). Mostra entrou/usado/saldo e os alertas (uso maior "
+                       "que entrada, mínimo do depósito, consumo acima das casas irmãs)."),
+            parametros={"type": "object",
+                        "properties": {"material": {"type": "string"},
+                                       "obra": {"type": "string"}}},
+            executar=consultar_material,
         ),
         Ferramenta(
             nome="guardar_foto_da_obra",

@@ -16,7 +16,8 @@ from fastapi.concurrency import run_in_threadpool
 from jinja2 import Environment, DictLoader, select_autoescape
 from datetime import date as _date
 
-from datetime import date
+from finance import relogio
+
 
 log = logging.getLogger("zaq.portal")
 
@@ -27,6 +28,7 @@ from contas import contas as ct
 from contas.permissoes import pode_financas
 from finance.livro_caixa import LivroCaixa
 from finance.lista_compras import ListaCompras
+from finance import relogio as _relogio
 
 router = APIRouter()
 
@@ -390,7 +392,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
     </form>
   </span>
 </div>{% endif %}
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol><symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol></defs></svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol><symbol id="ic-mapa" viewBox="0 0 24 24"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></symbol><symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol></defs></svg>
 <div id="navprog"></div>
 {% macro navi(sec, href, ic, label) -%}
 <a href="{{ href }}" class="nav-i{% if secao_ativa==sec and sec %} on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-{{ ic }}"/></svg><span>{{ label }}</span></a>
@@ -449,7 +451,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
-  {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{{ navi('obras_mapa','/painel/obras/mapa','mapa','Mapa das obras') }}{% endif %}
   {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
      público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
      _render(), não é todo mundo do nicho que vende espaço numerado. #}
@@ -515,7 +517,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.chave == 'clinica' %}{{ navi('clinica','/painel/clinica/configurar','empresa','Clínica') }}{% endif %}
   {# Obras (finance/obras): cada casa e cada reforma, com o custo e as etapas.
      Regra 6 — só existe pra construção; quem vê é quem vê o financeiro. #}
-  {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{% endif %}
+  {% if tem_pj and caps.financeiro and raio_x_perfil and raio_x_perfil.chave == 'obras' %}{{ navi('obras','/painel/obras','empresa','Obras') }}{{ navi('obras_mapa','/painel/obras/mapa','mapa','Mapa das obras') }}{% endif %}
   {# Estandes (finance/evento_stands): o mapa de venda por trás do /e/<slug>
      público. Opt-in dentro de 'eventos' — ver o cálculo de tem_estandes em
      _render(), não é todo mundo do nicho que vende espaço numerado. #}
@@ -4266,6 +4268,11 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
        A dica "vincule pra aparecer na ficha" era uma caixinha desligada logo
        abaixo, com cara de campo; mora aqui, no próprio campo. #}
     <label id="tit-cli-lbl" title="opcional — liga o título à ficha do fornecedor">Fornecedor<input name="cliente" id="tit-cli-input" list="tit-forn-dl" placeholder="opcional · liga à ficha"></label>
+    {#- o MÊS DE REFERÊNCIA (484, pedido do dono em 02/10/2026): só informação.
+       Em branco vale o mês anterior ao vencimento (a conta que vence 10/11 é a
+       de outubro). Só em conta a pagar — some com o "A receber". Mora nesta
+       linha, que se ajusta sozinha; a de cima é uma grade fixa de quatro. -#}
+    <label id="tit-ref-lbl" title="opcional — em branco, vale o mês anterior ao vencimento">Mês de referência<input name="mes_referencia" id="tit-ref-input" type="month"></label>
     {#- A CLASSIFICAÇÃO (migração 317) — pedido do dono em 23/09/2026: "no
        lançamento do contas a pagar já colocar o centro de custo e plano de
        contas e categoria". Os três são OPCIONAIS: quem nunca usou continua não
@@ -4405,6 +4412,9 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     var td = document.getElementById('tit-tipo-d');
     if(td){ td.style.display = pagar ? '' : 'none';
             td.querySelectorAll('input').forEach(function(r){ r.disabled = !pagar; if(!pagar) r.checked = false; }); }
+    // o MÊS DE REFERÊNCIA também é só da conta a pagar
+    var rl = document.getElementById('tit-ref-lbl'), ri = document.getElementById('tit-ref-input');
+    if(rl && ri){ rl.style.display = pagar ? '' : 'none'; ri.disabled = !pagar; if(!pagar) ri.value = ''; }
     titMemoria();
   }
   // A MEMÓRIA DO FORNECEDOR. Pergunta ao servidor como este fornecedor foi
@@ -4620,9 +4630,10 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         link pra ficha. -#}{% if t.contraparte and t.contraparte|lower|trim != (t.cliente_nome or '')|lower|trim %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}
         {% if t.aprovacao=='aguardando' %} <span class="selo esp">aguardando {{ 'você' if pode_liberar else 'o dono' }}</span>{% elif t.aprovacao=='recusado' %} <span class="selo rec">recusado</span>{% endif %}
         {% if t.periodicidade %} <span class="selo rep">🔁 {{ RITMO_SELO[t.periodicidade] }}</span>{% endif %}
+        {% if t.folha_parte %} <span class="selo rep" title="gerada pela folha (Equipe e folha › Datas de pagamento): o valor acompanha a folha, e a baixa entra no holerite sozinha">📅 folha · {{ t.folha_parte }}</span>{% endif %}
         {% if not t.valor_centavos %} <span class="selo falta">falta o valor</span>{% endif %}
         {% if t.sem_fornecedor %} <span class="selo falta">sem fornecedor</span>{% endif %}</div>
-      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
+      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span>{% if t.tipo=='pagar' and t.referencia %} · <span title="mês de referência{{ '' if t.referencia_anotada else ' (o anterior ao vencimento — dá pra mudar no editar)' }}">ref. {{ t.referencia.strftime('%m/%Y') }}</span>{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
       seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
       "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}{#- o PORQUÊ de um valor mexido pelo painel da diferença (323): sem isto,
@@ -4786,6 +4797,15 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     <form method="post" action="/painel/empresa/titulo/{{ t.id }}/descricao" class="tit-edit">
       <input name="descricao" value="{{ t.descricao }}" placeholder="descrição" style="flex:2 1 140px;min-width:0">
       <input name="valor" value="{{ (t.valor_centavos/100)|n2 }}" inputmode="decimal" placeholder="valor R$" style="flex:1 1 80px;min-width:0">
+      {#- O VENCIMENTO e o MÊS DE REFERÊNCIA (484, pedido do dono em 02/10/2026).
+         A data só em conta a pagar ABERTA (a paga já tem a data dela no caixa);
+         a referência vem preenchida com a que vale hoje — anotada, ou o mês
+         anterior ao vencimento — e apagar volta ao padrão. Os `tem_*` separam
+         "apaguei" de "o campo nem veio", como no fornecedor. -#}
+      {% if t.tipo == 'pagar' %}
+      {% if t.status == 'aberto' %}<input type="hidden" name="tem_venc" value="1"><input type="date" name="vencimento" value="{{ t.vencimento.isoformat() if t.vencimento else '' }}" title="vencimento" required style="flex:1 1 120px;min-width:0">{% endif %}
+      <input type="hidden" name="tem_ref" value="1"><input type="month" name="mes_referencia" value="{{ t.referencia.strftime('%Y-%m') if t.referencia else '' }}" title="mês de referência — em branco, vale o mês anterior ao vencimento" style="flex:1 1 120px;min-width:0">
+      {% endif %}
       {# O FORNECEDOR, que faltava. Antes daqui o editar tinha dois campos e quem
          salvasse sem fornecedor não colocava mais — 30 de 30 títulos a pagar da
          Prime estavam assim, com o nome do fornecedor enfiado na descrição.
@@ -5122,6 +5142,9 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
   .plj-banco button{width:auto;background:none;border:1px solid var(--borda);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;color:var(--txt)}
   .plj-banco button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
   .plj-banco button.tira{color:#c98080}
+  .plj-banco label.neg{display:inline-flex;align-items:center;gap:.25rem;margin:0;font-size:.74rem;color:var(--txt-mut);cursor:pointer;white-space:nowrap}
+  .plj-banco label.neg input{width:auto;flex:none;margin:0;padding:0}
+  .plj-banco label.neg:has(input:checked){color:#e07a5f}
   .plj-banco.novo input[name=banco]{flex:1 1 9rem}
   .plj-edita{margin-top:.7rem}
   .plj-edita>summary{cursor:pointer;color:var(--verde-claro);font-size:.78rem}
@@ -5154,14 +5177,19 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
       <input type="hidden" name="banco" value="{{ s.banco|e }}">
       <span class="nome">{{ s.banco|e }}</span>
       <span class="idade">{% if s.dias <= 0 %}informado hoje, {{ s.informado_em.strftime('%H:%M') }}{% elif s.dias == 1 %}informado ontem{% else %}informado há {{ s.dias }} dias{% endif %}{% if s.velho %} — atualize{% endif %}</span>
-      <input name="valor" inputmode="decimal" value="{{ (s.valor_centavos/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
+      {#- O NEGATIVO numa caixa (02/10/2026): o teclado numérico do iPhone não
+         tem o sinal de menos. O campo mostra o valor sem sinal e a caixa diz se
+         está no vermelho; digitar o "-" continua valendo. -#}
+      <input name="valor" inputmode="decimal" value="{{ ((s.valor_centavos|abs)/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
+      <label class="neg" title="saldo negativo — cheque especial, conta no vermelho"><input type="checkbox" name="negativo" value="1"{% if s.valor_centavos < 0 %} checked{% endif %}> negativo</label>
       <button class="pr">atualizar</button>
       <button class="tira" formaction="/painel/empresa/saldo/arquivar" data-msg="Tirar {{ s.banco|e }} da soma? O histórico dele fica guardado, e informar de novo traz ele de volta." onclick="return confirm(this.dataset.msg)">tirar ✕</button>
     </form>
     {% endfor %}
     <form method="post" action="/painel/empresa/saldo" class="plj-banco novo">
       <input name="banco" required maxlength="60" placeholder="{{ 'Outro banco' if planej.saldos else 'Banco (ex: Sicoob)' }}">
-      <input name="valor" required inputmode="decimal" placeholder="saldo R$ (pode ser negativo)">
+      <input name="valor" required inputmode="decimal" placeholder="saldo R$">
+      <label class="neg" title="saldo negativo — cheque especial, conta no vermelho"><input type="checkbox" name="negativo" value="1"> negativo</label>
       <button class="pr">+ informar</button>
     </form>
   </div>
@@ -5395,13 +5423,14 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
 
 </div>
 </div>
-<details class="card larga sec-pc" id="folha"{% if folha.itens or erro %} open{% endif %}>
+<details class="card larga sec-pc" id="folha"{% if folha.itens or erro or folha_aviso %} open{% endif %}>
   <summary><span><strong>Equipe e folha</strong>
     {% if folha.itens %}<span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · FGTS do mês {{ folha.total_fgts_centavos|brl }} · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span>{% else %}<span class="mut" style="font-size:.76rem;font-weight:400">· nenhum funcionário cadastrado</span>{% endif %}</span><span class="chev">▾</span></summary>
   {# recusa do excluir (e qualquer outro aviso da aba) — fora do {% if folha.itens %}
      de propósito: excluir o último funcionário esvazia a lista, e a mensagem
      explicando por que a exclusão NÃO aconteceu não pode sumir junto. #}
   {% if erro %}<div style="background:#241313;border:1px solid #5a2b2b;color:#f0b3ad;font-size:.78rem;line-height:1.6;padding:.6rem .8rem;border-radius:9px;margin:.7rem 0">{{ erro }}</div>{% endif %}
+  {% if folha_aviso %}<div class="ok" style="margin:.7rem 0">{{ folha_aviso }}</div>{% endif %}
   <form method="post" action="/painel/empresa/funcionario" class="emp-form" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
@@ -5478,6 +5507,18 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
     .fa-aviso{font-size:.7rem;color:var(--txt-mut);line-height:1.6;margin-top:.55rem}
     .sal-hist{list-style:none;margin:.55rem 0 0;font-size:.72rem;color:var(--txt-mut)}
     .sal-hist li{display:flex;justify-content:space-between;gap:10px;padding:.28rem 0;border-top:1px solid var(--card-2)}
+    /* as DATAS DE PAGAMENTO (482): adiantamento e saldo do mês, cada um numa linha */
+    .folha-ag{margin-top:.55rem;display:flex;flex-direction:column;gap:.25rem}
+    .ag-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .55rem;font-size:.76rem}
+    .ag-rot{color:var(--txt-mut);min-width:96px}
+    .ag-lin b{font-variant-numeric:tabular-nums}
+    .ag-st{font-size:.66rem;padding:.06rem .42rem;border-radius:5px;background:#1d1d20;color:var(--txt-mut)}
+    .ag-st.ag-pago{background:#14301f;color:var(--verde-claro)}
+    .ag-st.ag-aberto{background:#3a2f14;color:#f0c05a}
+    .ag-lin.ag-ant .ag-rot{color:#f0c05a}
+    .ag-regra{font-size:.68rem;color:var(--txt-mut)}
+    .fp-op{display:inline-flex !important;align-items:center;gap:.3rem;font-size:.74rem !important;color:var(--txt) !important;cursor:pointer}
+    .fp-op input{width:auto !important;margin:0 !important}
   </style>
   <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)"><span>Funcionário</span><span>A pagar (líquido)</span></div>
   {% for f in folha.itens %}<details class="folha-lin">
@@ -5506,6 +5547,22 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         {% if f.pro_labore %} <span class="mut">(pró-labore não desconta INSS CLT)</span>{% endif %}
         <span class="mut">· custo real {{ f.custo_real_centavos|brl }}</span>
       </div>
+      {#- AS DATAS DE PAGAMENTO (482): só aparece pra quem configurou — a folha de
+          quem paga num dia só continua igual. "previsto" é o que a regra diz sem
+          conta a pagar; o saldo do mês passado entra enquanto estiver aberto,
+          porque no começo do mês é ele o pagamento da vez. -#}
+      {% set ag = f.agenda %}
+      {% if ag and (ag.configurado or ag.saldo_anterior) %}
+      <div class="folha-ag">
+        {% if ag.saldo_anterior %}{% set p = ag.saldo_anterior %}
+        <div class="ag-lin ag-ant"><span class="ag-rot">📅 Saldo de {{ p.mes }}</span><span>vence {{ p.vencimento.strftime('%d/%m') }}</span><b>{{ p.valor|brl }}</b><span class="ag-st ag-aberto">em aberto nas contas a pagar{% if p.aprovacao == 'aguardando' %} · aguardando liberação{% endif %}</span></div>
+        {% endif %}
+        {% for parte, rot in (('adiantamento', 'Adiantamento'), ('saldo', 'Saldo')) %}{% set p = ag.partes.get(parte) %}
+        {% if p %}<div class="ag-lin"><span class="ag-rot">📅 {{ rot }}</span><span>{% if p.situacao == 'pago' %}pago em {{ (p.pago_em or p.vencimento).strftime('%d/%m') }}{% else %}vence {{ p.vencimento.strftime('%d/%m') }}{% endif %}</span><b>{{ p.valor|brl }}</b><span class="ag-st ag-{{ p.situacao }}">{% if p.situacao == 'pago' %}pago ✓{% elif p.situacao == 'aberto' %}conta a pagar{% if p.aprovacao == 'aguardando' %} · aguardando liberação{% endif %}{% if p.mexido %} · valor mudado à mão{% endif %}{% else %}previsto{% endif %}</span></div>{% endif %}
+        {% endfor %}
+        <div class="ag-regra">{% if ag.regra.adiantamento %}adiantamento {{ ag.regra.adiantamento }} · {% endif %}saldo no {{ ag.regra.saldo }} · contas a pagar {{ 'geradas sozinhas' if ag.gera_titulos else 'desligadas' }}</div>
+      </div>
+      {% endif %}
 
     <div class="fa">
       {% if not f.pro_labore %}
@@ -5514,6 +5571,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         <form class="fa-row" method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" title="Adiantamento salarial — dinheiro adiantado ao funcionário; desconta no fechamento.">
           <span class="lbl">Adiantamento salarial</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00"><button class="amb">+ adiantar</button>
         </form>
+        {% if f.agenda and f.agenda.gera_titulos and f.agenda.cfg.adiantamento_dia %}<div class="fa-aviso" style="margin:.2rem 0 .3rem">O adiantamento do dia {{ f.agenda.cfg.adiantamento_dia }} já está nas contas a pagar — dê baixa lá. Este botão é pra um adiantamento a mais.</div>{% endif %}
         <form class="fa-row" method="post" action="/painel/empresa/funcionario/{{ f.id }}/beneficio" title="Vale-refeição/alimentação — benefício (custo da empresa); NÃO desconta do funcionário.">
           <span class="lbl">Vale-refeição / alim.</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00"><button class="add">+ benefício</button>
         </form>
@@ -5538,6 +5596,25 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
           <div class="fa-row"><span class="lbl"></span><button>salvar</button></div>
         </form>
       </div>
+
+      {# ── 📅 DATAS DE PAGAMENTO (482, pedido do dono em 02/10/2026) ──────────
+         Adiantamento num dia (percentual OU valor fixo, por pessoa) e o saldo no
+         dia de sempre ou no 5º dia útil do mês seguinte. Formulário próprio, e
+         não o ✎ Editar: os forms de lá mandam os campos em hidden. #}
+      {% set ag = f.agenda or {} %}{% set cf = ag.cfg or {} %}
+      <details class="fa-ed">
+        <summary>📅 Datas de pagamento{% if ag.configurado %} · {% if ag.regra.adiantamento %}adiantamento {{ ag.regra.adiantamento }} · {% endif %}saldo no {{ ag.regra.saldo }}{% endif %}</summary>
+        <div class="fa-grp" style="border-top-left-radius:0;border-top-right-radius:0">
+          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/pagamento">
+            <div class="fa-row"><span class="lbl">Adiantamento no dia</span><input class="org" type="number" name="adiant_dia" min="1" max="28" value="{{ cf.adiantamento_dia or '' }}" placeholder="—"><span class="ag-regra">vazio = sem adiantamento</span></div>
+            <div class="fa-row"><span class="lbl">Quanto adiantar</span><label class="fp-op"><input type="radio" name="adiant_modo" value="pct"{% if not cf.adiantamento_centavos %} checked{% endif %}> % do salário</label><input class="org" name="adiant_pct" inputmode="decimal" value="{{ ag.pct_txt or '' }}" placeholder="40"><label class="fp-op"><input type="radio" name="adiant_modo" value="fixo"{% if cf.adiantamento_centavos %} checked{% endif %}> valor fixo</label><input class="money" name="adiant_valor" inputmode="decimal" value="{{ cf.adiantamento_centavos|brl if cf.adiantamento_centavos else '' }}" placeholder="R$ 0,00"></div>
+            <div class="fa-row"><span class="lbl">Saldo do salário</span><label class="fp-op"><input type="radio" name="saldo_regra" value="quinto_util"{% if cf.saldo_regra == 'quinto_util' %} checked{% endif %}> 5º dia útil do mês seguinte</label><label class="fp-op"><input type="radio" name="saldo_regra" value="dia"{% if cf.saldo_regra != 'quinto_util' %} checked{% endif %}> dia</label><input class="org" type="number" name="dia" min="1" max="28" value="{{ f.dia_pagamento }}"><span class="ag-regra">do mês seguinte</span></div>
+            <div class="fa-row"><span class="lbl">Contas a pagar</span><label class="fp-op"><input type="checkbox" name="gerar" value="1"{% if cf.titulos_folha_desde %} checked{% endif %}> gerar sozinho o adiantamento e o saldo</label></div>
+            <div class="fa-row"><span class="lbl"></span><button class="add">salvar</button></div>
+          </form>
+          <div class="fa-aviso">O 5º dia útil conta o sábado e pula domingo e feriado nacional, como manda a regra do Ministério do Trabalho. Com as contas a pagar ligadas, o adiantamento e o saldo nascem em Contas a pagar aguardando a sua liberação; o saldo acompanha a folha (extra, desconto, aumento) e, ao dar baixa, o pagamento entra aqui sozinho — sem lançar o caixa duas vezes. Começa no mês de hoje: mês que já passou não ganha conta.</div>
+        </div>
+      </details>
 
       {# ── ✎ EDITAR ─────────────────────────────────────────────────────────
          Nome, cargo, CBO e dia de pagamento não tinham COMO ser alterados depois
@@ -5608,7 +5685,7 @@ function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); i
         {% for ev in f.eventos %}
         <div class="fa-ev">
           <span><span class="ev-tag ev-{{ ev.tipo }}">{{ ev.rotulo }}</span>{{ ev.valor_centavos|brl }}{% if ev.data %} · {{ ev.data.strftime('%d/%m') }}{% endif %}{% if ev.descricao %} · {{ ev.descricao }}{% endif %}</span>
-          <form method="post" action="/painel/empresa/evento/remover" onsubmit="return confirm('Remover este lançamento? Se tiver ido pro caixa, é revertido junto.')"><input type="hidden" name="evento_id" value="{{ ev.id }}"><button class="ev-rm">✕ remover</button></form>
+          {% if ev.do_titulo %}<span class="ag-regra" title="foi pago pela conta a pagar da folha — pra desfazer, é lá">pago na conta a pagar</span>{% else %}<form method="post" action="/painel/empresa/evento/remover" onsubmit="return confirm('Remover este lançamento? Se tiver ido pro caixa, é revertido junto.')"><input type="hidden" name="evento_id" value="{{ ev.id }}"><button class="ev-rm">✕ remover</button></form>{% endif %}
         </div>
         {% endfor %}
       </details>
@@ -8549,7 +8626,7 @@ def _plano_aviso(conta_row, beta_ativo, avisar=True) -> dict | None:
                 "cortado": True}
     if not hasattr(venc, "toordinal"):  # sem data valida -> nada a avisar
         return None
-    dias = (venc - _date.today()).days
+    dias = (venc - relogio.hoje()).days
     if dias < 0:
         # Venceu por data: so' esta REALMENTE cortado se o beta estiver desligado.
         return {"nivel": "vencido", "status": status, "vencimento": venc,
@@ -8587,6 +8664,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("renovacoes", "/painel/renovacoes"),
                  ("hoje", "/painel/hoje"),
                  ("clinica", "/painel/clinica"),
+                 ("obras_mapa", "/painel/obras/mapa"),   # antes de "obras": é prefixo dela
                  ("obras", "/painel/obras"),
                  ("estandes", "/painel/eventos/estandes"),
                  ("follow_up", "/painel/follow-up"),
@@ -9306,7 +9384,7 @@ def _painel_dashboard(pool, conta, vende_servico=False):
     puro não roda a query nem vê a pizza — `tem_funil` fica False.
     """
     from finance import empresa as emp
-    hoje = _date.today()
+    hoje = relogio.hoje()
     res = emp.resumo_titulos(pool, conta[0], dias=30)
     fluxo = emp.fluxo_projetado(pool, conta[0], semanas=4)
     dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
@@ -11571,11 +11649,22 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
         campos["cpf"] = d
     elif tipo == "pj":
         campos["cnpj"] = d
+    from finance import evento_stands as _es
+    estande = "nome" in campos and _es.app_de_stands(pool, conta[0])
+    antes = (cli.obter_cliente(pool, conta[0], cliente_id) or {}) if estande else {}
     try:
         cli.atualizar_cliente(pool, conta[0], cliente_id, **campos)
         request.session["aviso"] = "Cliente atualizado."
     except ValueError as e:
         request.session["erro"] = str(e)
+        estande = False
+    if estande and antes:
+        # só o app de estandes (Outlet Chic): a marca do stand mora na reserva, e a
+        # correção do nome feita aqui vai pra ela (ver evento_stands.nome_do_cadastro_mudou)
+        try:
+            _es.nome_do_cadastro_mudou(pool, conta[0], cliente_id, antes.get("nome"), nome)
+        except Exception:  # noqa: BLE001 — o cliente já foi salvo; a marca fica como estava
+            pass
     return RedirectResponse("/painel/clientes", status_code=303)
 
 
@@ -11676,7 +11765,7 @@ def painel_pdv(request: Request, add: int = 0):
                               from clientes c left join pessoas p on p.id = c.pessoa_id) cc
                         on cc.cid = l.cliente_id
                 where l.conta_id=%s and l.origem='balcao' and l.tipo='receita'
-                      and l.data = current_date
+                      and l.data = (now() at time zone 'America/Sao_Paulo')::date
                 order by l.criado_em desc""",
             (conta[0],),
         ).fetchall()
@@ -11693,7 +11782,7 @@ def painel_pdv(request: Request, add: int = 0):
                               from clientes c left join pessoas p on p.id = c.pessoa_id) cc
                         on cc.cid = t.cliente_id
                 where t.conta_id=%s and t.tipo='receber' and t.status='aberto'
-                      and t.criado_em::date = current_date
+                      and (t.criado_em at time zone 'America/Sao_Paulo')::date = (now() at time zone 'America/Sao_Paulo')::date
                       and t.descricao like 'Venda de balcao%%'
                 order by t.criado_em desc""",
             (conta[0],),
@@ -11908,7 +11997,7 @@ def painel_empresa(request: Request, mes: str = ""):
         return _render("empresa_dados", request, dados=d, tem_pj=True, erro="",
                        nichos_lista=_nichos.lista_nichos(), eh_fornecedor=bool(conta[8]),
                        identidade=emp.obter_identidade(pool, conta[0]), margem_alvo=60.0)
-    hoje = _date.today()
+    hoje = _relogio.hoje()   # o mês de Brasília: às 22h do dia 30 ainda é este mês
     # O SELETOR DE MÊS DO DRE (pedido do dono em 29/09/2026, depois da Iris
     # reparar que só dava pra ver o mês atual): só o card do DRE (e o "ver por
     # centro de custo" dentro dele) olha pro mês escolhido — o resto da aba
@@ -12088,8 +12177,13 @@ def painel_empresa(request: Request, mes: str = ""):
     folha = emp.folha_do_mes(pool, conta[0], hoje.year, hoje.month)
     # anexa os lançamentos do mês a cada funcionário (pro histórico "corrigir")
     _evs = emp.eventos_folha_do_mes(pool, conta[0], hoje.year, hoje.month)
+    # e as DATAS DE PAGAMENTO (482): adiantamento e saldo deste mês, com o valor e
+    # a situação de cada um, e o saldo do mês passado enquanto estiver aberto
+    from finance import folha_titulos as _ft
+    _agenda = _ft.agenda(pool, conta[0], folha["itens"], hoje=hoje)
     for _it in folha["itens"]:
         _it["eventos"] = _evs.get(_it["id"], [])
+        _it["agenda"] = _agenda.get(_it["id"])
     from finance import clientes as _cli   # _nichos já é import de módulo (topo)
     # os dois papéis não são exclusivos — quem é as duas coisas aparece nas duas listas.
     clientes_lista = _cli.listar_clientes(pool, conta[0], papel="cliente")
@@ -12135,7 +12229,8 @@ def painel_empresa(request: Request, mes: str = ""):
                    centros_ativos=centros_ativos,
                    # linha do tempo de salário por funcionário (uma consulta só)
                    hist_salarios=emp.historicos_salarios(pool, conta[0]),
-                   hoje_iso=date.today().isoformat(),
+                   hoje_iso=hoje.isoformat(),
+                   folha_aviso=request.session.pop("folha_aviso", None),
                    # a recusa do excluir precisa chegar na tela: sem isto a rota
                    # gravava na sessão e ninguém mostrava (o erro vazaria pra
                    # outra página que faz pop)
@@ -12635,7 +12730,8 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                          categoria: str = Form(""),
                          plano_conta_id: str = Form(""),
                          centro_custo_id: str = Form(""),
-                         tipo_despesa: str = Form("")):
+                         tipo_despesa: str = Form(""),
+                         mes_referencia: str = Form("")):
     from finance import empresa as emp, clientes as cli
     g = _guard_pj(request)
     if not g:
@@ -12703,7 +12799,10 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                              cliente_id=cli_id,
                              plano_conta_id=plano_conta_id.strip() or None,
                              centro_custo_id=centro_custo_id.strip() or None,
-                             tipo_despesa=tipo_despesa.strip() or None)
+                             tipo_despesa=tipo_despesa.strip() or None,
+                             # o MÊS DE REFERÊNCIA (484): só na conta a pagar
+                             mes_referencia=(mes_referencia.strip() or None
+                                             if tipo_ok == "pagar" else None))
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
@@ -12711,21 +12810,31 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
 
 @router.post("/painel/empresa/saldo")
 def empresa_saldo_informar(request: Request, banco: str = Form(""),
-                           valor: str = Form("")):
+                           valor: str = Form(""), negativo: str = Form("")):
     """O dono informa o saldo de um banco (etapa A do pedido 3, 23/09/2026).
 
-    Valor COM SINAL: cheque especial é saldo de verdade, e é por isso que o
-    conversor é o do acréscimo, que aceita o menos. Campo sem nenhum dígito é
-    recusado — "0" é saldo legítimo, texto em branco não."""
+    Valor COM SINAL: cheque especial é saldo de verdade. Campo sem número é
+    recusado — "0" é saldo legítimo, texto em branco não.
+
+    O NEGATIVO tem botão próprio desde 02/10/2026 (queixa da Prime: "não
+    consegue colocar saldo negativo"). O campo abre o teclado numérico do
+    celular, e o do iPhone não tem o sinal de menos: não havia como digitar. A
+    caixa "negativo" resolve sem trocar o teclado. E o que não der pra entender
+    é recusado com aviso (`si.ler_valor`), em vez de virar R$ 0,00 calado."""
     from finance import saldo_informado as si
     g = _guard_pj(request)
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    if not any(ch.isdigit() for ch in (valor or "")):
-        request.session["emp_aviso"] = "Informe o valor do saldo (pode ser 0 ou negativo)."
+    cent = si.ler_valor(valor)
+    if cent is None:
+        request.session["emp_aviso"] = (
+            "Não entendi o valor do saldo. Escreva só o número (ex.: 2.400,00) e, "
+            "se estiver no vermelho, marque \"negativo\".")
     else:
-        r = si.informar(pool, conta[0], banco, _acrescimo_para_centavos(valor),
+        if negativo in ("1", "on", "true"):
+            cent = -abs(cent)
+        r = si.informar(pool, conta[0], banco, cent,
                         membro_id=request.session.get("membro_id"))
         if not r.get("ok"):
             request.session["emp_aviso"] = r.get("erro")
@@ -13056,8 +13165,12 @@ def empresa_titulo_descricao(request: Request, titulo_id: int,
                              categoria: str = Form(""), plano_conta_id: str = Form(""),
                              centro_custo_id: str = Form(""), tem_classe: str = Form(""),
                              tem_plano: str = Form(""), tem_centro: str = Form(""),
-                             tipo_despesa: str = Form(""), tem_tipo: str = Form("")):
+                             tipo_despesa: str = Form(""), tem_tipo: str = Form(""),
+                             vencimento: str = Form(""), tem_venc: str = Form(""),
+                             mes_referencia: str = Form(""), tem_ref: str = Form("")):
     """Edita descrição, valor e/ou FORNECEDOR. valor vazio = não mexe no valor.
+    Na conta a pagar, também o VENCIMENTO e o MÊS DE REFERÊNCIA (484, pedido do
+    dono em 02/10/2026) — com o mesmo marcador de presença (`tem_venc`/`tem_ref`).
 
     O FORNECEDOR só entrou aqui em 03/09/2026, e a falta dele era o buraco que o
     dono relatou: salvou sem fornecedor, não colocava mais. Na Prime eram 30 de
@@ -13100,13 +13213,26 @@ def empresa_titulo_descricao(request: Request, titulo_id: int,
         # o TIPO (325), com o mesmo marcador de presença: só mexe se o campo
         # estava no formulário, e aí "" apaga
         tipo_d = tipo_despesa.strip() if tem_tipo else None
+    # O VENCIMENTO e a REFERÊNCIA (484). Data inválida ou vazia = não mexe (o
+    # vencimento é obrigatório); referência vazia = volta ao padrão.
+    novo_venc = None
+    if tem_venc in ("1", "on", "true") and vencimento.strip():
+        try:
+            novo_venc = _date.fromisoformat(vencimento.strip())
+        except ValueError:
+            novo_venc = None
+    nova_ref = False
+    if tem_ref in ("1", "on", "true"):
+        nova_ref = mes_referencia.strip() or None
     if (nova_desc is not None or novo_val is not None or nova_cp is not None
-            or tem_classe in ("1", "on", "true")):
+            or tem_classe in ("1", "on", "true") or novo_venc is not None
+            or nova_ref is not False):
         emp.editar_titulo(pool, conta[0], titulo_id,
                           descricao=nova_desc, valor_centavos=novo_val,
                           contraparte=nova_cp, cliente_id=cli_id,
                           categoria=cat, plano_conta_id=plano,
-                          centro_custo_id=centro, tipo_despesa=tipo_d)
+                          centro_custo_id=centro, tipo_despesa=tipo_d,
+                          vencimento=novo_venc, mes_referencia=nova_ref)
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
@@ -13277,6 +13403,58 @@ def empresa_funcionario_editar(request: Request, funcionario_id: int,
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
+@router.post("/painel/empresa/funcionario/{funcionario_id}/pagamento")
+def empresa_funcionario_pagamento(request: Request, funcionario_id: int,
+                                  adiant_dia: str = Form(""), adiant_modo: str = Form("pct"),
+                                  adiant_pct: str = Form(""), adiant_valor: str = Form(""),
+                                  saldo_regra: str = Form("dia"), dia: str = Form(""),
+                                  gerar: str = Form("")):
+    """As DATAS DE PAGAMENTO de uma pessoa (02/10/2026, pedido do dono): o
+    adiantamento (dia + percentual do salário OU valor fixo) e o saldo (dia fixo
+    ou 5º dia útil do mês seguinte), e se isso vira conta a pagar sozinho.
+
+    Rota própria, e não o /editar: os formulários do /editar mandam os campos
+    deles em `hidden`, e um campo novo ali seria apagado por quem salva o
+    depto/setor sem saber que ele existe. A regra mora em finance/folha_titulos."""
+    from finance import folha_titulos as ft
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    try:
+        dia_a = int(adiant_dia) if adiant_dia.strip() else None
+    except ValueError:
+        dia_a = None
+    try:
+        dia_s = int(dia) if dia.strip() else None
+    except ValueError:
+        dia_s = None
+    # quem preencheu só um dos dois campos quis aquele, qualquer que seja o
+    # botão marcado — o rádio esquecido no "%" não pode recusar o valor digitado
+    modo = adiant_modo
+    if modo != "fixo" and not adiant_pct.strip() and adiant_valor.strip():
+        modo = "fixo"
+    elif modo == "fixo" and not adiant_valor.strip() and adiant_pct.strip():
+        modo = "pct"
+    fixo = _reais_para_centavos(adiant_valor) if modo == "fixo" else None
+    r = ft.configurar(pool, conta[0], funcionario_id, adiantamento_dia=dia_a,
+                      adiantamento_pct=(adiant_pct if modo != "fixo" else None),
+                      adiantamento_centavos=fixo, saldo_regra=saldo_regra,
+                      dia_pagamento=dia_s, gerar_titulos=bool(gerar))
+    if not r["ok"]:
+        request.session["erro"] = r["erro"]
+    else:
+        feito = [f"{r[k]} {rot}" for k, rot in (("criados", "criada(s)"),
+                                                ("atualizados", "ajustada(s)"),
+                                                ("cancelados", "cancelada(s)")) if r[k]]
+        # o aviso mora DENTRO da seção da folha (folha_aviso), não no topo da
+        # página: a volta cai em #folha, e um "salvo ✓" lá em cima ninguém via
+        request.session["folha_aviso"] = (
+            "Datas de pagamento salvas ✓"
+            + (f" — contas a pagar da folha: {', '.join(feito)}." if feito else "."))
+    return RedirectResponse("/painel/empresa#folha", status_code=303)
+
+
 @router.post("/painel/empresa/funcionario/{funcionario_id}/salario")
 def empresa_funcionario_salario(request: Request, funcionario_id: int,
                                 valor: str = Form(""), vigencia: str = Form(""),
@@ -13299,7 +13477,7 @@ def empresa_funcionario_salario(request: Request, funcionario_id: int,
             emp.corrigir_salario_atual(pool, conta[0], funcionario_id, cent)
         else:
             emp.definir_salario(pool, conta[0], funcionario_id, cent,
-                                _data_iso(vigencia) or date.today().replace(day=1))
+                                _data_iso(vigencia) or _relogio.hoje().replace(day=1))
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
@@ -13363,7 +13541,7 @@ def empresa_folha_pagar(request: Request, funcionario_id: str = Form("")):
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    hoje = _date.today()
+    hoje = _relogio.hoje()   # a folha do mês de Brasília, não o de UTC
     fid = int(funcionario_id) if funcionario_id.strip().isdigit() else None
     emp.pagar_folha(pool, conta[0], hoje.year, hoje.month, funcionario_id=fid)
     return RedirectResponse("/painel/empresa", status_code=303)
@@ -13378,7 +13556,7 @@ def empresa_holerite(request: Request, funcionario_id: int, ano: int = 0, mes: i
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    hoje = _date.today()
+    hoje = _relogio.hoje()
     ano = ano or hoje.year
     mes = mes if 1 <= mes <= 12 else hoje.month
     h = emp.holerite_funcionario(pool, conta[0], funcionario_id, ano, mes)
@@ -13397,7 +13575,7 @@ def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    hoje = _date.today()
+    hoje = relogio.hoje()
     ano = ano or hoje.year
     mes = mes or hoje.month
     csv = emp.csv_contador(pool, conta[0], ano, mes)
@@ -13433,7 +13611,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     if not pode_financas(_papel_logado(request, conta[0])):
         return RedirectResponse("/painel/compras", status_code=303)
     pool = get_pool()
-    hoje = date.today()
+    hoje = relogio.hoje()
     # Gate PJ ÚNICO: usa modulo_pj_ativo (mesma verdade da aba Empresa e do bot).
     # Cobre plano PJ + status válido E o override por cortesia (conta_modulos).
     # Chamado uma vez só por request — não pesa pra conta PF (retorna False).
@@ -13676,14 +13854,13 @@ def _fmt_comparacao(r: dict, cidade: str | None = None) -> dict:
     """Formata o resultado do comparador pra JSON amigavel ao front (com BRL). Cada
     produto leva dias (recencia) e fonte='cupom'. Itens SEM cupom ganham referencia de
     catalogo (fora do total)."""
-    from datetime import date
     rotulos = {"mercado": "🏪 Mercado", "farmacia": "💊 Farmácia", "outro": "🏪 Mercado"}
     grupos = {}
     itens_detalhe = {item["descricao"]: item for item in r.get("itens", [])}
 
     def _dias(dt):
         try:
-            return (date.today() - dt).days
+            return (relogio.hoje() - dt).days
         except Exception:  # noqa: BLE001
             return None
 
@@ -13979,8 +14156,7 @@ def listar_a_definir(request: Request, mes: str = "", membro: str = ""):
     if not conta:
         return JSONResponse({"ok": False}, status_code=401)
     from finance.livro_caixa import LivroCaixa
-    from datetime import date as _date
-    hoje = _date.today()
+    hoje = relogio.hoje()
     try:
         ano_sel, mes_num = (int(x) for x in mes.split("-")) if mes else (hoje.year, hoje.month)
     except ValueError:

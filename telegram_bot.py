@@ -148,6 +148,18 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _midia_pro_livro(agente, imagem_b64: str | None, media_type: str) -> None:
+    """Deixa a FOTO da mensagem em `livro.midia_atual`, como o webhook do WhatsApp:
+    na construção, a foto da obra vai pra etapa pelo guardar_foto_da_obra. Só
+    imagem (PDF não é foto de obra); foto que não decodifica segue sem ir pra obra."""
+    if not imagem_b64 or not (media_type or "").startswith("image/"):
+        return
+    try:
+        agente.livro.midia_atual = (base64.b64decode(imagem_b64), media_type)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
                      media_type: str = "image/jpeg", dica_qr: bool = False, eh_cupom: bool | None = None):
     # Idempotencia: se esta mensagem ja' foi processada (reentrega ou multiplas instancias),
@@ -305,6 +317,11 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
                 agente.livro.chave_nfce_atual = chave_nfce
         except Exception:  # noqa: BLE001
             pass
+    # A foto da mensagem fica à mão das ferramentas, como no webhook do WhatsApp
+    # (web/app.py): na construção, a foto que não é nota (o telhado pronto) vai pra
+    # obra pelo guardar_foto_da_obra. PDF não é foto de obra, e fica de fora.
+    _midia_pro_livro(agente, imagem_b64, media_type)
+    agente.livro.canal_interativo = True          # o Telegram mostra o teclado de respostas
     # AGILIDADE (percepcao): o loop do agente leva alguns segundos (varias chamadas
     # ao modelo). Mostra "digitando..." na hora pra pessoa saber que estamos nessa.
     try:
@@ -329,7 +346,19 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
     from finance.nfce_qr import deve_mandar_dica_qr
     if deve_mandar_dica_qr(dica_qr, chave_nfce, getattr(agente, "_obs_tools", set())):
         resposta += (DICA_QR if chave_nfce else DICA_QR_FALHOU)
-    await update.message.reply_text(resposta)
+    await update.message.reply_text(resposta, reply_markup=_teclado_da_escolha(agente))
+
+
+def _teclado_da_escolha(agente):
+    """A escolha com toque (finance/escolhas.py) no Telegram: um TECLADO DE
+    RESPOSTAS — o toque manda o título como mensagem comum, e o fluxo de texto de
+    sempre recebe "Casa 2". Some depois do toque. None sem escolha."""
+    escolha = getattr(getattr(agente, "livro", None), "escolha", None)
+    if not escolha:
+        return None
+    from telegram import KeyboardButton, ReplyKeyboardMarkup
+    return ReplyKeyboardMarkup([[KeyboardButton(o["titulo"])] for o in escolha["opcoes"]],
+                               one_time_keyboard=True, resize_keyboard=True)
 
 
 async def on_text(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):

@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
+
+from finance import relogio
 from decimal import Decimal, ROUND_HALF_UP
 
 _log = logging.getLogger("openclaw.apolices")
@@ -125,7 +127,7 @@ def degrau_de(dias: int | None) -> int | None:
 def dias_para(vigencia_fim, hoje: date | None = None) -> int | None:
     if vigencia_fim is None:
         return None
-    return (vigencia_fim - (hoje or date.today())).days
+    return (vigencia_fim - (hoje or relogio.hoje())).days
 
 
 # --------------------------------------------------------------- comissão
@@ -256,7 +258,7 @@ def a_vencer(pool, conta_id: int, *, dias: int = HORIZONTE, hoje: date | None = 
     `corretor_id` recorta pro corretor (a fila dele). Sem ele vem a carteira
     inteira, que é o que o dono vê.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     sql = (f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
            "  from apolices a left join clientes cl on cl.id = a.cliente_id "
            " where a.conta_id = %s and a.excluida_em is null and a.situacao = any(%s) "
@@ -289,7 +291,7 @@ def proxima(pool, conta_id: int, *, hoje: date | None = None,
     tela dizendo "não há nada" convida a cadastrar de novo o que já está lá. Com
     isto ela diz QUAL é a próxima e QUANDO entra na régua.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     sql = (f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
            "  from apolices a left join clientes cl on cl.id = a.cliente_id "
            " where a.conta_id = %s and a.excluida_em is null and a.situacao = any(%s) and a.vigencia_fim > %s")
@@ -318,7 +320,7 @@ def listar(pool, conta_id: int, *, hoje: date | None = None,
     estiver no `bem` — placa e modelo, que é como a corretora procura um carro. Sem
     ela, uma carteira de trezentas linhas é uma tabela que ninguém lê.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     termo = (busca or "").strip()
     sql = (f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
            "  from apolices a left join clientes cl on cl.id = a.cliente_id "
@@ -387,7 +389,7 @@ def total_da_carteira(pool, conta_id: int) -> int:
 
 
 def uma(pool, conta_id: int, apolice_id: int, *, hoje: date | None = None) -> dict | None:
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     with pool.connection() as c:
         r = c.execute(
             f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
@@ -503,7 +505,7 @@ def ficha_do_cliente(pool, conta_id: int, cliente_id: int, *, hoje: date | None 
     18/09 na conta 37: 39 de 39 leads casam por 11 dígitos. Oito dígitos casariam
     também — e casariam gente errada.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     with pool.connection() as c:
         cl = c.execute(
             """select c.id, c.nome, c.telefone, c.email, c.endereco, c.cidade, c.uf, c.cep,
@@ -579,7 +581,7 @@ def marcar_vencidas(pool, hoje: date | None = None) -> int:
     apaga nada, não mexe em cliente, não desfaz renovação — quem renovou já saiu
     de `VIVAS` antes de chegar aqui.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or relogio.hoje()
     with pool.connection() as c:
         with c.transaction():
             cur = c.execute(

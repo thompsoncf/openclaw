@@ -18,7 +18,9 @@ A janela é orquestração — reusa o montador (Fase 4) e o envio de WhatsApp e
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
+
+from finance import relogio
 
 
 # ----------------------------------------------------------------------------
@@ -36,7 +38,7 @@ def abrir_janela_semana(pool, data_entrega=None, apenas_assinatura_id: int | Non
     from finance import montador
 
     if data_entrega is None:
-        data_entrega = date.today() + timedelta(days=7)
+        data_entrega = relogio.hoje() + timedelta(days=7)
 
     with pool.connection() as c:
         sql = """select id from assinaturas where status = 'ativa'"""

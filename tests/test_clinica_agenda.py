@@ -33,7 +33,10 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   valor_estimado_centavos bigint not null default 0,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint, membro_id bigint,
-  tipo text, resultado text, descricao text default '', criado_em timestamptz default now());
+  tipo text, resultado text, descricao text default '', criado_em timestamptz default now(),
+  -- o CHECK de produção (migração 075): o Ligar quebrou com valor fora dele
+  constraint prospeccao_atividades_resultado_check check (resultado in
+    ('sem_resposta','retornar','interessado','sem_interesse','agendado','fechado')));
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, contato_nome text,
   ultima_msg_em timestamptz default now());
@@ -78,6 +81,9 @@ def pool():
         c.execute("alter table eventos_agenda add column if not exists marcado_por text")
         c.execute((BASE / "360_clinica_agenda.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "471_clinica_tratamento_proposto.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "490_clinica_resultados.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "495_clinica_recebimentos.sql").read_text(encoding="utf-8"))
+        c.execute((BASE / "580_clinica_desmarcou.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -417,7 +423,7 @@ def test_reabrir_falta_so_se_o_horario_continua_livre(pool):
         eid, _ = _marcar(c)
         assert ca.mudar_situacao(c, CLINICA, eid, "faltou") is None
         _marcar(c, nome="Outra", fone="99 97777-0061")               # alguém pegou as 08:00
-        assert "ocupado" in ca.mudar_situacao(c, CLINICA, eid, "agendado")
+        assert "ocupado" in ca.mudar_situacao(c, CLINICA, eid, "agendado", agora=MESMO_DIA)
 
 
 def test_mesmo_celular_nome_digitado_e_em_bacabal(pool):
@@ -470,6 +476,9 @@ def _status(c, eid):
                          join eventos_agenda e on e.prospeccao_id = p.id where e.id=%s""", (eid,)).fetchone()
 
 
+MESMO_DIA = ca.utc(SEG, time(10))                  # a falta das 08:00 desfeita no mesmo dia
+
+
 def test_faltou_volta_pro_follow_up_e_reabrir_devolve(pool):
     with pool.connection() as c:
         eid, _ = _marcar(c)
@@ -478,9 +487,56 @@ def test_faltou_volta_pro_follow_up_e_reabrir_devolve(pool):
         assert _status(c, eid)[0] == "follow_up"
         nota = c.execute("select descricao from prospeccao_atividades order by id desc limit 1").fetchone()[0]
         assert nota.startswith("Faltou à consulta de 28/09 08:00")
-        assert ca.mudar_situacao(c, CLINICA, eid, "agendado") is None
+        assert ca.mudar_situacao(c, CLINICA, eid, "agendado", agora=MESMO_DIA) is None
         assert _status(c, eid)[0] == "qualificado"
         assert [r[0] for r in c.execute("select motivo from funil_movimentos").fetchall()] == ["agenda"] * 3
+
+
+def test_falta_so_depois_da_tolerancia_e_desfeita_so_no_dia(pool):
+    """Decisão J do dono (02/10/2026): o Faltou aparece 15 minutos depois do horário; e
+    a falta se desfaz só no mesmo dia (para outro dia, Remarcar)."""
+    with pool.connection() as c:
+        eid, _ = _marcar(c)                                         # 28/09 08:00
+        assert "tolerância" in ca.mudar_situacao(c, CLINICA, eid, "faltou", agora=ca.utc(SEG, time(8, 14)))
+        assert ca.mudar_situacao(c, CLINICA, eid, "faltou", agora=ca.utc(SEG, time(8, 15))) is None
+        assert "mesmo dia" in ca.mudar_situacao(c, CLINICA, eid, "agendado", agora=ca.utc(SEG + timedelta(days=1), time(9)))
+        assert ca.mudar_situacao(c, CLINICA, eid, "agendado", agora=ca.utc(SEG, time(17))) is None
+
+
+def test_atrasado_aparece_depois_da_tolerancia(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        ev = ca.evento(c, CLINICA, eid)
+        assert ca.atrasado_min(ev, ca.utc(SEG, time(8, 10))) is None
+        assert ca.atrasado_min(ev, ca.utc(SEG, time(8, 20))) == 20
+        assert ca.atrasado_min(ev, ca.utc(SEG + timedelta(days=1), time(8))) is None   # outro dia: não é atraso
+        d = ca.dia(c, CLINICA, SEG, ca.utc(SEG, time(8, 30)))
+        evs = [e for col in d["colunas"] for cel in col["celulas"] for e in cel.get("evs", [])]
+        assert [e["atrasado_min"] for e in evs if e["id"] == eid] == [30]
+
+
+def test_ligar_registra_o_contato_no_card(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        assert ca.ligar(c, CLINICA, eid, "talvez", 51) == "Escolha como foi a ligação."
+        assert ca.ligar(c, CLINICA, eid, "nao_atendeu", 51) is None
+        r = c.execute("""select tipo, resultado, descricao from prospeccao_atividades
+                          order by id desc limit 1""").fetchone()
+        assert r == ("ligacao", "sem_resposta", "Ligação sobre o horário de seg 28/09 08:00: não atendeu.")
+        assert ca.ligar(c, CLINICA, eid, "atendeu", 51) is None
+        assert c.execute("select resultado from prospeccao_atividades order by id desc limit 1").fetchone() == (None,)
+        _ate_atendimento(c, eid)
+        assert "quem ainda vai vir" in ca.ligar(c, CLINICA, eid, "atendeu", 51)
+
+
+def test_remarcar_pelas_proximas_passagens_e_a_sede(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        ev = ca.evento(c, CLINICA, eid)
+        grupos = ca.opcoes_remarcar(c, CLINICA, ev, AGORA, _manoel(c)["id"])
+        assert grupos and all(g["horarios"] for g in grupos)
+        assert grupos[0]["local_id"] == ev["local_id"]          # a cidade do paciente primeiro
+        assert ev["inicio"].isoformat() not in [h["valor"] for g in grupos for h in g["horarios"]]
 
 
 def test_cancelou_tambem_volta_pro_follow_up(pool):
@@ -532,6 +588,68 @@ def test_presente_leva_o_card_pra_consulta(pool):
         assert _status(c, eid)[0] == "consulta"
         assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
                          ).fetchone() == ("qualificado", "consulta", "agenda")
+
+
+def _marcar_tipo(c, tipo, h=8, dia=SEG, nome="Maria Clara", fone="(99) 98888-0001"):
+    eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, tipo)["id"],
+                           inicio=ca.utc(dia, time(h)), nome=nome, fone=fone, agora=AGORA)
+    assert erro is None, erro
+    return eid
+
+
+def test_presente_so_abre_consulta_em_horario_de_consulta(pool):
+    """"Veio ou faltou" depende do tipo do horário: o ato único (exame, teste alérgico,
+    procedimento avulso) não passa por Consulta; resolve-se no Finalizar."""
+    with pool.connection() as c:
+        teste = _marcar_tipo(c, "Testes alérgicos")
+        assert _status(c, teste)[0] == "qualificado"
+        _ate_atendimento(c, teste)
+        assert _status(c, teste)[0] == "qualificado"            # Presente não mexe
+        assert ca.mudar_situacao(c, CLINICA, teste, "finalizado", tratamento="nao") is None
+        assert _status(c, teste)[0] == "ganho"                  # o ato único conclui no Finalizar
+        proc = _marcar_tipo(c, "Procedimento clínico", h=9, nome="Outra", fone="99 97777-0097")
+        _ate_atendimento(c, proc)
+        assert _status(c, proc)[0] == "qualificado"            # procedimento avulso também não
+        consulta = _marcar_tipo(c, "Consulta", h=10, nome="Mais uma", fone="99 97777-0098")
+        _ate_atendimento(c, consulta)
+        assert _status(c, consulta)[0] == "consulta"
+
+
+def test_ato_unico_finalizado_sem_a_pergunta_nao_fica_em_agendado(pool):
+    """O "um toque" (e a sessão de pacote, que não pergunta do tratamento): o horário
+    que não abre Consulta resolve o card no Finalizar, mesmo sem a resposta."""
+    with pool.connection() as c:
+        teste = _marcar_tipo(c, "Testes alérgicos")
+        _ate_atendimento(c, teste)
+        assert ca.mudar_situacao(c, CLINICA, teste, "finalizado") is None
+        assert _status(c, teste)[0] == "ganho"
+
+
+def test_consulta_nova_reabre_o_card_concluido_e_o_retorno_nao(pool):
+    """Marcar consulta nova reabre o card em Agendado (o paciente voltou com outra
+    queixa). O retorno e a sessão de quem concluiu não reabrem nada."""
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        lead = ca.evento(c, CLINICA, eid)["lead"]
+        c.execute("update prospeccao set status='ganho', valor_estimado_centavos=300000 where id=%s", (lead,))
+        _marcar_tipo(c, "Retorno", h=10)
+        assert _status(c, eid) == ("ganho", 300000)
+        _marcar_tipo(c, "Consulta", dia=SEG + timedelta(days=7))
+        assert _status(c, eid) == ("qualificado", 0)            # venda nova: sem o valor da anterior
+        assert c.execute("select de, para, motivo from funil_movimentos order by id desc limit 1"
+                         ).fetchone() == ("ganho", "qualificado", "agenda")
+        assert c.execute("select descricao from prospeccao_atividades order by id desc limit 1"
+                         ).fetchone()[0] == "Consulta nova marcada: o card voltou para Agendado."
+
+
+def test_funil_de_antes_a_consulta_nova_nao_reabre(pool):
+    with pool.connection() as c:
+        c.execute("delete from funil_etapas where conta_id=%s and chave in ('consulta','tratamento','retorno')",
+                  (CLINICA,))
+        eid, _ = _marcar(c)
+        c.execute("update prospeccao set status='ganho' where id=%s", (ca.evento(c, CLINICA, eid)["lead"],))
+        _marcar_tipo(c, "Consulta", dia=SEG + timedelta(days=7))
+        assert _status(c, eid)[0] == "ganho"
 
 
 def test_propos_tratamento_segura_o_card_em_consulta_com_o_plano_a_montar(pool):
@@ -785,6 +903,26 @@ def test_finalizado_sem_resposta_nao_prende_em_consulta_e_card_adiante_nao_volta
         assert _status(c, eid2)[0] == "proposta"          # alguém já levou adiante: fica
 
 
+def test_tela_finalizar_com_resultado_a_entregar(cli, pool):
+    seg = _proxima_segunda()
+    with pool.connection() as c:
+        eid, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, "Consulta")["id"],
+                               inicio=ca.utc(seg, time(8)), nome="Ana", fone="99 97777-0099")
+        assert erro is None
+        _ate_atendimento(c, eid)
+        c.commit()
+    r = cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",
+                 data={"nova": "finalizado", "tratamento": "nao", "resultado": "1", "resultado_em": "31/02"})
+    assert "inválida" in cli.get(r.headers["location"]).text
+    cli.post(f"/painel/clinica/agenda/evento/{eid}/situacao",       # a data sem a caixa vale como pedido
+             data={"nova": "finalizado", "tratamento": "nao",
+                   "resultado_em": (seg + timedelta(days=10)).isoformat()})
+    with pool.connection() as c:
+        assert c.execute("select previsto_em, estado from clinica_resultados where evento_id=%s", (eid,)
+                         ).fetchone() == (seg + timedelta(days=10), "aguardando")
+        assert _status(c, eid)[0] == "retorno"
+
+
 def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
     seg = _proxima_segunda()
     with pool.connection() as c:
@@ -794,8 +932,8 @@ def test_tela_finalizar_pergunta_o_tratamento(cli, pool):
         _ate_atendimento(c, eid)
         c.commit()
     html = cli.get(f"/painel/clinica/agenda/evento/{eid}").text
-    assert "O médico propôs tratamento?" in html
-    assert "vai para Retorno, se o médico pediu, ou Concluído" in html and "fica em Consulta" in html
+    assert "O médico propôs tratamento?" in html and "Resultado a entregar" in html
+    assert "vai para Retorno, se o médico pediu ou há resultado a entregar, ou Concluído" in html and "fica em Consulta" in html
     # a conta que ainda não aplicou o modelo lê pra onde o card vai NELA
     with pool.connection() as c:
         guardadas = c.execute("select chave, fase from funil_etapas where conta_id=%s", (CLINICA,)).fetchall()
@@ -858,3 +996,103 @@ def test_agenda_antiga_manda_a_clinica_pra_agenda_nova(monkeypatch):
     cli.get("/_papel/vendedor")
     with pytest.raises(Chegou):
         cli.get("/painel/agenda")
+
+
+# ------------------------------------------------------------------ entrega 2c
+
+def test_encaixe_de_quem_chegou_entra_presente_mesmo_sem_encaixe_no_dia(pool):
+    with pool.connection() as c:
+        c.execute("update clinica_grade set encaixes = 0 where conta_id=%s", (CLINICA,))
+        agora = ca.utc(SEG, time(10, 7))
+        eid, erro = ca.encaixe_chegou(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, "Consulta")["id"],
+                                      nome="Chegou Agora", fone="99 97777-0071", membro_id=51, agora=agora)
+        assert erro is None
+        ev = ca.evento(c, CLINICA, eid)
+        assert (ev["situacao"], ev["encaixe"], ev["hora"]) == ("presente", True, "10:05")
+        assert _status(c, eid)[0] == "consulta"
+        _, erro = ca.encaixe_chegou(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, "Consulta")["id"],
+                                    nome="Fora", fone="99 97777-0072", membro_id=51, agora=ca.utc(SEG, time(22)))
+        assert "horário de atendimento" in erro
+
+
+def test_cancelar_passagem_deixa_a_remarcar_sem_falta(pool):
+    with pool.connection() as c:
+        um, _ = _marcar(c)
+        dois, _ = _marcar(c, h=9, nome="Outra", fone="99 97777-0073")
+        assert ca.mudar_situacao(c, CLINICA, dois, "confirmado") is None
+        local = ca.evento(c, CLINICA, um)["local_id"]
+        avisos, erro = ca.cancelar_passagem(c, CLINICA, _manoel(c)["id"], SEG, local, 51, agora=AGORA)
+        assert erro is None and sorted(a["evento"]["id"] for a in avisos) == sorted([um, dois])
+        for eid in (um, dois):
+            ev = ca.evento(c, CLINICA, eid)
+            assert (ev["situacao"], ev["desmarcou"]) == ("cancelou", "clinica")
+            assert _status(c, eid)[0] == "follow_up"
+        assert "não é falta" in c.execute("select descricao from prospeccao_atividades order by id desc limit 1").fetchone()[0]
+        assert "sem nenhum custo" in avisos[0]["texto"] and "Manoel" in avisos[0]["texto"]
+        livres = ca.livres(c, CLINICA, _manoel(c)["id"], _tipo(c, "Consulta")["id"], SEG, 1, AGORA)
+        assert livres == []                                     # a sede, o único lugar do dia, ficou bloqueada
+        assert ca.dia(c, CLINICA, SEG, AGORA)["faltas"] == 0
+
+
+def test_cancelar_a_cidade_da_tarde_nao_mexe_na_sede_da_manha(pool):
+    """Um dia com dois lugares: a sede de manhã e Bacabal à tarde. Cancelar Bacabal
+    bloqueia só a tarde; quem está marcado na sede segue marcado, e a manhã segue aberta."""
+    with pool.connection() as c:
+        bacabal = c.execute("select id from clinica_locais where conta_id=%s and cidade='Bacabal'", (CLINICA,)).fetchone()[0]
+        c.execute("update clinica_grade set local_id=%s where conta_id=%s and inicio = '13:30'", (bacabal, CLINICA))
+        manha, _ = _marcar(c)                                             # 08:00, sede
+        tarde, _ = _marcar(c, h=14, nome="Da Tarde", fone="99 97777-0076")   # 14:00, Bacabal
+        assert ca.evento(c, CLINICA, tarde)["local_id"] == bacabal
+        lugares = [p["local_id"] for p in ca.passagens_do_dia(c, CLINICA, _manoel(c)["id"], SEG)]
+        assert bacabal in lugares and len(lugares) == 2
+        avisos, erro = ca.cancelar_passagem(c, CLINICA, _manoel(c)["id"], SEG, bacabal, 51, agora=AGORA)
+        assert erro is None and [a["evento"]["id"] for a in avisos] == [tarde]
+        assert ca.evento(c, CLINICA, manha)["situacao"] == "agendado"
+        livres = ca.livres(c, CLINICA, _manoel(c)["id"], _tipo(c, "Consulta")["id"], SEG, 1, AGORA)
+        assert livres and all(ca.local(x["inicio"]).hour < 12 for x in livres)    # a manhã segue aberta
+        # o segundo clique não cancela de novo nem duplica o bloqueio
+        assert "não atende" in ca.cancelar_passagem(c, CLINICA, _manoel(c)["id"], SEG, bacabal, 51, agora=AGORA)[1]
+        assert c.execute("select count(*) from clinica_bloqueios where conta_id=%s", (CLINICA,)).fetchone()[0] == 1
+        assert [e["id"] for e in ca.desmarcados_pela_clinica(c, CLINICA, _manoel(c)["id"], SEG)] == [tarde]
+
+
+def test_saiu_sem_ser_atendido_volta_pro_follow_up(pool):
+    with pool.connection() as c:
+        eid, _ = _marcar(c)
+        assert "chegou" in ca.saiu_sem_atendimento(c, CLINICA, eid, 51)
+        assert ca.mudar_situacao(c, CLINICA, eid, "presente") is None
+        assert _status(c, eid)[0] == "consulta"
+        assert ca.saiu_sem_atendimento(c, CLINICA, eid, 51) is None
+        ev = ca.evento(c, CLINICA, eid)
+        assert (ev["situacao"], ev["desmarcou"]) == ("cancelou", "saiu")
+        assert _status(c, eid)[0] == "follow_up"
+
+
+def test_telas_da_2c(cli, pool):
+    seg = _proxima_segunda()
+    with pool.connection() as c:
+        teste, erro = ca.agendar(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, "Testes alérgicos")["id"],
+                                 inicio=ca.utc(seg, time(9)), nome="Ana", fone="99 97777-0074")
+        assert erro is None
+        _ate_atendimento(c, teste)
+        c.commit()
+    html = cli.get(f"/painel/clinica/agenda/evento/{teste}").text
+    assert "Atendimento de um toque" in html and "O médico propôs tratamento?" not in html and "Saiu sem ser atendido" in html
+    assert "Cancelar a passagem" in cli.get(f"/painel/clinica/agenda?data={seg.isoformat()}").text
+    with pool.connection() as c:
+        outro, _ = ca.agendar(c, CLINICA, profissional_id=_manoel(c)["id"], servico_id=_tipo(c, "Consulta")["id"],
+                              inicio=ca.utc(seg, time(10)), nome="Bia", fone="99 97777-0075")
+        local = ca.evento(c, CLINICA, outro)["local_id"]
+        c.commit()
+    r = cli.post("/painel/clinica/agenda/passagem/cancelar",
+                 data={"prof": str(_mid(pool)), "data": seg.isoformat(), "local": str(local or ""), "confirma": "sim"})
+    assert r.headers["location"].startswith("/painel/clinica/agenda/passagem/cancelada")
+    pag = cli.get(r.headers["location"]).text
+    assert "Bia" in pag and "Mandar esta" in pag
+    assert "Bia" in cli.get(r.headers["location"]).text             # a lista vem do banco: recarregar não perde
+    assert "Mandar a mensagem de remarcar" in cli.get(f"/painel/clinica/agenda/evento/{outro}").text
+
+
+def _mid(pool):
+    with pool.connection() as c:
+        return _manoel(c)["id"]

@@ -173,3 +173,13 @@ def _avisos_da_equipe_o_dia_todo(monkeypatch):
     dela (`tests/test_aviso_noite.py`), que fecham a janela de propósito."""
     from finance import aviso_noite
     monkeypatch.setattr(aviso_noite, "HORAS", (0, 24))
+
+
+@pytest.fixture(autouse=True)
+def _simula_virada(monkeypatch):
+    """`SIMULA_VIRADA=1 pytest`: a suíte inteira como se fosse 21h–24h de Brasília
+    (ver tests/relogio_fixo.py). Desligado, não faz nada."""
+    if os.environ.get("SIMULA_VIRADA") == "1":
+        from tests.relogio_fixo import simular_virada
+        simular_virada(monkeypatch)
+    yield

@@ -58,7 +58,9 @@ from __future__ import annotations
 import json
 import logging
 import secrets
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
+
+from finance import relogio
 
 _log = logging.getLogger("finance.aditivo")
 
@@ -282,7 +284,7 @@ def conferir_data(pool, conta_id: int, contrato_id: int, nova_data,
 
     # 7.1 — antecedência mínima, contada da data ORIGINALMENTE contratada
     if velha:
-        faltam = (velha - date.today()).days
+        faltam = (velha - relogio.hoje()).days
         avisos.append({
             "regra": "7.1",
             "ok": faltam >= dias_min,
@@ -897,7 +899,7 @@ def aplicar(pool, aditivo: dict) -> dict:
     if a_pagar > 0 and not aditivo.get("titulo_id"):
         try:
             from finance import empresa as emp
-            venc = aditivo.get("vencimento") or (date.today() + timedelta(days=30))
+            venc = aditivo.get("vencimento") or (relogio.hoje() + timedelta(days=30))
             if isinstance(venc, datetime):
                 venc = venc.date()
             desc = (f"{ordinal(aditivo['ordem'])} aditivo ao contrato "

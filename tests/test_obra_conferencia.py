@@ -198,3 +198,106 @@ def test_tela_confere_e_avisa(pool, conta, monkeypatch):
     assert "com diferença" in html and "Fornecedores" in html and "Nenhuma nota pra conferir" in html
     r = c.post(f"/painel/obras/deposito/conferir/{lid}", data={"mov_id": [str(mov)], "chegou": ["58"]})
     assert "erro=" in r.headers["location"]                              # já conferida
+
+
+# ── os achados da verificação independente do #1001 ──────────────────────
+def test_conferir_pra_menos_nao_deixa_o_cd_negativo(pool, conta):
+    lid = _nota(pool, conta, [("TIJOLO 8 FUROS", 1000, "un")], fornecedor="Olaria")
+    p = omat.achar_produto(pool, conta, "tijolo")
+    o = ob.criar_obra(pool, conta, "Casa Tijolo", "casa")
+    omat.mover(pool, conta, acao="levei", produto_id=p["id"], quantidade=600, obra_id=o["id"])
+    mov = conf.pendentes(pool, conta)[0]["itens"][0]["mov_id"]
+    with pytest.raises(ValueError, match="só tem 400"):
+        conf.conferir(pool, conta, lid, chegou={mov: "500"})            # tiraria 500 de 400
+    assert _cd(pool, conta, "tijolo") == 400 and conf.pendentes(pool, conta)   # nada gravado
+    conf.conferir(pool, conta, lid, chegou={mov: "700"})                 # tira 300 dos 400
+    assert _cd(pool, conta, "tijolo") == 100
+
+
+def test_nota_que_ja_foi_pras_obras_nao_confere_pra_menos(pool, conta):
+    # 10 dos 60 sacos foram pra Casa X; a nota vai pra Casa Y (os 50 livres, por
+    # transferência — a entrada fica no CD). Conferir 58 deixaria o CD em -2.
+    lid = _nota(pool, conta, [("CIMENTO CP II 50KG", 60, "sc")])
+    p = omat.achar_produto(pool, conta, "cimento cp ii")
+    x = ob.criar_obra(pool, conta, "Casa X", "casa")
+    y = ob.criar_obra(pool, conta, "Casa Y", "casa")
+    omat.mover(pool, conta, acao="levei", produto_id=p["id"], quantidade=10, obra_id=x["id"])
+    ob.por_na_obra(pool, conta, lid, y["id"])
+    assert omat.saldo_local(pool, conta, p["id"], y["id"]) == 50 and _cd(pool, conta, "cimento cp ii") == 0
+    mov = conf.pendentes(pool, conta)[0]["itens"][0]["mov_id"]
+    with pytest.raises(ValueError, match="já saiu"):
+        conf.conferir(pool, conta, lid, chegou={mov: "58"})
+    assert _cd(pool, conta, "cimento cp ii") == 0
+
+
+def test_nota_em_lotes_o_lote_novo_volta_pra_conferir_na_mesma_conferencia(pool, conta):
+    lid = _nota(pool, conta, [("CIMENTO CP II 50KG", 60, "sc")])
+    conf.conferir(pool, conta, lid)
+    assert conf.pendentes(pool, conta) == []
+    with pool.connection() as c:                       # a página 2 da nota, anexada depois
+        c.execute("""insert into itens_lancamento (lancamento_id, descricao, quantidade,
+                         valor_unitario_centavos, valor_total_centavos, unidade)
+                     values (%s,'AREIA MEDIA',6,9000,0,'m3')""", (lid,))
+        c.commit()
+    omat.absorver_lancamento(pool, conta, lid)
+    pend = conf.pendentes(pool, conta)
+    assert [n["lancamento_id"] for n in pend] == [lid] and len(pend[0]["itens"]) == 1
+    assert "AREIA" in pend[0]["itens"][0]["nome"].upper()
+    r = conf.conferir(pool, conta, lid, chegou={pend[0]["itens"][0]["mov_id"]: "5"})
+    assert r["divergente"] and _cd(pool, conta, "areia") == 5
+    x = conf.conferidas(pool, conta)
+    assert len(x) == 1 and x[0]["divergente"] and len(x[0]["difs"]) == 1    # a mesma conferência
+    conf.desfazer(pool, conta, x[0]["id"])                                 # os dois lotes voltam
+    assert len(conf.pendentes(pool, conta)[0]["itens"]) == 2 and _cd(pool, conta, "areia") == 6
+
+
+def test_desfazer_recusa_quando_a_nota_ja_foi_pra_obra(pool, conta):
+    lid = _nota(pool, conta, [("CIMENTO CP II 50KG", 60, "sc")])
+    mov = conf.pendentes(pool, conta)[0]["itens"][0]["mov_id"]
+    conf.conferir(pool, conta, lid, chegou={mov: "58"})
+    o = ob.criar_obra(pool, conta, "Casa D", "casa")
+    ob.por_na_obra(pool, conta, lid, o["id"])                 # a entrada inteira muda de lugar
+    x = conf.conferidas(pool, conta)[0]
+    assert x["pode_desfazer"] is False
+    with pytest.raises(ValueError, match="foi pra uma obra"):
+        conf.desfazer(pool, conta, x["id"])
+    p = omat.achar_produto(pool, conta, "cimento cp ii")
+    assert omat.saldo_local(pool, conta, p["id"], o["id"]) == 58          # a obra intacta
+
+
+def test_desfazer_nao_deixa_o_cd_negativo(pool, conta):
+    lid = _nota(pool, conta, [("CIMENTO CP II 50KG", 60, "sc")])
+    mov = conf.pendentes(pool, conta)[0]["itens"][0]["mov_id"]
+    conf.conferir(pool, conta, lid, chegou={mov: "65"})                  # veio a mais
+    p = omat.achar_produto(pool, conta, "cimento cp ii")
+    o = ob.criar_obra(pool, conta, "Casa K", "casa")
+    omat.mover(pool, conta, acao="levei", produto_id=p["id"], quantidade=65, obra_id=o["id"])
+    with pytest.raises(ValueError, match="já saiu do CD"):
+        conf.desfazer(pool, conta, conf.conferidas(pool, conta)[0]["id"])
+    assert _cd(pool, conta, "cimento cp ii") == 0
+
+
+def test_quantidade_como_se_digita_no_brasil(pool, conta):
+    assert omat.quantidade_br("1.000") == 1000 and omat.quantidade_br("1,5") == Decimal("1.5")
+    assert omat.quantidade_br("1.250,5") == Decimal("1250.5") and omat.quantidade_br("1.5") == Decimal("1.5")
+    assert omat.quantidade_br("0.500") == Decimal("0.5") and omat.quantidade_br("10.0004") == 10
+    for ruim in ("nan", "snan", "inf", "-inf", "1e12", "99999999999", "", "trinta", "-1"):
+        with pytest.raises(ValueError):
+            omat.quantidade_br(ruim)
+    lid = _nota(pool, conta, [("TIJOLO 8 FUROS", 1000, "un"), ("CONCRETO USINADO", Decimal("1.125"), "m3")])
+    itens = {("tijolo" if "TIJOLO" in i["nome"].upper() else "concreto"): i
+             for i in conf.pendentes(pool, conta)[0]["itens"]}
+    assert itens["concreto"]["valor_campo"] == "1,125" and itens["tijolo"]["valor_campo"] == "1000"
+    r = conf.conferir(pool, conta, lid, chegou={itens["tijolo"]["mov_id"]: "1.000",
+                                                itens["concreto"]["mov_id"]: itens["concreto"]["valor_campo"]})
+    assert not r["divergente"]                  # "1.000" é mil; o campo como veio bate
+
+
+def test_tela_quantidade_estranha_vira_aviso_e_nao_erro_500(pool, conta, monkeypatch):
+    lid = _nota(pool, conta, [("CIMENTO CP II 50KG", 60, "sc")])
+    c = _painel(pool, conta, monkeypatch)
+    mov = conf.pendentes(pool, conta)[0]["itens"][0]["mov_id"]
+    for ruim in ("nan", "inf", "1e12"):
+        r = c.post(f"/painel/obras/deposito/conferir/{lid}", data={"mov_id": [str(mov)], "chegou": [ruim]})
+        assert r.status_code == 303 and "erro=" in r.headers["location"]
+    assert conf.pendentes(pool, conta)

@@ -372,7 +372,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 <div class="dp-rolo"><table class="dp-tab">
 {% for x in conferidas %}<tr><td>{{ x.quando.strftime('%d/%m %H:%M') }}</td><td><b>{{ x.fornecedor|e }}</b>{% if x.difs %}<div class="dp-mut">{{ x.difs|join(' · ')|e }}</div>{% endif %}</td>
   <td>{% if x.divergente %}<span class="dp-chip a">com diferença</span>{% else %}<span class="dp-chip v">bateu</span>{% endif %} <span class="dp-mut">· {{ x.quem|e }}</span></td>
-  <td class="v"><form method="post" action="/painel/obras/deposito/conferencia/{{ x.id }}/desfazer" onsubmit="return confirm('Desfazer esta conferência? A nota volta pra conferir.')"><button class="dp-bt">desfazer</button></form></td></tr>{% endfor %}
+  <td class="v">{% if x.pode_desfazer %}<form method="post" action="/painel/obras/deposito/conferencia/{{ x.id }}/desfazer" onsubmit="return confirm('Desfazer esta conferência? A nota volta pra conferir.')"><button class="dp-bt">desfazer</button></form>{% else %}<span class="dp-mut">foi pra obra</span>{% endif %}</td></tr>{% endfor %}
 </table></div>{% endif %}
 
 <h3 style="margin:1.2rem 0 .4rem;font-size:1rem">Tudo que entrou no CD</h3>

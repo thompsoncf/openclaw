@@ -8,7 +8,10 @@
 --   obra_conferencias        uma por nota (lançamento) conferida: quem, quando, se
 --                            teve divergência, e o fornecedor (o texto da nota)
 --   obra_conferencia_itens   cada item: a quantidade da nota e a que chegou, e o
---                            movimento de entrada que foi corrigido
+--                            movimento de entrada que foi corrigido — UM por
+--                            entrada (índice único): a nota lida em lotes confere
+--                            o lote novo na mesma conferência, e a corrida de duas
+--                            conferências para no índice
 --
 -- O CD FICA COM O QUE CHEGOU: a conferência corrige a quantidade da própria
 -- entrada no estoque_mov (e guarda a da nota aqui) — assim, se a nota mudar de
@@ -48,6 +51,7 @@ create table if not exists public.obra_conferencia_itens (
   chegou_qtd       numeric(12,3) not null
 );
 create index if not exists idx_obra_conferencia_itens on public.obra_conferencia_itens (conferencia_id);
+create unique index if not exists uq_obra_conferencia_itens_mov on public.obra_conferencia_itens (mov_id);
 end $$;
 
 -- rollback:

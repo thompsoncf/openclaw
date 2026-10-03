@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from contas import equipe as eq
 from db.conexao import get_pool
+from finance import obra_conferencia as conf
 from finance import obra_ferramentas as fer
 from finance import obra_pedidos as op
 from finance import obras as ob
@@ -86,6 +87,9 @@ def deposito(request: Request):
                    rotulo_mat=_rotulo_mat(),
                    sobras=op.sobras(pool, conta[0]) if aba in ("geral", "sobras") else [],
                    entradas=op.entradas(pool, conta[0]) if aba == "entradas" else [],
+                   a_conferir=conf.pendentes(pool, conta[0]) if aba in ("geral", "entradas") else [],
+                   conferidas=conf.conferidas(pool, conta[0]) if aba == "entradas" else [],
+                   divergencias=conf.divergencias(pool, conta[0]) if aba == "entradas" else [],
                    ferramentas=ferramentas, rf=fer.resumo(ferramentas), obras_abertas=obras_abertas,
                    ferr_prontas=[f for f in ferramentas if f["obra_pronta"]],
                    ok=(request.query_params.get("ok") or "").strip(),
@@ -173,6 +177,37 @@ def ferramenta_acao(request: Request, ferramenta_id: int, acao: str, obra_id: st
     except ValueError as e:
         return _volta("ferramentas", erro=str(e))
     return _volta("ferramentas", ok=msg)
+
+
+# ── a conferência da nota (PR 3a do CD) ───────────────────────────────────
+@router.post(_BASE + "/conferir/{lancamento_id}")
+def conferir(request: Request, lancamento_id: int, mov_id: list[int] = Form([]),
+             chegou: list[str] = Form([])):
+    """Bateu (as quantidades como vieram) ou o que chegou de verdade. `def`
+    síncrono com listas paralelas no Form (banco síncrono não entra em async)."""
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, _ = ac
+    try:
+        r = conf.conferir(get_pool(), conta[0], lancamento_id, chegou=dict(zip(mov_id, chegou)),
+                          por=request.session.get("membro_id"))
+    except ValueError as e:
+        return _volta("entradas", erro=str(e))
+    return _volta("entradas", ok=r["frase"])
+
+
+@router.post(_BASE + "/conferencia/{conferencia_id}/desfazer")
+def conferencia_desfazer(request: Request, conferencia_id: int):
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, _ = ac
+    try:
+        msg = conf.desfazer(get_pool(), conta[0], conferencia_id)
+    except ValueError as e:
+        return _volta("entradas", erro=str(e))
+    return _volta("entradas", ok=msg)
 
 
 @router.post(_BASE + "/minimo")
@@ -281,7 +316,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     {% for r in v.abaixo %}<tr><td>🟠 <b>{{ r.nome|e }}</b> abaixo do mínimo</td><td class="v"><a class="dp-bt" href="?aba=estoque">Ver</a></td></tr>{% endfor %}
     {% for s in sobras %}<tr><td>🏁 <b>{{ s.obra|e }}</b> está pronta com material</td><td class="v"><a class="dp-bt" href="?aba=sobras">Ver</a></td></tr>{% endfor %}
     {% for f in rf.alertas %}<tr><td>🔧 <b>{{ f.nome|e }}</b> ({{ f.codigo|e }}) na {{ f.obra|e }} — {{ f.alerta|e }}</td><td class="v"><a class="dp-bt" href="?aba=ferramentas">Ver</a></td></tr>{% endfor %}
-    {% if not (v.pedidos|selectattr('status', 'equalto', 'pedido')|list or v.abaixo or sobras or rf.alertas) %}<tr><td class="dp-mut">Nada pendente. ✅</td></tr>{% endif %}
+    {% if a_conferir %}<tr><td>🧾 <b>{{ a_conferir|length }} nota{{ 's' if a_conferir|length != 1 }}</b> que chegou no CD falta conferir</td><td class="v"><a class="dp-bt" href="?aba=entradas">Conferir</a></td></tr>{% endif %}
+    {% if not (v.pedidos|selectattr('status', 'equalto', 'pedido')|list or v.abaixo or sobras or rf.alertas or a_conferir) %}<tr><td class="dp-mut">Nada pendente. ✅</td></tr>{% endif %}
     </table></div>
   <div class="dp-box"><b>Quanto dura o que tem no CD</b>
     <div class="dp-mut">Pelo que saiu nas últimas 4 semanas.</div>
@@ -315,7 +351,32 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 <p class="dp-mut" style="margin-top:.6rem"><b>Cobertura</b> = o que tem no CD ÷ o que sai por dia (média do último mês).{% if ve_dinheiro %} <b>Valor</b> pelo último preço de nota de cada material.{% endif %}</p>
 
 {% elif aba == 'entradas' %}
-<p class="dp-mut">O que entrou no CD: a nota de material sem obra, o “chegou sem nota” e a sobra que voltou das casas. A conferência contra a nota vem no próximo passo.</p>
+<h3 style="margin:.2rem 0 .4rem;font-size:1rem">🧾 Falta conferir{% if a_conferir %} · {{ a_conferir|length }}{% endif %}</h3>
+<p class="dp-mut">Confira a nota contra o que desceu do caminhão. Bateu? Toque em “Conferir” do jeito que está. Não bateu? Corrija a quantidade que chegou — o CD fica com o que chegou de verdade, e a diferença fica contra o fornecedor.</p>
+{% for n in a_conferir %}<form method="post" action="/painel/obras/deposito/conferir/{{ n.lancamento_id }}" class="dp-box">
+  <div style="display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap"><b>{{ n.fornecedor|e }}</b><span class="dp-mut">nota de {{ n.data.strftime('%d/%m') }}</span></div>
+  <table class="dp-tab" style="margin:.4rem 0"><tr><th>Material</th><th class="v">A nota diz</th><th class="v">Chegou</th></tr>
+  {% for i in n.itens %}<tr><td>{{ i.nome|e }}</td><td class="v">{{ i.rotulo|e }}</td>
+    <td class="v"><input type="hidden" name="mov_id" value="{{ i.mov_id }}"><input name="chegou" value="{{ i.valor_campo }}" inputmode="decimal" style="max-width:5.5rem;text-align:right"></td></tr>{% endfor %}
+  </table>
+  <button class="dp-bt prim">✓ Conferir</button>
+</form>{% endfor %}
+{% if not a_conferir %}<div class="dp-box dp-mut">Nenhuma nota pra conferir. ✅</div>{% endif %}
+
+{% if divergencias %}<h3 style="margin:1.2rem 0 .4rem;font-size:1rem">Fornecedores · últimos 30 dias</h3>
+<div class="dp-rolo"><table class="dp-tab"><tr><th>Fornecedor</th><th class="v">Notas conferidas</th><th class="v">Com diferença</th></tr>
+{% for d in divergencias %}<tr{% if d.com_diferenca %} class="alerta"{% endif %}><td>{{ d.fornecedor|e }}</td><td class="v">{{ d.notas }}</td><td class="v">{% if d.com_diferenca %}<span class="dp-chip a">{{ d.com_diferenca }}</span>{% else %}0{% endif %}</td></tr>{% endfor %}
+</table></div>{% endif %}
+
+{% if conferidas %}<h3 style="margin:1.2rem 0 .4rem;font-size:1rem">Conferidas</h3>
+<div class="dp-rolo"><table class="dp-tab">
+{% for x in conferidas %}<tr><td>{{ x.quando.strftime('%d/%m %H:%M') }}</td><td><b>{{ x.fornecedor|e }}</b>{% if x.difs %}<div class="dp-mut">{{ x.difs|join(' · ')|e }}</div>{% endif %}</td>
+  <td>{% if x.divergente %}<span class="dp-chip a">com diferença</span>{% else %}<span class="dp-chip v">bateu</span>{% endif %} <span class="dp-mut">· {{ x.quem|e }}</span></td>
+  <td class="v"><form method="post" action="/painel/obras/deposito/conferencia/{{ x.id }}/desfazer" onsubmit="return confirm('Desfazer esta conferência? A nota volta pra conferir.')"><button class="dp-bt">desfazer</button></form></td></tr>{% endfor %}
+</table></div>{% endif %}
+
+<h3 style="margin:1.2rem 0 .4rem;font-size:1rem">Tudo que entrou no CD</h3>
+<p class="dp-mut">A nota de material sem obra, o “chegou sem nota” e a sobra que voltou das casas.</p>
 <div class="dp-rolo"><table class="dp-tab"><tr><th>Quando</th><th>Material</th><th class="v">Quantidade</th><th>De onde</th></tr>
 {% for e in entradas %}<tr><td>{{ e.quando.strftime('%d/%m %H:%M') }}</td><td>{{ e.nome|e }}</td><td class="v">{{ e.rotulo|e }}</td><td class="dp-mut">{{ e.origem|e }}</td></tr>{% endfor %}
 {% if not entradas %}<tr><td colspan="4" class="dp-mut">Nada entrou no CD ainda.</td></tr>{% endif %}

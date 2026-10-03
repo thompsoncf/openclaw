@@ -10,7 +10,7 @@ import glob
 import pytest
 from psycopg_pool import ConnectionPool
 
-from db.aplicar_migracoes import aplicar_migracoes
+from db.aplicar_migracoes import aplicar_migracoes, ordem
 
 # tabelas base mínimas que as migrações 088/089 referenciam (FKs)
 _BASE_SQL = """
@@ -148,8 +148,8 @@ create table schema_migrations (id serial primary key, nome text unique not null
 
 def _pendentes_a_partir_de(corte: str) -> list[str]:
     """Nomes das migrações >= corte (as que ficam pendentes após o baseline)."""
-    nomes = sorted(os.path.basename(f) for f in glob.glob("db/migracoes/*.sql"))
-    return [n for n in nomes if n >= corte]
+    nomes = sorted((os.path.basename(f) for f in glob.glob("db/migracoes/*.sql")), key=ordem)
+    return [n for n in nomes if ordem(n)[0] >= int(corte)]
 
 
 @pytest.fixture()
@@ -174,8 +174,8 @@ def pool():
 
 def _baseline_ate_087(pool):
     """Marca todas as migrações < 088 como já aplicadas (como no prod real)."""
-    nomes = sorted(os.path.basename(f) for f in glob.glob("db/migracoes/*.sql"))
-    antigas = [n for n in nomes if n < "088"]
+    nomes = sorted((os.path.basename(f) for f in glob.glob("db/migracoes/*.sql")), key=ordem)
+    antigas = [n for n in nomes if ordem(n)[0] < 88]
     with pool.connection() as c:
         for n in antigas:
             c.execute("insert into schema_migrations(nome) values(%s) on conflict do nothing", (n,))

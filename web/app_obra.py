@@ -226,13 +226,19 @@ def inicio(request: Request):
     conta, papel, membro_id = ac
     pool = get_pool()
     obras = _com_lote(pool, conta[0], oc.obras_do(pool, conta[0], papel, membro_id))
+    try:
+        from finance import obra_pedidos as op
+        a_caminho = {p["obra_id"] for p in op.pedidos(pool, conta[0]) if p["status"] == "saiu"}
+    except Exception:  # noqa: BLE001
+        a_caminho = set()
     if not obras:
         corpo = ("<div class=card><div class=nm>Nenhuma obra sua ainda</div>"
                  "<p class=mut>Peça pro dono escolher você como mestre na ficha da casa "
                  "(Obras › a casa › Dados da obra › Mestre de obras).</p></div>")
     else:
         corpo = "".join(
-            f"<a class=card href='{_BASE}/{o['id']}'><div class=nm>{esc(_rot(o))}</div>"
+            f"<a class=card href='{_BASE}/{o['id']}'><div class=nm>{esc(_rot(o))}"
+            f"{' <span class=mut>🚚 chegou do CD?</span>' if o['id'] in a_caminho else ''}</div>"
             f"<div class=bar><i style='width:{o['pct']}%'></i></div>"
             f"<div class=mut>{o['pct']}% · "
             f"{('próxima: ' + esc(o['proxima_etapa'].lower())) if o.get('proxima_etapa') else 'todas as etapas feitas'}"
@@ -290,11 +296,14 @@ def obra(request: Request, obra_id: int):
               f"<a class=gesto href='#foto'><span class=ic>📷</span>Foto da etapa<small>a prova do que ficou pronto</small></a>"
               f"<a class=gesto href='#etapa'><span class=ic>✅</span>Marcar etapa<small>{len(pendentes)} faltando</small></a>"
               f"<a class=gesto href='#material'><span class=ic>🧱</span>Material<small>usei · levei · chegou</small></a>"
+              f"<a class=gesto href='#pedir'><span class=ic>📦</span>Pedir ao CD<small>o depósito separa e manda</small></a>"
               + (f"<a class=gesto href='{_BASE}/quadra/{o['grupo_id']}'><span class=ic>🗺️</span>Quadro da quadra<small>as casas lado a lado</small></a>"
                  if o.get("grupo_id") else
                  "<a class=gesto href='/obra'><span class=ic>🏗️</span>Minhas obras<small>voltar pra lista</small></a>")
               + "</div>")
-    corpo = (f"<div class=card><div class=nm>{esc(_rot(o))}</div>"
+    cd_topo, cd_pedir = _blocos_do_cd(pool, conta[0], o)
+    corpo = (cd_topo +
+             f"<div class=card><div class=nm>{esc(_rot(o))}</div>"
              f"<div class=bar><i style='width:{o['pct']}%'></i></div>"
              f"<div class=mut>{o['pct']}% · {len(feitas)} de {len(o['etapas'])} etapas</div></div>"
              + gestos +
@@ -325,7 +334,8 @@ def obra(request: Request, obra_id: int):
              f"<button class=bt>Apontar</button>"
              f"<p class=mut style='margin:.6rem 0 0'>A nota fotografada já entra sozinha — aqui é o que você usou, "
              f"o que trouxe do depósito ou o que chegou sem nota.</p></form>"
-             + (f"<div class=card><div class=mut style='margin-bottom:.3rem'>NA OBRA AGORA</div>{saldo}</div>" if saldo else ""))
+             + (f"<div class=card><div class=mut style='margin-bottom:.3rem'>NA OBRA AGORA</div>{saldo}</div>" if saldo else "")
+             + cd_pedir)
     feitos = [f for f in oc.recentes(pool, conta[0], membro_id=membro_id if papel == "mestre" else None,
                                      limite=30) if f["obra_id"] == obra_id][:8]
     if feitos:
@@ -364,6 +374,129 @@ def guardar_foto(request: Request, obra_id: int, foto: UploadFile = File(...), e
     except ValueError as e:
         return _volta(f"/obra/{obra_id}#foto", erro=str(e))
     return _volta(f"/obra/{obra_id}", ok=r["frase"])
+
+
+# ── o CD (docs/mockups/obras_cd_almoxarifado.html, PR 1) ──────────────────
+_PRAZOS = (("amanha", "amanhã cedo"), ("semana", "essa semana"), ("", "sem pressa"))
+
+
+def _blocos_do_cd(pool, conta_id: int, o: dict) -> tuple[str, str]:
+    """(topo, pedir): no topo, os pedidos abertos desta obra — com o "recebi"
+    e a foto — e a sobra da casa pronta; embaixo, o formulário de pedir."""
+    try:
+        from finance import obra_material as om
+        from finance import obra_pedidos as op
+        abertos = [p for p in op.pedidos(pool, conta_id, obra_ids={o["id"]})
+                   if p["status"] in ("pedido", "separando", "saiu")]
+        no_cd = [r for r in om.deposito(pool, conta_id) if r["saldo"] > 0]
+        saldo_obra = [r for r in om.quadro_da_obra(pool, conta_id, o["id"]) if r["saldo"] > 0]
+    except Exception:  # noqa: BLE001 — sem a 670
+        return "", ""
+    topo = ""
+    for p in abertos:
+        tit = ("🚚 Chegou do CD?" if p["status"] == "saiu"
+               else f"📦 Pedido ao CD · {op.ROTULO[p['status']].split(' ', 1)[1].lower()}")
+        linhas = "".join(
+            f"<div class=linha style='display:flex;justify-content:space-between;align-items:center;gap:.5rem;"
+            f"padding:.35rem 0;border-bottom:1px solid var(--borda)'><span>{esc(i['nome'])}</span>"
+            f"<input type=hidden name=item_id value='{i['id']}'>"
+            f"<input name=qtd value='{esc(format(i['qtd'].normalize(), 'f'))}' inputmode=decimal "
+            f"style='width:5.5rem;text-align:right'></div>" for i in p["itens"])
+        topo += (f"<form method=post action='{_BASE}/{o['id']}/pedido/{p['id']}/recebi' "
+                 f"enctype='multipart/form-data' class=card style='border-color:var(--verde2)'>"
+                 f"<div class=nm>{tit}</div><div class=mut>Confira e corrija o que veio a menos.</div>"
+                 f"{linhas}<label>Foto do material descarregado</label>"
+                 f"<input type=file name=foto accept='image/*' capture=environment>"
+                 f"<button class=bt>✓ Recebi</button></form>")
+    pronta = o["pct"] == 100 or o["status"] in ("pronta", "vendida", "entregue")
+    if pronta and saldo_obra:
+        lista = " · ".join(f"{om.rotulo(r['saldo'], r['unidade'])} de {esc(r['nome'])}" for r in saldo_obra)
+        topo += (f"<form method=post action='{_BASE}/{o['id']}/devolver' class=card style='border-color:var(--verde2)'>"
+                 f"<div class=nm>🏁 A casa ficou pronta</div>"
+                 f"<div class=mut>Ainda tem material dela aqui: {lista}. Volta pro CD?</div>"
+                 f"<button class=bt>Devolver ao CD</button></form>")
+    opc = "".join('<option value="' + esc(r["nome"]) + '">' for r in no_cd)
+    linhas = "".join(
+        f"<div style='display:flex;gap:.4rem;margin-top:.4rem'>"
+        f"<input name=material list=cdmats placeholder='{'cimento' if n == 0 else 'outro material'}' style='flex:2'>"
+        f"<input name=quantidade inputmode=decimal placeholder='qtd' style='flex:1'></div>" for n in range(3))
+    prazos = "".join(f"<label><input type=radio name=prazo value='{k}'{' checked' if k == 'amanha' else ''}>"
+                     f"<span>{r}</span></label>" for k, r in _PRAZOS)
+    pedir = (f"<h2 id=pedir>📦 Pedir ao CD</h2>"
+             f"<form method=post action='{_BASE}/{o['id']}/pedido' class=card>"
+             f"<label>O que você precisa</label>{linhas}<datalist id=cdmats>{opc}</datalist>"
+             f"<label>Pra quando</label><div class=acoes>{prazos}</div>"
+             f"<label style='display:flex;gap:.5rem;align-items:center;text-transform:none;font-size:.9rem;"
+             f"letter-spacing:0;color:var(--txt)'><input type=checkbox name=urgente value=1 style='width:auto'> é urgente</label>"
+             f"<label>Recado (opcional)</label><input name=recado placeholder='pra laje de amanhã'>"
+             f"<button class=bt>Pedir ao CD</button>"
+             f"<p class=mut style='margin:.6rem 0 0'>O pedido cai no quadro do depósito. Quando chegar, "
+             f"confirme aqui em cima com o \u201crecebi\u201d e a foto.</p></form>")
+    return topo, pedir
+
+
+@router.post("/obra/{obra_id:int}/pedido")
+def pedir(request: Request, obra_id: int, material: list[str] = Form([]),
+          quantidade: list[str] = Form([]), prazo: str = Form(""), urgente: str = Form(""),
+          recado: str = Form("")):
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, papel, membro_id = ac
+    pool = get_pool()
+    if not oc.pode(pool, conta[0], papel, membro_id, obra_id):
+        return _volta("/obra", erro="Essa obra não está com você.")
+    from datetime import timedelta
+    from finance import obra_pedidos as op
+    from finance.relogio import hoje
+    quando = {"amanha": hoje() + timedelta(days=1), "semana": hoje() + timedelta(days=7)}.get(prazo)
+    try:
+        r = op.criar(pool, conta[0], obra_id, itens=list(zip(material, quantidade)),
+                     pedido_por=membro_id, urgente=bool(urgente), prazo=quando, recado=recado)
+    except ValueError as e:
+        return _volta(f"/obra/{obra_id}#pedir", erro=str(e))
+    return _volta(f"/obra/{obra_id}", ok=f"Pedido enviado ao CD ({r['n']} material{'is' if r['n'] != 1 else ''}).")
+
+
+@router.post("/obra/{obra_id:int}/pedido/{pedido_id:int}/recebi")
+def recebi(request: Request, obra_id: int, pedido_id: int, item_id: list[int] = Form([]),
+           qtd: list[str] = Form([]), foto: UploadFile | None = File(None)):
+    """O "recebi": é ele que tira do CD e põe na obra (decisão 4 do dono)."""
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, papel, membro_id = ac
+    pool = get_pool()
+    if not oc.pode(pool, conta[0], papel, membro_id, obra_id):
+        return _volta("/obra", erro="Essa obra não está com você.")
+    from finance import obra_pedidos as op
+    if not any(p["id"] == pedido_id for p in op.pedidos(pool, conta[0], obra_ids={obra_id})):
+        return _volta(f"/obra/{obra_id}", erro="Esse pedido não é desta obra.")
+    dados = foto.file.read() if foto is not None and foto.filename else b""
+    try:
+        r = op.receber(pool, conta[0], pedido_id, recebido_por=membro_id,
+                       quantidades=dict(zip(item_id, qtd)),
+                       foto=(dados, foto.content_type or "") if dados else None)
+    except ValueError as e:
+        return _volta(f"/obra/{obra_id}", erro=str(e))
+    return _volta(f"/obra/{obra_id}", ok=r["frase"])
+
+
+@router.post("/obra/{obra_id:int}/devolver")
+def devolver_sobra(request: Request, obra_id: int):
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, papel, membro_id = ac
+    pool = get_pool()
+    if not oc.pode(pool, conta[0], papel, membro_id, obra_id):
+        return _volta("/obra", erro="Essa obra não está com você.")
+    from finance import obra_pedidos as op
+    try:
+        txt = op.devolver(pool, conta[0], obra_id, membro_id)
+    except ValueError as e:
+        return _volta(f"/obra/{obra_id}", erro=str(e))
+    return _volta(f"/obra/{obra_id}", ok=txt)
 
 
 @router.post("/obra/{obra_id}/material")

@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>O CD das obras — almoxarifado central · mockup</title>
+<style>
+  :root { --verde:#12b886; --verde-claro:#3ee0a6; --vf:#e9faf3; --tinta:#14211c; --cinza:#5b6b64;
+          --linha:#dfe8e3; --ambar:#f2a33a; --af:#fff5e6; --azul:#2b7de9; --azf:#eaf2fd;
+          --coral:#e8590c; --cf:#fdecea; --fundo:#f6f8f7; --escuro:#10201a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--fundo); color:var(--tinta); font:15px/1.5 "Segoe UI","Helvetica Neue",Arial,sans-serif; }
+  .pg { max-width:1060px; margin:0 auto; padding:28px 16px 60px; }
+  h1 { font-size:28px; margin:0 0 6px; letter-spacing:-.4px; }
+  h2 { font-size:20px; margin:36px 0 10px; letter-spacing:-.2px; }
+  h2 .n { display:inline-grid; place-items:center; width:26px; height:26px; border-radius:50%; background:var(--tinta); color:#fff; font-size:13px; margin-right:8px; vertical-align:2px; }
+  h3 { font-size:15px; margin:0 0 6px; }
+  p { margin:0 0 10px; }
+  .mut { color:var(--cinza); }
+  .card { background:#fff; border:1px solid var(--linha); border-radius:12px; padding:16px; }
+  .duas { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .tres { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  @media (max-width:820px){ .duas,.tres{ grid-template-columns:1fr; } }
+  .chip { display:inline-block; padding:1px 9px; border-radius:99px; font-size:12px; font-weight:700; }
+  .chip.v { background:var(--vf); color:#0b7a58; } .chip.a { background:var(--af); color:#9a5b06; }
+  .chip.az { background:var(--azf); color:#1d5fb8; } .chip.c { background:var(--cf); color:#b3410b; }
+  .chip.cz { background:#eef2f0; color:var(--cinza); }
+  .aviso { background:var(--af); border-radius:10px; padding:10px 14px; font-size:14px; }
+  .ok { background:var(--vf); border-radius:10px; padding:10px 14px; font-size:14px; }
+  .decisao { background:#fff; border:1px solid var(--linha); border-left:4px solid var(--ambar); border-radius:10px; padding:12px 14px; margin-bottom:10px; }
+  .decisao .rec { font-size:13.5px; color:#0b7a58; margin-top:4px; }
+  code { background:#eef3f0; padding:1px 5px; border-radius:4px; font-size:13px; }
+  table.t { width:100%; border-collapse:collapse; font-size:13.5px; }
+  table.t th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); border-bottom:2px solid var(--tinta); padding:6px; white-space:nowrap; }
+  table.t td { padding:7px 6px; border-bottom:1px solid var(--linha); vertical-align:middle; }
+  table.t td.v { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  table.t tr.alerta td { background:#fffaf0; }
+  .rolo { overflow-x:auto; }
+
+  /* ===== a tela do painel ===== */
+  .painel { background:#fff; border:1px solid var(--linha); border-radius:14px; overflow:hidden; box-shadow:0 10px 30px -18px rgba(0,0,0,.25); }
+  .pn-topo { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--linha); background:#fbfcfb; flex-wrap:wrap; }
+  .pn-topo b { font-size:17px; }
+  .pn-abas { display:flex; gap:2px; padding:0 10px; border-bottom:1px solid var(--linha); overflow-x:auto; background:#fbfcfb; }
+  .pn-abas button { appearance:none; border:0; background:none; font:inherit; font-size:13.5px; padding:10px 12px; cursor:pointer; color:var(--cinza); border-bottom:3px solid transparent; white-space:nowrap; }
+  .pn-abas button.on { color:var(--tinta); font-weight:700; border-color:var(--verde); }
+  .pn-corpo { padding:16px; }
+  .aba { display:none; } .aba.on { display:block; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
+  .kpi { border:1px solid var(--linha); border-radius:11px; padding:9px 12px; }
+  .kpi .r { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); display:block; }
+  .kpi .v { font-size:21px; font-weight:800; display:block; line-height:1.3; }
+  .kpi .x { font-size:12px; color:var(--cinza); }
+  .kpi.a { background:var(--af); border-color:#f3d39b; } .kpi.c { background:var(--cf); border-color:#f3c3b3; }
+  .bt { display:inline-block; border:1px solid var(--linha); background:#fff; border-radius:8px; padding:4px 10px; font-size:12.5px; cursor:pointer; color:var(--tinta); }
+  .bt.p { background:var(--verde); border-color:var(--verde); color:#fff; font-weight:700; }
+
+  /* o quadro dos pedidos (kanban) */
+  .kanban { display:grid; grid-template-columns:repeat(4,minmax(200px,1fr)); gap:10px; overflow-x:auto; }
+  .col { background:#f3f6f4; border-radius:11px; padding:9px; min-height:180px; }
+  .col h4 { margin:0 0 8px; font-size:12.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); display:flex; justify-content:space-between; }
+  .ped { background:#fff; border:1px solid var(--linha); border-radius:10px; padding:9px 10px; margin-bottom:8px; font-size:13px; }
+  .ped .q { font-weight:700; }
+  .ped ul { margin:5px 0 7px; padding-left:17px; }
+  .ped .rod { display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:12px; color:var(--cinza); }
+  .ped.urg { border-left:4px solid var(--coral); }
+
+  /* o celular */
+  .fones { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  @media (max-width:820px){ .fones{ grid-template-columns:1fr; } }
+  .fone { width:250px; border:10px solid #1b2622; border-radius:26px; background:#0d1714; color:#e6f1ec; overflow:hidden; margin:0 auto; font-size:13px; }
+  .fone .topo { background:#0a120f; padding:9px 12px; border-bottom:1px solid #24403a; font-weight:700; }
+  .fone .corpo { padding:11px; min-height:330px; }
+  .fone .cx { background:#15241f; border:1px solid #24403a; border-radius:11px; padding:9px; margin-bottom:8px; }
+  .fone .rot { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:#8fb0a3; margin:6px 0 3px; }
+  .fone .in { background:#0a120f; border:1px solid #24403a; border-radius:8px; padding:7px 8px; color:#e6f1ec; }
+  .fone .bv { background:#12b886; color:#fff; border-radius:10px; padding:9px; text-align:center; font-weight:700; margin-top:9px; }
+  .fone .bs { border:1px solid #24403a; border-radius:10px; padding:8px; text-align:center; margin-top:7px; color:#cfe9de; }
+  .fone .linha { display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #24403a; }
+  .fone .foto { height:70px; border-radius:9px; background:repeating-linear-gradient(135deg,#1c3a30 0 10px,#173128 10px 20px); display:grid; place-items:center; color:#8fb0a3; font-size:12px; margin-top:6px; }
+  .legenda-fone { text-align:center; font-size:13px; color:var(--cinza); margin-top:8px; }
+
+  .fontes li { font-size:13.5px; margin-bottom:3px; }
+  .fluxo { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:6px 0 2px; }
+  .fluxo span { background:#fff; border:1px solid var(--linha); border-radius:99px; padding:4px 11px; font-size:13px; font-weight:600; }
+  .fluxo i { color:var(--cinza); font-style:normal; }
+</style></head>
+<body><div class="pg">
+
+<h1>O CD das obras <span class="mut" style="font-size:18px">— o almoxarifado central, com aba própria</span></h1>
+<p class="mut">Zaq Construção e Reforma · 03/10/2026 · mockup pra aprovação · exemplo com a Quadra 4 (casas 1 a 6) e o Seu Zé como mestre</p>
+
+<div class="ok"><b>O que já existe e não muda:</b> a nota fotografada vira quantidade (no depósito quando não tem obra), o mestre aponta "usei / levei / chegou", o mínimo avisa, e o dinheiro continua no lançamento. Esta aba organiza o <b>CD</b> — o galpão — como o centro que abastece as obras.</div>
+
+<h2><span class="n">1</span>O que a pesquisa mostrou</h2>
+<div class="tres">
+  <div class="card"><h3>📦 O fluxo de distribuição</h3><p class="mut" style="margin:0;font-size:13.5px">Os sistemas bons tratam a ida do material como um <b>pedido com etapas</b>, não como uma baixa solta: a obra pede → o CD separa → sai (romaneio) → a obra confirma o recebimento com foto → a sobra volta. Cada passo tem dono e hora.</p></div>
+  <div class="card"><h3>🧾 Entrada conferida</h3><p class="mut" style="margin:0;font-size:13.5px">Conferir a nota contra o que desceu do caminhão. "A nota diz 60, chegaram 58" vira uma <b>divergência registrada</b>, com o fornecedor — é onde o material some antes de chegar no estoque.</p></div>
+  <div class="card"><h3>🔧 Ferramenta não é material</h3><p class="mut" style="margin:0;font-size:13.5px">Betoneira, andaime e martelete não se gastam: <b>saem e voltam</b>. O controle é com quem está, em qual obra e desde quando — e o alerta da que ficou parada.</p></div>
+  <div class="card"><h3>🔢 Inventário rotativo + curva ABC</h3><p class="mut" style="margin:0;font-size:13.5px">Em vez de parar o galpão pra contar tudo, conta-se <b>pouco todo dia</b>, começando pelos itens classe A (os ~20% que são ~80% do valor: cimento, ferro, telha). A diferença vira ajuste com motivo.</p></div>
+  <div class="card"><h3>📈 Indicadores que importam</h3><p class="mut" style="margin:0;font-size:13.5px"><b>Acuracidade</b> (o sistema bate com a prateleira?), <b>dias de cobertura</b> (o cimento dura até quando?), giro e perdas. E o <b>dinheiro parado</b> no galpão.</p></div>
+  <div class="card"><h3>📱 Tudo pelo celular</h3><p class="mut" style="margin:0;font-size:13.5px">Quem pede e quem confirma está no canteiro. O pedido e o "recebi" têm que caber em dois toques no app do mestre — que já existe.</p></div>
+</div>
+
+<h2><span class="n">2</span>A aba "Depósito (CD)" no painel</h2>
+<p class="mut">Logo abaixo de Obras e Mapa das obras no menu. Clique nas abas da tela.</p>
+
+<div class="painel">
+  <div class="pn-topo"><b>📦 Depósito (CD)</b><span class="mut" style="font-size:13px">Galpão da PX2 · abastece 6 obras</span>
+    <span style="margin-left:auto" class="bt p">+ Entrada de material</span></div>
+  <div class="pn-abas" id="abas">
+    <button data-a="geral" class="on">Visão geral</button>
+    <button data-a="pedidos">Pedidos das obras <span class="chip c">3</span></button>
+    <button data-a="estoque">Estoque</button>
+    <button data-a="entradas">Entradas</button>
+    <button data-a="saidas">Saídas e romaneio</button>
+    <button data-a="ferramentas">Ferramentas <span class="chip a">1</span></button>
+    <button data-a="inventario">Inventário</button>
+  </div>
+  <div class="pn-corpo">
+
+    <!-- ===== visão geral ===== -->
+    <div class="aba on" id="a-geral">
+      <div class="kpis">
+        <div class="kpi"><span class="r">Itens no CD</span><span class="v">23</span><span class="x">materiais com saldo</span></div>
+        <div class="kpi"><span class="r">Dinheiro parado</span><span class="v">R$ 18.430</span><span class="x">pelo preço da nota</span></div>
+        <div class="kpi c"><span class="r">Pedidos das obras</span><span class="v">3 abertos</span><span class="x">1 urgente</span></div>
+        <div class="kpi a"><span class="r">Abaixo do mínimo</span><span class="v">2</span><span class="x">argamassa · telha</span></div>
+        <div class="kpi"><span class="r">Ferramentas fora</span><span class="v">5 de 9</span><span class="x">1 parada há 12 dias</span></div>
+        <div class="kpi"><span class="r">Acuracidade</span><span class="v">96%</span><span class="x">nas contagens do mês</span></div>
+      </div>
+      <div class="duas">
+        <div class="card" style="padding:12px">
+          <h3>Precisa de você hoje</h3>
+          <table class="t">
+            <tr><td>🔴 <b>Casa 5</b> pediu 20 sacos de cimento — <span class="mut">urgente, pra laje de amanhã</span></td><td class="v"><span class="bt p">Separar</span></td></tr>
+            <tr><td>⚠️ <b>Nota Constrular 12/09</b>: chegaram 58 de 60 sacos</td><td class="v"><span class="bt">Ver</span></td></tr>
+            <tr><td>🟠 <b>Argamassa</b> abaixo do mínimo: 8 de 15 sacos</td><td class="v"><span class="bt">Comprar</span></td></tr>
+            <tr><td>🔧 <b>Betoneira 400 L</b> na Casa 2 há 12 dias — a casa está pronta</td><td class="v"><span class="bt">Recolher</span></td></tr>
+            <tr><td>🔢 Contagem do dia: <b>5 itens</b> classe A</td><td class="v"><span class="bt">Contar</span></td></tr>
+          </table>
+        </div>
+        <div class="card" style="padding:12px">
+          <h3>Quanto dura o que tem no CD</h3>
+          <p class="mut" style="font-size:13px">Pelo consumo das obras nas últimas 4 semanas.</p>
+          <table class="t">
+            <tr><th>Material</th><th class="v" style="text-align:right">No CD</th><th class="v" style="text-align:right">Cobertura</th></tr>
+            <tr class="alerta"><td>Telha cerâmica</td><td class="v">320 un</td><td class="v"><span class="chip c">4 dias</span></td></tr>
+            <tr class="alerta"><td>Argamassa AC-II</td><td class="v">8 sc</td><td class="v"><span class="chip a">6 dias</span></td></tr>
+            <tr><td>Cimento CP-II 50 kg</td><td class="v">50 sc</td><td class="v"><span class="chip v">12 dias</span></td></tr>
+            <tr><td>Areia média</td><td class="v">9 m³</td><td class="v"><span class="chip v">15 dias</span></td></tr>
+            <tr><td>Ferro 8 mm</td><td class="v">40 br</td><td class="v"><span class="chip v">30+ dias</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== pedidos (o fluxo de distribuição) ===== -->
+    <div class="aba" id="a-pedidos">
+      <div class="fluxo"><span>📝 Pedido</span><i>→</i><span>📦 Separando</span><i>→</i><span>🚚 Saiu</span><i>→</i><span>✅ Recebido</span></div>
+      <p class="mut" style="font-size:13px;margin-bottom:12px">O mestre pede pelo app. O CD separa e despacha; quando o mestre confirma "recebi" com a foto, o material entra na obra — e sai do CD. Faltou algo? A diferença fica registrada no pedido.</p>
+      <div class="kanban">
+        <div class="col"><h4>📝 Pedido <span>2</span></h4>
+          <div class="ped urg"><div class="q">Casa 5 · Lote 5</div><ul><li>20 sc cimento CP-II</li><li>2 m³ areia média</li></ul>
+            <div class="rod"><span>Seu Zé · 07:40 · <b style="color:var(--coral)">urgente</b></span><span class="bt p">Separar</span></div></div>
+          <div class="ped"><div class="q">Casa 6 · Lote 6</div><ul><li>30 barras ferro 8 mm</li><li>2 milheiros tijolo</li></ul>
+            <div class="rod"><span>Seu Zé · ontem 16:10</span><span class="bt p">Separar</span></div></div>
+        </div>
+        <div class="col"><h4>📦 Separando <span>1</span></h4>
+          <div class="ped"><div class="q">Casa 3 · Lote 3</div><ul><li>10 sc argamassa <span class="chip a">tem 8</span></li><li>1 lata tinta acrílica</li></ul>
+            <div class="rod"><span>separa: Bruno</span><span class="bt">Pronto p/ sair</span></div></div>
+        </div>
+        <div class="col"><h4>🚚 Saiu <span>1</span></h4>
+          <div class="ped"><div class="q">Casa 4 · Lote 4</div><ul><li>400 telhas</li><li>15 sc cimento</li></ul>
+            <div class="rod"><span>viagem 1 · 09:20 · caminhão do Nego</span><span class="chip az">esperando o "recebi"</span></div></div>
+        </div>
+        <div class="col"><h4>✅ Recebido <span>hoje 2</span></h4>
+          <div class="ped"><div class="q">Casa 1 · Lote 1</div><ul><li>6 m³ areia</li></ul>
+            <div class="rod"><span>Seu Zé · 08:05 · 📷</span><span class="chip v">ok</span></div></div>
+          <div class="ped"><div class="q">Casa 2 · Lote 2</div><ul><li>20 sc cimento <span class="chip c">recebeu 18</span></li></ul>
+            <div class="rod"><span>Seu Zé · 08:30 · 📷</span><span class="chip c">faltaram 2</span></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== estoque ===== -->
+    <div class="aba" id="a-estoque">
+      <div class="rolo"><table class="t">
+        <tr><th>Material</th><th>ABC</th><th>Onde</th><th class="v" style="text-align:right">No CD</th><th class="v" style="text-align:right">Mínimo</th><th class="v" style="text-align:right">Sai por semana</th><th class="v" style="text-align:right">Cobertura</th><th class="v" style="text-align:right">Valor (nota)</th></tr>
+        <tr><td><b>Cimento CP-II 50 kg</b></td><td><span class="chip c">A</span></td><td>Baia 1</td><td class="v">50 sc</td><td class="v">20</td><td class="v">29 sc</td><td class="v"><span class="chip v">12 dias</span></td><td class="v">R$ 1.645</td></tr>
+        <tr class="alerta"><td><b>Telha cerâmica portuguesa</b></td><td><span class="chip c">A</span></td><td>Pátio</td><td class="v">320 un</td><td class="v">800</td><td class="v">560 un</td><td class="v"><span class="chip c">4 dias</span></td><td class="v">R$ 576</td></tr>
+        <tr><td><b>Ferro 8 mm (barra 12 m)</b></td><td><span class="chip c">A</span></td><td>Cavalete</td><td class="v">40 br</td><td class="v">30</td><td class="v">9 br</td><td class="v"><span class="chip v">30+ dias</span></td><td class="v">R$ 1.560</td></tr>
+        <tr><td>Areia média lavada</td><td><span class="chip a">B</span></td><td>Pátio</td><td class="v">9 m³</td><td class="v">4</td><td class="v">4,2 m³</td><td class="v"><span class="chip v">15 dias</span></td><td class="v">R$ 990</td></tr>
+        <tr class="alerta"><td>Argamassa AC-II 20 kg</td><td><span class="chip a">B</span></td><td>Prateleira A2</td><td class="v">8 sc</td><td class="v">15</td><td class="v">9 sc</td><td class="v"><span class="chip a">6 dias</span></td><td class="v">R$ 176</td></tr>
+        <tr><td>Tinta acrílica 18 L</td><td><span class="chip cz">C</span></td><td>Prateleira B1</td><td class="v">6 lt</td><td class="v">2</td><td class="v">1 lt</td><td class="v"><span class="chip v">30+ dias</span></td><td class="v">R$ 1.692</td></tr>
+        <tr><td>Fio 2,5 mm (rolo 100 m)</td><td><span class="chip cz">C</span></td><td>Prateleira C3</td><td class="v">7 rl</td><td class="v">—</td><td class="v">0,5 rl</td><td class="v"><span class="chip v">30+ dias</span></td><td class="v">R$ 1.330</td></tr>
+      </table></div>
+      <p class="mut" style="font-size:12.5px;margin-top:8px"><b>ABC</b> pelo valor que saiu nos últimos 90 dias · <b>Onde</b> é opcional (baia, prateleira) · <b>Cobertura</b> = no CD ÷ o que sai por dia · <b>Valor</b> pelo último preço de nota de cada material — só dono e gestor veem.</p>
+    </div>
+
+    <!-- ===== entradas (conferência) ===== -->
+    <div class="aba" id="a-entradas">
+      <p class="mut" style="font-size:13px">A nota fotografada já entra sozinha. Aqui o CD <b>confere</b> o que desceu do caminhão: bateu, um toque; não bateu, digita quanto chegou.</p>
+      <div class="rolo"><table class="t">
+        <tr><th>Nota</th><th>Fornecedor</th><th>Itens</th><th>Conferência</th><th></th></tr>
+        <tr class="alerta"><td>12/09 · nº 4.512</td><td>Constrular</td><td>60 sc cimento · 400 telhas</td><td><span class="chip c">cimento: chegaram 58 de 60</span></td><td class="v"><span class="bt">Avisar fornecedor</span></td></tr>
+        <tr><td>11/09 · nº 88.120</td><td>Areial São José</td><td>12 m³ areia</td><td><span class="chip v">conferida ✓ · Bruno</span></td><td></td></tr>
+        <tr><td>10/09 · nº 2.301</td><td>Ferro &amp; Aço</td><td>60 barras ferro 8 mm</td><td><span class="chip cz">falta conferir</span></td><td class="v"><span class="bt p">Conferir</span></td></tr>
+      </table></div>
+      <div class="aviso" style="margin-top:10px">A divergência entra no estoque pelo que <b>chegou</b> (58), e o histórico do fornecedor guarda: <i>"Constrular: 2 divergências em 30 dias"</i>.</div>
+    </div>
+
+    <!-- ===== saídas e romaneio ===== -->
+    <div class="aba" id="a-saidas">
+      <p class="mut" style="font-size:13px">Cada viagem do caminhão é um <b>romaneio</b>: o que vai pra cada casa. Imprime ou manda pro motorista pelo WhatsApp.</p>
+      <div class="duas">
+        <div class="card" style="padding:12px"><h3>🚚 Viagem 1 · hoje 09:20 · caminhão do Nego</h3>
+          <table class="t">
+            <tr><td><b>Casa 4</b></td><td>400 telhas · 15 sc cimento</td><td class="v"><span class="chip az">esperando o "recebi"</span></td></tr>
+            <tr><td><b>Casa 1</b></td><td>6 m³ areia</td><td class="v"><span class="chip v">recebido 08:05 📷</span></td></tr>
+          </table>
+          <div style="margin-top:8px"><span class="bt">🖨️ Imprimir romaneio</span> <span class="bt">📲 Mandar pro motorista</span></div>
+        </div>
+        <div class="card" style="padding:12px"><h3>↩️ Voltou pro CD (sobras)</h3>
+          <table class="t">
+            <tr><td><b>Casa 2</b> (pronta)</td><td>4 sc cimento · 120 tijolos</td><td class="v"><span class="chip v">devolvido</span></td></tr>
+            <tr><td><b>Casa 1</b> (pronta)</td><td>1 lata tinta</td><td class="v"><span class="chip v">devolvido</span></td></tr>
+          </table>
+          <p class="mut" style="font-size:12.5px;margin:8px 0 0">Casa pronta com saldo na obra? O Zaq lembra: <i>"a Casa 2 ficou pronta com 4 sacos de cimento lá — volta pro CD?"</i></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== ferramentas ===== -->
+    <div class="aba" id="a-ferramentas">
+      <div class="rolo"><table class="t">
+        <tr><th>Ferramenta / equipamento</th><th>Código</th><th>Onde está</th><th>Com quem</th><th>Desde</th><th></th></tr>
+        <tr class="alerta"><td><b>Betoneira 400 L</b></td><td>FER-01</td><td>Casa 2 <span class="chip v">pronta</span></td><td>Seu Zé</td><td><span class="chip a">12 dias</span></td><td class="v"><span class="bt p">Recolher</span></td></tr>
+        <tr><td>Betoneira 400 L</td><td>FER-02</td><td>Casa 5</td><td>Seu Zé</td><td>3 dias</td><td class="v"><span class="bt">Devolver</span></td></tr>
+        <tr><td>Andaime (10 peças)</td><td>FER-03</td><td>Casa 4</td><td>Seu Zé</td><td>6 dias</td><td class="v"><span class="bt">Devolver</span></td></tr>
+        <tr><td>Martelete rompedor</td><td>FER-04</td><td>CD · Prateleira D1</td><td>—</td><td>—</td><td class="v"><span class="bt">Emprestar</span></td></tr>
+        <tr><td>Serra mármore</td><td>FER-05</td><td>Casa 3</td><td>Bruno (pedreiro)</td><td>1 dia</td><td class="v"><span class="bt">Devolver</span></td></tr>
+        <tr><td>Carrinho de mão (4)</td><td>FER-06</td><td>2 no CD · 2 na Casa 6</td><td>—</td><td>—</td><td class="v"><span class="bt">Emprestar</span></td></tr>
+      </table></div>
+      <p class="mut" style="font-size:12.5px;margin-top:8px">A ferramenta <b>sai e volta</b> — não é baixa de estoque. Alerta quando está em obra pronta, ou parada há mais de 7 dias. O código pode virar etiqueta com QR depois.</p>
+    </div>
+
+    <!-- ===== inventário rotativo ===== -->
+    <div class="aba" id="a-inventario">
+      <div class="duas">
+        <div class="card" style="padding:12px"><h3>🔢 Contagem de hoje (5 itens, classe A primeiro)</h3>
+          <table class="t">
+            <tr><th>Material</th><th class="v" style="text-align:right">Sistema</th><th class="v" style="text-align:right">Contado</th><th class="v" style="text-align:right">Diferença</th></tr>
+            <tr><td>Cimento CP-II</td><td class="v">50</td><td class="v">50</td><td class="v"><span class="chip v">ok</span></td></tr>
+            <tr class="alerta"><td>Telha cerâmica</td><td class="v">320</td><td class="v">306</td><td class="v"><span class="chip c">−14 · quebra</span></td></tr>
+            <tr><td>Ferro 8 mm</td><td class="v">40</td><td class="v">40</td><td class="v"><span class="chip v">ok</span></td></tr>
+            <tr><td>Areia média</td><td class="v">9 m³</td><td class="v">—</td><td class="v"><span class="bt p">Contar</span></td></tr>
+            <tr><td>Argamassa AC-II</td><td class="v">8</td><td class="v">—</td><td class="v"><span class="bt p">Contar</span></td></tr>
+          </table>
+          <p class="mut" style="font-size:12.5px;margin:8px 0 0">Diferença vira <b>ajuste com motivo</b> (quebra, perda, erro de lançamento, furto) — e entra no indicador de perdas.</p>
+        </div>
+        <div class="card" style="padding:12px"><h3>📈 Como o CD está indo</h3>
+          <table class="t">
+            <tr><td>Acuracidade do estoque</td><td class="v"><b>96%</b> <span class="mut">(meta 95%)</span></td></tr>
+            <tr><td>Perdas no mês</td><td class="v"><b>R$ 412</b> <span class="mut">· 14 telhas quebradas</span></td></tr>
+            <tr><td>Divergências de fornecedor</td><td class="v"><b>2</b> <span class="mut">· Constrular</span></td></tr>
+            <tr><td>Pedido → recebido (média)</td><td class="v"><b>5 h</b></td></tr>
+            <tr><td>Giro do cimento</td><td class="v"><b>2,4×</b> no mês</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<h2><span class="n">3</span>O canteiro: o mestre pede, confirma e devolve</h2>
+<p class="mut">No app do mestre, que já existe — dois toques pra cada coisa, sem valor nenhum.</p>
+<div class="fones">
+  <div>
+    <div class="fone"><div class="topo">← Casa 5 · Pedir material</div><div class="corpo">
+      <div class="rot">O que você precisa</div>
+      <div class="cx"><div class="linha"><span>Cimento CP-II</span><b>20 sc</b></div><div class="linha"><span>Areia média</span><b>2 m³</b></div><div style="color:#8fb0a3;padding-top:5px">+ outro material</div></div>
+      <div class="rot">Pra quando</div>
+      <div class="cx" style="display:flex;gap:6px"><span class="in" style="flex:1;text-align:center;background:#12b886;border-color:#12b886">amanhã cedo</span><span class="in" style="flex:1;text-align:center">essa semana</span></div>
+      <div class="rot">Recado (opcional)</div><div class="in">pra laje de amanhã</div>
+      <div class="bv">Pedir ao CD</div>
+    </div></div>
+    <div class="legenda-fone">1 · o pedido cai no quadro do CD</div>
+  </div>
+  <div>
+    <div class="fone"><div class="topo">← Casa 5 · Chegou material</div><div class="corpo">
+      <div class="cx"><b>🚚 Viagem 1 · do CD</b><div class="linha"><span>Cimento CP-II</span><b>20 sc</b></div><div class="linha"><span>Areia média</span><b>2 m³</b></div></div>
+      <div class="foto">📷 foto do material descarregado</div>
+      <div class="bv">✓ Recebi tudo</div>
+      <div class="bs">Faltou ou veio quebrado</div>
+      <p style="color:#8fb0a3;font-size:11.5px;margin:8px 0 0">O "recebi" tira do CD e põe na casa — o mesmo "levei" de hoje, mas com prova.</p>
+    </div></div>
+    <div class="legenda-fone">2 · a prova de entrega fecha o pedido</div>
+  </div>
+  <div>
+    <div class="fone"><div class="topo">← Casa 2 · Devolver sobra</div><div class="corpo">
+      <div class="cx" style="border-color:#3ee0a6"><b>🏁 A Casa 2 ficou pronta</b><p style="color:#8fb0a3;margin:4px 0 0">Ainda tem material dela aqui. Volta pro CD?</p></div>
+      <div class="cx"><div class="linha"><span>Cimento CP-II</span><b>4 sc</b></div><div class="linha"><span>Tijolo 8 furos</span><b>120 un</b></div><div class="linha"><span>🔧 Betoneira FER-01</span><b>1</b></div></div>
+      <div class="bv">Devolver ao CD</div>
+      <div class="bs">Levar pra outra casa</div>
+    </div></div>
+    <div class="legenda-fone">3 · a sobra (e a ferramenta) volta</div>
+  </div>
+</div>
+
+<h2><span class="n">4</span>O que muda por dentro</h2>
+<div class="card"><ul style="margin:0;padding-left:20px;font-size:14px">
+  <li><b>O estoque continua o mesmo</b> (<code>estoque_mov</code>, CD = <code>obra_id</code> vazio). O pedido não inventa estoque novo: o "recebi" grava a mesma transferência pareada do "levei" de hoje, agora presa a um pedido.</li>
+  <li><b>Pedido da obra:</b> tabela <code>obra_pedidos</code> (obra, quem pediu, pra quando, urgência, status pedido → separando → saiu → recebido, quem fez cada passo e a hora) + <code>obra_pedido_itens</code> (pedido × recebido, a diferença).</li>
+  <li><b>Romaneio:</b> a "viagem" agrupa pedidos que saíram juntos (motorista, hora). Texto pronto pra imprimir ou mandar pelo WhatsApp do dono.</li>
+  <li><b>Conferência de entrada:</b> no item da nota absorvido, o "chegou" de verdade; a diferença vira divergência do fornecedor (o CNPJ da nota já vem do leitor).</li>
+  <li><b>Ferramentas:</b> o mesmo catálogo com tipo <code>ferramenta</code> e unidade de patrimônio (código FER-01), mais <code>ferramenta_emprestimo</code> (onde, com quem, desde). Sai e volta — nunca é baixa.</li>
+  <li><b>Inventário rotativo:</b> <code>inventario_contagem</code> (sistema × contado, motivo); a diferença vira <code>ajuste</code> no <code>estoque_mov</code>. ABC e cobertura são calculados, sem cadastro.</li>
+  <li><b>Valor do estoque:</b> pelo último preço unitário da nota (já está em <code>itens_lancamento</code>) — só pra dono e gestor; o app do mestre continua sem dinheiro.</li>
+</ul></div>
+
+<h2><span class="n">5</span>Entrega proposta em 3 PRs</h2>
+<div class="tres">
+  <div class="card"><h3>PR 1 · A aba e o fluxo dos pedidos</h3><p class="mut" style="margin:0;font-size:13.5px">Aba "Depósito (CD)" no menu (visão geral + estoque com cobertura + entradas), <b>pedido pelo app do mestre</b>, quadro Pedido → Separando → Saiu → Recebido, "recebi" com foto, devolução da sobra e o aviso de casa pronta com saldo.</p></div>
+  <div class="card"><h3>PR 2 · Ferramentas</h3><p class="mut" style="margin:0;font-size:13.5px">Cadastro com código, empréstimo e devolução (no painel e no app), "onde está cada uma", alerta da parada e da que ficou em obra pronta.</p></div>
+  <div class="card"><h3>PR 3 · Conferência, inventário e indicadores</h3><p class="mut" style="margin:0;font-size:13.5px">Conferência da nota na entrada (divergência por fornecedor), contagem do dia pela curva ABC, ajuste com motivo, acuracidade, perdas, romaneio impresso e "onde" (baia/prateleira).</p></div>
+</div>
+
+<h2><span class="n">6</span>As decisões pra aprovar</h2>
+<div class="decisao"><b>1. O pedido da obra precisa de aprovação antes de separar?</b>
+  <div class="rec">Recomendo: não — o CD separa direto (como o mestre marca etapa direto). O dono vê tudo no quadro e pode cancelar. Aprovação a cada pedido trava a obra.</div></div>
+<div class="decisao"><b>2. Quem opera o CD?</b> Hoje seria o dono ou o gestor.
+  <div class="rec">Recomendo: um papel novo <b>"Almoxarife"</b> (só a aba do CD, sem caixa nem custo das obras), opcional — na PX2 o dono opera até ter alguém no galpão.</div></div>
+<div class="decisao"><b>3. Mostrar o "dinheiro parado" no CD?</b>
+  <div class="rec">Recomendo: sim, pelo último preço da nota, só pra dono e gestor. É o número que mostra o custo de comprar demais.</div></div>
+<div class="decisao"><b>4. O "recebi" do mestre é obrigatório pra o material entrar na obra?</b>
+  <div class="rec">Recomendo: sim pros pedidos — é a prova de entrega. Mas o "levei" direto de hoje continua valendo pra quem não usa pedido.</div></div>
+<div class="decisao"><b>5. Ferramenta entra no mesmo catálogo de material?</b>
+  <div class="rec">Recomendo: sim, com tipo "ferramenta" e código próprio — um cadastro só, comportamento de empréstimo (sai e volta).</div></div>
+<div class="decisao"><b>6. Um CD ou vários galpões?</b>
+  <div class="rec">Recomendo: manter um CD por empresa (decisão de 02/10). O movimento já sabe o local, então abrir um segundo galpão depois não refaz nada.</div></div>
+
+<h2><span class="n">7</span>Fontes</h2>
+<ul class="fontes">
+  <li><a href="https://sienge.com.br/blog/almoxarifado-pequeno/">Sienge — como organizar o almoxarifado (entrada conferida, requisição, ferramentas, 5S, indicadores)</a></li>
+  <li><a href="https://sienge.com.br/blog/curva-abc-como-fazer/">Sienge — curva ABC na obra</a> · <a href="https://periodicos.ufes.br/bjpe/article/view/36678">curva ABC no estoque de uma construtora (UFES)</a></li>
+  <li><a href="https://struxhub.com/blog/construction-materials-management-how-to-track-construction-materials-from-warehouse-to-jobsite-in-real-time/">StruxHub — do galpão ao canteiro: pedido, separação, entrega, prova de entrega, sobra</a></li>
+  <li><a href="https://www.fieldmaterials.com/platform/field-materials-inventory-management">Field Materials — pedido pelo celular, transferências entre galpão e obra</a> · <a href="https://www.getply.com/blog/what-s-essential-in-construction-inventory-management-software/">Ply — checklist do que o sistema precisa ter</a></li>
+  <li><a href="https://www.b2bstack.com.br/product/easytool-software-para-almoxarifado-e-controle-de-ferramentas">EasyTool — almoxarifado e empréstimo de ferramentas</a> · <a href="https://mwm.ai/pt/apps/alva-obras/6761736813">ALVA Obras — almoxarifado por obra</a></li>
+</ul>
+
+</div>
+<script>
+document.getElementById('abas').addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#abas button').forEach(function(x){ x.classList.toggle('on', x === b); });
+  document.querySelectorAll('.aba').forEach(function(a){ a.classList.toggle('on', a.id === 'a-' + b.dataset.a); });
+});
+</script>
+</body></html>

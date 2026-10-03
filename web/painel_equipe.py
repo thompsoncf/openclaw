@@ -600,6 +600,9 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
       <span class="ph-desc">Só o <b>financeiro</b> (contas, pagamentos, cobranças). <b>Não</b> entra na prospecção/vendas.</span>
     </div>
     {% if tem_mestre %}<div class="ph-row">
+      <span class="ph-nome">Almoxarife (CD)</span>
+      <span class="ph-desc">Só a aba <b>Depósito (CD)</b>: os pedidos das obras, o estoque do galpão, as entradas e as sobras. <b>Não</b> vê caixa, custo das obras nem o valor do estoque.</span>
+    </div><div class="ph-row">
       <span class="ph-nome">Mestre de obras</span>
       <span class="ph-desc">Só o <b>app da obra</b> no celular, e só das casas em que você o escolher como mestre: foto da etapa, marcar etapa, apontar material e o quadro da quadra. <b>Não</b> vê nenhum valor em dinheiro.</span>
     </div>{% endif %}

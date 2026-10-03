@@ -44,6 +44,33 @@ def _entrar(request: Request):
     return conta, None
 
 
+# O recado depois de salvar volta na URL como CÓDIGO, nunca como frase. O painel
+# desenha os templates com o autoescape desligado (`select_autoescape()` só liga
+# pra nome com extensão, e os daqui não têm), então um `?ok=<texto>` devolvido
+# na tela deixaria qualquer um montar um link com script ou com um recado falso
+# ("ligue pro suporte no número tal") assinado pelo Zaq.
+_ERROS = {
+    "papel": "Só o dono e quem gerencia mudam o tema da empresa.",
+    "tema": "Escolha um dos quatro temas.",
+    "dono": "Pra você, o tema da empresa já é o seu.",
+}
+
+
+def _recado_ok(codigo: str) -> str:
+    """'empresa-claro' → 'Tema da empresa: Claro.'; código desconhecido → ''."""
+    if codigo == "seguir":
+        return "Pronto: você segue o tema da empresa."
+    quem, _, tema = (codigo or "").partition("-")
+    t = ap.normalizar(tema)
+    if not t:
+        return ""
+    if quem == "empresa":
+        return f"Tema da empresa: {ap.ROTULOS[t][0]}."
+    if quem == "meu":
+        return f"Seu tema: {ap.ROTULOS[t][0]}."
+    return ""
+
+
 def _volta(ok: str = "", erro: str = "") -> RedirectResponse:
     q = f"?ok={quote(ok)}" if ok else (f"?erro={quote(erro)}" if erro else "")
     return RedirectResponse("/painel/aparencia" + q, status_code=303)
@@ -62,7 +89,8 @@ def painel_aparencia(request: Request, ok: str = "", erro: str = ""):
     return _render("aparencia", request, titulo="Aparência", tem_pj=True,
                    secao_ativa="aparencia", atual=atual, opcoes=opcoes,
                    muda_empresa=papel in ap.PAPEIS_DA_EMPRESA,
-                   tem_meu=bool(membro_id), rotulos=ap.ROTULOS, ok=ok, erro=erro)
+                   tem_meu=bool(membro_id), rotulos=ap.ROTULOS,
+                   ok=_recado_ok(ok), erro=_ERROS.get(erro, ""))
 
 
 @router.post("/painel/aparencia/empresa")
@@ -71,10 +99,10 @@ def painel_aparencia_empresa(request: Request, tema: str = Form("")):
     if fora is not None:
         return fora
     if (request.session.get("papel") or "dono") not in ap.PAPEIS_DA_EMPRESA:
-        return _volta(erro="Só o dono e quem gerencia mudam o tema da empresa.")
+        return _volta(erro="papel")
     if not ap.salvar_empresa(get_pool(), conta[0], tema):
-        return _volta(erro="Escolha um dos quatro temas.")
-    return _volta(ok=f"Tema da empresa: {ap.ROTULOS[ap.normalizar(tema)][0]}.")
+        return _volta(erro="tema")
+    return _volta(ok=f"empresa-{ap.normalizar(tema)}")
 
 
 @router.post("/painel/aparencia/meu")
@@ -84,13 +112,13 @@ def painel_aparencia_meu(request: Request, tema: str = Form("")):
         return fora
     membro_id = request.session.get("membro_id")
     if not membro_id:
-        return _volta(erro="Pra você, o tema da empresa já é o seu.")
+        return _volta(erro="dono")
     escolha = "" if tema == "seguir" else tema
     if not ap.salvar_meu(get_pool(), conta[0], membro_id, escolha):
-        return _volta(erro="Escolha um dos quatro temas.")
+        return _volta(erro="tema")
     if not escolha:
-        return _volta(ok="Pronto: você segue o tema da empresa.")
-    return _volta(ok=f"Seu tema: {ap.ROTULOS[ap.normalizar(escolha)][0]}.")
+        return _volta(ok="seguir")
+    return _volta(ok=f"meu-{ap.normalizar(escolha)}")
 
 
 _TPL = r"""{% extends "base" %}{% block conteudo %}
@@ -152,8 +180,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 
   <div class="ap-teste"><b>Em teste nesta conta.</b> O tema escuro continua igual. No claro e no misto, algumas telas ainda aparecem com partes escuras ou cores trocadas; elas vão sendo acertadas nas próximas atualizações. Se algo ficar difícil de ler, volte pro Escuro.</div>
 
-  {% if ok %}<div class="ap-msg ap-ok">{{ ok }}</div>{% endif %}
-  {% if erro %}<div class="ap-msg ap-err">{{ erro }}</div>{% endif %}
+  {% if ok %}<div class="ap-msg ap-ok">{{ ok|e }}</div>{% endif %}
+  {% if erro %}<div class="ap-msg ap-err">{{ erro|e }}</div>{% endif %}
 
   <form class="ap-bloco" method="post" action="/painel/aparencia/empresa">
     <h3>Tema da empresa</h3>

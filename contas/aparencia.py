@@ -42,6 +42,7 @@ PAPEIS_DA_EMPRESA = ("dono", "gestor")
 # por página depois da primeira.
 _PILOTO_CACHE: dict[int, tuple[bool, float]] = {}
 _PILOTO_TTL = 300
+_FALHA_TTL = 15
 
 
 def normalizar(tema) -> str | None:
@@ -62,7 +63,10 @@ def eh_piloto(pool, conta_id) -> bool:
             r = cx.execute("select temas_piloto from contas where id=%s", (conta_id,)).fetchone()
         sim = bool(r and r[0])
     except Exception:  # noqa: BLE001 — sem a coluna (migração não rodou) é "não"
-        sim = False
+        # Guardado por pouco tempo: uma falha passageira não pode deixar a piloto
+        # 5 minutos no escuro, sem o item Aparência, como se fosse um defeito.
+        _PILOTO_CACHE[conta_id] = (False, agora - _PILOTO_TTL + _FALHA_TTL)
+        return False
     _PILOTO_CACHE[conta_id] = (sim, agora)
     return sim
 

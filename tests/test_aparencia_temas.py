@@ -199,8 +199,9 @@ def pool():
                        open=True, kwargs={"prepare_threshold": None})
     init_schema(p)
     with p.connection() as c:
-        c.execute("create table if not exists nichos (id serial primary key, slug text unique)")
-        c.execute("alter table contas add column if not exists nicho_id int")
+        # Sem criar `nichos` nem `contas.nicho_id` aqui: o banco de teste é COMPARTILHADO
+        # e uma `nichos` mínima viraria a definitiva pros arquivos seguintes (a 031
+        # semeia `nome`/`tipo`). A 680 pula a marca da piloto quando elas não existem.
         c.execute((RAIZ / "db" / "migracoes" / "680_aparencia_temas.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -213,8 +214,10 @@ def contas(pool):
         piloto = c.execute("insert into contas (tipo, nome, temas_piloto) values ('pj','Piloto',true) "
                            "returning id").fetchone()[0]
         outra = c.execute("insert into contas (tipo, nome) values ('pj','Outra') returning id").fetchone()[0]
-        m = c.execute("insert into membros (conta_id, nome, email, papel) values (%s,'Ana',%s,'vendedor') "
-                      "returning id", (piloto, f"ana{piloto}@temas.test")).fetchone()[0]
+        # só as colunas do db/schema.sql: o banco novo do CI não tem `email`, e o
+        # `papel` de lá só aceita 'dono'/'membro' (o padrão serve)
+        m = c.execute("insert into membros (conta_id, nome) values (%s,'Ana') returning id",
+                      (piloto,)).fetchone()[0]
         c.commit()
     ap.esquecer_cache()
     yield piloto, outra, m
@@ -268,3 +271,39 @@ def test_membro_de_outra_conta_nao_vale(pool, contas):
     ap.esquecer_cache()
     assert ap.salvar_meu(pool, outra, m, "claro") is False
     assert ap.ler(pool, outra, m)["meu"] is None
+
+
+# ---------- o recado depois de salvar ----------
+
+def test_o_recado_volta_como_codigo_e_nunca_como_texto_livre():
+    """Os templates do painel rodam com autoescape desligado: um `?ok=<texto>`
+    ecoado na tela viraria script ou recado falso assinado pelo Zaq."""
+    from web import painel_aparencia as pa
+    assert pa._recado_ok("empresa-claro") == "Tema da empresa: Claro."
+    assert pa._recado_ok("meu-misto") == "Seu tema: Misto."
+    assert pa._recado_ok("seguir") == "Pronto: você segue o tema da empresa."
+    for lixo in ("<script>alert(1)</script>", "empresa-<b>x</b>", "Ligue 0800", "meu-roxo", ""):
+        assert pa._recado_ok(lixo) == "", lixo
+    assert set(pa._ERROS) == {"papel", "tema", "dono"}
+    fonte = inspect.getsource(pa.painel_aparencia)
+    assert "_recado_ok(ok)" in fonte and '_ERROS.get(erro, "")' in fonte
+
+
+def test_a_tela_escapa_o_recado_mesmo_assim():
+    html = _tela(ok="<script>x</script>", erro="<b>y</b>")
+    assert "<script>x</script>" not in html and "&lt;script&gt;" in html
+    assert "<b>y</b>" not in html
+
+
+def test_falha_na_leitura_da_piloto_nao_fica_5_minutos():
+    """Uma consulta que falha uma vez não pode deixar a piloto no escuro por 5 min."""
+    class PoolQuebrado:
+        def connection(self):
+            raise RuntimeError("banco piscou")
+    ap.esquecer_cache()
+    assert ap.eh_piloto(PoolQuebrado(), 987654) is False
+    _, quando = ap._PILOTO_CACHE[987654]
+    import time
+    restante = ap._PILOTO_TTL - (time.monotonic() - quando)
+    assert restante <= ap._FALHA_TTL + 1, "a falha ficou guardada tempo demais"
+    ap.esquecer_cache()

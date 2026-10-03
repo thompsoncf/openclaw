@@ -4,7 +4,8 @@ PR 1 de 3 do desenho aprovado pelo dono em 03/10/2026
 (docs/mockups/obras_cd_almoxarifado.html, "segue as recomendações"): a visão
 geral, o quadro dos pedidos das obras (Pedido → Separando → Saiu → Recebido),
 o estoque com a cobertura em dias, as entradas e a sobra das casas prontas.
-Ferramentas (PR 2) e conferência + inventário (PR 3) vêm depois.
+Depois vieram as ferramentas (PR 2), a conferência da nota (PR 3a) e o
+inventário rotativo pela curva ABC com os indicadores (PR 3b).
 
 QUEM VÊ: quem tem a capacidade `deposito` (contas.equipe) — dono, gestor,
 financeiro e o ALMOXARIFE, que vê só esta aba. O "dinheiro parado" (o valor do
@@ -25,6 +26,7 @@ from contas import equipe as eq
 from db.conexao import get_pool
 from finance import obra_conferencia as conf
 from finance import obra_ferramentas as fer
+from finance import obra_inventario as inv
 from finance import obra_pedidos as op
 from finance import obras as ob
 from finance import raio_x_perfil as rxp
@@ -35,7 +37,7 @@ _log = logging.getLogger("openclaw.painel_deposito")
 _BASE = "/painel/obras/deposito"
 _ABAS = (("geral", "Visão geral"), ("pedidos", "Pedidos das obras"), ("estoque", "Estoque"),
          ("entradas", "Entradas"), ("ferramentas", "Ferramentas"),
-         ("sobras", "Sobras das casas prontas"))
+         ("sobras", "Sobras das casas prontas"), ("inventario", "Inventário"))
 
 
 def _acesso(request: Request):
@@ -81,6 +83,7 @@ def deposito(request: Request):
     ferramentas = fer.listar(pool, conta[0])
     obras_abertas = [o for o in ob.listar_obras(pool, conta[0], com_custos=False)
                      if o["status"] not in ("vendida", "entregue", "arquivada")]
+    abc, ordem = inv.curva(pool, conta[0], v["estoque"]) if aba in ("geral", "estoque", "inventario") else ({}, [])
     return _render("obras_deposito", request, titulo="Depósito (CD)", secao_ativa="obras_deposito",
                    aba=aba, abas=_ABAS, v=v, colunas=colunas, rotulo=op.ROTULO,
                    ve_dinheiro=papel in ("dono", "gestor"), brl=ob._brl,
@@ -90,6 +93,11 @@ def deposito(request: Request):
                    a_conferir=conf.pendentes(pool, conta[0]) if aba in ("geral", "entradas") else [],
                    conferidas=conf.conferidas(pool, conta[0]) if aba == "entradas" else [],
                    divergencias=conf.divergencias(pool, conta[0]) if aba == "entradas" else [],
+                   abc=abc, motivos=inv.MOTIVOS,
+                   dia=inv.contagem_do_dia(pool, conta[0], linhas=v["estoque"], abc=abc)
+                   if aba in ("geral", "inventario") else None,
+                   ind=inv.indicadores(pool, conta[0], linhas=v["estoque"], ordem=ordem)
+                   if aba in ("geral", "inventario") else None,
                    ferramentas=ferramentas, rf=fer.resumo(ferramentas), obras_abertas=obras_abertas,
                    ferr_prontas=[f for f in ferramentas if f["obra_pronta"]],
                    ok=(request.query_params.get("ok") or "").strip(),
@@ -210,6 +218,35 @@ def conferencia_desfazer(request: Request, conferencia_id: int):
     return _volta("entradas", ok=msg)
 
 
+# ── o inventário rotativo (PR 3b do CD) ───────────────────────────────────
+@router.post(_BASE + "/contar")
+def contar(request: Request, produto_id: int = Form(0), contado: str = Form(""),
+           motivo: str = Form("")):
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, _ = ac
+    try:
+        r = inv.contar(get_pool(), conta[0], produto_id, contado, motivo=motivo,
+                       por=request.session.get("membro_id"))
+    except ValueError as e:
+        return _volta("inventario", erro=str(e))
+    return _volta("inventario", ok=r["frase"])
+
+
+@router.post(_BASE + "/contagem/{contagem_id}/desfazer")
+def contagem_desfazer(request: Request, contagem_id: int):
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, _ = ac
+    try:
+        msg = inv.desfazer(get_pool(), conta[0], contagem_id)
+    except ValueError as e:
+        return _volta("inventario", erro=str(e))
+    return _volta("inventario", ok=msg)
+
+
 @router.post(_BASE + "/minimo")
 def minimo(request: Request, produto: list[int] = Form([]), minimo: list[str] = Form([])):
     """Os mínimos do CD, todos de uma vez. `def` síncrono (banco síncrono)."""
@@ -282,6 +319,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 
 <div class="dp-abas">{% for k, r in abas %}<a href="?aba={{ k }}" class="{{ 'on' if aba == k }}">{{ r }}{% if k == 'pedidos' and v.abertos %} · {{ v.abertos }}{% endif %}</a>{% endfor %}</div>
 
+{% macro chip_abc(k) %}<span class="dp-chip{{ ' c' if k == 'A' else (' a' if k == 'B' else '') }}">{{ k }}</span>{% endmacro %}
 {% macro cartao(p) %}<div class="dp-ped{{ ' urg' if p.urgente and p.status != 'recebido' }}">
   <b>{{ p.obra|e }}</b>{% if p.urgente and p.status != 'recebido' %} <span class="dp-chip c">urgente</span>{% endif %}
   <ul>{% for i in p.itens %}<li>{{ i.rotulo }} de {{ i.nome|e }}
@@ -308,6 +346,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="dp-kpi{{ ' alerta' if v.abaixo }}"><span class="r">Abaixo do mínimo</span><span class="v">{{ v.abaixo|length }}</span><span class="x">{{ v.abaixo|map(attribute='nome')|join(' · ')|truncate(40) if v.abaixo else 'nada' }}</span></div>
   {% if rf.total %}<div class="dp-kpi{{ ' alerta' if rf.alertas }}"><span class="r">Ferramentas fora</span><span class="v">{{ rf.fora }} de {{ rf.total }}</span><span class="x">{{ rf.alertas|length }} pra conferir</span></div>{% endif %}
   <div class="dp-kpi{{ ' alerta' if sobras }}"><span class="r">Sobra em casa pronta</span><span class="v">{{ sobras|length }}</span><span class="x">casa{{ 's' if sobras|length != 1 }} com material</span></div>
+  <div class="dp-kpi{{ ' alerta' if ind.acuracidade is not none and ind.acuracidade < 95 }}"><span class="r">Acuracidade</span><span class="v">{{ ind.acuracidade ~ '%' if ind.acuracidade is not none else '—' }}</span><span class="x">{{ 'nas contagens do mês' if ind.contagens else 'nenhuma contagem ainda' }}</span></div>
 </div>
 <div class="dp-duas">
   <div class="dp-box"><b>Precisa de você hoje</b>
@@ -317,7 +356,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     {% for s in sobras %}<tr><td>🏁 <b>{{ s.obra|e }}</b> está pronta com material</td><td class="v"><a class="dp-bt" href="?aba=sobras">Ver</a></td></tr>{% endfor %}
     {% for f in rf.alertas %}<tr><td>🔧 <b>{{ f.nome|e }}</b> ({{ f.codigo|e }}) na {{ f.obra|e }} — {{ f.alerta|e }}</td><td class="v"><a class="dp-bt" href="?aba=ferramentas">Ver</a></td></tr>{% endfor %}
     {% if a_conferir %}<tr><td>🧾 <b>{{ a_conferir|length }} nota{{ 's' if a_conferir|length != 1 }}</b> que chegou no CD falta conferir</td><td class="v"><a class="dp-bt" href="?aba=entradas">Conferir</a></td></tr>{% endif %}
-    {% if not (v.pedidos|selectattr('status', 'equalto', 'pedido')|list or v.abaixo or sobras or rf.alertas or a_conferir) %}<tr><td class="dp-mut">Nada pendente. ✅</td></tr>{% endif %}
+    {% if dia.faltam %}<tr><td>🔢 Contagem do dia: <b>{{ dia.faltam }} {{ 'materiais' if dia.faltam != 1 else 'material' }}</b>{% if dia.faltam_a %} <span class="dp-mut">· {{ dia.faltam_a }} da classe A</span>{% endif %}</td><td class="v"><a class="dp-bt" href="?aba=inventario">Contar</a></td></tr>{% endif %}
+    {% if not (v.pedidos|selectattr('status', 'equalto', 'pedido')|list or v.abaixo or sobras or rf.alertas or a_conferir or dia.faltam) %}<tr><td class="dp-mut">Nada pendente. ✅</td></tr>{% endif %}
     </table></div>
   <div class="dp-box"><b>Quanto dura o que tem no CD</b>
     <div class="dp-mut">Pelo que saiu nas últimas 4 semanas.</div>
@@ -338,9 +378,10 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 
 {% elif aba == 'estoque' %}
 <form method="post" action="/painel/obras/deposito/minimo"><div class="dp-rolo"><table class="dp-tab">
-<tr><th>Material</th><th class="v">No CD</th><th class="v">Mínimo</th><th class="v">Sai por semana</th><th class="v">Cobertura</th>{% if ve_dinheiro %}<th class="v">Valor (nota)</th>{% endif %}</tr>
+<tr><th>Material</th><th>ABC</th><th class="v">No CD</th><th class="v">Mínimo</th><th class="v">Sai por semana</th><th class="v">Cobertura</th>{% if ve_dinheiro %}<th class="v">Valor (nota)</th>{% endif %}</tr>
 {% for r in v.estoque %}<tr{% if r.abaixo or (r.cobertura is not none and r.cobertura < 7) %} class="alerta"{% endif %}>
   <td{% if r.chave %} style="font-weight:600"{% endif %}>{{ r.nome|e }}</td>
+  <td>{{ chip_abc(abc.get(r.produto_id, 'C')) }}</td>
   <td class="v"><b>{{ rotulo_mat(r.saldo, r.unidade)|e }}</b>{% if r.abaixo %} ⚠️{% endif %}</td>
   <td class="v"><input type="hidden" name="produto" value="{{ r.produto_id }}"><input name="minimo" value="{{ '%g'|format(r.minimo) if r.minimo else '' }}" inputmode="decimal" style="max-width:4.5rem;text-align:right" placeholder="—"></td>
   <td class="v">{{ r.rotulo_semana|e }}</td>
@@ -348,7 +389,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   {% if ve_dinheiro %}<td class="v">{{ brl(r.valor) if r.valor else '—' }}</td>{% endif %}</tr>{% endfor %}
 </table></div>
 {% if v.estoque %}<button class="dp-bt prim" style="margin-top:.6rem">Salvar mínimos</button>{% else %}<p class="dp-mut">O CD ainda está vazio. A nota de material sem obra entra aqui sozinha.</p>{% endif %}</form>
-<p class="dp-mut" style="margin-top:.6rem"><b>Cobertura</b> = o que tem no CD ÷ o que sai por dia (média do último mês).{% if ve_dinheiro %} <b>Valor</b> pelo último preço de nota de cada material.{% endif %}</p>
+<p class="dp-mut" style="margin-top:.6rem"><b>ABC</b> pelo valor que saiu do CD nos últimos 90 dias (CD novo: pelo valor parado nele) — a classe A são os poucos que pesam mais. <b>Cobertura</b> = o que tem no CD ÷ o que sai por dia (média do último mês).{% if ve_dinheiro %} <b>Valor</b> pelo último preço de nota de cada material.{% endif %}</p>
 
 {% elif aba == 'entradas' %}
 <h3 style="margin:.2rem 0 .4rem;font-size:1rem">🧾 Falta conferir{% if a_conferir %} · {{ a_conferir|length }}{% endif %}</h3>
@@ -425,6 +466,48 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   <form method="post" action="/painel/obras/deposito/devolver/{{ s.obra_id }}" data-confirma="Trazer tudo de {{ s.obra|e }} de volta pro CD?" onsubmit="return confirm(this.dataset.confirma)"><button class="dp-bt prim">Devolver ao CD</button></form>
 </div>{% endfor %}
 {% if not sobras and not ferr_prontas %}<div class="dp-box dp-mut">Nenhuma casa pronta com material ou ferramenta. ✅</div>{% endif %}
+
+{% elif aba == 'inventario' %}
+{% macro motivo_sel() %}<select name="motivo" style="width:auto;max-width:11rem;margin:0"><option value="">— motivo —</option>{% for k, r in motivos.items() %}<option value="{{ k }}">{{ r }}</option>{% endfor %}</select>{% endmacro %}
+<div class="dp-kpis">
+  <div class="dp-kpi{{ ' alerta' if ind.acuracidade is not none and ind.acuracidade < 95 }}"><span class="r">Acuracidade</span><span class="v">{{ ind.acuracidade ~ '%' if ind.acuracidade is not none else '—' }}</span><span class="x">{% if ind.contagens %}{{ ind.bateram }} de {{ ind.contagens }} bateram · meta 95%{% else %}sem contagem ainda{% endif %}</span></div>
+  <div class="dp-kpi{{ ' alerta' if ind.perdas }}"><span class="r">Perdas no mês</span><span class="v">{% if not ind.perdas %}nenhuma{% elif ve_dinheiro and ind.perdas_valor %}{{ brl(ind.perdas_valor) }}{% else %}{{ ind.perdas|length }} materia{{ 'is' if ind.perdas|length != 1 else 'l' }}{% endif %}</span><span class="x">{% for x in ind.perdas %}{{ x.rotulo|e }} de {{ x.nome|e }} ({{ x.motivo }}){{ ' · ' if not loop.last }}{% endfor %}</span></div>
+  <div class="dp-kpi{{ ' alerta' if ind.divergentes }}"><span class="r">Notas com diferença</span><span class="v">{{ ind.divergentes or 'nenhuma' }}</span><span class="x">{{ ind.fornecedor_divergente|e if ind.divergentes else 'nas notas conferidas' }}</span></div>
+  <div class="dp-kpi"><span class="r">Pedido → recebido</span><span class="v">{{ ind.pedido_recebido.media if ind.pedido_recebido else '—' }}</span><span class="x">{% if ind.pedido_recebido %}média de {{ ind.pedido_recebido.pedidos }} pedido{{ 's' if ind.pedido_recebido.pedidos != 1 }}{% else %}sem pedido recebido{% endif %}</span></div>
+  <div class="dp-kpi"><span class="r">Giro</span><span class="v">{{ ('%.1f'|format(ind.giro.vezes)).replace('.', ',') ~ '×' if ind.giro and ind.giro.vezes is not none else '—' }}</span><span class="x">{% if ind.giro %}{{ ind.giro.nome|e }} no mês{% else %}sem saída no mês{% endif %}</span></div>
+</div>
+
+<div class="dp-box"><b>🔢 Contagem de hoje</b> <span class="dp-mut">({{ dia.itens|length }} {{ 'materiais' if dia.itens|length != 1 else 'material' }}, classe A primeiro)</span>
+  {% if dia.itens %}<div class="dp-rolo"><table class="dp-tab" style="margin-top:.4rem"><tr><th>Material</th><th class="v">Sistema</th><th class="v">Contado</th></tr>
+  {% for i in dia.itens %}{% set k = i.contagem %}<tr{% if k and k.dif < 0 %} class="alerta"{% endif %}>
+    <td>{{ chip_abc(i.classe) }} {{ i.nome|e }}{% if not k %} <span class="dp-mut">· {{ 'nunca contado' if not i.ultima else 'última contagem ' ~ i.ultima.strftime('%d/%m') }}</span>{% endif %}</td>
+    <td class="v">{{ rotulo_mat(i.sistema, i.unidade)|e }}</td>
+    <td class="v">{% if k %}{{ '%g'|format(k.contado) }} <span class="dp-chip {{ 'v' if k.dif == 0 else 'c' }}">{{ k.rotulo_dif|e }}</span>
+      {% if k.pode_desfazer %}<form method="post" action="/painel/obras/deposito/contagem/{{ k.id }}/desfazer" style="display:inline" onsubmit="return confirm('Desfazer esta contagem? O ajuste no estoque é apagado.')"><button class="dp-bt" title="digitou errado?">desfazer</button></form>{% endif %}
+    {% else %}<form method="post" action="/painel/obras/deposito/contar" style="display:flex;gap:.35rem;justify-content:flex-end;align-items:center;flex-wrap:wrap;margin:0">
+      <input type="hidden" name="produto_id" value="{{ i.produto_id }}"><input name="contado" required inputmode="decimal" placeholder="quanto tem" style="width:6.5rem;margin:0;text-align:right">
+      {{ motivo_sel() }}<button class="dp-bt prim">Contar</button></form>{% endif %}</td></tr>{% endfor %}
+  </table></div>
+  {% else %}<p class="dp-mut" style="margin:.5rem 0 0">Nada pra contar hoje — o CD está em dia. ✅</p>{% endif %}
+  <p class="dp-mut" style="margin:.6rem 0 0">Conte o que está na prateleira e digite. Não bateu? Escolha o motivo — a diferença vira ajuste no estoque. A classe A é contada toda semana, a B a cada 15 dias, a C uma vez por mês.</p>
+</div>
+
+{% set na_lista = dia.itens|map(attribute='produto_id')|list %}
+{% set fora = v.estoque|rejectattr('produto_id', 'in', na_lista)|list %}
+{% if fora %}<details class="dp-box"><summary><b>Contar outro material</b> <span class="dp-mut">— achou algo estranho na prateleira?</span></summary>
+<form method="post" action="/painel/obras/deposito/contar" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-top:.6rem">
+  <select name="produto_id" required>{% for r in fora %}<option value="{{ r.produto_id }}">{{ r.nome|e }} (sistema: {{ rotulo_mat(r.saldo, r.unidade)|e }})</option>{% endfor %}</select>
+  <input name="contado" required inputmode="decimal" placeholder="quanto tem" style="max-width:6rem;text-align:right">
+  {{ motivo_sel() }}<button class="dp-bt prim">Contar</button>
+</form></details>{% endif %}
+
+{% if dia.recentes %}<h3 style="margin:1.2rem 0 .4rem;font-size:1rem">Contagens recentes</h3>
+<div class="dp-rolo"><table class="dp-tab"><tr><th>Quando</th><th>Material</th><th class="v">Sistema</th><th class="v">Contado</th><th>Diferença</th><th>Quem</th></tr>
+{% for k in dia.recentes %}<tr><td>{{ k.quando.strftime('%d/%m %H:%M') }}</td><td>{{ k.nome|e }}</td>
+  <td class="v">{{ '%g'|format(k.sistema) }}</td><td class="v">{{ '%g'|format(k.contado) }}</td>
+  <td><span class="dp-chip {{ 'v' if k.dif == 0 else 'c' }}">{{ k.rotulo_dif|e }}</span></td><td class="dp-mut">{{ k.quem|e }}</td></tr>{% endfor %}
+</table></div>{% endif %}
+<p class="dp-mut" style="margin-top:.8rem"><b>Acuracidade</b> = contagens que bateram ÷ contagens (últimos 30 dias). <b>Giro</b> = o que saiu do CD no mês ÷ o estoque médio, do material que mais pesa na curva ABC.</p>
 {% endif %}
 </div>
 {% endblock %}"""

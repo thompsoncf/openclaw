@@ -34,6 +34,9 @@ _AVISOS = {
     "vendido": "Venda registrada: o estoque baixou e a receita está no Financeiro.",
     "recebido": "Pagamento registrado: a receita está no Financeiro.",
     "ligacao": "Ligação registrada no card do paciente.",
+    "encaixe": "Encaixe marcado e paciente presente.",
+    "saiu": "Anotado: saiu sem ser atendido. O horário ficou livre; não conta como falta.",
+    "desmarcou_msg": "Mensagem enviada.",
     "fica": "Anotado: fica a receber. O título está em Financeiro › A receber.",
 }
 
@@ -125,6 +128,7 @@ def agenda(request: Request):
         from finance import clinica_vagas as cvg
         vagas_esperando = cvg.esperando(c, conta_id)
         prof_id = _int(q.get("prof")) or (profs[0]["id"] if profs else None)
+        tipos_enc = cc.listar_tipos(c, conta_id)
         if vista == "semana" and prof_id:
             segunda = data - timedelta(days=data.isoweekday() - 1)
             dados = ca.semana(c, conta_id, prof_id, segunda, agora)
@@ -152,7 +156,9 @@ def agenda(request: Request):
                    link_dia=link(vista="dia", data=data.isoformat()),
                    link_semana=link(vista="semana", data=data.isoformat()),
                    prof_nome={p["id"]: p["nome"] for p in profs},
-                   prof_marca=any(p["id"] == prof_id and p["tipos"] for p in profs))
+                   prof_marca=any(p["id"] == prof_id and p["tipos"] for p in profs),
+                   e_hoje=(data == hoje), futuro_ou_hoje=(data >= hoje), tipos_enc=tipos_enc,
+                   local_nome={x["id"]: x["cidade"] or x["nome"] for x in locais})
 
 
 # ------------------------------------------------------------------ novo agendamento
@@ -438,6 +444,73 @@ def evento_receber(request: Request, evento_id: int, valor: str = Form(""), form
                "" if erro else ("fica" if forma == "fiado" else "recebido"), erro or "")
 
 
+@router.post("/painel/clinica/agenda/encaixe")
+def encaixe(request: Request, prof: str = Form(""), tipo: str = Form(""), nome: str = Form(""),
+            fone: str = Form("")):
+    """"+ Encaixe (chegou sem marcar)": o paciente já está na recepção."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not (_int(prof) and _int(tipo) and nome.strip()):
+        return _ir(request, "/painel/clinica/agenda", erro="Escolha o profissional, o atendimento e o nome do paciente.")
+    with get_pool().connection() as c:
+        eid, erro = ca.encaixe_chegou(c, conta[0], profissional_id=_int(prof), servico_id=_int(tipo), nome=nome,
+                                      fone=fone, membro_id=request.session.get("membro_id"))
+        (c.rollback if erro else c.commit)()
+    if erro:
+        return _ir(request, "/painel/clinica/agenda", erro=erro)
+    return _ir(request, f"/painel/clinica/agenda/evento/{eid}", "encaixe")
+
+
+@router.post("/painel/clinica/agenda/passagem/cancelar")
+def passagem_cancelar(request: Request, prof: str = Form(""), data: str = Form(""), local: str = Form(""),
+                      confirma: str = Form("")):
+    """"Cancelar esta passagem": a clínica cancela a ida do profissional àquele lugar no dia."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    dia = _data(data, None) if data else None
+    if not (_int(prof) and dia) or confirma != "sim":
+        return _ir(request, "/painel/clinica/agenda", erro="Confirme o cancelamento da passagem.")
+    with get_pool().connection() as c:
+        avisos, erro = ca.cancelar_passagem(c, conta[0], _int(prof), dia, _int(local),
+                                           request.session.get("membro_id"))
+        (c.rollback if erro else c.commit)()
+    if erro:
+        return _ir(request, "/painel/clinica/agenda", erro=erro)
+    return RedirectResponse(f"/painel/clinica/agenda/passagem/cancelada?data={dia.isoformat()}&prof={_int(prof)}",
+                            status_code=303)
+
+
+@router.get("/painel/clinica/agenda/passagem/cancelada", response_class=HTMLResponse)
+def passagem_cancelada(request: Request):
+    """Os pacientes da passagem cancelada, cada um com a mensagem pronta pra mandar."""
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    q = request.query_params
+    dia, prof = (_data(q.get("data"), None) if q.get("data") else None), _int(q.get("prof"))
+    with get_pool().connection() as c:
+        evs = ca.desmarcados_pela_clinica(c, conta[0], prof, dia) if (dia and prof) else []
+        linhas = []
+        for e in evs:
+            prox = ca.proxima_passagem(c, conta[0], e["profissional_id"], e["local_id"], ca.local(e["inicio"]).date())
+            linhas.append({"ev": e, "texto": ca.texto_desmarcou(c, conta[0], e, prox)})
+    return _render("clinica_passagem_cancelada.html", request, titulo="Passagem cancelada", **_ctx_base(request),
+                   linhas=linhas, data_iso=dia.isoformat() if dia else "", prof_id=prof or "")
+
+
+@router.post("/painel/clinica/agenda/evento/{evento_id}/saiu")
+def evento_saiu(request: Request, evento_id: int):
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    with get_pool().connection() as c:
+        erro = ca.saiu_sem_atendimento(c, conta[0], evento_id, request.session.get("membro_id"))
+        (c.rollback if erro else c.commit)()
+    return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", "" if erro else "saiu", erro or "")
+
+
 @router.post("/painel/clinica/agenda/evento/{evento_id}/ligacao")
 def evento_ligacao(request: Request, evento_id: int, resultado: str = Form("")):
     conta, _g, redir = _acesso(request)
@@ -469,6 +542,14 @@ def evento_mensagem(request: Request, evento_id: int, qual: str = Form("marcado"
     conta_id = conta[0]
     with get_pool().connection() as c:
         ev = ca.evento(c, conta_id, evento_id)
+        if qual == "desmarcou" and ev and ev.get("desmarcou") == "clinica":
+            prox = ca.proxima_passagem(c, conta_id, ev["profissional_id"], ev["local_id"], ca.local(ev["inicio"]).date())
+            ok = ca.enviar(c, conta_id, ev, ca.texto_desmarcou(c, conta_id, ev, prox), autor="humano",
+                           membro_id=request.session.get("membro_id")).get("ok")
+            c.commit()
+            volta = (f"/painel/clinica/agenda/passagem/cancelada?data={ca.local(ev['inicio']).date().isoformat()}"
+                     f"&prof={ev['profissional_id']}")
+            return _ir(request, volta, "desmarcou_msg" if ok else "sem_mensagem")
         if not ev or ev["situacao"] in ("finalizado", "cancelou", "faltou"):
             return _ir(request, f"/painel/clinica/agenda/evento/{evento_id}", erro="Esse agendamento não recebe mensagem.")
         agora = datetime.now(timezone.utc)
@@ -596,6 +677,17 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
     {% if vista == 'dia' %}<div class="ag-kpi"><b>{{ d.a_receber }}</b><span>a receber</span></div>{% endif %}
   </div>
 
+  {% if vista == 'dia' and e_hoje and d.colunas %}
+  <details class="ag-caixa"><summary><b>+ Encaixe</b> (chegou sem marcar)</summary>
+    <form class="ag-form" method="post" action="/painel/clinica/agenda/encaixe" style="margin-top:.5rem">
+      <label>Profissional<select name="prof">{% for col in d.colunas if col.marca %}<option value="{{ col.prof.id }}">{{ col.prof.nome }}</option>{% endfor %}</select></label>
+      <label>Atendimento<select name="tipo">{% for t in tipos_enc %}<option value="{{ t.id }}">{{ t.nome }}</option>{% endfor %}</select></label>
+      <label>Paciente<input name="nome" required></label>
+      <label>Celular<input name="fone" inputmode="tel"></label>
+      <div class="ag-acoes inteira"><button onclick="this.disabled=true;this.form.submit()">Marcar e dar Presente</button><span class="mut">entra agora, como encaixe, mesmo com os encaixes do dia esgotados</span></div>
+    </form></details>
+  {% endif %}
+
   {% if vista == 'dia' and d.remarcar %}
   <div class="ag-caixa alerta"><b>Pediram para remarcar</b> (responderam 2 no lembrete)
     {% for e in d.remarcar %}<div><a href="/painel/clinica/agenda/evento/{{ e.id }}">{{ e.paciente }} · {{ e.dia }} {{ e.hora }} · {{ prof_nome.get(e.profissional_id, '') }}</a></div>{% endfor %}</div>
@@ -605,10 +697,10 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
   <div class="ag-caixa">Ninguém atende {{ 'neste dia' if vista == 'dia' else 'nesta semana' }}. {% if gerencia %}A grade de cada profissional fica em <a href="/painel/clinica/configurar?aba=grade">Clínica › Grade</a>.{% endif %}</div>
   {% else %}
   <div class="ag-rolo"><table class="ag">
-    <thead><tr><th></th>{% for col in d.colunas %}<th>{% if vista == 'dia' %}<span style="color:{{ col.prof.cor }}">●</span> {{ col.prof.nome }}<small>{{ col.prof.funcao }}</small>{% else %}{{ col.rotulo }}{% if col.hoje %} · hoje{% endif %}<small>{% if col.ocupacao is not none %}{{ col.ocupacao }}% ocupado{% else %}não atende{% endif %}</small>{% endif %}</th>{% endfor %}</tr></thead>
+    <thead><tr><th></th>{% for col in d.colunas %}<th>{% if vista == 'dia' %}<span style="color:{{ col.prof.cor }}">●</span> {{ col.prof.nome }}<small>{{ col.prof.funcao }}</small>{% if futuro_ou_hoje and col.faixas %}{% for loc in col.faixas | map(attribute='local_id') | unique %}<form method="post" action="/painel/clinica/agenda/passagem/cancelar" style="margin:.2rem 0 0" onsubmit="if(!confirm('Cancelar a ida de ' + {{ col.prof.nome|tojson|forceescape }} + ' a ' + {{ local_nome.get(loc, 'este lugar')|tojson|forceescape }} + ' neste dia? Os marcados ficam a remarcar (não conta como falta) e esse horário fica bloqueado.')){return false;} this.querySelector('button').disabled=true; return true;"><input type="hidden" name="prof" value="{{ col.prof.id }}"><input type="hidden" name="data" value="{{ d.data.isoformat() }}"><input type="hidden" name="local" value="{{ loc or '' }}"><input type="hidden" name="confirma" value="sim"><button class="sec" style="width:auto;min-height:26px;padding:.1rem .5rem;font-size:.75rem">Cancelar a passagem{% if (col.faixas | map(attribute='local_id') | unique | list | length) > 1 %} · {{ local_nome.get(loc, '') }}{% endif %}</button></form>{% endfor %}{% endif %}{% else %}{{ col.rotulo }}{% if col.hoje %} · hoje{% endif %}<small>{% if col.ocupacao is not none %}{{ col.ocupacao }}% ocupado{% else %}não atende{% endif %}</small>{% endif %}</th>{% endfor %}</tr></thead>
     <tbody>{% for h in d.linhas %}{% set i = loop.index0 %}<tr><td class="h">{{ '%02d:%02d'|format(h.hour, h.minute) }}</td>
       {% for col in d.colunas %}{% set cel = col.celulas[i] %}
-        {% if cel.tipo == 'ev' %}<td>{% for e in cel.evs %}<a class="ev s-{{ e.situacao }}" style="border-left-color:{{ e.cor }}" href="/painel/clinica/agenda/evento/{{ e.id }}"><b>{{ e.paciente }}</b><span>{{ e.tipo }} · {{ e.hora }}–{{ e.fim_txt }}{% if e.encaixe %} · encaixe{% endif %}</span><span>{{ SIT_D[e.situacao] }}{% if e.atrasado_min %} · <b>atrasado {{ e.atrasado_min }} min</b>{% endif %}{% if e.pede_remarcar_em %} · quer remarcar{% endif %}{% if e.pgto %} · {% if e.pgto == 'a_receber' %}<b>a receber</b>{% else %}{{ SELO_PGTO[e.pgto] }}{% endif %}{% endif %}</span>{% if e.ficha and e.situacao not in ('finalizado','cancelou','faltou') %}<span title="{{ e.ficha_txt }}">{% if e.ficha.completa %}✓ ficha completa{% else %}📝 ficha {{ e.ficha.pct }}%{% endif %}{% if e.ficha.alergia %} · ⚠ alergia{% endif %}</span>{% endif %}</a>{% endfor %}</td>
+        {% if cel.tipo == 'ev' %}<td>{% for e in cel.evs %}<a class="ev s-{{ e.situacao }}" style="border-left-color:{{ e.cor }}" href="/painel/clinica/agenda/evento/{{ e.id }}"><b>{{ e.paciente }}</b><span>{{ e.tipo }} · {{ e.hora }}–{{ e.fim_txt }}{% if e.encaixe %} · encaixe{% endif %}</span><span>{% if e.desmarcou == 'clinica' %}a clínica desmarcou{% elif e.desmarcou == 'saiu' %}saiu sem atendimento{% else %}{{ SIT_D[e.situacao] }}{% endif %}{% if e.atrasado_min %} · <b>atrasado {{ e.atrasado_min }} min</b>{% endif %}{% if e.pede_remarcar_em %} · quer remarcar{% endif %}{% if e.pgto %} · {% if e.pgto == 'a_receber' %}<b>a receber</b>{% else %}{{ SELO_PGTO[e.pgto] }}{% endif %}{% endif %}</span>{% if e.ficha and e.situacao not in ('finalizado','cancelou','faltou') %}<span title="{{ e.ficha_txt }}">{% if e.ficha.completa %}✓ ficha completa{% else %}📝 ficha {{ e.ficha.pct }}%{% endif %}{% if e.ficha.alergia %} · ⚠ alergia{% endif %}</span>{% endif %}</a>{% endfor %}</td>
         {% elif cel.tipo == 'livre' and ((vista == 'dia' and col.marca) or (vista == 'semana' and prof_marca)) %}<td><a class="livre" href="/painel/clinica/agenda/novo?prof={{ col.prof.id if vista == 'dia' else prof_id }}&data={{ (col.dia if vista == 'semana' else d.data).isoformat() }}&hora={{ '%02d:%02d'|format(h.hour, h.minute) }}">+ livre</a></td>
         {% elif cel.tipo == 'livre' %}<td class="continua"></td>
         {% elif cel.tipo == 'continua' %}<td class="continua"></td>
@@ -686,7 +778,7 @@ _TPL_NOVO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 
 _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 <div class="ag-pag">
-  <div class="ag-topo"><div><h2>{{ ev.paciente }}</h2><div class="sub">{{ ev.tipo }} · {{ quando }}{% if prof %} · {{ prof.nome }}{% endif %}{% if ev.encaixe %} · encaixe{% endif %}</div></div>
+  <div class="ag-topo"><div><h2>{{ ev.paciente }}</h2><div class="sub">{{ ev.tipo }} · {{ quando }}{% if prof %} · {{ prof.nome }}{% endif %}{% if ev.encaixe %} · encaixe{% endif %}{% if ev.desmarcou == 'clinica' %} · <b>a clínica desmarcou</b>{% elif ev.desmarcou == 'saiu' %} · saiu sem ser atendido{% endif %}</div></div>
     <a class="ag-bt sec" href="/painel/clinica/agenda?data={{ data_iso }}">Voltar à agenda</a></div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
@@ -711,6 +803,8 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       {% endif %}
       {% if pacote_vai %}
       <div class="inteira"><span class="mut">Sessão do pacote: finalizar baixa 1 do saldo ({{ pacote_vai.nome }}, sessão {{ pacote_vai.usadas + 1 }} de {{ pacote_vai.total }}).</span></div>
+      {% elif ev.categoria not in ('consulta', '') %}
+      <div class="inteira"><span class="mut">Atendimento de um toque: finalizar conclui (ou vai pra Retorno, se houver retorno ou resultado). A pergunta do tratamento é da consulta e da avaliação.</span></div>
       {% else %}
       <div class="inteira"><span class="mut">O médico propôs tratamento? (o card do paciente anda no funil com a resposta)</span>
         <div class="ag-ops" style="margin-top:.3rem">
@@ -723,6 +817,7 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <label>Resultado previsto para (se o laboratório disse)<input type="date" name="resultado_em"></label>
       <div class="ag-acoes inteira"><button>Finalizar</button></div>
     </form>
+    <form method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/saiu" style="margin-top:.4rem" onsubmit="return confirm('O paciente saiu sem ser atendido? O horário fica livre e não conta como falta.')"><button class="sec">Saiu sem ser atendido</button></form>
     {% endif %}{% endif %}
     {% if ev.situacao == 'finalizado' %}
     {% if pacote_feito %}<div class="ok" style="margin-top:.7rem">Sessão {{ pacote_feito.usadas }} de {{ pacote_feito.total }} baixada ({{ pacote_feito.nome }}).{% if pacote_feito.saldo %} Faltam {{ pacote_feito.saldo }}; a próxima fica boa a partir de {{ pacote_feito.proxima.strftime('%d/%m') }} (intervalo de {{ pacote_feito.intervalo }} dias).{% else %} Pacote concluído.{% endif %}</div>{% endif %}
@@ -752,6 +847,12 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
       <div class="ag-acoes inteira"><button onclick="this.disabled=true;this.form.submit()">Receber</button><span class="mut">a receita vai pro Financeiro; "fica a receber" vira um título do paciente</span></div>
     </form>{% endif %}
   </div>
+  {% endif %}
+
+  {% if ev.desmarcou == 'clinica' %}
+  <div class="ag-caixa"><b>A clínica desmarcou este horário</b> <span class="mut">(não conta como falta)</span>
+    <div class="ag-acoes"><form method="post" action="/painel/clinica/agenda/evento/{{ ev.id }}/mensagem"><input type="hidden" name="qual" value="desmarcou"><button class="sec">Mandar a mensagem de remarcar</button></form>
+      <a class="ag-bt sec" href="/painel/clinica/agenda/passagem/cancelada?data={{ data_iso }}&prof={{ ev.profissional_id }}">Ver a lista do dia</a></div></div>
   {% endif %}
 
   {% if ev.lead and ev.situacao in ('agendado','confirmado','faltou') %}
@@ -803,3 +904,17 @@ _TPL_EVENTO = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
 _env.loader.mapping["clinica_agenda.html"] = _TPL
 _env.loader.mapping["clinica_agenda_novo.html"] = _TPL_NOVO
 _env.loader.mapping["clinica_agenda_evento.html"] = _TPL_EVENTO
+_env.loader.mapping["clinica_passagem_cancelada.html"] = r"""{% extends "base" %}{% block conteudo %}""" + _CSS + r"""
+<div class="ag-pag">
+  <div class="ag-topo"><div><h2>Passagem cancelada</h2><div class="sub">Os pacientes ficaram "a remarcar", com o selo "a clínica desmarcou" (não conta como falta). Mande a mensagem pronta de cada um.</div></div>
+    <a class="ag-bt sec" href="/painel/clinica/agenda{% if data_iso %}?data={{ data_iso }}{% endif %}">Voltar à agenda</a></div>
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+  {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
+  {% for l in linhas %}
+  <div class="ag-caixa"><b><a href="/painel/clinica/agenda/evento/{{ l.ev.id }}">{{ l.ev.paciente }}</a></b> · {{ l.ev.hora }}
+    <div class="ag-msg">{{ l.texto }}</div>
+    <div class="ag-acoes"><form method="post" action="/painel/clinica/agenda/evento/{{ l.ev.id }}/mensagem"><input type="hidden" name="qual" value="desmarcou"><button class="sec">Mandar esta</button></form></div>
+  </div>
+  {% else %}<div class="ag-caixa">Ninguém estava marcado nesse dia: só o dia ficou bloqueado.</div>{% endfor %}
+</div>
+{% endblock %}"""

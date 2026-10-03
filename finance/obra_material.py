@@ -81,12 +81,16 @@ def quantidade_br(txt) -> Decimal:
     ("1.5"), menos no milhar óbvio ("1.000", "12.500"). Recusa com ValueError o
     que não é quantidade (vazio, texto, nan/inf, negativo, grande demais pro
     numeric(12,3)) e arredonda em 3 casas — a precisão do banco, pra comparar
-    igual ao que fica gravado ("10.0004" é 10)."""
-    s = str(txt if txt is not None else "").strip().replace(" ", "")
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif re.fullmatch(r"[1-9]\d{0,2}(\.\d{3})+", s):
-        s = s.replace(".", "")
+    igual ao que fica gravado ("10.0004" é 10). O que já chega como número não
+    passa pela leitura do texto: Decimal('30.000') é trinta, não trinta mil."""
+    if isinstance(txt, (int, float, Decimal)) and not isinstance(txt, bool):
+        s = str(txt)
+    else:
+        s = str(txt if txt is not None else "").strip().replace(" ", "")
+        if "," in s:
+            s = s.replace(".", "").replace(",", ".")
+        elif re.fullmatch(r"[1-9]\d{0,2}(\.\d{3})+", s):
+            s = s.replace(".", "")
     try:
         d = Decimal(s)
     except Exception:  # noqa: BLE001

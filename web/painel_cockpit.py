@@ -210,7 +210,7 @@ def _gerencia(request: Request):
 # Os tokens vêm de web/tema.py, que é a fonte única do painel inteiro — o mesmo
 # bloco que o portal, o admin e a agenda usam. Aqui embaixo fica só o CSS de
 # layout deste app (app shell, abas, folha de ações), que não existe em outro lugar.
-_CSS = _tema.FONTES + """<style>""" + _tema.variaveis(com_base=False) + _tema.temas(menu=(".hdr", ".tabs")) + """
+_CSS = _tema.FONTES + """<style>""" + _tema.variaveis(com_base=False) + """
 /* O AVISO DO ZAPFETCH (20/09/2026). `--zap-baixo` é a altura do rodapé fixo
    deste app: é a MESMA de `.toast{bottom:88px}` logo abaixo, e sem ela o aviso
    cobriria justamente o botão que a pessoa precisa apertar. */
@@ -1596,7 +1596,14 @@ def _ic(nome: str, cls: str = "ic") -> str:
 #
 # A versão sai do CONTEÚDO: mudou o CSS, muda a URL, e o navegador busca a nova
 # sem ninguém precisar lembrar de virar um número à mão.
-_CSS_TEXTO = _CSS[len(_tema.FONTES):].replace("<style>", "", 1).rsplit("</style>", 1)[0]
+# Os TEMAS (claro, misto, automático: web/tema.py) entram no FIM da folha servida,
+# não no `_CSS`: só valem com `data-tema` no <html>, e os seletores deles são mais
+# específicos que as regras do app, então a ordem não muda nada na tela. No fim,
+# a primeira `.tabs{` da folha continua sendo a regra do app, que é o que os testes
+# de layout procuram (tests/test_cockpit_rodape_android.py). No misto, o "menu" do
+# Cockpit é o cabeçalho e a barra de abas.
+_CSS_TEXTO = (_CSS[len(_tema.FONTES):].replace("<style>", "", 1).rsplit("</style>", 1)[0]
+              + _tema.temas(menu=(".hdr", ".tabs")))
 _CSS_VER = _hashlib.sha1(_CSS_TEXTO.encode()).hexdigest()[:10]
 
 

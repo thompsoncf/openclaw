@@ -37,6 +37,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
               "367_pix_da_empresa.sql", "369_obra_fotos.sql", "371_obra_etapa_pagamentos.sql",
               "478_obra_quadras.sql", "482_obra_mapas.sql")
 _BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+# as migrações com prefixo de data (db/nova_migracao.py): acha pelo nome
+_MIGRACOES += tuple(p.name for p in sorted(_BASE.glob("*_obra_mapa_planta_obs.sql")))
 
 
 @pytest.fixture(scope="module")
@@ -375,3 +377,158 @@ def test_a_aba_esta_no_menu_e_fica_acesa():
     assert 'href="/painel/obras/mapa" class="nav-i on"' in html     # aba própria, acesa
     assert 'href="/painel/obras" class="nav-i"' in html            # e Obras apagada
     assert 'id="ic-mapa"' in html
+
+
+# ── o arquivo da área: importar, a página do PDF e o "O que tem no arquivo" ──
+def _pdf2() -> bytes:
+    """Um projeto de 2 páginas: a 1ª deitada (200×100), a 2ª em pé (100×300)."""
+    import pymupdf
+    doc = pymupdf.open()
+    doc.new_page(width=200, height=100)
+    doc.new_page(width=100, height=300)
+    try:
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
+def test_obs_guarda_as_linhas_e_e_da_conta(pool, conta):
+    m = om.criar(pool, conta, "Área Obs")
+    om.salvar_obs(pool, conta, m["id"], "  Quadras A a F \r\n\n   lotes 1 a 6   são nossos  ")
+    assert om.obter(pool, conta, m["id"])["planta_obs"] == "Quadras A a F\nlotes 1 a 6 são nossos"
+    om.salvar_obs(pool, conta, m["id"], "x" * 900)
+    assert len(om.obter(pool, conta, m["id"])["planta_obs"]) == om.MAX_OBS
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo, nome) values ('pj','Outra') returning id").fetchone()[0]
+        c.commit()
+    with pytest.raises(ValueError, match="não encontrada"):
+        om.salvar_obs(pool, outra, m["id"], "invasão")
+
+
+def test_pdf_escolhe_a_pagina_e_guarda_o_nome(pool, conta):
+    m = om.criar(pool, conta, "Área PDF")
+    subidas = {}
+    r = om.guardar_planta(pool, conta, m["id"], _pdf2(), "application/pdf", pagina=2,
+                          nome_arquivo="C:\\fakepath\\projeto  executivo.pdf",
+                          subir=lambda cam, dados, ct: subidas.setdefault(cam, ct))
+    assert r["altura"] == 3000                                  # a 2ª página, em pé
+    assert om.obter(pool, conta, m["id"])["planta_nome"] == "projeto executivo.pdf · página 2"
+    with pytest.raises(ValueError, match="tem 2 páginas"):
+        om.guardar_planta(pool, conta, m["id"], _pdf2(), "application/pdf", pagina=3,
+                          subir=lambda *a: None)
+    with pytest.raises(ValueError, match="uma página só"):
+        om.guardar_planta(pool, conta, m["id"], _pdf(), "application/pdf", pagina=2,
+                          subir=lambda *a: None)
+
+
+def _com_bucket(monkeypatch):
+    from finance import comprovantes
+    guardado = {}
+
+    def _subir(caminho, dados, ct):
+        guardado[caminho] = (dados, ct)
+        return caminho
+
+    monkeypatch.setattr(comprovantes, "subir_em", _subir)
+    monkeypatch.setattr(comprovantes, "ler", lambda cam: guardado[cam])
+    monkeypatch.setattr(comprovantes, "apagar", lambda cam: guardado.pop(cam, None))
+    return guardado
+
+
+def test_painel_cria_a_area_ja_com_o_arquivo_e_a_obs(pool, conta, monkeypatch):
+    _com_bucket(monkeypatch)
+    c = _painel(pool, conta, monkeypatch)
+    html = c.get("/painel/obras/mapa").text
+    assert 'name="planta"' in html and "Como mandar o arquivo pro mapa ficar bem feito" in html
+    assert "O que tem no arquivo" in html
+    r = c.post("/painel/obras/mapa/nova",
+               data={"nome": "Área Nova", "cidade": "Lago da Pedra", "pagina": "1",
+                     "obs": "Quadra 4: lotes 1 a 6 são nossos."},
+               files={"planta": ("croqui.png", _png(600, 300), "image/png")})
+    assert r.headers["location"].endswith("/editar")
+    m = next(x for x in om.listar(pool, conta) if x["nome"] == "Área Nova")
+    d = om.obter(pool, conta, m["id"])
+    assert d["tem_planta"] and d["planta_nome"] == "croqui.png" and "lotes 1 a 6" in d["planta_obs"]
+    # o editor mostra a obs pra quem risca
+    assert "lotes 1 a 6 são nossos" in c.get(r.headers["location"]).text
+    # sem arquivo (o campo vazio do navegador) a área nasce do mesmo jeito
+    r = c.post("/painel/obras/mapa/nova", data={"nome": "Área Sem Arquivo", "pagina": "1", "obs": ""},
+               files={"planta": ("", b"", "application/octet-stream")})
+    assert r.headers["location"].endswith("/editar") and "erro" not in r.headers["location"]
+    # arquivo que não serve: a área nasce, e o editor diz o porquê
+    r = c.post("/painel/obras/mapa/nova", data={"nome": "Área Errada", "pagina": "1"},
+               files={"planta": ("planta.dwg", b"AC1027 dwg", "application/octet-stream")})
+    assert "/editar?erro=" in r.headers["location"]
+
+
+def test_painel_importar_trocar_e_a_obs_sozinha(pool, conta, monkeypatch):
+    _com_bucket(monkeypatch)
+    c = _painel(pool, conta, monkeypatch)
+    m = om.criar(pool, conta, "Área Importar")
+    html = c.get(f"/painel/obras/mapa?m={m['id']}").text
+    assert "📎 Importar planta" in html and 'id="importar" open' in html     # aberto sem planta
+    # a obs sozinha (o arquivo vem depois), com dado que tenta virar código
+    r = c.post(f"/painel/obras/mapa/{m['id']}/planta",
+               data={"com_obs": "1", "obs": "Lotes <script>x</script> 1 a 6", "pagina": "1"},
+               files={"planta": ("", b"", "application/octet-stream")})
+    assert "erro" not in r.headers["location"]
+    html = c.get(f"/painel/obras/mapa?m={m['id']}").text
+    assert "<script>x" not in html and "Lotes &lt;script&gt;x&lt;/script&gt; 1 a 6" in html
+    # página inválida: volta pro bloco de importar com o aviso
+    r = c.post(f"/painel/obras/mapa/{m['id']}/planta", data={"com_obs": "1", "obs": "x", "pagina": "dois"},
+               files={"planta": ("p.png", _png(), "image/png")})
+    assert "erro=" in r.headers["location"] and r.headers["location"].endswith("#importar")
+    # o arquivo entra; o bloco fecha e vira "Trocar a planta"
+    r = c.post(f"/painel/obras/mapa/{m['id']}/planta",
+               data={"com_obs": "1", "obs": "Quadra 4 inteira", "pagina": "2"},
+               files={"planta": ("projeto.pdf", _pdf2(), "application/pdf")})
+    assert "erro" not in r.headers["location"]
+    d = om.obter(pool, conta, m["id"])
+    assert d["tem_planta"] and d["planta_nome"] == "projeto.pdf · página 2" and d["planta_obs"] == "Quadra 4 inteira"
+    html = c.get(f"/painel/obras/mapa?m={m['id']}").text
+    assert "📎 Trocar a planta" in html and 'id="importar" open' not in html
+    assert "arquivo atual: projeto.pdf · página 2" in html
+    # o formulário antigo (sem o campo da obs) não apaga a obs
+    c.post(f"/painel/obras/mapa/{m['id']}/planta", files={"planta": ("p.png", _png(), "image/png")})
+    assert om.obter(pool, conta, m["id"])["planta_obs"] == "Quadra 4 inteira"
+    # sem arquivo e sem o campo da obs: pede o arquivo
+    r = c.post(f"/painel/obras/mapa/{m['id']}/planta", files={"planta": ("", b"", "application/octet-stream")})
+    assert "erro=" in r.headers["location"]
+
+
+# ── os achados da verificação independente do #1011 ──────────────────────
+def test_arquivo_vazio_com_nome_avisa_e_pdf_com_senha_explica(pool, conta, monkeypatch):
+    import pymupdf
+    _com_bucket(monkeypatch)
+    c = _painel(pool, conta, monkeypatch)
+    m = om.criar(pool, conta, "Área Achados")
+    r = c.post(f"/painel/obras/mapa/{m['id']}/planta", data={"com_obs": "1", "obs": "", "pagina": "1"},
+               files={"planta": ("planta.pdf", b"", "application/pdf")})          # download que falhou
+    assert "erro=" in r.headers["location"] and not om.obter(pool, conta, m["id"])["tem_planta"]
+    doc = pymupdf.open()
+    doc.new_page(width=200, height=100)
+    try:
+        trancado = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="abc", owner_pw="dono")
+    finally:
+        doc.close()
+    with pytest.raises(ValueError, match="tem senha"):
+        om.guardar_planta(pool, conta, m["id"], trancado, "application/pdf", subir=lambda *a: None)
+    r = c.post(f"/painel/obras/mapa/{m['id']}/planta", data={"com_obs": "1", "obs": "", "pagina": "²"},
+               files={"planta": ("p.png", _png(), "image/png")})
+    from urllib.parse import unquote
+    assert "Página do PDF inválida" in unquote(r.headers["location"])
+
+
+def test_nova_area_tambem_leva_o_arquivo(pool, conta, monkeypatch):
+    _com_bucket(monkeypatch)
+    c = _painel(pool, conta, monkeypatch)
+    m = om.criar(pool, conta, "Área Primeira")
+    html = c.get(f"/painel/obras/mapa?m={m['id']}").text
+    bloco = html.split('id="nova-area"')[1].split('id="dados-area"')[0]
+    assert 'enctype="multipart/form-data"' in bloco and 'name="planta"' in bloco and 'name="obs"' in bloco
+    assert 'id="dados-area"' in html
+    r = c.post("/painel/obras/mapa/nova", data={"nome": "Área Segunda", "pagina": "1", "obs": "Quadra 7"},
+               files={"planta": ("q7.png", _png(), "image/png")})
+    assert r.headers["location"].endswith("/editar")
+    d = om.obter(pool, conta, next(x["id"] for x in om.listar(pool, conta) if x["nome"] == "Área Segunda"))
+    assert d["tem_planta"] and d["planta_obs"] == "Quadra 7" and d["planta_nome"] == "q7.png"

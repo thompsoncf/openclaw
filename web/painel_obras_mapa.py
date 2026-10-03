@@ -78,16 +78,49 @@ def mapa(request: Request):
                    erro=(request.query_params.get("erro") or "").strip())
 
 
+def _arquivo(planta) -> tuple[bytes, str, str] | None:
+    """(conteúdo, tipo, nome) do arquivo do formulário — None só quando não
+    escolheram nenhum (o campo vazio do navegador chega SEM NOME). Com nome e 0
+    byte (download que falhou), segue: o `guardar_planta` diz "veio vazio"."""
+    if planta is None or isinstance(planta, str) or not (planta.filename or "").strip():
+        return None
+    return planta.file.read(), planta.content_type or "", planta.filename
+
+
+def _pagina(txt: str) -> int:
+    t = (txt or "").strip()
+    if not t:
+        return 1
+    if not (t.isascii() and t.isdigit()) or int(t) < 1:
+        raise ValueError("Página do PDF inválida — use 1, 2, 3…")
+    return int(t)
+
+
 @router.post("/painel/obras/mapa/nova")
-def mapa_novo(request: Request, nome: str = Form(""), cidade: str = Form("")):
+def mapa_novo(request: Request, nome: str = Form(""), cidade: str = Form(""),
+              planta: UploadFile | None = File(None), pagina: str = Form("1"),
+              obs: str = Form("")):
+    """A área nasce já com o arquivo (planta, croqui ou desenho) e o "O que tem
+    no arquivo", quando vêm — os dois opcionais. `def` síncrono (banco síncrono)."""
     conta, redir = _acesso(request)
     if redir is not None:
         return redir
     try:
+        pag = _pagina(pagina)
         m = om.criar(get_pool(), conta[0], nome, cidade)
     except ValueError as e:
         return _volta("/painel/obras/mapa", str(e))
-    return RedirectResponse(f"/painel/obras/mapa/{m['id']}/editar", status_code=303)
+    editor = f"/painel/obras/mapa/{m['id']}/editar"
+    try:
+        if obs.strip():
+            om.salvar_obs(get_pool(), conta[0], m["id"], obs)
+        arq = _arquivo(planta)
+        if arq:
+            om.guardar_planta(get_pool(), conta[0], m["id"], arq[0], arq[1],
+                              pagina=pag, nome_arquivo=arq[2])
+    except ValueError as e:         # a área nasceu; o arquivo não — o editor diz o porquê
+        return _volta(editor, f"A área foi criada, mas o arquivo não entrou: {e}")
+    return RedirectResponse(editor, status_code=303)
 
 
 @router.post("/painel/obras/mapa/{mapa_id}/dados")
@@ -107,18 +140,32 @@ def mapa_dados(request: Request, mapa_id: int, nome: str = Form(""),
 
 
 @router.post("/painel/obras/mapa/{mapa_id}/planta")
-def planta_subir(request: Request, mapa_id: int, planta: UploadFile = File(...),
-                 volta: str = Form("")):
+def planta_subir(request: Request, mapa_id: int, planta: UploadFile | None = File(None),
+                 volta: str = Form(""), pagina: str = Form("1"), obs: str = Form(""),
+                 com_obs: str = Form("")):
+    """O arquivo da área (planta, croqui ou desenho) e/ou o "O que tem no
+    arquivo". `com_obs` diz que o formulário tem o campo — sem ele (formulário
+    antigo), a obs fica como está; com ele, até vazia ela é gravada."""
     conta, redir = _acesso(request)
     if redir is not None:
         return redir
     destino = (f"/painel/obras/mapa/{mapa_id}/editar" if volta == "editor"
                else f"/painel/obras/mapa?m={mapa_id}")
     try:
-        om.guardar_planta(get_pool(), conta[0], mapa_id,
-                          planta.file.read(), planta.content_type or "")
+        pag = _pagina(pagina)
+        arq = _arquivo(planta)
+        if arq is None and not com_obs:
+            raise ValueError("Escolha o arquivo da planta, do croqui ou do desenho.")
+        if com_obs:                     # a obs primeiro: o texto não se perde se o arquivo falhar
+            om.salvar_obs(get_pool(), conta[0], mapa_id, obs)
+        if arq:
+            om.guardar_planta(get_pool(), conta[0], mapa_id, arq[0], arq[1],
+                              pagina=pag, nome_arquivo=arq[2])
     except ValueError as e:
-        return _volta(destino, str(e))
+        r = _volta(destino, str(e))
+        if volta != "editor":           # volta pro bloco de importar, aberto pela âncora
+            r.headers["location"] += "#importar"
+        return r
     return RedirectResponse(destino, status_code=303)
 
 
@@ -202,6 +249,11 @@ _CSS_MAPA = r"""<style>
 .om-bt{padding:.35rem .7rem;border-radius:7px;border:1px solid var(--borda);background:transparent;color:inherit;cursor:pointer;font-size:.8rem;text-decoration:none;display:inline-block}
 .om-bt.prim{background:var(--verde);border-color:var(--verde);color:#fff}
 .om-mut{color:var(--txt-mut);font-size:.78rem}
+.om-box textarea{width:100%;box-sizing:border-box;resize:vertical;font:inherit}
+.om-dica{border:1px dashed var(--borda);border-radius:9px;padding:.55rem .75rem;margin-top:.6rem;font-size:.84rem}
+.om-dica summary{cursor:pointer;font-weight:600}
+.om-dica ol{margin:.5rem 0 .3rem;padding-left:1.2rem}.om-dica li{margin:.3rem 0}
+.om-obs{white-space:pre-line}
 
 /* ====== o chão e os blocos (a técnica dos stands) ====== */
 .mapa-caixa{background:#10201a;border-radius:14px;padding:14px;margin-top:.8rem}
@@ -309,7 +361,32 @@ _CSS_MAPA = r"""<style>
 .pf-fotos img{width:84px;height:64px;object-fit:cover;border-radius:7px;border:1px solid var(--borda)}
 </style>"""
 
-_TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
+# O ARQUIVO DA ÁREA (pedido do dono em 03/10/2026): onde quer que se anexe a
+# planta, o croqui ou o desenho, vem junto o passo a passo pra o mapa ficar bem
+# feito e o campo "O que tem no arquivo" — o que o desenho não deixa claro, pra
+# quem risca os lotes. Dado digitado só com `|e` (o env não escapa sozinho).
+_MACROS_ARQUIVO = r"""
+{% macro como_mandar(aberto) %}<details class="om-dica"{{ ' open' if aberto }}><summary>📋 Como mandar o arquivo pro mapa ficar bem feito</summary>
+<ol>
+  <li><b>O melhor é a planta de implantação</b> do loteamento ou do condomínio, em PDF — a que o engenheiro fez ou a prefeitura aprovou. Projeto com várias páginas? Diga em “Página do PDF” qual é a da planta geral.</li>
+  <li><b>Foto ou croqui à mão também servem.</b> Foto: tire de cima, reta (sem ângulo), com boa luz, a folha inteira aparecendo e sem sombra. Croqui: desenhe a rua, as quadras e numere os lotes.</li>
+  <li><b>Arquivo do AutoCAD (DWG)?</b> Exporte em PDF antes (Imprimir → Salvar como PDF) ou peça o PDF ao engenheiro.</li>
+  <li><b>Um arquivo por área.</b> Cada quadra numa folha separada? Crie uma área pra cada.</li>
+  <li><b>O que o desenho não diz, escreva em “O que tem no arquivo”:</b> quais quadras e lotes aparecem, quais casas são suas, quais estão vagas ou são de terceiros, onde fica a rua de entrada, se o croqui está fora de escala.</li>
+</ol>
+<div class="om-mut">PDF, JPG, PNG ou WEBP, até 10 MB. Depois de subir, é só riscar os lotes por cima, seguindo o desenho.</div>
+</details>{% endmacro %}
+{% macro campos_arquivo(obs, tem_planta) %}
+  <div><label>{{ 'Trocar o arquivo' if tem_planta else 'Planta, croqui ou desenho' }}</label>
+    <input type="file" name="planta" accept="application/pdf,image/jpeg,image/png,image/webp"></div>
+  <div><label>Página do PDF</label><input name="pagina" value="1" inputmode="numeric" maxlength="3"></div>
+  <div style="grid-column:1/-1"><label>O que tem no arquivo (obs)</label>
+    <input type="hidden" name="com_obs" value="1">
+    <textarea name="obs" rows="3" maxlength="600" placeholder="Ex.: Planta do Santa Marina 2, quadras A a F. As nossas casas são os lotes 1 a 6 da quadra 4 (marquei de azul). Lotes 7 a 9 vagos; o resto é de terceiros. A entrada fica na rua de baixo.">{{ obs|e }}</textarea></div>
+{% endmacro %}
+"""
+
+_TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + _MACROS_ARQUIVO + r"""
 <div class="om-pag">
 <a class="om-volta" href="/painel/obras">← Obras</a>
 <div class="om-topo" style="margin-top:.4rem"><div><h2>Mapa das obras</h2>
@@ -321,11 +398,13 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
 {% if not mapas and not exemplo %}
 <div class="om-box">
   <b>Crie a primeira área de obras</b>
-  <p class="om-mut" style="margin:.4rem 0 .6rem">A área é o empreendimento — o loteamento, a quadra de casas, o condomínio. Pode ter várias. Depois de criar, suba a planta (PDF ou foto) e risque os lotes por cima.</p>
-  <form method="post" action="/painel/obras/mapa/nova" class="om-grid">
+  <p class="om-mut" style="margin:.4rem 0 .6rem">A área é o empreendimento — o loteamento, a quadra de casas, o condomínio. Pode ter várias. Já mande o arquivo dela — a planta, o croqui ou o desenho — e depois é só riscar os lotes por cima.</p>
+  {{ como_mandar(true) }}
+  <form method="post" action="/painel/obras/mapa/nova" enctype="multipart/form-data" class="om-grid">
     <div><label>Nome</label><input name="nome" placeholder="Santa Marina 2" required></div>
     <div><label>Cidade (opcional)</label><input name="cidade" placeholder="Paço do Lumiar"></div>
-    <div><label>&nbsp;</label><button class="om-bt prim">Criar e riscar os lotes</button></div>
+    {{ campos_arquivo('', false) }}
+    <div><button class="om-bt prim">Criar a área e riscar os lotes</button></div>
   </form>
   <p class="om-mut" style="margin:.7rem 0 0">Quer ver como fica antes? <a href="/painel/obras/mapa?exemplo=1">Ver um exemplo pronto ›</a></p>
 </div>
@@ -344,12 +423,13 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
     <div class="emp-sel">
       {% for x in mapas %}<a class="emp{{ ' on' if v and not exemplo and v.mapa.id == x.id }}" href="/painel/obras/mapa?m={{ x.id }}">{{ x.nome|e }}</a>{% endfor %}
       {% if exemplo %}<a class="emp on" href="/painel/obras/mapa?exemplo=1">👀 Residencial Exemplo</a>
-      {% else %}<a class="emp mais" href="#nova-area">+ nova área</a><a class="emp mais" href="/painel/obras/mapa?exemplo=1">👀 exemplo</a>{% endif %}
+      {% else %}<a class="emp mais" href="#nova-area" onclick="document.getElementById('nova-area').open=true">+ nova área</a><a class="emp mais" href="/painel/obras/mapa?exemplo=1">👀 exemplo</a>{% endif %}
     </div>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
       <button class="mb" id="bt2d" onclick="setVista('2d')">Planta</button>
       <button class="mb on" id="bt3d" onclick="setVista('3d')">3D</button>
-      {% if v and not exemplo %}<a class="mb" href="/painel/obras/mapa/{{ v.mapa.id }}/editar">✏️ Riscar os lotes</a>{% endif %}
+      {% if v and not exemplo %}<a class="mb" href="#importar" onclick="document.getElementById('importar').open=true">📎 {{ 'Trocar a planta' if v.mapa.tem_planta else 'Importar planta' }}</a>
+      <a class="mb" href="/painel/obras/mapa/{{ v.mapa.id }}/editar">✏️ Riscar os lotes</a>{% endif %}
     </div>
   </div>
   {% if v %}
@@ -366,7 +446,7 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
     <span><i style="background:repeating-linear-gradient(135deg,rgba(255,255,255,.4) 0 2px,var(--terc) 2px 5px)"></i>de terceiro</span>
   </div>
   {% if not v.lotes %}<p style="color:#cfe9de;font-size:.86rem;margin:.8rem 0 0">A área ainda não tem lote riscado.
-    <a style="color:#d7ebe2" href="/painel/obras/mapa/{{ v.mapa.id }}/editar">Suba a planta e risque os lotes ›</a></p>{% endif %}
+    <a style="color:#d7ebe2" href="{{ '/painel/obras/mapa/' ~ v.mapa.id ~ '/editar' if v.mapa.tem_planta else '#importar' }}">{{ 'Risque os lotes ›' if v.mapa.tem_planta else 'Importe a planta e risque os lotes ›' }}</a></p>{% endif %}
   {% endif %}
 </div>
 </div><div>
@@ -393,26 +473,36 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
 </div>
 
 {% if v and not exemplo %}
-<details class="om-box" id="nova-area"><summary>Dados da área · {{ v.mapa.nome|e }}</summary>
+<details class="om-box" id="importar"{{ ' open' if not v.mapa.tem_planta }}>
+<script>if (location.hash === '#importar' || location.hash === '#nova-area') document.getElementById(location.hash.slice(1)).open = true;</script>
+  <summary>📎 {{ 'Trocar a planta, o croqui ou o desenho' if v.mapa.tem_planta else 'Importar a planta, o croqui ou o desenho' }} · {{ v.mapa.nome|e }}{% if v.mapa.planta_nome %} <span class="om-mut">· arquivo atual: {{ v.mapa.planta_nome|e }}</span>{% endif %}</summary>
+  {% if v.mapa.planta_obs %}<p class="om-mut om-obs" style="margin:.5rem 0 0">📎 <b>O que tem no arquivo:</b> {{ v.mapa.planta_obs|e }}</p>{% endif %}
+  {{ como_mandar(not v.mapa.tem_planta) }}
+  <form method="post" action="/painel/obras/mapa/{{ v.mapa.id }}/planta" enctype="multipart/form-data" class="om-grid">
+    {{ campos_arquivo(v.mapa.planta_obs, v.mapa.tem_planta) }}
+    <div><button class="om-bt prim">{{ 'Salvar' if v.mapa.tem_planta else 'Importar' }}</button></div>
+  </form>
+</details>
+
+<details class="om-box" id="nova-area"><summary>➕ Nova área — outro loteamento, quadra ou condomínio</summary>
+  {{ como_mandar(false) }}
+  <form method="post" action="/painel/obras/mapa/nova" enctype="multipart/form-data" class="om-grid">
+    <div><label>Nome</label><input name="nome" placeholder="Santa Marina 3" required></div>
+    <div><label>Cidade (opcional)</label><input name="cidade"></div>
+    {{ campos_arquivo('', false) }}
+    <div><button class="om-bt prim">Criar a área e riscar os lotes</button></div>
+  </form>
+</details>
+
+<details class="om-box" id="dados-area"><summary>Dados da área · {{ v.mapa.nome|e }}</summary>
   <form method="post" action="/painel/obras/mapa/{{ v.mapa.id }}/dados" class="om-grid" style="margin-top:.5rem">
     <div><label>Nome</label><input name="nome" value="{{ v.mapa.nome|e }}" required></div>
     <div><label>Cidade</label><input name="cidade" value="{{ v.mapa.cidade|e }}"></div>
     <div><label>&nbsp;</label><button class="om-bt prim">Salvar</button></div>
   </form>
-  <form method="post" action="/painel/obras/mapa/{{ v.mapa.id }}/planta" enctype="multipart/form-data" class="om-grid" style="margin-top:.4rem">
-    <div><label>{{ 'Trocar a planta' if v.mapa.tem_planta else 'Subir a planta (PDF ou foto)' }}</label>
-      <input type="file" name="planta" accept="application/pdf,image/*" required></div>
-    <div><label>&nbsp;</label><button class="om-bt">Subir</button></div>
-  </form>
   <form method="post" action="/painel/obras/mapa/{{ v.mapa.id }}/dados" onsubmit="return confirm('Apagar esta área e os riscos dela? As obras ligadas não são tocadas.')" style="margin-top:.4rem">
     <input type="hidden" name="nome" value="{{ v.mapa.nome|e }}"><input type="hidden" name="apagar" value="1">
     <button class="om-bt">Apagar a área</button></form>
-  <hr style="border:none;border-top:1px solid var(--borda);margin:.8rem 0">
-  <form method="post" action="/painel/obras/mapa/nova" class="om-grid">
-    <div><label>Nova área</label><input name="nome" placeholder="Santa Marina 3"></div>
-    <div><label>Cidade</label><input name="cidade"></div>
-    <div><label>&nbsp;</label><button class="om-bt">Criar outra área</button></div>
-  </form>
 </details>
 {% endif %}
 {% endif %}
@@ -570,7 +660,7 @@ window.addEventListener('resize', montar);
 </script>
 {% endblock %}"""
 
-_TPL_EDITOR = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
+_TPL_EDITOR = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + _MACROS_ARQUIVO + r"""
 <style>
 .ed-chao{position:relative;border-radius:10px;background:#142b23;box-shadow:inset 0 0 0 1px #24453a;
   touch-action:none;user-select:none;margin:0 auto}
@@ -600,13 +690,18 @@ _TPL_EDITOR = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + r"""
 {% if erro %}<div class="om-erro">{{ erro|e }}</div>{% endif %}
 
 {% if not m.tem_planta %}
-<div class="om-box"><b>Suba a planta primeiro (opcional)</b>
-  <p class="om-mut" style="margin:.3rem 0 .5rem">Com a planta de fundo, riscar é só seguir o desenho. Serve o PDF do loteamento ou uma foto. Dá pra riscar sem planta também — o chão fica quadriculado.</p>
+<div class="om-box"><b>📎 Importe a planta, o croqui ou o desenho primeiro (opcional)</b>
+  <p class="om-mut" style="margin:.3rem 0 0">Com o desenho de fundo, riscar é só seguir as linhas. Dá pra riscar sem ele também — o chão fica quadriculado.</p>
+  {{ como_mandar(true) }}
   <form method="post" action="/painel/obras/mapa/{{ m.id }}/planta" enctype="multipart/form-data" class="om-grid">
-    <div><label>Planta (PDF ou foto)</label><input type="file" name="planta" accept="application/pdf,image/*" required></div>
     <input type="hidden" name="volta" value="editor">
-    <div><label>&nbsp;</label><button class="om-bt prim">Subir a planta</button></div>
+    {{ campos_arquivo(m.planta_obs, false) }}
+    <div><button class="om-bt prim">Importar</button></div>
   </form></div>
+{% elif m.planta_obs %}
+<div class="om-box"><b>📎 O que tem no arquivo</b>{% if m.planta_nome %} <span class="om-mut">· {{ m.planta_nome|e }}</span>{% endif %}
+  <p class="om-obs" style="margin:.35rem 0 0">{{ m.planta_obs|e }}</p>
+  <p class="om-mut" style="margin:.35rem 0 0">Siga isso ao riscar. Pra trocar o arquivo ou a obs: <a href="/painel/obras/mapa?m={{ m.id }}#importar">Mapa das obras › Trocar a planta</a>.</p></div>
 {% endif %}
 
 <div class="mapa-caixa">

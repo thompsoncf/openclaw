@@ -808,6 +808,12 @@ def _regra_antes(c, conta_id: int, conversa_id: int, regra: dict, enviar) -> boo
         return False
     if not _cr.tem_o_que_responder(c, conversa_id, regra):
         return False
+    if regra.get("resgate"):
+        # o lead do resgate que "respondeu" com a URA de uma empresa (03/10/2026, Prime,
+        # lead #1431): robô não se responde — o resgate avisa o supervisor
+        from finance import resgate as _rg
+        if _rg.so_robo_sem_resposta(c, conversa_id):
+            return False
     if not _cr.ia_pode_falar(regra):
         if not _cr.ja_mandou_fora(c, conversa_id, regra):
             enviar(_cr.texto_fora(regra), _cr.STATUS_FORA)

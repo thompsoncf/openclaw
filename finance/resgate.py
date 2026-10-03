@@ -112,6 +112,44 @@ RE_PARAR = re.compile(
     r"desisti|j[aá] (fechei|contratei)|vou bloquear|bloqueado)(?!\w)",
     re.I)
 
+#: O ATENDIMENTO AUTOMÁTICO DE OUTRA EMPRESA (03/10/2026, Prime, lead #1431): a
+#: retomada foi pra um número que é a URA de uma empresa, 8 segundos depois veio
+#: "Desculpe, mas não entendi. Tente digitar só o assunto…", e a IA respondeu o robô —
+#: e o resumo contou como cliente que respondeu. Só o que GENTE não escreve: menu,
+#: "digite", "opção inválida", "mensagem automática". "Obrigada pelo contato" e "não
+#: entendi" sozinhos são gente, e quem é gente nunca pode ficar sem resposta.
+RE_ROBO = re.compile(
+    r"(?<!\w)(mensagem autom[aá]tica|resposta autom[aá]tica|atendimento autom[aá]tico|"
+    r"(sou|aqui [eé]) (o|a|um|uma) (assistente|atendente) virtual|digite|tecle|"
+    r"(escolha|selecione|responda com) (uma |a |o )?(das )?(op[cç][aãoõ]|n[uú]mero)|"
+    r"op[cç][aã]o (inv[aá]lida|desejada)|menu (principal|inicial|de op[cç][oõ]es)|"
+    r"n[aã]o (consegui )?entendi.{0,80}(tente|digite|op[cç][aãoõ]|de outra forma)|"
+    r"para falar com (um |uma |nosso |nossa )?(atendente|consultor|humano)|"
+    r"(fora do|nosso) hor[aá]rio de atendimento|agradecemos (o seu |seu |o |pelo |por entrar em )contato|"
+    r"em breve (retornaremos|responderemos|entraremos))(?!\w)",
+    re.I | re.S)
+#: o menu numerado ("1 - Fatura", "2) Segunda via", "1️⃣ Vendas"): três linhas é menu
+#: (duas podem ser o cliente respondendo "1. sábado / 2. domingo")
+_RE_MENU = re.compile(r"^\s*(?:\d{1,2}\s*[-–—).:]|\d️?⃣)\s*\S", re.M)
+
+
+def e_robo(texto) -> bool:
+    """A mensagem é de um atendimento automático (URA, menu, resposta de ausência)?"""
+    t = texto or ""
+    return bool(RE_ROBO.search(t)) or len(_RE_MENU.findall(t)) >= 3
+
+
+def so_robo_sem_resposta(c, conversa_id: int) -> bool:
+    """O que chegou depois da nossa última mensagem é TODO de robô? Aí a IA do resgate
+    não responde: robô respondendo robô não acaba nunca, e queima o chip. Áudio, foto
+    ou qualquer coisa sem texto conta como gente."""
+    rows = c.execute(
+        """select coalesce(texto,'') from mensagens where conversa_id=%s and direcao='in'
+             and criado_em > coalesce((select max(criado_em) from mensagens
+                                        where conversa_id=%s and direcao='out'), '-infinity')""",
+        (conversa_id, conversa_id)).fetchall()
+    return bool(rows) and all(e_robo(t) for (t,) in rows)
+
 FAIXAS = {1: "Cliente esperando resposta", 2: "Festa com data por vir",
           3: "Aberto", 4: "Perdido"}
 
@@ -1040,10 +1078,11 @@ def varrer_devolvidos(pool, conta_id: int) -> int:
 
 def _acompanhar(pool, conta_id: int, cfg: dict, agora: datetime) -> dict:
     """Os leads que já estão com a IA: o cliente respondeu? pediu pra parar? alguém
-    da equipe falou com ele (a IA sai)? o gestor deu o lead pra outra pessoa?"""
+    da equipe falou com ele (a IA sai)? o gestor deu o lead pra outra pessoa? quem
+    respondeu foi um robô (estado 'robo': não conta como resposta, e o supervisor sabe)?"""
     from finance import chip_regra as _cr
-    out = {"responderam": 0, "pararam": 0, "pausados": 0, "devolvidos": 0}
-    avisar = []
+    out = {"responderam": 0, "pararam": 0, "pausados": 0, "devolvidos": 0, "robos": 0}
+    avisar, robos = [], []
     with pool.connection() as c:
         rows = c.execute(
             """select r.prospeccao_id, r.conversa_id, r.entrou_em, r.estado, r.membro_id,
@@ -1055,21 +1094,29 @@ def _acompanhar(pool, conta_id: int, cfg: dict, agora: datetime) -> dict:
                 _devolvido(c, conta_id, lead, conv, vend)
                 out["devolvidos"] += 1
                 continue
-            if estado in ("chamado", "perdido"):
+            if estado in ("chamado", "perdido", "robo"):
                 # depois do perdido do resgate, a resposta reabre: a entrada de mensagem
                 # já devolve o lead à etapa que a conta manda (funil_perda.reativar), e a
                 # IA — ainda dona do lead — segue a conversa
                 resp = c.execute("""select texto from mensagens where conversa_id=%s
                                       and direcao='in' and criado_em > %s
                                     order by criado_em""", (conv, entrou)).fetchall()
-                if resp:
-                    parou = any(RE_PARAR.search(t or "") for (t,) in resp)
+                # o robô não é resposta; GENTE escrevendo depois dele, é
+                gente = [t for (t,) in resp if not e_robo(t)]
+                if gente:
+                    parou = any(RE_PARAR.search(t or "") for t in gente)
                     c.execute("""update resgate_leads set estado=%s, respondeu_em=now(), opt_out=%s
                                   where prospeccao_id=%s""",
                               ("parou" if parou else "respondeu", parou, lead))
                     out["pararam" if parou else "responderam"] += 1
                     if parou:
                         _registrar(c, conta_id, "parou", lead=lead)
+                elif resp and estado != "robo":
+                    c.execute("update resgate_leads set estado='robo' where prospeccao_id=%s",
+                              (lead,))
+                    _registrar(c, conta_id, "robo", lead=lead, texto=(resp[0][0] or "")[:300])
+                    out["robos"] += 1
+                    robos.append((lead, quem))
             if estado != "pausado":
                 r = {"vale_desde": entrou}
                 if _cr.pausar_se_humano(c, conta_id, conv, r):
@@ -1082,6 +1129,12 @@ def _acompanhar(pool, conta_id: int, cfg: dict, agora: datetime) -> dict:
         supervisor(pool, conta_id, f"⏸ Resgate · lead #{lead} ({_primeiro(quem)})\n"
                                    "Alguém da equipe falou com o cliente, então eu saí da "
                                    "conversa. O lead continua com a IA.", lead=lead, cfg=cfg)
+    for lead, quem in robos:
+        supervisor(pool, conta_id, f"🤖 Resgate · lead #{lead} ({_primeiro(quem)})\n"
+                                   "Quem respondeu foi um atendimento automático, não uma "
+                                   "pessoa. Não respondo robô. Se o número estiver errado, "
+                                   "corrija na ficha ou marque como perdido. Se uma pessoa "
+                                   "escrever, eu volto a atender.", lead=lead, cfg=cfg)
     return out
 
 
@@ -1209,7 +1262,7 @@ def resumo(c, conta_id: int, cfg: dict, agora: datetime) -> str:
                           from resgate_leads where conta_id=%s and respondeu_em >= %s""",
                      (conta_id, ini)).fetchone()
     linhas = [f"📋 Resgate · hoje", f"{cham} chamado{'s' if cham != 1 else ''} · "
-              f"{resp[0]} respondeu" + ("ram" if resp[0] != 1 else "")]
+              f"{resp[0]} {'respondeu' if resp[0] == 1 else 'responderam'}"]
     try:
         with c.transaction():
             vis = c.execute("""select count(*) from ia_visitas v join resgate_leads r
@@ -1238,6 +1291,10 @@ def resumo(c, conta_id: int, cfg: dict, agora: datetime) -> str:
                              and estado='pausado'""", (conta_id,)).fetchone()[0]
     if pausados:
         linhas.append(f"{pausados} com alguém da equipe falando com o cliente (eu saí)")
+    robos = _contagem_hoje(c, conta_id, ("robo",), agora)
+    if robos:
+        linhas.append(f"{robos} era atendimento automático, não gente (não respondi)" if robos == 1
+                      else f"{robos} eram atendimento automático, não gente (não respondi)")
     # as justificativas do dia: nota do próprio vendedor num lead que tinha sido avisado
     just = c.execute(
         """select coalesce(nullif(m.nome,''), m.email), a.descricao

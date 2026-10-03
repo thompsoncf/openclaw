@@ -77,7 +77,7 @@ def test_convidado_nao_recebe_novidades():
 def test_convidado_nao_gere_nem_vende_nem_ve_financeiro():
     caps = eq.caps_do_papel("convidado")
     assert caps == {"vendas": False, "financeiro": False, "gerir": False,
-                    "origens": True, "campo": False}
+                    "origens": True, "campo": False, "deposito": False}
 
 
 # ── o papel existe pra ser convidado ───────────────────────────────────────

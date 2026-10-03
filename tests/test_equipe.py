@@ -49,17 +49,17 @@ def test_caps_por_papel():
     # `campo` é a quinta (02/10/2026): o app do mestre de obras (/obra). Dono e
     # gestor têm (cobrem o mestre); vendedor, financeiro e convidado, não.
     assert equipe.caps_do_papel("dono") == {
-        "vendas": True, "financeiro": True, "gerir": True, "origens": True, "campo": True}
+        "vendas": True, "financeiro": True, "gerir": True, "origens": True, "campo": True, "deposito": True}
     assert equipe.caps_do_papel("vendedor") == {
-        "vendas": True, "financeiro": False, "gerir": False, "origens": False, "campo": False}
+        "vendas": True, "financeiro": False, "gerir": False, "origens": False, "campo": False, "deposito": False}
     assert equipe.caps_do_papel("financeiro") == {
-        "vendas": False, "financeiro": True, "gerir": False, "origens": False, "campo": False}
+        "vendas": False, "financeiro": True, "gerir": False, "origens": False, "campo": False, "deposito": True}
     assert equipe.caps_do_papel("convidado") == {
-        "vendas": False, "financeiro": False, "gerir": False, "origens": True, "campo": False}
+        "vendas": False, "financeiro": False, "gerir": False, "origens": True, "campo": False, "deposito": False}
     assert equipe.caps_do_papel("mestre") == {
-        "vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": True}
+        "vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": True, "deposito": False}
     assert equipe.caps_do_papel(None) == {
-        "vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": False}
+        "vendas": False, "financeiro": False, "gerir": False, "origens": False, "campo": False, "deposito": False}
 
 
 def test_aplicar_contexto():

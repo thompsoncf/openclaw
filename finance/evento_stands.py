@@ -266,6 +266,139 @@ def registrar_comprovante(pool, conta_id: int, codigo: str, comprovante_url: str
     return {"ok": True, "stand": stand}
 
 
+def _subir_comprovante(conta_id: int, codigo: str, conteudo: bytes, content_type: str,
+                       subir=None) -> tuple[str | None, str | None]:
+    """Valida e sobe o arquivo pro bucket PRIVADO. Devolve (caminho, None) ou
+    (None, "a frase do erro")."""
+    from . import comprovantes as _comprov
+    import time
+    import uuid
+    try:
+        ct = _comprov.validar(conteudo, content_type)
+    except ValueError as e:
+        return None, str(e)
+    ext = _EXT_COMPROVANTE.get(ct, "bin")
+    caminho = f"stands/{conta_id}/{codigo}-{int(time.time())}-{uuid.uuid4().hex[:8]}.{ext}"
+    try:
+        (subir or _comprov.subir_em)(caminho, conteudo, ct)
+    except ValueError as e:
+        return None, str(e)
+    return caminho, None
+
+
+def anexar_comprovante_da_reserva(pool, conta_id: int, codigo: str, conteudo: bytes,
+                                  content_type: str, *, subir=None) -> dict:
+    """O COMPROVANTE DE UMA RESERVA QUE JÁ EXISTE (03/10/2026, relato do dono da
+    Outlet Chic: a vendedora não conseguia anexar o comprovante do cliente na
+    reserva lançada pela lista — o app só tinha "Registrar venda", e só pra stand
+    livre). Sobe o arquivo e liga a TODOS os stands da reserva (a mesma proposta)
+    que ainda estão reservados; status e prazo não mudam — confirmar o sinal
+    continua sendo da gestão. Sem proposta ainda, ela nasce agora (com contrato).
+    Devolve {"ok", "codigos", ...} ou {"ok": False, "erro"}."""
+    stand = buscar(pool, conta_id, codigo)
+    if not stand:
+        return {"ok": False, "erro": "Estande não encontrado."}
+    if stand["status"] == "livre":
+        return {"ok": False, "erro": "Este stand está livre — use \"Registrar venda\"."}
+    if stand["status"] != "pre_reservado":
+        return {"ok": False, "erro": "Este stand já está vendido: o sinal já foi confirmado."}
+    caminho, erro = _subir_comprovante(conta_id, codigo, conteudo, content_type, subir)
+    if erro:
+        return {"ok": False, "erro": erro}
+    oid = stand.get("orcamento_id")
+    with pool.connection() as c:
+        rows = c.execute(
+            "update evento_stands set comprovante_url=%s, comprovante_em=%s, atualizado_em=now() "
+            "where conta_id=%s and status='pre_reservado' and (codigo=%s or "
+            "(%s::bigint is not null and orcamento_id=%s::bigint)) returning codigo",
+            (caminho, _ag.agora_brt(), conta_id, codigo, oid, oid)).fetchall()
+        c.commit()
+    r = {"ok": True, "codigos": sorted(x[0] for x in rows) or [codigo]}
+    if not oid:
+        try:
+            extra = garantir_orcamento_e_contrato(pool, conta_id, buscar(pool, conta_id, codigo))
+            if extra:
+                r.update(extra)
+        except Exception as e:  # noqa: BLE001 — o comprovante já está no stand
+            _log.warning("evento_stands: comprovante anexado mas a proposta do %s/%s "
+                         "falhou: %s: %s", conta_id, codigo, type(e).__name__, e)
+    _log.info("evento_stands: comprovante anexado à reserva — conta %s, estande(s) %s",
+              conta_id, ",".join(r["codigos"]))
+    return r
+
+
+def _registrar_reserva_do_stand(pool, conta_id: int, stand: dict, nome: str, whatsapp,
+                                vendedor_id=None) -> int | None:
+    """O stand ocupado SEM prospecção (o comprovante entrou pelo painel sem o nome do
+    lojista — S116, S78 e i14 em 02/10/2026) ganha a reserva registrada: é nela que
+    moram a marca, a vendedora e, depois, a proposta. Devolve o id, ou None."""
+    nome = (nome or "").strip()
+    if not nome:
+        return None
+    oid = stand.get("orcamento_id")
+    with pool.connection() as c:
+        pid = c.execute(
+            "insert into prospeccao (conta_id, empresa, whatsapp, status, origem, vendedor_id) "
+            "values (%s,%s,%s,'novo','pagina_stands',%s) returning id",
+            (conta_id, nome[:200], (whatsapp or "").strip()[:40] or None,
+             int(vendedor_id) if vendedor_id else None)).fetchone()[0]
+        c.execute("update evento_stands set prospeccao_id=%s, atualizado_em=now() "
+                  "where conta_id=%s and prospeccao_id is null and (codigo=%s or "
+                  "(%s::bigint is not null and orcamento_id=%s::bigint))",
+                  (pid, conta_id, stand["codigo"], oid, oid))
+        c.commit()
+    return int(pid)
+
+
+def cadastro_pelo_documento(pool, conta_id: int, doc: str) -> dict | None:
+    """O cadastro que a conta JÁ TEM em Clientes (cliente ou fornecedor, feito à mão
+    ou por outra venda) com este CPF/CNPJ, no formato do botão de busca do
+    formulário do stand (o mesmo de `receita_do_cnpj`, mais o WhatsApp). None se a
+    conta não tem. Quem também é cliente de OUTRA conta: WhatsApp e e-mail não
+    vêm (são o que a outra conta registrou)."""
+    from . import clientes as _cli
+    from . import validadoc
+    ok, tipo, digitos = validadoc.valida(doc)
+    if not ok or tipo not in ("pf", "pj"):
+        return None
+    dono = _dono_do_documento(pool, conta_id, tipo, digitos)
+    if not dono or not dono.get("cliente_id"):
+        return None
+    cli = _cli.obter_cliente(pool, conta_id, int(dono["cliente_id"]))
+    if not cli:
+        return None
+    fora = bool(_clientes_de_outra_conta(pool, conta_id, {cli["id"]: cli}))
+    g = lambda k: (cli.get(k) or "").strip() or None  # noqa: E731
+    cep = "".join(ch for ch in str(cli.get("cep") or "") if ch.isdigit())
+    return {"ok": True, "fonte": "clientes", "cliente": g("nome"),
+            "razao": g("razao_social"), "fantasia": g("nome"), "rep": g("representante"),
+            "end": g("endereco"),
+            "cep": f"{cep[:5]}-{cep[5:]}" if len(cep) == 8 else (cep or None),
+            "cidade": g("cidade"), "uf": g("uf"),
+            "email": None if fora else g("email"), "whats": None if fora else g("telefone")}
+
+
+def buscar_dados_do_documento(pool, conta_id: int, doc: str) -> dict:
+    """O botão de busca do formulário do cliente do stand (painel e app — o link
+    público do contrato continua só na Receita): primeiro o cadastro que a conta
+    já tem em Clientes (03/10/2026, o dono: o cliente cadastrado à mão na aba
+    Clientes/Fornecedor "a vendedora não consegue puxar os dados"), depois a
+    Receita. CPF só existe no cadastro: a Receita não consulta pessoa física."""
+    from . import validadoc
+    achado = None
+    if pool is not None:
+        try:
+            achado = cadastro_pelo_documento(pool, conta_id, doc)
+        except Exception as e:  # noqa: BLE001 — sem o cadastro, a Receita ainda responde
+            _log.info("evento_stands: busca em Clientes falhou: %s: %s", type(e).__name__, e)
+    if achado:
+        return achado
+    ok, tipo, _dig = validadoc.valida(doc)
+    if ok and tipo == "pf":
+        return {"ok": False, "erro": "Esse CPF não está em Clientes — digite os dados."}
+    return receita_do_cnpj(doc)
+
+
 # Mesmos tipos aceitos de finance/comprovantes.py (o comprovante do estande é
 # prova de pagamento, não foto de obra — não reaproveita finance/obra_fotos.py,
 # que aceita HEIC e não aceita PDF).
@@ -299,20 +432,9 @@ def subir_e_registrar_comprovante(pool, conta_id: int, codigo: str, conteudo: by
     Devolve {"ok": False, "erro": "..."} tanto pra upload inválido (arquivo
     vazio, tipo não aceito) quanto pra estande indisponível — quem chama não
     precisa saber em qual das duas etapas falhou pra mostrar a mensagem."""
-    from . import comprovantes as _comprov
-    import time
-    import uuid
-    try:
-        ct = _comprov.validar(conteudo, content_type)
-    except ValueError as e:
-        return {"ok": False, "erro": str(e)}
-    ext = _EXT_COMPROVANTE.get(ct, "bin")
-    caminho = f"stands/{conta_id}/{codigo}-{int(time.time())}-{uuid.uuid4().hex[:8]}.{ext}"
-    subir = subir or _comprov.subir_em
-    try:
-        subir(caminho, conteudo, ct)
-    except ValueError as e:
-        return {"ok": False, "erro": str(e)}
+    caminho, erro = _subir_comprovante(conta_id, codigo, conteudo, content_type, subir)
+    if erro:
+        return {"ok": False, "erro": erro}
     if junto_com:
         r = registrar_comprovante_grupo(pool, conta_id, [codigo] + list(junto_com), caminho,
                                         prospeccao_id=prospeccao_id)
@@ -517,7 +639,8 @@ def plano_de_pagamento(total_centavos: int, sinal_centavos: int, saldo_ate,
 
 def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict, *,
                                   sinal_centavos: int | None = None,
-                                  cliente_id: int | None = None) -> dict | None:
+                                  cliente_id: int | None = None,
+                                  cadastro_pronto: bool = False) -> dict | None:
     """Quando o comprovante do SINAL chega, nascem a PROPOSTA e o CONTRATO do
     estande (pedido do dono, 29/09/2026: "colocar o contrato quando pagar o
     sinal") — reaproveitando o motor que a Prime Eventos já usa: a linha vai
@@ -624,8 +747,11 @@ def garantir_orcamento_e_contrato(pool, conta_id: int, stand: dict, *,
     # Cliente CADASTRADO ANTES pela vendedora (link com `?c=`): a reserva vai pro
     # cadastro dele, que já traz o que o contrato pede.
     if cliente_id:
+        # `cadastro_pronto`: quem chama acabou de salvar o cadastro (o formulário do
+        # stand) — o nome do cadastro pode ser o da EMPRESA e a reserva só tem a marca
         _vincular_cliente_da_reserva(pool, conta_id, [x["codigo"] for x in grupo], oid,
-                                     int(cliente_id), nome, zap)
+                                     int(cliente_id), "" if cadastro_pronto else nome,
+                                     None if cadastro_pronto else zap)
     else:
         for x in grupo:
             _garantir_cliente_do_stand(pool, conta_id, x["codigo"], oid, nome, zap)
@@ -1136,6 +1262,16 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
     elif tipo == "pj":
         campos["cnpj"] = digitos
     nome_doc = "CPF" if tipo == "pf" else "CNPJ"
+    if not stand.get("prospeccao_id"):
+        # STAND SEM RESERVA REGISTRADA (03/10/2026): o comprovante entrou pelo painel
+        # sem o nome do lojista e o stand ficou sem prospecção — sem marca, sem
+        # vendedora e sem proposta. Salvar o cadastro registra a reserva com o nome
+        # fantasia (e a vendedora, quando é ela que salva)
+        pid = _registrar_reserva_do_stand(
+            pool, conta_id, stand, fantasia, g("whats"),
+            vendedor_id if juntar == "do_vendedor" else None)
+        if pid:
+            stand["prospeccao_id"] = pid
     oid = stand.get("orcamento_id")
     cid = stand.get("cliente_id")
     atual = _cli.obter_cliente(pool, conta_id, cid) if cid else None
@@ -1306,6 +1442,18 @@ def salvar_cadastro_stand(pool, conta_id: int, codigo: str, dados: dict, *,
     # o cadastro provisório que o stand tinha (só nome, sem vínculo) sai da lista
     for velho in antes - {cid}:
         _arquivar_se_sobrou(pool, conta_id, velho)
+
+    if not oid and stand["status"] == "pre_reservado" and stand.get("comprovante_url"):
+        # o comprovante chegou, mas a proposta não nasceu (veio sem o nome do lojista):
+        # nasce agora, com o contrato, já no cadastro que acabou de ser salvo
+        try:
+            extra = garantir_orcamento_e_contrato(
+                pool, conta_id, buscar(pool, conta_id, codigo) or stand,
+                cliente_id=cid, cadastro_pronto=True)
+            oid = (extra or {}).get("orcamento_id") or oid
+        except Exception as e:  # noqa: BLE001 — o cadastro já foi salvo
+            _log.warning("evento_stands: cadastro do %s/%s salvo, mas a proposta não "
+                         "nasceu: %s: %s", conta_id, codigo, type(e).__name__, e)
 
     # 4. as propostas: a deste stand e as das outras reservas do mesmo cadastro
     cli = _cli.obter_cliente(pool, conta_id, cid) or {}

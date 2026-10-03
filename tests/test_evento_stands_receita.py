@@ -264,7 +264,9 @@ def test_as_tres_rotas_devolvem_o_cadastro_inteiro(monkeypatch):
     assert status == 401 and "sessão expirou" in j["erro"]
 
     # app: logado traz tudo; sem sessão, 401
-    monkeypatch.setattr(app, "_sessao", lambda request: {"conta_id": 40})
+    # o _sessao de verdade devolve (conta_id, membro_id): a busca agora olha os Clientes da conta
+    monkeypatch.setattr(app, "_sessao", lambda request: (40, None))
+    monkeypatch.setattr(app, "get_pool", lambda: None)
     monkeypatch.setattr(app, "_gerencia", lambda request: None)
     confere(app.cockpit_stands_consulta_cnpj(object(), doc=CNPJ))
     monkeypatch.setattr(app, "_sessao", lambda request: None)

@@ -1,0 +1,437 @@
+<title>Temas do Zaq</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: documento de decisão — coluna de leitura, com uma vitrine interativa larga no topo. */
+:root{
+  --pg-bg:#F2F5F3; --pg-card:#FFFFFF; --pg-line:#D8E1DB; --pg-txt:#16201A; --pg-dim:#55655B;
+  --pg-acc:#0B7A3E; --pg-acc-fundo:#E2F3E8; --pg-aviso:#8A5D00; --pg-aviso-fundo:#FBF0D8;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --pg-bg:#0E1311; --pg-card:#151C18; --pg-line:#26322B; --pg-txt:#E5EEE8; --pg-dim:#93A399;
+  --pg-acc:#3DDC7C; --pg-acc-fundo:#12291B; --pg-aviso:#E8B44E; --pg-aviso-fundo:#2A2110; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --pg-bg:#0E1311; --pg-card:#151C18; --pg-line:#26322B; --pg-txt:#E5EEE8; --pg-dim:#93A399;
+  --pg-acc:#3DDC7C; --pg-acc-fundo:#12291B; --pg-aviso:#E8B44E; --pg-aviso-fundo:#2A2110; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--pg-bg);color:var(--pg-txt);font:15px/1.6 var(--body);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:28px 64px}
+.ler{max-width:780px}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+h1{font-size:clamp(1.9rem,4vw,2.6rem);line-height:1.1;font-weight:700}
+h2{font-size:1.45rem;font-weight:700;margin-block:0 .6rem}
+h3{font-size:1.05rem;font-weight:650}
+p{margin:0 0 .8rem}
+.olho{font:500 .72rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--pg-acc)}
+.sub{color:var(--pg-dim);font-size:1.02rem;max-width:62ch;margin-top:.7rem}
+section{margin-top:56px}
+.nota{background:var(--pg-aviso-fundo);color:var(--pg-txt);border:1px solid var(--pg-line);border-radius:10px;padding:12px 14px;font-size:.92rem}
+.nota b{color:var(--pg-aviso)}
+code{font:.86em var(--mono);background:var(--pg-acc-fundo);padding:1px 5px;border-radius:4px}
+
+/* ---------- controles da vitrine ---------- */
+.ctrl{display:flex;flex-wrap:wrap;gap:18px 28px;align-items:flex-end;margin:22px 0 14px}
+.grp{display:flex;flex-direction:column;gap:6px}
+.grp>span{font:500 .72rem var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--pg-dim)}
+.seg{display:flex;flex-wrap:wrap;gap:4px;background:var(--pg-card);border:1px solid var(--pg-line);border-radius:10px;padding:4px}
+.seg button{border:0;background:transparent;color:var(--pg-txt);font:500 .9rem var(--body);padding:7px 13px;border-radius:7px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--pg-txt);color:var(--pg-bg)}
+.seg button:focus-visible,.cores button:focus-visible,.opc:focus-visible{outline:2px solid var(--pg-acc);outline-offset:2px}
+.cores{display:flex;gap:8px;padding:6px 2px}
+.cores button{width:30px;height:30px;border-radius:50%;border:2px solid var(--pg-card);box-shadow:0 0 0 1px var(--pg-line);cursor:pointer}
+.cores button[aria-pressed="true"]{box-shadow:0 0 0 2px var(--pg-txt)}
+.chk{display:flex;gap:8px;align-items:center;font-size:.9rem;color:var(--pg-dim);cursor:pointer}
+
+/* ---------- a vitrine: o painel do Zaq de verdade, com os tokens do produto ---------- */
+.palco{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:20px;align-items:start}
+@media (max-width:900px){.palco{grid-template-columns:minmax(0,1fr)}.fone{display:none}}
+
+.zaq{
+  /* ESCURO — exatamente os valores de hoje (web/tema.py) */
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-fundo:#241C0F; --coral-fundo:#241313; --azul-fundo:#0D1B23;
+  --sombra:0 1px 0 rgba(0,0,0,.0);
+  color-scheme:dark;
+  background:var(--bg);color:var(--text);font-family:var(--body);
+  border-radius:14px;overflow:hidden;border:1px solid var(--pg-line);
+  display:grid;grid-template-columns:200px minmax(0,1fr);min-height:560px;
+  transition:background .25s,color .25s;
+}
+.zaq.claro,.zaq.misto{
+  --bg:#F3F6F4; --bg-2:#E9EFEB; --surface:#FFFFFF; --line:#D7E0DA;
+  --text:#101A14; --text-dim:#4D5E54; --text-faint:#7B8B82;
+  --ambar:#8F6200; --coral:#B3372F; --azul:#17689F;
+  --ambar-fundo:#FBF1DA; --coral-fundo:#FBE8E6; --azul-fundo:#E4F0F8;
+  --sombra:0 1px 2px rgba(16,26,20,.06);
+  color-scheme:light;
+}
+/* MISTO: o menu redefine as MESMAS variáveis só dentro dele. Nenhum token novo. */
+.zaq.misto .side{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --acc:var(--acc-esc); --sobre-acc:var(--sobre-esc);
+}
+/* cor de destaque: cada uma tem a versão pra fundo escuro e pra fundo claro */
+.zaq{--acc:var(--acc-esc);--sobre-acc:var(--sobre-esc)}
+.zaq.claro,.zaq.misto{--acc:var(--acc-clr);--sobre-acc:var(--sobre-clr)}
+.zaq{--acc-fundo:color-mix(in srgb,var(--acc) 14%,var(--surface))}
+
+.side{background:var(--bg-2);border-right:1px solid var(--line);padding:16px 10px;display:flex;flex-direction:column;gap:2px;color:var(--text)}
+.logo{display:flex;align-items:center;gap:7px;font:700 1.15rem var(--display);padding:0 8px 14px;color:var(--text)}
+.logo svg path{stroke:var(--acc)} .logo svg path+path{fill:var(--acc);stroke:none}
+.sgrp{font:500 .64rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);padding:12px 8px 4px}
+.si{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;color:var(--text-dim);font-size:.88rem}
+.si i{width:14px;height:14px;border-radius:4px;border:1.5px solid currentColor;opacity:.8;flex:none}
+.si.on{background:var(--acc-fundo);color:var(--text);font-weight:600}
+.si.on i{border-color:var(--acc);background:var(--acc)}
+.side .rodape{margin-top:auto;padding:12px 8px 0;border-top:1px solid var(--line);font-size:.78rem;color:var(--text-faint)}
+
+.main{padding:18px 20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.topo{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.topo h3{font-size:1.3rem;color:var(--text)}
+.topo small{display:block;color:var(--text-dim);font-size:.82rem}
+.btn{border:0;border-radius:8px;padding:9px 14px;font:600 .86rem var(--body);background:var(--acc);color:var(--sobre-acc);cursor:pointer}
+.btn.sec{background:transparent;color:var(--text);border:1px solid var(--line)}
+.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--sombra)}
+.kpi span{font-size:.76rem;color:var(--text-dim)}
+.kpi b{display:block;font:600 1.35rem var(--mono);font-variant-numeric:tabular-nums;color:var(--text);margin-top:2px}
+.kpi em{font-style:normal;font-size:.75rem;color:var(--acc)}
+.aviso{border-radius:10px;padding:10px 12px;font-size:.85rem;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.aviso.amb{background:var(--ambar-fundo);color:var(--text);border:1px solid color-mix(in srgb,var(--ambar) 35%,transparent)}
+.aviso.amb b{color:var(--ambar)}
+.aviso.cru{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0b8b8}
+.tab{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sombra)}
+.tab-h{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+.tab-h b{font-size:.92rem;color:var(--text)}
+.tab-h span{font-size:.78rem;color:var(--text-dim)}
+.lin{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) 92px 74px;gap:10px;align-items:center;padding:9px 14px;border-bottom:1px solid var(--line);font-size:.86rem}
+.lin:last-child{border-bottom:0}
+.lin .nm{color:var(--text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lin .ds{color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lin .vl{font:500 .84rem var(--mono);font-variant-numeric:tabular-nums;text-align:right;color:var(--text)}
+.pil{justify-self:end;font-size:.72rem;font-weight:600;padding:3px 8px;border-radius:99px;white-space:nowrap}
+.pil.ok{background:var(--acc-fundo);color:var(--acc)}
+.pil.am{background:var(--ambar-fundo);color:var(--ambar)}
+.pil.co{background:var(--coral-fundo);color:var(--coral)}
+.pil.az{background:var(--azul-fundo);color:var(--azul)}
+@media (max-width:640px){
+  .zaq{grid-template-columns:minmax(0,1fr)}
+  .side{display:none}
+  .kpis{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .kpi:nth-child(3){display:none}
+  .lin{grid-template-columns:minmax(0,1fr) 80px}
+  .lin .ds,.lin .vl{display:none}
+}
+
+/* celular do vendedor (barra de baixo, .btmnav) */
+.fone{border:8px solid #1b1f1d;border-radius:30px;overflow:hidden;background:#1b1f1d}
+.fone .zaq{display:flex;flex-direction:column;min-height:500px;border:0;border-radius:22px}
+.fone .ftop{padding:14px 14px 8px;display:flex;justify-content:space-between;align-items:center}
+.fone .ftop b{font:700 1.05rem var(--display);color:var(--text)}
+.fone .lista{padding:0 10px;display:flex;flex-direction:column;gap:8px;flex:1}
+.fone .it{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 11px;box-shadow:var(--sombra)}
+.fone .it b{font-size:.84rem;color:var(--text);display:block}
+.fone .it span{font-size:.75rem;color:var(--text-dim)}
+.btmnav{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--bg-2);padding:8px 4px 10px}
+.btmnav div{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:.66rem;color:var(--text-dim)}
+.btmnav div i{width:16px;height:16px;border-radius:5px;border:1.5px solid currentColor}
+.btmnav div.on{color:var(--acc)} .btmnav div.on i{background:var(--acc);border-color:var(--acc)}
+.zaq.misto .btmnav{--bg-2:#0E1512;--line:#1E2A23;--text-dim:#8FA197;--acc:var(--acc-esc)}
+
+.legenda{font-size:.85rem;color:var(--pg-dim);margin-top:10px}
+
+/* ---------- tela de configuração (Aparência) ---------- */
+.cfg{background:var(--pg-card);border:1px solid var(--pg-line);border-radius:14px;padding:20px;display:grid;gap:22px}
+.cfg h3{margin-bottom:2px}
+.cfg p.d{color:var(--pg-dim);font-size:.88rem;margin:0}
+.opcs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px}
+@media (max-width:640px){.opcs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.opc{border:1.5px solid var(--pg-line);border-radius:12px;padding:8px;background:transparent;color:var(--pg-txt);font:inherit;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:8px}
+.opc[aria-checked="true"]{border-color:var(--pg-acc);box-shadow:0 0 0 1px var(--pg-acc)}
+.opc b{font-size:.9rem}
+.opc small{color:var(--pg-dim);font-size:.76rem;line-height:1.35}
+.mini{height:62px;border-radius:7px;overflow:hidden;display:grid;grid-template-columns:28% 1fr;border:1px solid var(--pg-line)}
+.mini .ms{background:var(--a)} .mini .mc{background:var(--b);padding:7px;display:grid;gap:5px;align-content:start}
+.mini .mc i{display:block;height:7px;border-radius:3px;background:var(--c)}
+.mini .mc i:first-child{width:55%;background:#25D366}
+.mini.auto{grid-template-columns:28% 1fr;background:linear-gradient(135deg,#0E1512 50%,#F3F6F4 50%)}
+.mini.auto .ms,.mini.auto .mc{background:transparent}
+.radio{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.radio label{display:flex;gap:10px;align-items:flex-start;font-size:.9rem;cursor:pointer}
+.radio label small{display:block;color:var(--pg-dim);font-size:.8rem}
+.radio input{accent-color:var(--pg-acc);margin-top:4px}
+
+/* ---------- tabelas e cartões de texto ---------- */
+.rolar{overflow-x:auto;border:1px solid var(--pg-line);border-radius:12px;background:var(--pg-card)}
+table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:520px}
+th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--pg-line);vertical-align:top}
+th{font:500 .7rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--pg-dim)}
+tr:last-child td{border-bottom:0}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.tag{display:inline-block;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--pg-acc-fundo);color:var(--pg-acc)}
+.tag.fora{background:var(--pg-aviso-fundo);color:var(--pg-aviso)}
+.duas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:720px){.duas{grid-template-columns:minmax(0,1fr)}}
+.bloco{background:var(--pg-card);border:1px solid var(--pg-line);border-radius:12px;padding:16px}
+.bloco p{font-size:.92rem;color:var(--pg-dim);margin:.4rem 0 0}
+pre{font:.8rem/1.55 var(--mono);background:var(--pg-bg);border:1px solid var(--pg-line);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:.6rem 0 0;color:var(--pg-txt)}
+pre .r{color:#C2453C} pre .g{color:var(--pg-acc)}
+ol.fases{list-style:none;padding:0;margin:0;display:grid;gap:10px;counter-reset:f}
+ol.fases li{counter-increment:f;display:grid;grid-template-columns:38px minmax(0,1fr);gap:12px;background:var(--pg-card);border:1px solid var(--pg-line);border-radius:12px;padding:14px}
+ol.fases li::before{content:counter(f);font:700 1.1rem var(--display);width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--pg-acc-fundo);color:var(--pg-acc)}
+ol.fases b{display:block}
+ol.fases span{color:var(--pg-dim);font-size:.9rem}
+.perg{display:grid;gap:10px}
+.perg div{background:var(--pg-card);border:1px solid var(--pg-line);border-radius:12px;padding:12px 14px}
+.perg b{display:block;margin-bottom:2px}
+.perg span{color:var(--pg-dim);font-size:.9rem}
+@media (prefers-reduced-motion:reduce){.zaq{transition:none}}
+</style>
+
+<div class="wrap">
+  <header class="ler">
+    <div class="olho">Desenho para aprovação · 03/10/2026</div>
+    <h1>Temas do Zaq: escuro, claro, misto e automático</h1>
+    <p class="sub">Cada nicho tem um jeito. A clínica atende em recepção clara, o mestre de obras abre o app no sol, o vendedor de stand usa à noite. A proposta é deixar a empresa escolher o padrão e cada pessoa trocar só pra ela, sem mexer no que já funciona.</p>
+  </header>
+
+  <section style="margin-top:34px">
+    <div class="ctrl" role="group" aria-label="Controles da vitrine">
+      <div class="grp"><span>Tema</span>
+        <div class="seg" id="seg-tema">
+          <button type="button" data-v="escuro" aria-pressed="true">Escuro</button>
+          <button type="button" data-v="claro" aria-pressed="false">Claro</button>
+          <button type="button" data-v="misto" aria-pressed="false">Misto</button>
+          <button type="button" data-v="auto" aria-pressed="false">Automático</button>
+        </div></div>
+      <div class="grp"><span>Nicho</span>
+        <div class="seg" id="seg-nicho">
+          <button type="button" data-v="clinica" aria-pressed="true">Clínica</button>
+          <button type="button" data-v="obras" aria-pressed="false">Construção</button>
+          <button type="button" data-v="eventos" aria-pressed="false">Eventos</button>
+          <button type="button" data-v="seguros" aria-pressed="false">Seguros</button>
+        </div></div>
+      <div class="grp"><span>Cor de destaque (opcional)</span>
+        <div class="cores" id="cores">
+          <button type="button" data-v="verde" aria-label="Verde Zaq" aria-pressed="true" style="background:#25D366"></button>
+          <button type="button" data-v="azul" aria-label="Azul" aria-pressed="false" style="background:#3D8FE8"></button>
+          <button type="button" data-v="roxo" aria-label="Roxo" aria-pressed="false" style="background:#8E62D6"></button>
+          <button type="button" data-v="rosa" aria-label="Rosa" aria-pressed="false" style="background:#D9558C"></button>
+          <button type="button" data-v="laranja" aria-label="Laranja" aria-pressed="false" style="background:#E0832A"></button>
+        </div></div>
+      <label class="chk"><input type="checkbox" id="cru"> Mostrar uma tela ainda não migrada</label>
+    </div>
+
+    <div class="palco">
+      <div class="zaq" id="painel">
+        <nav class="side" aria-label="Menu de exemplo">
+          <div class="logo"><svg width="20" height="20" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M16 18 H44 L18 46 H46" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z"/></svg>zaq</div>
+          <div id="menu"></div>
+          <div class="rodape" id="empresa"></div>
+        </nav>
+        <div class="main">
+          <div class="topo"><h3 id="titulo"></h3><div style="display:flex;gap:8px"><button class="btn sec" type="button">Filtrar</button><button class="btn" type="button" id="acao"></button></div></div>
+          <div class="kpis" id="kpis"></div>
+          <div class="aviso amb" id="aviso"></div>
+          <div class="aviso cru" id="aviso-cru" hidden>Tela antiga: este quadro tem a cor escrita direto no código (<code style="background:transparent;color:inherit">#3a1d1d</code>) e não acompanha o tema.</div>
+          <div class="tab"><div class="tab-h"><b id="tab-t"></b><span id="tab-s"></span></div><div id="linhas"></div></div>
+        </div>
+      </div>
+
+      <div class="fone" aria-label="App no celular">
+        <div class="zaq" id="fone">
+          <div class="ftop"><b>Hoje</b><button class="btn" type="button" style="padding:6px 10px;font-size:.78rem">+ Novo</button></div>
+          <div class="lista" id="fone-lista"></div>
+          <div class="btmnav"><div class="on"><i></i>Hoje</div><div><i></i>Agenda</div><div><i></i>Conversas</div><div><i></i>Mais</div></div>
+        </div>
+      </div>
+    </div>
+    <p class="legenda" id="leg"></p>
+  </section>
+
+  <section class="ler">
+    <div class="olho">O que o mercado usa</div>
+    <h2>Quatro opções resolvem quase todo mundo</h2>
+    <p>Os sistemas que as pessoas usam todo dia (WhatsApp, Google, GitHub, Slack, o próprio iPhone e o Android) oferecem as mesmas três escolhas: <b>Claro</b>, <b>Escuro</b> e <b>Automático</b>, que segue o celular ou o computador. Ninguém precisa aprender nada novo.</p>
+    <p>A quarta, <b>Misto</b>, é o visual clássico de ERP e painel administrativo: menu lateral escuro e área de trabalho clara. Agrada quem passa o dia lendo tabela e quer a marca presente no menu.</p>
+    <p>Mais que isso (editor de cores livre, dezenas de temas) costuma dar mais suporte do que valor: a pessoa escolhe uma combinação ilegível e acha que o sistema quebrou. Por isso a cor de destaque, se entrar, vem de uma lista curta com contraste já conferido.</p>
+  </section>
+
+  <section>
+    <div class="ler">
+      <div class="olho">Onde se escolhe</div>
+      <h2>Configurar › Aparência</h2>
+      <p>A empresa define o padrão. Cada pessoa pode seguir o padrão ou escolher o dela. Quem não mexe em nada continua vendo o escuro de hoje.</p>
+    </div>
+    <div class="cfg" style="margin-top:14px">
+      <div>
+        <h3>Padrão da empresa</h3>
+        <p class="d">Vale pra todos da equipe que deixarem “Seguir a empresa”. Só o dono e quem gerencia mudam.</p>
+        <div class="opcs" role="radiogroup" aria-label="Padrão da empresa" id="opcs">
+          <button type="button" class="opc" role="radio" aria-checked="true" data-v="escuro"><div class="mini" style="--a:#0E1512;--b:#0A0F0C;--c:#1E2A23"><div class="ms"></div><div class="mc"><i></i><i></i><i></i></div></div><b>Escuro</b><small>Como é hoje.</small></button>
+          <button type="button" class="opc" role="radio" aria-checked="false" data-v="claro"><div class="mini" style="--a:#E9EFEB;--b:#F3F6F4;--c:#D7E0DA"><div class="ms"></div><div class="mc"><i></i><i></i><i></i></div></div><b>Claro</b><small>Fundo claro em tudo.</small></button>
+          <button type="button" class="opc" role="radio" aria-checked="false" data-v="misto"><div class="mini" style="--a:#0E1512;--b:#F3F6F4;--c:#D7E0DA"><div class="ms"></div><div class="mc"><i></i><i></i><i></i></div></div><b>Misto</b><small>Menu escuro, trabalho claro.</small></button>
+          <button type="button" class="opc" role="radio" aria-checked="false" data-v="auto"><div class="mini auto"><div class="ms"></div><div class="mc"><i></i></div></div><b>Automático</b><small>Segue o celular ou computador de cada um.</small></button>
+        </div>
+      </div>
+      <div>
+        <h3>Só pra mim</h3>
+        <div class="radio">
+          <label><input type="radio" name="meu" id="meu-seguir" checked><span>Seguir a empresa<small>Se o dono trocar o padrão, troca pra mim também.</small></span></label>
+          <label><input type="radio" name="meu" id="meu-outro"><span>Escolher o meu<small>Abre as mesmas quatro opções. Vale em qualquer aparelho em que eu entrar.</small></span></label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="ler">
+    <div class="olho">Como entra no código</div>
+    <h2>A troca acontece num lugar só</h2>
+    <p>Desde 22/09 as cores do painel saem de um arquivo único, <code>web/tema.py</code>, com apelidos pra todos os nomes antigos. Hoje são <b>5.943 usos</b> de variável de cor no código: todos eles trocam de tema sozinhos quando o arquivo ganha a versão clara.</p>
+  </section>
+  <div class="duas" style="margin-top:14px">
+    <div class="bloco"><h3>1. Uma marca na página</h3><p>O servidor escreve o tema na primeira linha do HTML. A tela já nasce na cor certa, sem piscar escuro e depois clarear.</p><pre>&lt;html data-tema="claro"&gt;</pre></div>
+    <div class="bloco"><h3>2. Tema claro = mesmas variáveis, outro valor</h3><p>Nenhum nome muda. Quem usa <code>var(--card)</code> continua usando.</p><pre>html[data-tema=claro]{ --bg:#F3F6F4; --surface:#FFF; --text:#101A14 … }</pre></div>
+    <div class="bloco"><h3>3. Misto sem token novo</h3><p>O menu redefine as mesmas variáveis só dentro dele. Tudo que está no menu fica escuro; o resto, claro.</p><pre>html[data-tema=misto] .side,
+html[data-tema=misto] .btmnav{ /* valores do escuro */ }</pre></div>
+    <div class="bloco"><h3>4. O verde muda de tom no claro</h3><p>O verde da marca (#25D366) some como texto em fundo branco (contraste 1,9). No claro ele escurece e a letra do botão vira branca. Quem decide é o token, não a tela.</p><pre>escuro  --verde:#25D366  --sobre-verde:#04150C
+claro   --verde:#0B7A3E  --sobre-verde:#FFFFFF</pre></div>
+    <div class="bloco"><h3>5. Onde guarda a escolha</h3><p>Padrão na conta, escolha pessoal no membro, e um cookie pra a primeira linha do HTML sair certa sem ir ao banco. O app do vendedor lê o mesmo.</p><pre>contas.tema   membros.tema   cookie zaq_tema</pre></div>
+    <div class="bloco"><h3>6. Portão por conta</h3><p>A opção aparece primeiro numa conta piloto. As outras seguem no escuro até a fase final, sem perceber nada.</p><pre>seletor visível só se conta ∈ piloto</pre></div>
+  </div>
+
+  <section class="ler">
+    <div class="olho">O risco, medido</div>
+    <h2>O que ainda tem cor escrita na mão</h2>
+    <p>O que pode estragar o tema claro são as cores escritas direto no código, fora do <code>tema.py</code>. Marque “Mostrar uma tela ainda não migrada” na vitrine pra ver o efeito: um quadro vinho num painel claro. São <b>~2.800 ocorrências</b> em <code>web/</code>. A troca é mecânica (cada cor vira o token equivalente, como <code>#3a1d1d</code> → <code>var(--coral-fundo)</code>) e vai tela por tela.</p>
+    <div class="nota"><b>Trava contra recaída:</b> um teste conta as cores fixas de cada arquivo e só deixa o número cair. Tela nova com <code>#hex</code> na mão não passa no CI.</div>
+  </section>
+  <div class="ler" style="margin-top:14px">
+    <div class="rolar"><table>
+      <thead><tr><th>Arquivo</th><th>O que é</th><th style="text-align:right">Cores fixas</th><th>Entra?</th></tr></thead>
+      <tbody>
+        <tr><td><code>portal.py</code></td><td>O painel: menu, Hoje, Financeiro, Configurar</td><td class="n">1.135</td><td><span class="tag">fase 2</span></td></tr>
+        <tr><td><code>painel_prospeccao.py</code></td><td>Funil e prospecção</td><td class="n">356</td><td><span class="tag">fase 3</span></td></tr>
+        <tr><td><code>painel_cockpit.py</code></td><td>Cockpit do vendedor</td><td class="n">290</td><td><span class="tag">fase 3</span></td></tr>
+        <tr><td><code>loja_stands.py</code></td><td>Lojas e stands do evento</td><td class="n">203</td><td><span class="tag">fase 4</span></td></tr>
+        <tr><td><code>painel_obras_mapa.py</code>, <code>painel_obras.py</code></td><td>Construção</td><td class="n">139</td><td><span class="tag">fase 4</span></td></tr>
+        <tr><td><code>painel_servicos.py</code>, <code>painel_agenda.py</code>, <code>admin.py</code></td><td>Serviços, agenda, ADM</td><td class="n">152</td><td><span class="tag">fase 4</span></td></tr>
+        <tr><td><code>painel_clinica_*.py</code>, <code>painel_eventos_stands.py</code> e outros</td><td>Telas dos nichos</td><td class="n">~250</td><td><span class="tag">fase 4</span></td></tr>
+        <tr><td><code>proposta.py</code>, <code>contrato_publico.py</code>, <code>aditivo_publico.py</code>, <code>recibo_publico.py</code>, <code>ficha_publica.py</code></td><td>Páginas e PDFs que o cliente final recebe</td><td class="n">351</td><td><span class="tag fora">fica como está</span></td></tr>
+      </tbody>
+    </table></div>
+    <p class="legenda">Contagem feita na main de 03/10/2026. Documentos do cliente final são impressão e assinatura: têm cara própria e não seguem o tema de quem está logado.</p>
+  </div>
+
+  <section class="ler">
+    <div class="olho">Ordem de entrega</div>
+    <h2>Cinco PRs pequenos, cada um sem mudar nada pra quem não escolheu</h2>
+    <ol class="fases">
+      <li><div><b>Base</b><span>Tema claro e misto no <code>tema.py</code>, a marca no <code>&lt;html&gt;</code>, cookie, colunas na conta e no membro, tela Aparência visível só pra conta piloto. Quem está no escuro vê exatamente o de hoje.</span></div></li>
+      <li><div><b>O painel principal</b><span>As 1.135 cores fixas do <code>portal.py</code> viram token, com a trava de contagem ligada. Depois disso o menu, o Hoje e o Configurar ficam certos nos quatro temas.</span></div></li>
+      <li><div><b>Cockpit e prospecção</b><span>As telas mais usadas por vendedor, inclusive no celular.</span></div></li>
+      <li><div><b>Telas dos nichos</b><span>Clínica, construção (mapa incluso), eventos e stands, agenda, serviços, ADM. Um PR por nicho.</span></div></li>
+      <li><div><b>Liberar pra todos</b><span>A opção aparece em todas as contas. Se você quiser, cada nicho pode nascer com um padrão próprio (por exemplo, clínica nasce clara) e a cor de destaque entra aqui.</span></div></li>
+    </ol>
+  </section>
+
+  <section class="ler">
+    <div class="olho">Preciso da sua decisão</div>
+    <h2>Cinco perguntas antes de começar</h2>
+    <div class="perg">
+      <div><b>1. As quatro opções (Escuro, Claro, Misto, Automático) servem?</b><span>Recomendo as quatro. O Automático custa quase nada depois que o claro existe.</span></div>
+      <div><b>2. Empresa define o padrão e cada pessoa pode trocar?</b><span>Recomendo sim. A recepcionista pode querer claro mesmo que o dono goste do escuro.</span></div>
+      <div><b>3. Cada nicho nasce com um padrão diferente?</b><span>Sugestão: clínica nasce clara, os demais seguem escuros. Conta antiga não muda sozinha.</span></div>
+      <div><b>4. Cor de destaque por conta entra agora ou depois?</b><span>Recomendo depois, na fase 5. Primeiro garantir o claro inteiro.</span></div>
+      <div><b>5. Qual conta é a piloto?</b><span>Sugestão: Espaço Pelle (conta 39), que está em implantação e tem recepção usando o dia todo.</span></div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var CORES={
+    verde:{esc:"#25D366",sesc:"#04150C",clr:"#0B7A3E",sclr:"#FFFFFF"},
+    azul:{esc:"#5AA8FF",sesc:"#04121F",clr:"#1660B8",sclr:"#FFFFFF"},
+    roxo:{esc:"#B794F6",sesc:"#170A2B",clr:"#6B3FB5",sclr:"#FFFFFF"},
+    rosa:{esc:"#F28DB2",sesc:"#2A0814",clr:"#B0306A",sclr:"#FFFFFF"},
+    laranja:{esc:"#F5A54A",sesc:"#261402",clr:"#B35A00",sclr:"#FFFFFF"}
+  };
+  var NICHOS={
+    clinica:{emp:"Espaço Pelle · clínica",titulo:"Hoje na clínica",sub:"sábado, 3 de outubro",acao:"+ Agendar",
+      menu:[["Principal",["Hoje","Agenda","Pacientes"]],["Clínica",["Prontuário","Planos e pacotes","Receber"]],["Sistema",["Configurar"]]],on:"Hoje",
+      kpis:[["Atendimentos hoje","14","3 encaixes"],["A receber hoje","R$ 4.380,00","9 pacientes"],["Fichas incompletas","5","link enviado"]],
+      aviso:"<b>2 pacientes</b> sem confirmação pra amanhã. Lembrete sai às 18h.",
+      tab:"Próximos atendimentos",tabs:"ordem do horário",
+      linhas:[["Mariana Couto","09:00 · Limpeza de pele","R$ 180,00","ok","Confirmado"],["Rafael Siqueira","09:40 · Avaliação","R$ 0,00","az","Primeira vez"],["Beatriz Nogueira","10:20 · Retorno","R$ 0,00","am","Ficha pendente"],["Joana Prado","11:00 · Sessão 3 de 6","R$ 250,00","co","Atrasado"]]},
+    obras:{emp:"PX2 Construções · obras",titulo:"Obras em andamento",sub:"6 casas e 3 reformas",acao:"+ Orçamento",
+      menu:[["Principal",["Hoje","Obras","Mapa"]],["Vendas",["Orçamentos","Contratos","Receber"]],["Sistema",["Configurar"]]],on:"Obras",
+      kpis:[["Obras ativas","9","2 com atraso"],["Medições a receber","R$ 86.400,00","4 etapas"],["Fotos do dia","23","5 obras"]],
+      aviso:"<b>Casa 14, Lote B</b>: mestre de obras não mandou foto há 3 dias.",
+      tab:"Etapas desta semana",tabs:"por obra",
+      linhas:[["Casa 14 · Lote B","Reboco interno","R$ 12.000,00","co","Atrasada"],["Reforma Ap. 302","Elétrica","R$ 4.800,00","ok","No prazo"],["Casa 9 · Lote A","Telhado","R$ 18.500,00","am","Medir sexta"],["Casa 21 · Lote C","Fundação","R$ 9.900,00","az","Começa seg"]]},
+    eventos:{emp:"Outlet Chic · eventos",titulo:"Stands do evento",sub:"Outlet de outubro",acao:"+ Contrato",
+      menu:[["Principal",["Hoje","Mapa de stands","Lojas"]],["Vendas",["Contratos","Vendedores","Receber"]],["Sistema",["Configurar"]]],on:"Mapa de stands",
+      kpis:[["Stands vendidos","31 de 48","65%"],["A receber","R$ 52.700,00","12 parcelas"],["Contratos por assinar","4","link enviado"]],
+      aviso:"<b>Stand B-07</b> reservado há 48h sem contrato. A reserva cai hoje às 23h.",
+      tab:"Últimas reservas",tabs:"mais recentes primeiro",
+      linhas:[["Moda Lis","Stand A-12 · 3×3 m","R$ 2.400,00","ok","Assinado"],["Calçados Vitória","Stand B-07 · 3×6 m","R$ 4.200,00","am","Reservado"],["Bijoux Ateliê","Stand C-02 · 2×2 m","R$ 1.300,00","az","Contrato enviado"],["Kids Fashion","Stand A-03 · 3×3 m","R$ 2.400,00","co","Parcela vencida"]]},
+    seguros:{emp:"Liberal Seguros · seguros",titulo:"Renovações do mês",sub:"outubro de 2026",acao:"+ Cotação",
+      menu:[["Principal",["Hoje","Cotações","Apólices"]],["Carteira",["Renovações","Sinistros","Comissões"]],["Sistema",["Configurar"]]],on:"Renovações",
+      kpis:[["Vencem em 30 dias","27","8 já cotadas"],["Comissão prevista","R$ 9.640,00","no mês"],["Cotações abertas","11","em 8 seguradoras"]],
+      aviso:"<b>3 apólices</b> vencem em 5 dias sem cotação de renovação.",
+      tab:"Renovações por vencimento",tabs:"mais urgente primeiro",
+      linhas:[["Carlos Menezes","Auto · Corolla 2022","R$ 3.210,00","co","Vence em 5 dias"],["Patrícia Lemos","Auto · HB20 2021","R$ 2.480,00","am","Cotando"],["Eduardo Faria","Auto · Compass 2023","R$ 4.950,00","ok","Renovada"],["Lúcia Andrade","Auto · Onix 2020","R$ 1.990,00","az","Proposta enviada"]]}
+  };
+  var est={tema:"escuro",nicho:"clinica",cor:"verde",cru:false};
+  var mq=window.matchMedia?window.matchMedia("(prefers-color-scheme: dark)"):null;
+  var $=function(id){return document.getElementById(id)};
+  function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")}
+
+  function temaReal(){ if(est.tema!=="auto")return est.tema; return (mq&&mq.matches)?"escuro":"claro"; }
+
+  function pintar(){
+    var t=temaReal(), c=CORES[est.cor];
+    ["painel","fone"].forEach(function(id){
+      var el=$(id); el.classList.remove("claro","misto");
+      if(t!=="escuro")el.classList.add(t);
+      el.style.setProperty("--acc-esc",c.esc); el.style.setProperty("--sobre-esc",c.sesc);
+      el.style.setProperty("--acc-clr",c.clr); el.style.setProperty("--sobre-clr",c.sclr);
+    });
+    var n=NICHOS[est.nicho];
+    $("empresa").textContent=n.emp; $("titulo").innerHTML=esc(n.titulo)+"<small>"+esc(n.sub)+"</small>";
+    $("acao").textContent=n.acao;
+    $("menu").innerHTML=n.menu.map(function(g){return '<div class="sgrp">'+esc(g[0])+'</div>'+g[1].map(function(i){return '<div class="si'+(i===n.on?' on':'')+'"><i></i>'+esc(i)+'</div>'}).join("")}).join("");
+    $("kpis").innerHTML=n.kpis.map(function(k){return '<div class="kpi"><span>'+esc(k[0])+'</span><b>'+esc(k[1])+'</b><em>'+esc(k[2])+'</em></div>'}).join("");
+    $("aviso").innerHTML=n.aviso;
+    $("tab-t").textContent=n.tab; $("tab-s").textContent=n.tabs;
+    $("linhas").innerHTML=n.linhas.map(function(l){return '<div class="lin"><span class="nm">'+esc(l[0])+'</span><span class="ds">'+esc(l[1])+'</span><span class="vl">'+esc(l[2])+'</span><span class="pil '+l[3]+'">'+esc(l[4])+'</span></div>'}).join("");
+    $("fone-lista").innerHTML=n.linhas.slice(0,4).map(function(l){return '<div class="it"><b>'+esc(l[0])+'</b><span>'+esc(l[1])+'</span> <span class="pil '+l[3]+'" style="float:right">'+esc(l[4])+'</span></div>'}).join("");
+    $("aviso-cru").hidden=!est.cru;
+    var leg={escuro:"Escuro: o Zaq de hoje, sem nenhuma mudança.",claro:"Claro: as mesmas telas, com as mesmas variáveis apontando pra outros valores.",misto:"Misto: menu lateral e barra do celular escuros, área de trabalho clara.",auto:"Automático: agora mostrando o "+(t==="escuro"?"escuro":"claro")+", porque é o que este aparelho está usando. Troque o modo do seu computador e a vitrine acompanha."};
+    $("leg").textContent=leg[est.tema];
+  }
+  function seg(id,chave){
+    $(id).addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;
+      est[chave]=b.dataset.v;
+      Array.prototype.forEach.call(this.querySelectorAll("button"),function(x){x.setAttribute("aria-pressed",x===b?"true":"false")});
+      if(chave==="tema")marcarOpc(b.dataset.v);
+      pintar();});
+  }
+  function marcarOpc(v){Array.prototype.forEach.call($("opcs").querySelectorAll(".opc"),function(x){x.setAttribute("aria-checked",x.dataset.v===v?"true":"false")})}
+  seg("seg-tema","tema"); seg("seg-nicho","nicho"); seg("cores","cor");
+  $("opcs").addEventListener("click",function(e){var b=e.target.closest(".opc");if(!b)return;
+    var alvo=$("seg-tema").querySelector('[data-v="'+b.dataset.v+'"]'); if(alvo)alvo.click();});
+  $("cru").addEventListener("change",function(){est.cru=this.checked;pintar();});
+  if(mq&&mq.addEventListener)mq.addEventListener("change",function(){if(est.tema==="auto")pintar();});
+  pintar();
+})();
+</script>

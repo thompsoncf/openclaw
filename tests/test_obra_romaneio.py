@@ -151,6 +151,22 @@ def test_outra_conta_nao_despacha_nem_ve(pool, conta):
     assert rom.romaneio(pool, outra, vid) is None and rom.viagens(pool, outra) == []
 
 
+def test_separar_ou_cancelar_atrasado_nao_desfaz_a_viagem(pool, conta, monkeypatch):
+    # duas pessoas no CD: o "Separar" leu "pedido", mas a viagem saiu antes do UPDATE dele
+    c4, _ = _cd(pool, conta)
+    p1 = op.criar(pool, conta, c4, itens=[("cimento", 5)])["id"]
+    vid = rom.despachar(pool, conta, [p1])["viagem_id"]
+    op.receber(pool, conta, p1)
+    lido = {"st": "pedido"}
+    monkeypatch.setattr(op, "_status", lambda c, conta_id, pedido_id: (lido["st"], c4))
+    with pytest.raises(ValueError, match="acabou de mudar"):
+        op.avancar(pool, conta, p1, "separando")
+    lido["st"] = "saiu"                                  # o cancelar leu "saiu"; já foi recebido
+    with pytest.raises(ValueError, match="acabou de mudar"):
+        op.cancelar(pool, conta, p1)
+    assert _status(pool, conta, p1) == ("recebido", vid)
+
+
 # ── o onde ────────────────────────────────────────────────────────────────
 def test_onde_limpa_e_ferramenta_nao_tem(pool, conta):
     _cd(pool, conta)

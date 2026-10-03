@@ -11,7 +11,9 @@
 --   catalogo_produtos.onde     onde o material fica no CD — texto livre, opcional
 --
 -- Aditiva e idempotente (if not exists). Banco sem o CD (sem a 032 ou a 670):
--- pula inteira — o código trata a coluna/tabela ausente como "sem viagem".
+-- pula inteira. As LEITURAS tratam a coluna/tabela ausente como "sem viagem" e
+-- "sem onde"; o "Saiu" e o salvar dependem dela — o deploy roda as migrações
+-- antes do código novo (preDeployCommand do render.yaml).
 
 do $$
 begin

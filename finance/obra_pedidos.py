@@ -94,8 +94,14 @@ def avancar(pool, conta_id: int, pedido_id: int, para: str) -> None:
         st, _ = _status(c, conta_id, pedido_id)
         if st not in _ANTES[para]:
             raise ValueError(f"O pedido já está em “{ROTULO[st]}”.")
-        c.execute(f"update obra_pedidos set status=%s, {para}_em=now() where id=%s and conta_id=%s",
-                  (para, pedido_id, conta_id))
+        # o UPDATE confere o estado de novo: o "Saiu" da viagem pode ter passado na
+        # frente entre a leitura e aqui (duas pessoas no CD) — sem isso o pedido
+        # voltava pra Separando e sumia do romaneio
+        if c.execute(f"""update obra_pedidos set status=%s, {para}_em=now()
+                          where id=%s and conta_id=%s and status = any(%s)""",
+                     (para, pedido_id, conta_id, list(_ANTES[para]))).rowcount == 0:
+            c.rollback()
+            raise ValueError("O pedido acabou de mudar — veja de novo.")
         c.commit()
 
 
@@ -104,8 +110,11 @@ def cancelar(pool, conta_id: int, pedido_id: int) -> None:
         st, _ = _status(c, conta_id, pedido_id)
         if st in ("recebido", "cancelado"):
             raise ValueError("Esse pedido já foi fechado.")
-        c.execute("""update obra_pedidos set status='cancelado', cancelado_em=now()
-                      where id=%s and conta_id=%s""", (pedido_id, conta_id))
+        if c.execute("""update obra_pedidos set status='cancelado', cancelado_em=now()
+                         where id=%s and conta_id=%s and status in ('pedido', 'separando', 'saiu')""",
+                     (pedido_id, conta_id)).rowcount == 0:
+            c.rollback()
+            raise ValueError("O pedido acabou de mudar — veja de novo.")
         c.commit()
 
 

@@ -61,7 +61,8 @@ _log = logging.getLogger("openclaw.resgate")
 
 _BRT = timezone(timedelta(hours=-3))
 
-#: vizinho das travas do relógio da visita (771171) e do sinal (771173)
+#: a trava advisory de antes da 610 (só no banco sem a tabela `travas`): vizinha das
+#: travas do relógio da visita (771171) e do sinal (771173)
 _LOCK = 771180
 
 MODOS = ("off", "ensaio", "ligado")
@@ -1628,49 +1629,39 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     """Um ciclo do resgate em toda empresa com ele em Ensaio ou ligado. Uma trava só
     pro processo inteiro: dois workers do Render não mandam a mesma retomada.
 
-    A TRAVA FICA FORA DE TRANSAÇÃO. O pool abre toda conexão com
-    `idle_in_transaction_session_timeout=60s` (db/conexao.py), e um ciclo daqui pode
-    passar disso (a IA escrevendo, o envio, os avisos). Numa transação aberta, a
-    sessão da trava seria derrubada no meio do ciclo, a trava soltaria e o outro
-    worker mandaria uma segunda retomada dentro do espaçamento. Em autocommit a
-    trava de sessão vale sem transação nenhuma aberta."""
+    A TRAVA É UMA LINHA (db/trava.py, migração 610), não `pg_try_advisory_lock`. Em
+    03/10/2026 a trava de sessão, atrás do pooler do Supabase, era pega numa conexão de
+    servidor e "solta" em outra; os dois workers rodaram o ciclo juntos, um decidiu não
+    chamar o lead #881 da Prime e o outro mandou a retomada 3 segundos depois. A linha
+    não segura transação nenhuma aberta, então o ciclo pode passar do
+    `idle_in_transaction_session_timeout` (a IA escrevendo, o envio) sem soltá-la."""
+    from db import trava as _trava
     agora = agora or datetime.now(timezone.utc)
     total = {"previas": 0, "retomadas": 0, "avisos": 0, "toques": 0, "perdidos": 0}
-    with pool.connection() as lk:
-        lk.commit()
-        lk.autocommit = True
+    with _trava.ciclo(pool, "resgate", _LOCK) as pegou:
+        if not pegou:
+            return total
         try:
+            with pool.connection() as c:
+                contas = [r[0] for r in c.execute(
+                    "select conta_id from resgate_config where modo in ('ensaio','ligado')"
+                ).fetchall()]
+                com_leads = [r[0] for r in c.execute(
+                    "select distinct conta_id from resgate_leads where ativo").fetchall()]
+        except Exception:  # noqa: BLE001 — banco sem a 396
+            return total
+        for conta_id in sorted(set(com_leads) - set(contas)):
             try:
-                if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-                    return total
-            except Exception:  # noqa: BLE001
-                return total
+                varrer_devolvidos(pool, conta_id)
+            except Exception as e:  # noqa: BLE001
+                _log.warning("resgate.rodar: devolvidos da conta %s: %s", conta_id, e)
+        for conta_id in contas:
             try:
-                try:
-                    with pool.connection() as c:
-                        contas = [r[0] for r in c.execute(
-                            "select conta_id from resgate_config where modo in ('ensaio','ligado')"
-                        ).fetchall()]
-                        com_leads = [r[0] for r in c.execute(
-                            "select distinct conta_id from resgate_leads where ativo").fetchall()]
-                except Exception:  # noqa: BLE001 — banco sem a 396
-                    return total
-                for conta_id in sorted(set(com_leads) - set(contas)):
-                    try:
-                        varrer_devolvidos(pool, conta_id)
-                    except Exception as e:  # noqa: BLE001
-                        _log.warning("resgate.rodar: devolvidos da conta %s: %s", conta_id, e)
-                for conta_id in contas:
-                    try:
-                        r = _uma_conta(pool, conta_id, agora)
-                        for k in total:
-                            total[k] += r.get(k, 0)
-                    except Exception as e:  # noqa: BLE001
-                        _log.warning("resgate.rodar: conta %s: %s: %s", conta_id, type(e).__name__, e)
-            finally:
-                lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
-        finally:
-            lk.autocommit = False
+                r = _uma_conta(pool, conta_id, agora)
+                for k in total:
+                    total[k] += r.get(k, 0)
+            except Exception as e:  # noqa: BLE001
+                _log.warning("resgate.rodar: conta %s: %s: %s", conta_id, type(e).__name__, e)
     return total
 
 

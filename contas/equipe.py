@@ -148,7 +148,10 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # vendedor e gestor voltava 303 e não gravava nada — a troca de situação deu
     # 500 por duas semanas, o aviso dizia "o ocorrido ficou registrado", e a
     # `erro_cliente` seguia VAZIA. Quem mais usa o painel era quem não deixava rastro.
-    permitido = ["/trocar", "/sair", "/painel/versao", "/painel/erro-cliente"]
+    # /painel/aparencia também é de todo papel (03/10/2026): cada pessoa escolhe o
+    # tema DELA. A rota mesma esconde a tela de quem não é conta piloto.
+    permitido = ["/trocar", "/sair", "/painel/versao", "/painel/erro-cliente",
+                 "/painel/aparencia"]
     if caps["vendas"]:
         permitido += ["/painel/servicos", "/painel/prospeccao"]
         # Clientes/Fornecedores (29/09/2026): liberada pro vendedor em todo

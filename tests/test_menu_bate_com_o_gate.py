@@ -40,7 +40,9 @@ _MEMBROS = ["gestor", "vendedor", "financeiro", "restrito", "membro", "convidado
 
 #: rotas que o gate deixa passar pra qualquer um, e que por isso não precisam
 #: aparecer no menu (nem podem ser cobradas dele)
-_LIVRES = {"/trocar", "/sair", "/painel/versao", "/painel/erro-cliente"}
+#: /painel/aparencia é de todo papel, mas o link só acende na conta piloto dos
+#: temas (`aparencia_ok`); o link e o portão são conferidos em test_aparencia_temas.py
+_LIVRES = {"/trocar", "/sair", "/painel/versao", "/painel/erro-cliente", "/painel/aparencia"}
 
 
 #: Os perfis de nicho que o menu conhece. O menu não é o mesmo pra todos (regra 6:

@@ -47,6 +47,25 @@ ORIGENS = (
     ("manual", "Manual"),
     ("outro", "Outro"),
 )
+#: a lista da clínica ("Como chegou" do cartão, desenho de 03/10/2026). Uma origem
+#: só: o anúncio, a agenda e a ficha do paciente gravam aqui. Mesmas chaves da lista
+#: de cima onde o sentido é o mesmo; a checagem do banco aceita as duas.
+ORIGENS_CLINICA = (
+    ("instagram", "Instagram"),
+    ("google", "Google"),
+    ("radio", "Rádio"),
+    ("indicacao", "Indicação"),
+    ("ja_paciente", "Já é paciente"),
+    ("whatsapp", "WhatsApp direto"),
+    ("telefone", "Telefone"),
+    ("balcao", "Balcão"),
+    ("outro", "Outro"),
+)
+
+
+def origens(perfil: str | None) -> tuple:
+    """A lista de origens que a tela mostra, pelo perfil do nicho."""
+    return ORIGENS_CLINICA if perfil == "clinica" else ORIGENS
 #: os tipos de festa que viram filtro; o resto é "outro", vazio é "sem tipo"
 TIPOS_FESTA = ("Casamento", "15 anos", "Aniversário", "Formatura", "Corporativo")
 #: faixas de convidados: chave, rótulo, mínimo, máximo (None = aberto)
@@ -67,7 +86,7 @@ COMERCIAL = (8, 18)
 
 
 def rotulo_origem(chave: str | None) -> str:
-    return dict(ORIGENS).get(chave or "", "")
+    return (dict(ORIGENS) | dict(ORIGENS_CLINICA)).get(chave or "", "")
 
 
 # ---------------------------------------------------------------- os filtros
@@ -104,7 +123,7 @@ def filtros(params, perfil: dict | None = None) -> dict:
         mes_ini = None
     dia = g("dia", "") if g("dia", "") in dict(DIAS_FESTA) else ""
     conv = g("conv", "") if g("conv", "") in {k for k, *_ in FAIXAS_CONVIDADOS} else ""
-    origem = g("origem", "") if g("origem", "") in dict(ORIGENS) else ""
+    origem = g("origem", "") if g("origem", "") in (dict(ORIGENS) | dict(ORIGENS_CLINICA)) else ""
     hora = g("hora", "") if g("hora", "") in dict(HORAS) else ""
     # os do perfil recorrente
     segmento = g("segmento", "") if g("segmento", "") in dict(familias()) else ""

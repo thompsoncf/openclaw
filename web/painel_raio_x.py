@@ -308,7 +308,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       </select></label>{% endif %}
     <label class="{{ 'on' if fl.origem }}">Origem
       <select name="origem" onchange="rxEnviar()"><option value="">todas</option>
-        {% for k, r in rxd.ORIGENS %}<option value="{{ k }}" {% if fl.origem==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        {% for k, r in rxd.origens(perfil.chave) %}<option value="{{ k }}" {% if fl.origem==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select></label>
     <label class="{{ 'on' if fl.hora }}">Chegou
       <select name="hora" onchange="rxEnviar()"><option value="">qualquer hora</option>

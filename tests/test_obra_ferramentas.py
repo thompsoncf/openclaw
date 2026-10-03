@@ -271,3 +271,57 @@ def test_mestre_ve_e_devolve_as_ferramentas_da_obra(pool, conta, monkeypatch):
     assert "A casa ficou pronta" in pagina and "🔧" in pagina
     c.post(f"/obra/{minha['id']}/devolver")
     assert not _por_codigo(pool, conta, c1)["fora"]
+
+
+# ── os achados da verificação independente do #997 ──────────────────────────
+def test_nome_com_apostrofo_nao_vira_javascript(pool, conta, monkeypatch):
+    # "Bomba d'água" quebrava o confirm do "Dar baixa" (e o formulário enviava
+    # sem perguntar); um nome feito pra isso viraria código na sessão do dono
+    fer.cadastrar(pool, conta, "Bomba d'água")
+    fer.cadastrar(pool, conta, "x'+alert(document.domain)+'")
+    html = _painel(pool, conta, monkeypatch).get("/painel/obras/deposito?aba=ferramentas").text
+    assert "confirm('Dar baixa" not in html                     # o dado não entra no JS
+    assert 'data-confirma="Dar baixa em Bomba d&#39;água' in html
+    assert "confirm(this.dataset.confirma)" in html
+    assert "alert(document.domain)+' (" not in html.split("data-confirma")[0]
+
+
+def test_clique_duplo_em_mandar_nao_da_500(pool, conta):
+    import threading
+    cod = fer.cadastrar(pool, conta, "Betoneira dupla")[0]
+    f = _por_codigo(pool, conta, cod)
+    o = _obra(pool, conta, "Casa Dupla")
+    resultados = []
+
+    def mandar():
+        try:
+            resultados.append(fer.emprestar(pool, conta, f["id"], o["id"]))
+        except ValueError as e:                                   # o esperado da segunda
+            resultados.append(f"recusado: {e}")
+        except Exception as e:  # noqa: BLE001 — o 500 de antes
+            resultados.append(f"ERRO {type(e).__name__}")
+
+    ts = [threading.Thread(target=mandar) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not [r for r in resultados if r.startswith("ERRO")], resultados
+    assert sum(1 for r in resultados if "foi pra" in r) == 1
+    assert sum(1 for r in resultados if "já está na Casa Dupla" in r) == 1
+
+
+def test_cadastro_ao_mesmo_tempo_vira_recado(pool, conta, monkeypatch):
+    fer.cadastrar(pool, conta, "Furadeira de impacto")              # FER-01 já existe
+    monkeypatch.setattr(fer, "_proximo_numero", lambda c, conta_id: 1)   # o outro pegou o mesmo
+    with pytest.raises(ValueError, match="ao mesmo tempo"):
+        fer.cadastrar(pool, conta, "Lixadeira")
+
+
+def test_devolver_tudo_so_na_casa_pronta(pool, conta):
+    o = _obra(pool, conta, "Casa Andando")
+    cod = fer.cadastrar(pool, conta, "Prumo")[0]
+    fer.emprestar(pool, conta, _por_codigo(pool, conta, cod)["id"], o["id"])
+    with pytest.raises(ValueError, match="ainda está em obra"):
+        fer.devolver_tudo(pool, conta, o["id"])
+    assert _por_codigo(pool, conta, cod)["fora"]                    # nada saiu da obra

@@ -65,14 +65,21 @@ def cadastrar(pool, conta_id: int, nome: str, quantidade=1, obs: str = "") -> li
         raise ValueError("Quantidade inválida.")
     if not 1 <= n <= 50:
         raise ValueError("Cadastre de 1 a 50 de uma vez.")
+    import psycopg
     with pool.connection() as c:
-        pid = _tipo(c, conta_id, nome)
-        prox = _proximo_numero(c, conta_id)
-        codigos = [f"FER-{prox + i:02d}" for i in range(n)]
-        for cod in codigos:
-            c.execute("""insert into obra_ferramentas (conta_id, produto_id, codigo, obs)
-                         values (%s,%s,%s,%s)""", (conta_id, pid, cod, " ".join((obs or "").split())[:120]))
-        c.commit()
+        try:
+            pid = _tipo(c, conta_id, nome)
+            prox = _proximo_numero(c, conta_id)
+            codigos = [f"FER-{prox + i:02d}" for i in range(n)]
+            for cod in codigos:
+                c.execute("""insert into obra_ferramentas (conta_id, produto_id, codigo, obs)
+                             values (%s,%s,%s,%s)""", (conta_id, pid, cod, " ".join((obs or "").split())[:120]))
+            c.commit()
+        except psycopg.errors.UniqueViolation:
+            # outro cadastro pegou o mesmo código no mesmo instante: nada foi gravado
+            c.rollback()
+            raise ValueError("Outro cadastro de ferramenta aconteceu ao mesmo tempo — "
+                             "confira a lista e cadastre de novo.")
     return codigos
 
 
@@ -127,9 +134,14 @@ def resumo(lista: list[dict]) -> dict:
 
 # ── sair, voltar, dar baixa ───────────────────────────────────────────────
 def _ferramenta(c, conta_id: int, ferramenta_id: int):
+    """A ferramenta DESTA conta, com a linha TRAVADA até o commit: o clique duplo
+    em "Mandar" chegava em dobro, a segunda batia no índice único e a tela dava
+    500 (achado da verificação do #997). Travada, a segunda espera e vê "já está
+    na Casa X" — trava em linha, como o resto do repo (db/trava.py, #991)."""
     r = c.execute("""select f.codigo, p.nome from obra_ferramentas f
                        join catalogo_produtos p on p.id = f.produto_id and p.fornecedor_id = f.conta_id
-                      where f.id=%s and f.conta_id=%s and f.ativa""",
+                      where f.id=%s and f.conta_id=%s and f.ativa
+                      for update of f""",
                   (ferramenta_id, conta_id)).fetchone()
     if not r:
         raise ValueError("Ferramenta não encontrada.")
@@ -203,8 +215,16 @@ def devolver_da_obra(pool, conta_id: int, obra_id: int, *, por=None) -> list[str
 
 
 def devolver_tudo(pool, conta_id: int, obra_id: int, *, por=None) -> str:
-    """A casa ficou pronta: o material E as ferramentas voltam pro CD."""
+    """A casa ficou pronta: o material E as ferramentas voltam pro CD. Só casa
+    PRONTA: a tela só oferece o botão ali, e um envio forjado não pode esvaziar
+    uma obra andando (achado da verificação do #997). Ferramenta de obra em
+    andamento volta uma por uma (`devolver`)."""
     from . import obra_pedidos as op
+    o = _ob.obter_obra(pool, conta_id, obra_id)
+    if not o:
+        raise ValueError("Obra não encontrada.")
+    if not (o["pct"] == 100 or o["status"] in _PRONTA):
+        raise ValueError(f"A {o['nome']} ainda está em obra — devolva item por item.")
     partes = []
     try:
         partes.append(op.devolver(pool, conta_id, obra_id, por))

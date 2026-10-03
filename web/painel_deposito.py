@@ -193,6 +193,12 @@ def minimo(request: Request, produto: list[int] = Form([]), minimo: list[str] = 
 
 
 # ─────────────────────────────────────────────────────────────── a tela
+#
+# DADO DIGITADO NUNCA ENTRA NO JAVASCRIPT do onsubmit/onclick: o `|e` protege o
+# HTML, mas o navegador desfaz o `&#39;` antes de rodar o JS — "Bomba d'água"
+# quebrava o confirm (e o formulário enviava sem perguntar), e um nome feito pra
+# isso viraria código na sessão do dono (achado da verificação do #997). A frase
+# vai num `data-confirma` e o JS só lê: confirm(this.dataset.confirma).
 _TPL = r"""{% extends "base" %}{% block conteudo %}
 <style>
 .dp-pag{width:100%;max-width:var(--pag,1180px);margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
@@ -333,7 +339,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         <select name="obra_id" required style="width:auto">{% for o in obras_abertas %}{% if o.id != f.obra_id %}<option value="{{ o.id }}">{{ o.nome|e }}</option>{% endif %}{% endfor %}</select>
         <input name="com_quem" placeholder="com quem" style="width:7.5rem"><button class="dp-bt prim">Mandar</button></form></details>{% endif %}
     <details style="display:inline-block;text-align:left"><summary class="dp-bt" style="list-style:none">Baixa</summary>
-      <form method="post" action="/painel/obras/deposito/ferramenta/{{ f.id }}/baixa" style="display:flex;gap:.3rem;margin-top:.3rem" onsubmit="return confirm('Dar baixa em {{ f.nome|e }} ({{ f.codigo|e }})? Ela sai da lista.')">
+      <form method="post" action="/painel/obras/deposito/ferramenta/{{ f.id }}/baixa" style="display:flex;gap:.3rem;margin-top:.3rem" data-confirma="Dar baixa em {{ f.nome|e }} ({{ f.codigo|e }})? Ela sai da lista." onsubmit="return confirm(this.dataset.confirma)">
         <input name="motivo" required placeholder="quebrou, sumiu…" style="width:8.5rem"><button class="dp-bt">Dar baixa</button></form></details>
   </td></tr>{% endfor %}
 {% if not ferramentas %}<tr><td colspan="6" class="dp-mut">Nenhuma ferramenta cadastrada ainda.</td></tr>{% endif %}
@@ -355,7 +361,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 </div>{% endfor %}
 {% for s in sobras %}<div class="dp-box" style="display:flex;justify-content:space-between;gap:.8rem;align-items:center;flex-wrap:wrap">
   <div><b>🏁 {{ s.obra|e }}</b><div class="dp-mut">{{ s.itens|map(attribute='texto')|join(' · ')|e }}</div></div>
-  <form method="post" action="/painel/obras/deposito/devolver/{{ s.obra_id }}" onsubmit="return confirm('Trazer todo o material de {{ s.obra|e }} de volta pro CD?')"><button class="dp-bt prim">Devolver ao CD</button></form>
+  <form method="post" action="/painel/obras/deposito/devolver/{{ s.obra_id }}" data-confirma="Trazer tudo de {{ s.obra|e }} de volta pro CD?" onsubmit="return confirm(this.dataset.confirma)"><button class="dp-bt prim">Devolver ao CD</button></form>
 </div>{% endfor %}
 {% if not sobras and not ferr_prontas %}<div class="dp-box dp-mut">Nenhuma casa pronta com material ou ferramenta. ✅</div>{% endif %}
 {% endif %}

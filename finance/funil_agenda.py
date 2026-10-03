@@ -193,33 +193,31 @@ def rodar(pool, conta_id: int | None = None) -> dict:
     outros de irem pra agenda.
     """
     total = {"contas": 0, "criados": 0, "ligados": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "funil_agenda", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                contas = ([conta_id] if conta_id else
-                          [r[0] for r in c.execute(
-                              """select distinct conta_id from funil_etapas
-                                  where coalesce(agenda_ao_entrar, false)""").fetchall()])
-            for cid in contas:
-                try:
-                    with pool.connection() as c:
-                        fila = pendentes(c, cid, etapas_que_agendam(c, cid))
-                    if not fila:
-                        continue
-                    total["contas"] += 1
-                    for lead in fila:
-                        try:
-                            r = garantir(pool, cid, lead)
-                            if r == "criado":
-                                total["criados"] += 1
-                            elif r == "ligado":
-                                total["ligados"] += 1
-                        except Exception:  # noqa: BLE001
-                            _log.warning("agenda do lead %s falhou", lead["id"], exc_info=True)
-                except Exception:  # noqa: BLE001
-                    _log.warning("ponte com a agenda falhou na conta %s", cid, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            contas = ([conta_id] if conta_id else
+                      [r[0] for r in c.execute(
+                          """select distinct conta_id from funil_etapas
+                              where coalesce(agenda_ao_entrar, false)""").fetchall()])
+        for cid in contas:
+            try:
+                with pool.connection() as c:
+                    fila = pendentes(c, cid, etapas_que_agendam(c, cid))
+                if not fila:
+                    continue
+                total["contas"] += 1
+                for lead in fila:
+                    try:
+                        r = garantir(pool, cid, lead)
+                        if r == "criado":
+                            total["criados"] += 1
+                        elif r == "ligado":
+                            total["ligados"] += 1
+                    except Exception:  # noqa: BLE001
+                        _log.warning("agenda do lead %s falhou", lead["id"], exc_info=True)
+            except Exception:  # noqa: BLE001
+                _log.warning("ponte com a agenda falhou na conta %s", cid, exc_info=True)
     return total

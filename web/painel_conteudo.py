@@ -639,25 +639,22 @@ def publicar_pendentes(pool) -> int:
     posts foram publicados nesta passada."""
     n = 0
     try:
-        with pool.connection() as lockc:
-            if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+        from db import trava as _trava
+        with _trava.ciclo(pool, "ia_insta", _LOCK) as pegou:
+            if not pegou:
                 return 0
-            try:
-                with pool.connection() as c:
-                    fila = c.execute(
-                        """select id from conteudo_posts
-                            where status='agendado' and agendado_para is not null
-                              and agendado_para <= now()
-                              and coalesce(tentativas,0) < %s
-                            order by agendado_para limit %s""",
-                        (_MAX_TENTATIVAS, _MAX_PASS)).fetchall()
-                for (pid,) in fila:
-                    r = publicar_post(pool, pid)
-                    if r.get("ok"):
-                        n += 1
-            finally:
-                lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
-                lockc.commit()
+            with pool.connection() as c:
+                fila = c.execute(
+                    """select id from conteudo_posts
+                        where status='agendado' and agendado_para is not null
+                          and agendado_para <= now()
+                          and coalesce(tentativas,0) < %s
+                        order by agendado_para limit %s""",
+                    (_MAX_TENTATIVAS, _MAX_PASS)).fetchall()
+            for (pid,) in fila:
+                r = publicar_post(pool, pid)
+                if r.get("ok"):
+                    n += 1
     except Exception as e:  # noqa: BLE001
         _log.info("IA Insta: publicar_pendentes falhou: %s: %s", type(e).__name__, e)
     return n

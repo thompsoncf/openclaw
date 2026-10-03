@@ -712,32 +712,30 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
     total = {"contas": 0, "sessao": 0, "retorno": 0, "validade": 0, "vencidos": 0, "concluidos": 0,
              "cards_retorno": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "clinica_pacotes", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
+        with pool.connection() as c:
+            try:
+                with c.transaction():
+                    contas = [r[0] for r in c.execute(
+                        # 'marcado' também: o horário que fechou o retorno pode ter sido
+                        # cancelado, e é `fechar_retornos` que o devolve pra fila
+                        """select conta_id from clinica_pacotes where estado='ativo'
+                           union select conta_id from clinica_retornos
+                                  where estado in ('aguardando', 'marcado')""").fetchall()]
+            except Exception:  # noqa: BLE001 — sem a 381
+                contas = []
+            for conta_id in contas:
                 try:
-                    with c.transaction():
-                        contas = [r[0] for r in c.execute(
-                            # 'marcado' também: o horário que fechou o retorno pode ter sido
-                            # cancelado, e é `fechar_retornos` que o devolve pra fila
-                            """select conta_id from clinica_pacotes where estado='ativo'
-                               union select conta_id from clinica_retornos
-                                      where estado in ('aguardando', 'marcado')""").fetchall()]
-                except Exception:  # noqa: BLE001 — sem a 381
-                    contas = []
-                for conta_id in contas:
-                    try:
-                        r = lembrar(c, conta_id, agora)
-                        total["contas"] += 1
-                        for k in ("sessao", "retorno", "validade", "vencidos"):
-                            total[k] += r[k]
-                    except Exception:  # noqa: BLE001
-                        c.rollback()
-                        _log.warning("pacotes: conta %s falhou", conta_id, exc_info=True)
-                total["concluidos"] = varrer_tratamento(c)
-                total["cards_retorno"] = varrer_retorno(c)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                    r = lembrar(c, conta_id, agora)
+                    total["contas"] += 1
+                    for k in ("sessao", "retorno", "validade", "vencidos"):
+                        total[k] += r[k]
+                except Exception:  # noqa: BLE001
+                    c.rollback()
+                    _log.warning("pacotes: conta %s falhou", conta_id, exc_info=True)
+            total["concluidos"] = varrer_tratamento(c)
+            total["cards_retorno"] = varrer_retorno(c)
     return total

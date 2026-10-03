@@ -108,5 +108,50 @@ def test_banco_sem_a_610_usa_a_trava_antiga():
         with p.connection() as c:
             assert c.execute("select count(*) from pg_locks where locktype='advisory' "
                              "and objid=771180").fetchone()[0] == 0
+        # a de exclusão também, com a chave em par (a, b) de antes
+        with trava.esperar(p, "visita_marcar:34", (771172, 34), prazo_s=1) as pegou:
+            assert pegou
+            with p.connection() as c:
+                assert c.execute("select count(*) from pg_locks where locktype='advisory' "
+                                 "and classid=771172 and objid=34").fetchone()[0] == 1
     finally:
         p.close()
+
+
+# ══════════════════════════════════════════════ esperar: a exclusão de um passo curto
+
+def test_esperar_espera_a_vez_e_passa_quando_o_outro_solta(pool):
+    """Duas aprovações no mesmo segundo pro mesmo dia (ia_orcamento.trava_do_dia), duas
+    marcações de visita, duas vendas do mesmo estoque: a segunda ESPERA a primeira."""
+    ordem, dentro = [], threading.Event()
+
+    def primeiro():
+        with trava.esperar(pool, "orcamento_dia:34:2026-12-12", (771174, 1)) as pegou:
+            assert pegou
+            ordem.append("1 entrou")
+            dentro.set()
+            threading.Event().wait(0.8)
+            ordem.append("1 saiu")
+
+    t = threading.Thread(target=primeiro)
+    t.start()
+    dentro.wait(5)
+    with trava.esperar(pool, "orcamento_dia:34:2026-12-12", (771174, 1), prazo_s=5) as pegou:
+        assert pegou
+        ordem.append("2 entrou")
+    t.join(5)
+    assert ordem == ["1 entrou", "1 saiu", "2 entrou"]
+
+
+def test_esperar_desiste_no_prazo_sem_mexer_na_trava_do_outro(pool):
+    assert trava.pegar(pool, "produto_venda:34", "balcao-1") is True
+    with trava.esperar(pool, "produto_venda:34", (771168, 34), prazo_s=0.5) as pegou:
+        assert pegou is False
+    with pool.connection() as c:
+        assert c.execute("select dono from travas where nome='produto_venda:34'").fetchone()[0] == "balcao-1"
+
+
+def test_esperar_nao_segura_outra_conta(pool):
+    with trava.esperar(pool, "visita_marcar:34", (771172, 34)) as a:
+        with trava.esperar(pool, "visita_marcar:40", (771172, 40), prazo_s=0.5) as b:
+            assert a and b

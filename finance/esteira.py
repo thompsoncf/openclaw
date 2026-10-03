@@ -792,32 +792,30 @@ def _e_hora_do_aviso(agora: datetime | None, conta_id: int, pool) -> bool:
 def rodar(pool, agora: datetime | None = None) -> dict:
     """Uma passada em todas as contas que ligaram. Chamada pelo poller."""
     total = {"contas": 0, "entraram": 0, "resolvidos": 0, "fechados": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "esteira", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                contas = [r[0] for r in c.execute(
-                    "select conta_id from funil_regua where coalesce(esteira_modo,'off') <> 'off'").fetchall()]
-            for conta_id in contas:
-                try:
-                    with pool.connection() as c:
-                        r = avaliar(c, conta_id, agora)
-                        c.commit()
-                    total["contas"] += 1
-                    total["entraram"] += r["entraram"]
-                    total["resolvidos"] += r["resolvidos"]
-                    total["fechados"] += len(r["fechados"])
-                    # o aviso sai DEPOIS do commit: mensagem não tem como ser desfeita
-                    if r["cobrancas"] and _e_hora_do_aviso(agora, conta_id, pool):
-                        notificar(pool, conta_id, r["cobrancas"])
-                    # e, depois que a janela fecha, o placar do dia pra quem decide.
-                    # Ele mesmo confere se é hora e se já saiu hoje.
-                    fecho_do_dia(pool, conta_id, agora)
-                except Exception:  # noqa: BLE001
-                    _log.warning("esteira falhou na conta %s", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            contas = [r[0] for r in c.execute(
+                "select conta_id from funil_regua where coalesce(esteira_modo,'off') <> 'off'").fetchall()]
+        for conta_id in contas:
+            try:
+                with pool.connection() as c:
+                    r = avaliar(c, conta_id, agora)
+                    c.commit()
+                total["contas"] += 1
+                total["entraram"] += r["entraram"]
+                total["resolvidos"] += r["resolvidos"]
+                total["fechados"] += len(r["fechados"])
+                # o aviso sai DEPOIS do commit: mensagem não tem como ser desfeita
+                if r["cobrancas"] and _e_hora_do_aviso(agora, conta_id, pool):
+                    notificar(pool, conta_id, r["cobrancas"])
+                # e, depois que a janela fecha, o placar do dia pra quem decide.
+                # Ele mesmo confere se é hora e se já saiu hoje.
+                fecho_do_dia(pool, conta_id, agora)
+            except Exception:  # noqa: BLE001
+                _log.warning("esteira falhou na conta %s", conta_id, exc_info=True)
     return total
 
 

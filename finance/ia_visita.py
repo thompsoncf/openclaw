@@ -393,78 +393,69 @@ def marcar(pool, conta_id: int, regra: dict, cfg: dict, lead_id: int, conversa_i
     vai pro cliente (quem manda é o agente, pelo chip da conversa)."""
     from finance import cockpit as ck
     from finance import chip_regra as _cr
-    import time
-    with pool.connection() as lk:
-        # trava de SESSÃO numa conexão só dela (o mesmo desenho do relógio da clínica):
-        # os passos abaixo abrem as próprias conexões, e a trava tem que durar todos.
-        # TRY com prazo, e não espera cega: conexão presa esperando trava é conexão a
-        # menos no pool do painel inteiro.
-        prazo = time.monotonic() + 15
-        while not lk.execute("select pg_try_advisory_lock(%s::int, %s::int)",
-                             (_LOCK_MARCAR, int(conta_id))).fetchone()[0]:
-            if time.monotonic() > prazo:
+    from db import trava as _trava
+    # a trava é uma LINHA (db/trava.py): a de sessão não segurava atrás do pooler do
+    # Supabase. Os passos abaixo abrem as próprias conexões e a trava dura todos. Espera
+    # a vez com prazo, tentando de novo: nenhuma conexão fica presa esperando.
+    with _trava.esperar(pool, f"visita_marcar:{int(conta_id)}", (_LOCK_MARCAR, int(conta_id))) as a_vez:
+        if not a_vez:
+            return {"ok": False, "motivo": "falhou"}
+        with pool.connection() as c:
+            viva = visita_viva(c, conta_id, lead_id, agora)
+            c.commit()
+        if viva and abs((viva["inicio"] - ini).total_seconds()) < 60:
+            # o cliente repetiu o horário que já tem: nada muda, nada conta
+            return {"ok": True, "evento_id": viva["evento_id"], "remarcou": False,
+                    "mesmo": True,
+                    "texto": f"Sua visita já está marcada: {fmt(ini)}. Te esperamos! 😊"}
+        if viva and viva["remarcacoes"] >= MAX_REMARCACOES:
+            return {"ok": False, "motivo": "remarcacoes"}
+        ok, motivo = cabe(pool, conta_id, cfg, ini, agora, conversa_id=conversa_id,
+                          ignorar_evento=viva["evento_id"] if viva else None)
+        if not ok:
+            return {"ok": False, "motivo": motivo}
+        loc = ini.astimezone(ag.BRT)
+        data, hora = loc.strftime("%Y-%m-%d"), loc.strftime("%H:%M")
+        conf_dia = motivo == CONF_DIA
+        if viva:
+            r = ck.remarcar_visita(pool, conta_id, None, viva["evento_id"], data=data,
+                                   hora=hora, avisar_cliente=False, gestao=True)
+            if not r.get("ok"):
                 return {"ok": False, "motivo": "falhou"}
-            time.sleep(0.3)
-        try:
             with pool.connection() as c:
-                viva = visita_viva(c, conta_id, lead_id, agora)
+                # a visita que um vendedor marcou ganha a linha aqui: daqui pra frente
+                # o relógio da IA cuida dela
+                c.execute("""insert into ia_visitas (evento_id, conta_id, prospeccao_id,
+                                                     conversa_id, conf_no_dia, remarcacoes)
+                             values (%s,%s,%s,%s,%s,1)
+                             on conflict (evento_id) do update set
+                               remarcacoes=ia_visitas.remarcacoes+1, conf_no_dia=excluded.conf_no_dia,
+                               conversa_id=coalesce(excluded.conversa_id, ia_visitas.conversa_id),
+                               vespera_em=null, duas_horas_em=null, confirmado_em=null,
+                               pede_remarcar_em=null, sem_resposta_em=null, falta_em=null,
+                               envio_falhas=0, envio_falhou_em=null, marcado_em=now()""",
+                          (viva["evento_id"], conta_id, lead_id, conversa_id, conf_dia))
                 c.commit()
-            if viva and abs((viva["inicio"] - ini).total_seconds()) < 60:
-                # o cliente repetiu o horário que já tem: nada muda, nada conta
-                return {"ok": True, "evento_id": viva["evento_id"], "remarcou": False,
-                        "mesmo": True,
-                        "texto": f"Sua visita já está marcada: {fmt(ini)}. Te esperamos! 😊"}
-            if viva and viva["remarcacoes"] >= MAX_REMARCACOES:
-                return {"ok": False, "motivo": "remarcacoes"}
-            ok, motivo = cabe(pool, conta_id, cfg, ini, agora, conversa_id=conversa_id,
-                              ignorar_evento=viva["evento_id"] if viva else None)
-            if not ok:
-                return {"ok": False, "motivo": motivo}
-            loc = ini.astimezone(ag.BRT)
-            data, hora = loc.strftime("%Y-%m-%d"), loc.strftime("%H:%M")
-            conf_dia = motivo == CONF_DIA
-            if viva:
-                r = ck.remarcar_visita(pool, conta_id, None, viva["evento_id"], data=data,
-                                       hora=hora, avisar_cliente=False, gestao=True)
-                if not r.get("ok"):
-                    return {"ok": False, "motivo": "falhou"}
-                with pool.connection() as c:
-                    # a visita que um vendedor marcou ganha a linha aqui: daqui pra frente
-                    # o relógio da IA cuida dela
-                    c.execute("""insert into ia_visitas (evento_id, conta_id, prospeccao_id,
-                                                         conversa_id, conf_no_dia, remarcacoes)
-                                 values (%s,%s,%s,%s,%s,1)
-                                 on conflict (evento_id) do update set
-                                   remarcacoes=ia_visitas.remarcacoes+1, conf_no_dia=excluded.conf_no_dia,
-                                   conversa_id=coalesce(excluded.conversa_id, ia_visitas.conversa_id),
-                                   vespera_em=null, duas_horas_em=null, confirmado_em=null,
-                                   pede_remarcar_em=null, sem_resposta_em=null, falta_em=null,
-                                   envio_falhas=0, envio_falhou_em=null, marcado_em=now()""",
-                              (viva["evento_id"], conta_id, lead_id, conversa_id, conf_dia))
-                    c.commit()
-                evento_id = viva["evento_id"]
-            else:
-                r = ck.agendar_visita(pool, conta_id, regra["membro_id"], lead_id, data=data,
-                                      hora=hora, dur_min=cfg["dur"], lembrete_min=None,
-                                      avisar_cliente=False)
-                if not r.get("ok"):
-                    return {"ok": False, "motivo": "falhou"}
-                evento_id = r["evento_id"]
-                with pool.connection() as c:
-                    anf = _nome(c, conta_id, cfg.get("anfitria_id"))
-                    c.execute("""update eventos_agenda set marcado_por='ia',
-                                        descricao = coalesce(descricao,'') || %s
-                                  where id=%s and conta_id=%s""",
-                              (f"\nMarcada pela IA. Recebe: {anf}." if anf else "\nMarcada pela IA.",
-                               evento_id, conta_id))
-                    c.execute("""insert into ia_visitas (evento_id, conta_id, prospeccao_id,
-                                                         conversa_id, conf_no_dia)
-                                 values (%s,%s,%s,%s,%s) on conflict (evento_id) do nothing""",
-                              (evento_id, conta_id, lead_id, conversa_id, conf_dia))
-                    c.commit()
-        finally:
-            lk.execute("select pg_advisory_unlock(%s::int, %s::int)", (_LOCK_MARCAR, int(conta_id)))
-            lk.commit()
+            evento_id = viva["evento_id"]
+        else:
+            r = ck.agendar_visita(pool, conta_id, regra["membro_id"], lead_id, data=data,
+                                  hora=hora, dur_min=cfg["dur"], lembrete_min=None,
+                                  avisar_cliente=False)
+            if not r.get("ok"):
+                return {"ok": False, "motivo": "falhou"}
+            evento_id = r["evento_id"]
+            with pool.connection() as c:
+                anf = _nome(c, conta_id, cfg.get("anfitria_id"))
+                c.execute("""update eventos_agenda set marcado_por='ia',
+                                    descricao = coalesce(descricao,'') || %s
+                              where id=%s and conta_id=%s""",
+                          (f"\nMarcada pela IA. Recebe: {anf}." if anf else "\nMarcada pela IA.",
+                           evento_id, conta_id))
+                c.execute("""insert into ia_visitas (evento_id, conta_id, prospeccao_id,
+                                                     conversa_id, conf_no_dia)
+                             values (%s,%s,%s,%s,%s) on conflict (evento_id) do nothing""",
+                          (evento_id, conta_id, lead_id, conversa_id, conf_dia))
+                c.commit()
     with pool.connection() as c:
         anf = _nome(c, conta_id, cfg.get("anfitria_id"))
     texto = (("Remarcado! ✅ " if viva else "Marcado! ✅ ") + fmt(ini)
@@ -616,108 +607,103 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     Janelas, e não minutos exatos: o poller anda de ~2 em ~2 minutos e atrasa."""
     agora = agora or datetime.now(timezone.utc)
     out = {"vesperas": 0, "duas_horas": 0, "sem_resposta": 0, "faltas": 0}
-    with pool.connection() as lk:
-        try:
-            if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-                return out
-        except Exception:  # noqa: BLE001 — banco sem a 390
+    from db import trava as _trava
+    with _trava.ciclo(pool, "ia_visita", _LOCK) as a_vez:
+        if not a_vez:
             return out
+        from finance import funil_regua as _fr
+        from finance.resgate import RE_PARAR
         try:
-            from finance import funil_regua as _fr
-            from finance.resgate import RE_PARAR
+            with pool.connection() as c:
+                rows = c.execute(
+                    # só conversa que ainda é da IA: gente assumiu (Assumir, resposta
+                    # pelo celular) → quem fala com o cliente é a pessoa, não o relógio
+                    """select v.evento_id, v.conta_id, v.prospeccao_id, v.conversa_id,
+                              v.conf_no_dia, v.vespera_em, v.duas_horas_em, v.confirmado_em,
+                              v.pede_remarcar_em, v.sem_resposta_em, v.falta_em, v.marcado_em,
+                              e.inicio, e.desfecho, e.local,
+                              coalesce(nullif(p.contato,''), nullif(p.empresa,''), ''),
+                              (select m.texto from mensagens m
+                                where m.conversa_id = v.conversa_id and m.direcao = 'in'
+                                order by m.criado_em desc, m.id desc limit 1)
+                         from ia_visitas v
+                         join eventos_agenda e on e.id = v.evento_id and e.conta_id = v.conta_id
+                         join conversas cv on cv.id = v.conversa_id and cv.conta_id = v.conta_id
+                         left join prospeccao p on p.id = v.prospeccao_id and p.conta_id = v.conta_id
+                        where e.status='ativo' and cv.agente_ativo and cv.status <> 'pendente'
+                          and v.envio_falhas < %s
+                          and (v.envio_falhou_em is null or v.envio_falhou_em < %s)
+                          and e.inicio between %s and %s
+                          -- o card saiu do jogo ou espera a data: o relógio não
+                          -- escreve mais (revisão de 27/09/2026)
+                          and (p.id is null or (""" + _fr.sql_encerradas_nao("p") + """
+                                                and p.status <> 'lista_espera'))""",
+                    (MAX_FALHAS, agora - INTERVALO_FALHA,
+                     agora - timedelta(days=3), agora + timedelta(days=2))).fetchall()
+        except Exception:  # noqa: BLE001
+            return out
+        from finance.cockpit import endereco_empresa
+        from finance.voltar_a_chamar import primeiro_nome
+        from finance import chip_regra as _cr
+        for r in rows:
+            v = dict(zip(("evento_id", "conta_id", "lead", "conversa_id", "conf_no_dia",
+                          "vespera_em", "duas_horas_em", "confirmado_em", "pede_remarcar_em",
+                          "sem_resposta_em", "falta_em", "marcado_em", "inicio", "desfecho",
+                          "local", "quem", "ultima_in"), r))
+            conta, ini = v["conta_id"], v["inicio"]
+            if RE_PARAR.search(v["ultima_in"] or ""):
+                continue                  # pediu pra parar: o relógio não escreve
+            # A MENSAGEM AO CLIENTE SÓ SAI DAS 8H ÀS 20H (a mesma janela das rotinas
+            # da visita). A véspera já nascia às 18h, mas o "2h antes" de uma visita
+            # às 9h saía às 7h, e o "sentimos sua falta" saía na hora em que alguém
+            # marcava a falta — até de madrugada (revisão de 27/09/2026).
+            cliente_ok = HORAS_CLIENTE[0] <= agora.astimezone(ag.BRT).hour < HORAS_CLIENTE[1]
             try:
-                with pool.connection() as c:
-                    rows = c.execute(
-                        # só conversa que ainda é da IA: gente assumiu (Assumir, resposta
-                        # pelo celular) → quem fala com o cliente é a pessoa, não o relógio
-                        """select v.evento_id, v.conta_id, v.prospeccao_id, v.conversa_id,
-                                  v.conf_no_dia, v.vespera_em, v.duas_horas_em, v.confirmado_em,
-                                  v.pede_remarcar_em, v.sem_resposta_em, v.falta_em, v.marcado_em,
-                                  e.inicio, e.desfecho, e.local,
-                                  coalesce(nullif(p.contato,''), nullif(p.empresa,''), ''),
-                                  (select m.texto from mensagens m
-                                    where m.conversa_id = v.conversa_id and m.direcao = 'in'
-                                    order by m.criado_em desc, m.id desc limit 1)
-                             from ia_visitas v
-                             join eventos_agenda e on e.id = v.evento_id and e.conta_id = v.conta_id
-                             join conversas cv on cv.id = v.conversa_id and cv.conta_id = v.conta_id
-                             left join prospeccao p on p.id = v.prospeccao_id and p.conta_id = v.conta_id
-                            where e.status='ativo' and cv.agente_ativo and cv.status <> 'pendente'
-                              and v.envio_falhas < %s
-                              and (v.envio_falhou_em is null or v.envio_falhou_em < %s)
-                              and e.inicio between %s and %s
-                              -- o card saiu do jogo ou espera a data: o relógio não
-                              -- escreve mais (revisão de 27/09/2026)
-                              and (p.id is null or (""" + _fr.sql_encerradas_nao("p") + """
-                                                    and p.status <> 'lista_espera'))""",
-                        (MAX_FALHAS, agora - INTERVALO_FALHA,
-                         agora - timedelta(days=3), agora + timedelta(days=2))).fetchall()
-            except Exception:  # noqa: BLE001
-                return out
-            from finance.cockpit import endereco_empresa
-            from finance.voltar_a_chamar import primeiro_nome
-            from finance import chip_regra as _cr
-            for r in rows:
-                v = dict(zip(("evento_id", "conta_id", "lead", "conversa_id", "conf_no_dia",
-                              "vespera_em", "duas_horas_em", "confirmado_em", "pede_remarcar_em",
-                              "sem_resposta_em", "falta_em", "marcado_em", "inicio", "desfecho",
-                              "local", "quem", "ultima_in"), r))
-                conta, ini = v["conta_id"], v["inicio"]
-                if RE_PARAR.search(v["ultima_in"] or ""):
-                    continue                  # pediu pra parar: o relógio não escreve
-                # A MENSAGEM AO CLIENTE SÓ SAI DAS 8H ÀS 20H (a mesma janela das rotinas
-                # da visita). A véspera já nascia às 18h, mas o "2h antes" de uma visita
-                # às 9h saía às 7h, e o "sentimos sua falta" saía na hora em que alguém
-                # marcava a falta — até de madrugada (revisão de 27/09/2026).
-                cliente_ok = HORAS_CLIENTE[0] <= agora.astimezone(ag.BRT).hour < HORAS_CLIENTE[1]
-                try:
-                    esp = endereco_empresa(pool, conta)
-                    nome = primeiro_nome(v["quem"])
-                    nome = nome[:1].upper() + nome[1:].lower() if nome else ""
-                    if v["desfecho"] == "nao_realizado":
-                        if (not v["falta_em"] and cliente_ok
-                                and _passo(pool, conta, v, "falta_em", TEXTO_FALTA, agora)):
-                            out["faltas"] += 1
-                        continue
-                    if ini <= agora or v["pede_remarcar_em"]:
-                        continue
-                    momento = _momento_vespera(ini, v["conf_no_dia"])
-                    if (not v["vespera_em"] and not v["confirmado_em"] and agora >= momento
-                            and v["marcado_em"] < momento and ini - agora > timedelta(hours=2, minutes=30)):
-                        if cliente_ok and _passo(pool, conta, v, "vespera_em",
-                                                 texto_vespera(ini, nome, agora, esp["nome"]),
-                                                 agora):
-                            out["vesperas"] += 1
-                        continue
-                    if not v["duas_horas_em"] and ini - agora <= timedelta(hours=2) \
-                            and v["marcado_em"] < ini - timedelta(hours=2):
-                        if cliente_ok and _passo(pool, conta, v, "duas_horas_em",
-                                                 texto_duas_horas(ini, esp["nome"],
-                                                                  v["local"] or esp["endereco"]
-                                                                  or esp["nome"],
-                                                                  bool(v["confirmado_em"])),
-                                                 agora):
-                            out["duas_horas"] += 1
-                        continue
-                    if (v["vespera_em"] and not v["confirmado_em"] and not v["sem_resposta_em"]
-                            and ini - agora <= timedelta(minutes=90)):
-                        with pool.connection() as c:
-                            pegou = c.execute("""update ia_visitas set sem_resposta_em=now()
-                                                  where evento_id=%s and sem_resposta_em is null
-                                                  returning evento_id""", (v["evento_id"],)).fetchone()
-                            anf = None
-                            if pegou:
-                                reg = _cr.regra_da_conversa(c, conta, v["conversa_id"])
-                                anf = (config(c, reg) or {}).get("anfitria_id") if reg else None
-                            c.commit()
-                        if pegou and anf:
-                            _cr.notificar(pool, conta, anf, "⏰ Visita sem confirmação",
-                                          f"{v['quem'] or 'O cliente'} não confirmou a visita de "
-                                          f"{fmt(ini)}. Continua marcada.",
-                                          f"/cockpit/lead/{v['lead']}")
-                            out["sem_resposta"] += 1
-                except Exception as e:  # noqa: BLE001
-                    _log.warning("ia_visita.rodar: evento %s: %s", v["evento_id"], e)
-        finally:
-            lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                esp = endereco_empresa(pool, conta)
+                nome = primeiro_nome(v["quem"])
+                nome = nome[:1].upper() + nome[1:].lower() if nome else ""
+                if v["desfecho"] == "nao_realizado":
+                    if (not v["falta_em"] and cliente_ok
+                            and _passo(pool, conta, v, "falta_em", TEXTO_FALTA, agora)):
+                        out["faltas"] += 1
+                    continue
+                if ini <= agora or v["pede_remarcar_em"]:
+                    continue
+                momento = _momento_vespera(ini, v["conf_no_dia"])
+                if (not v["vespera_em"] and not v["confirmado_em"] and agora >= momento
+                        and v["marcado_em"] < momento and ini - agora > timedelta(hours=2, minutes=30)):
+                    if cliente_ok and _passo(pool, conta, v, "vespera_em",
+                                             texto_vespera(ini, nome, agora, esp["nome"]),
+                                             agora):
+                        out["vesperas"] += 1
+                    continue
+                if not v["duas_horas_em"] and ini - agora <= timedelta(hours=2) \
+                        and v["marcado_em"] < ini - timedelta(hours=2):
+                    if cliente_ok and _passo(pool, conta, v, "duas_horas_em",
+                                             texto_duas_horas(ini, esp["nome"],
+                                                              v["local"] or esp["endereco"]
+                                                              or esp["nome"],
+                                                              bool(v["confirmado_em"])),
+                                             agora):
+                        out["duas_horas"] += 1
+                    continue
+                if (v["vespera_em"] and not v["confirmado_em"] and not v["sem_resposta_em"]
+                        and ini - agora <= timedelta(minutes=90)):
+                    with pool.connection() as c:
+                        pegou = c.execute("""update ia_visitas set sem_resposta_em=now()
+                                              where evento_id=%s and sem_resposta_em is null
+                                              returning evento_id""", (v["evento_id"],)).fetchone()
+                        anf = None
+                        if pegou:
+                            reg = _cr.regra_da_conversa(c, conta, v["conversa_id"])
+                            anf = (config(c, reg) or {}).get("anfitria_id") if reg else None
+                        c.commit()
+                    if pegou and anf:
+                        _cr.notificar(pool, conta, anf, "⏰ Visita sem confirmação",
+                                      f"{v['quem'] or 'O cliente'} não confirmou a visita de "
+                                      f"{fmt(ini)}. Continua marcada.",
+                                      f"/cockpit/lead/{v['lead']}")
+                        out["sem_resposta"] += 1
+            except Exception as e:  # noqa: BLE001
+                _log.warning("ia_visita.rodar: evento %s: %s", v["evento_id"], e)
     return out

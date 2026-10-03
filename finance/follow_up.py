@@ -1088,35 +1088,33 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     Best-effort por conta: conta com dado torto não para a passada das outras.
     """
     total = {"contas": 0, "avisos": 0, "simulados": 0, "represados": 0, "sincronizados": 0}
-    with pool.connection() as lockc:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "follow_up", _LOCK) as pegou:
         # dois workers no Render: sem o lock os dois cobram o mesmo lead no mesmo
         # segundo, e o índice único viraria erro em vez de dedup
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                contas = [r[0] for r in c.execute(
-                    "select conta_id from funil_regua where follow_up_modo <> 'off'").fetchall()]
-            from finance import raio_x_perfil as rxp
-            for conta_id in contas:
-                try:
-                    perfil = rxp.perfil_da_conta(pool, conta_id)
-                    if perfil["chave"] not in PERFIS_COM_TELA:
-                        continue
-                    with pool.connection() as c:
-                        cfg = config(c, conta_id)
-                        total["sincronizados"] += sincronizar(
-                            c, conta_id, leads(c, conta_id, perfil, agora, cfg))
-                        r = avaliar(c, conta_id, agora, perfil)
-                        c.commit()
-                    total["contas"] += 1
-                    for k in ("avisos", "simulados", "represados"):
-                        total[k] += r[k]
-                    # a mensagem sai DEPOIS do commit, nunca antes: push não tem
-                    # como ser desfeito por um erro adiante
-                    notificar(pool, conta_id, r["pendentes"])
-                except Exception:  # noqa: BLE001
-                    _log.warning("follow-up falhou na conta %s", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            contas = [r[0] for r in c.execute(
+                "select conta_id from funil_regua where follow_up_modo <> 'off'").fetchall()]
+        from finance import raio_x_perfil as rxp
+        for conta_id in contas:
+            try:
+                perfil = rxp.perfil_da_conta(pool, conta_id)
+                if perfil["chave"] not in PERFIS_COM_TELA:
+                    continue
+                with pool.connection() as c:
+                    cfg = config(c, conta_id)
+                    total["sincronizados"] += sincronizar(
+                        c, conta_id, leads(c, conta_id, perfil, agora, cfg))
+                    r = avaliar(c, conta_id, agora, perfil)
+                    c.commit()
+                total["contas"] += 1
+                for k in ("avisos", "simulados", "represados"):
+                    total[k] += r[k]
+                # a mensagem sai DEPOIS do commit, nunca antes: push não tem
+                # como ser desfeito por um erro adiante
+                notificar(pool, conta_id, r["pendentes"])
+            except Exception:  # noqa: BLE001
+                _log.warning("follow-up falhou na conta %s", conta_id, exc_info=True)
     return total

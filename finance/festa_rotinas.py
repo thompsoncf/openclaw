@@ -440,35 +440,30 @@ def _reivindicar(pool, conta_id: int, lead: int, quem: str) -> bool:
 def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
     out = {"disputas": 0, "reservas_vencidas": 0, "pos_festa": 0}
-    with pool.connection() as lk:
-        try:
-            if not lk.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-                return out
-        except Exception:  # noqa: BLE001
+    from db import trava as _trava
+    with _trava.ciclo(pool, "festa_rotinas", _LOCK) as pegou:
+        if not pegou:
             return out
         try:
+            with pool.connection() as c:
+                contas = [r[0] for r in c.execute(
+                    """select conta_id from visita_rotinas_config
+                        where reserva_disputada_h is not null or pos_festa
+                           or proposta_validade_dias is not null
+                        order by conta_id""").fetchall()]
+        except Exception:  # noqa: BLE001 — banco sem a 421
+            return out
+        for conta_id in contas:
             try:
                 with pool.connection() as c:
-                    contas = [r[0] for r in c.execute(
-                        """select conta_id from visita_rotinas_config
-                            where reserva_disputada_h is not null or pos_festa
-                               or proposta_validade_dias is not null
-                            order by conta_id""").fetchall()]
-            except Exception:  # noqa: BLE001 — banco sem a 421
-                return out
-            for conta_id in contas:
-                try:
-                    with pool.connection() as c:
-                        cfg = config(c, conta_id)
-                        c.commit()
-                    out["reservas_vencidas"] += reservas_vencidas(pool, conta_id, agora)
-                    if (HORAS_EQUIPE[0] <= agora.astimezone(ag.BRT).hour < HORAS_EQUIPE[1]):
-                        out["disputas"] += disputas(pool, conta_id, cfg, agora)
-                    out["pos_festa"] += pos_festa(pool, conta_id, cfg, agora)
-                except Exception as e:  # noqa: BLE001
-                    _log.warning("festa_rotinas.rodar: conta %s: %s", conta_id, e)
-        finally:
-            lk.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                    cfg = config(c, conta_id)
+                    c.commit()
+                out["reservas_vencidas"] += reservas_vencidas(pool, conta_id, agora)
+                if (HORAS_EQUIPE[0] <= agora.astimezone(ag.BRT).hour < HORAS_EQUIPE[1]):
+                    out["disputas"] += disputas(pool, conta_id, cfg, agora)
+                out["pos_festa"] += pos_festa(pool, conta_id, cfg, agora)
+            except Exception as e:  # noqa: BLE001
+                _log.warning("festa_rotinas.rodar: conta %s: %s", conta_id, e)
     return out
 
 

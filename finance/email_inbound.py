@@ -473,25 +473,22 @@ def diagnostico(pool, conta_id: int, canal: str = "email") -> dict:
 
 
 def poll_uma_vez(pool) -> int:
-    """Uma passada do poller: sincroniza toda conta com e-mail configurado, com
-    advisory lock (só 1 worker por vez)."""
+    """Uma passada do poller: sincroniza toda conta com e-mail configurado, um worker
+    por vez (a trava é uma linha, db/trava.py)."""
+    from db import trava as _trava
     total = 0
     try:
-        with pool.connection() as c:
-            got = c.execute("select pg_try_advisory_lock(%s)", (_LOCK_KEY,)).fetchone()[0]
-            if not got:
+        with _trava.ciclo(pool, "email_inbound", _LOCK_KEY) as pegou:
+            if not pegou:
                 return 0
-            try:
+            with pool.connection() as c:
                 caixas = c.execute(
                     "select conta_id, canal from canais_config where canal in ('email','email2') and ativo").fetchall()
-                for cid, canal in caixas:
-                    try:
-                        total += sincronizar(pool, cid, canal)
-                    except Exception:  # noqa: BLE001
-                        pass
-            finally:
-                c.execute("select pg_advisory_unlock(%s)", (_LOCK_KEY,))
-                c.commit()
+            for cid, canal in caixas:
+                try:
+                    total += sincronizar(pool, cid, canal)
+                except Exception:  # noqa: BLE001
+                    pass
     except Exception as e:  # noqa: BLE001
         _log.info("email_in: poll falhou: %s", e)
     return total

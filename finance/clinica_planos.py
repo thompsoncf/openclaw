@@ -1123,36 +1123,34 @@ def em_aberto(c, conta_id: int, agora: datetime) -> dict:
 def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
     total = {"contas": 0, "aceites": 0, "toques": 0, "avisos": 0, "vencidos": 0, "pagos": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "clinica_planos", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
+        with pool.connection() as c:
+            try:
+                with c.transaction():
+                    from finance.clinica_planos_publico import contas_com_plano_enviado
+                    contas = contas_com_plano_enviado(c)
+            except Exception:  # noqa: BLE001 — sem a 379
+                contas = []
+            try:
+                with c.transaction():
+                    # e quem tem plano aceito esperando pagamento (a baixa pode vir do financeiro)
+                    from finance.clinica_planos_publico import contas_com_plano_a_pagar
+                    contas = sorted(set(contas) | set(contas_com_plano_a_pagar(c)))
+            except Exception:  # noqa: BLE001 — sem a 474
+                pass
+            for conta_id in contas:
                 try:
-                    with c.transaction():
-                        from finance.clinica_planos_publico import contas_com_plano_enviado
-                        contas = contas_com_plano_enviado(c)
-                except Exception:  # noqa: BLE001 — sem a 379
-                    contas = []
-                try:
-                    with c.transaction():
-                        # e quem tem plano aceito esperando pagamento (a baixa pode vir do financeiro)
-                        from finance.clinica_planos_publico import contas_com_plano_a_pagar
-                        contas = sorted(set(contas) | set(contas_com_plano_a_pagar(c)))
-                except Exception:  # noqa: BLE001 — sem a 474
-                    pass
-                for conta_id in contas:
-                    try:
-                        total["aceites"] += processar(pool, c, conta_id, agora)
-                        r = cobrar(pool, c, conta_id, agora)
-                        c.commit()
-                        total["pagos"] += conferir_pagamentos(c, conta_id)
-                        total["contas"] += 1
-                        for k in ("toques", "avisos", "vencidos"):
-                            total[k] += r[k]
-                    except Exception:  # noqa: BLE001
-                        c.rollback()
-                        _log.warning("planos: conta %s falhou", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                    total["aceites"] += processar(pool, c, conta_id, agora)
+                    r = cobrar(pool, c, conta_id, agora)
+                    c.commit()
+                    total["pagos"] += conferir_pagamentos(c, conta_id)
+                    total["contas"] += 1
+                    for k in ("toques", "avisos", "vencidos"):
+                        total[k] += r[k]
+                except Exception:  # noqa: BLE001
+                    c.rollback()
+                    _log.warning("planos: conta %s falhou", conta_id, exc_info=True)
     return total

@@ -781,33 +781,31 @@ def rodar(pool) -> dict:
     ligada é pista de bug, e sem esse número não haveria como perceber.
     """
     total = {"contas": 0, "movidos": 0, "simulados": 0, "avisos": 0, "escalados": 0}
-    with pool.connection() as lockc:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "funil_regua", _LOCK) as pegou:
         # Dois workers no Render: sem o lock, os dois aplicam o mesmo gatilho no
         # mesmo lead no mesmo segundo e o histórico ganha a linha em duplicidade.
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                contas = [r[0] for r in c.execute(
-                    "select conta_id from funil_regua "
-                    "where gatilhos_modo <> 'off' or cobranca_modo <> 'off'").fetchall()]
-            for conta_id in contas:
-                try:
-                    with pool.connection() as c:
-                        r = aplicar_gatilhos(c, conta_id)
-                        cob = avaliar_cobranca(c, conta_id)
-                        c.commit()
-                    total["contas"] += 1
-                    total["movidos"] += r["movidos"]
-                    total["simulados"] += r["simulados"] + cob["simulados"]
-                    total["avisos"] += cob["avisos"]
-                    total["escalados"] += cob["escalados"]
-                    # só depois do commit: ver o comentário em avaliar_cobranca
-                    notificar(pool, conta_id, cob["pendentes"])
-                except Exception:  # noqa: BLE001
-                    _log.warning("régua falhou na conta %s", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            contas = [r[0] for r in c.execute(
+                "select conta_id from funil_regua "
+                "where gatilhos_modo <> 'off' or cobranca_modo <> 'off'").fetchall()]
+        for conta_id in contas:
+            try:
+                with pool.connection() as c:
+                    r = aplicar_gatilhos(c, conta_id)
+                    cob = avaliar_cobranca(c, conta_id)
+                    c.commit()
+                total["contas"] += 1
+                total["movidos"] += r["movidos"]
+                total["simulados"] += r["simulados"] + cob["simulados"]
+                total["avisos"] += cob["avisos"]
+                total["escalados"] += cob["escalados"]
+                # só depois do commit: ver o comentário em avaliar_cobranca
+                notificar(pool, conta_id, cob["pendentes"])
+            except Exception:  # noqa: BLE001
+                _log.warning("régua falhou na conta %s", conta_id, exc_info=True)
     return total
 
 

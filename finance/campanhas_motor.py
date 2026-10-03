@@ -353,30 +353,27 @@ def renovar_tokens_ig(pool) -> int:
 
 def _disparar(pool) -> int:
     enviados = 0
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "campanhas_motor", _LOCK) as pegou:
+        if not pegou:
             return 0
-        try:
-            with pool.connection() as c:
-                camps = c.execute(
-                    """select id, conta_id, nome, limite_dia, enviados_hoje, dia_contagem
-                         from campanhas where status='ativa'""").fetchall()
-            hoje = relogio.hoje()
-            for (cid, conta_id, nome, limite, env_hoje, dia) in camps:
-                if dia != hoje:
-                    env_hoje = 0
-                    with pool.connection() as c:
-                        c.execute("update campanhas set enviados_hoje=0, dia_contagem=%s where id=%s",
-                                  (hoje, cid))
-                        c.commit()
-                restante = max(0, (limite or 0) - (env_hoje or 0))
-                if restante <= 0:
-                    continue
-                n = _disparar_campanha(pool, cid, conta_id, nome, min(restante, _MAX_PASS))
-                enviados += n
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
-            lockc.commit()
+        with pool.connection() as c:
+            camps = c.execute(
+                """select id, conta_id, nome, limite_dia, enviados_hoje, dia_contagem
+                     from campanhas where status='ativa'""").fetchall()
+        hoje = relogio.hoje()
+        for (cid, conta_id, nome, limite, env_hoje, dia) in camps:
+            if dia != hoje:
+                env_hoje = 0
+                with pool.connection() as c:
+                    c.execute("update campanhas set enviados_hoje=0, dia_contagem=%s where id=%s",
+                              (hoje, cid))
+                    c.commit()
+            restante = max(0, (limite or 0) - (env_hoje or 0))
+            if restante <= 0:
+                continue
+            n = _disparar_campanha(pool, cid, conta_id, nome, min(restante, _MAX_PASS))
+            enviados += n
     return enviados
 
 
@@ -568,41 +565,38 @@ def _disparar_wa(pool) -> int:
     env_sid = prospec_convite.sid_template()   # fallback global (env)
     from finance import whatsapp_out
     enviados = 0
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK_WA,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "campanhas_wa", _LOCK_WA) as pegou:
+        if not pegou:
             return 0
-        try:
+        with pool.connection() as c:
+            camps = c.execute(
+                """select id, conta_id, coalesce(limite_wa_dia,30),
+                          coalesce(wa_enviados_hoje,0), wa_dia_contagem,
+                          coalesce(wa_template_sid,'')
+                     from campanhas where status='ativa' and coalesce(wa_ativo,false)""").fetchall()
+        hoje = relogio.hoje()
+        for (cid, conta_id, limite, env_hoje, dia, camp_sid) in camps:
+            # decide UMA vez por campanha, não alvo a alvo: se o canal da conta
+            # não manda template (QR) ou falta o SID, nenhum alvo ia sair mesmo —
+            # e marcar erro em cada um os tirava da fila pra sempre.
             with pool.connection() as c:
-                camps = c.execute(
-                    """select id, conta_id, coalesce(limite_wa_dia,30),
-                              coalesce(wa_enviados_hoje,0), wa_dia_contagem,
-                              coalesce(wa_template_sid,'')
-                         from campanhas where status='ativa' and coalesce(wa_ativo,false)""").fetchall()
-            hoje = relogio.hoje()
-            for (cid, conta_id, limite, env_hoje, dia, camp_sid) in camps:
-                # decide UMA vez por campanha, não alvo a alvo: se o canal da conta
-                # não manda template (QR) ou falta o SID, nenhum alvo ia sair mesmo —
-                # e marcar erro em cada um os tirava da fila pra sempre.
+                motivo = prospec_convite.motivo_bloqueio(c, conta_id, camp_sid)
+            _wa_bloqueio(pool, cid, motivo)
+            if motivo:
+                continue
+            sid = (camp_sid or "").strip() or env_sid   # template da campanha > env
+            if dia != hoje:
+                env_hoje = 0
                 with pool.connection() as c:
-                    motivo = prospec_convite.motivo_bloqueio(c, conta_id, camp_sid)
-                _wa_bloqueio(pool, cid, motivo)
-                if motivo:
-                    continue
-                sid = (camp_sid or "").strip() or env_sid   # template da campanha > env
-                if dia != hoje:
-                    env_hoje = 0
-                    with pool.connection() as c:
-                        c.execute("update campanhas set wa_enviados_hoje=0, wa_dia_contagem=%s where id=%s",
-                                  (hoje, cid))
-                        c.commit()
-                restante = max(0, (limite or 0) - (env_hoje or 0))
-                if restante <= 0:
-                    continue
-                enviados += _disparar_wa_campanha(pool, cid, conta_id, sid,
-                                                  min(restante, _MAX_PASS), whatsapp_out)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK_WA,))
-            lockc.commit()
+                    c.execute("update campanhas set wa_enviados_hoje=0, wa_dia_contagem=%s where id=%s",
+                              (hoje, cid))
+                    c.commit()
+            restante = max(0, (limite or 0) - (env_hoje or 0))
+            if restante <= 0:
+                continue
+            enviados += _disparar_wa_campanha(pool, cid, conta_id, sid,
+                                              min(restante, _MAX_PASS), whatsapp_out)
     return enviados
 
 
@@ -846,27 +840,24 @@ def _disparar_reengajamento(pool) -> int:
     sequência e não respondeu em N dias leva 1 toque pelo outro canal. Dispara 1x
     por lead (reengajado_em) e respeita os limites/dia da campanha."""
     enviados = 0
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK_REENG,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "campanhas_reeng", _LOCK_REENG) as pegou:
+        if not pegou:
             return 0
-        try:
-            with pool.connection() as c:
-                camps = c.execute(
-                    """select id, conta_id, coalesce(reengajar_dias,3), coalesce(wa_ativo,false),
-                              coalesce(wa_template_sid,''), limite_dia, coalesce(enviados_hoje,0),
-                              dia_contagem
-                         from campanhas
-                        where status='ativa' and coalesce(reengajar_ativo,false)""").fetchall()
-            hoje = relogio.hoje()
-            for (cid, conta_id, dias, wa_ativo, camp_sid, limite, env_hoje, dia_cont) in camps:
-                restante = max(0, (limite or 0) - (0 if dia_cont != hoje else (env_hoje or 0)))
-                if restante <= 0:
-                    continue
-                enviados += _reengajar_campanha(pool, cid, conta_id, int(dias or 3), bool(wa_ativo),
-                                                camp_sid, min(restante, _MAX_PASS))
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK_REENG,))
-            lockc.commit()
+        with pool.connection() as c:
+            camps = c.execute(
+                """select id, conta_id, coalesce(reengajar_dias,3), coalesce(wa_ativo,false),
+                          coalesce(wa_template_sid,''), limite_dia, coalesce(enviados_hoje,0),
+                          dia_contagem
+                     from campanhas
+                    where status='ativa' and coalesce(reengajar_ativo,false)""").fetchall()
+        hoje = relogio.hoje()
+        for (cid, conta_id, dias, wa_ativo, camp_sid, limite, env_hoje, dia_cont) in camps:
+            restante = max(0, (limite or 0) - (0 if dia_cont != hoje else (env_hoje or 0)))
+            if restante <= 0:
+                continue
+            enviados += _reengajar_campanha(pool, cid, conta_id, int(dias or 3), bool(wa_ativo),
+                                            camp_sid, min(restante, _MAX_PASS))
     return enviados
 
 

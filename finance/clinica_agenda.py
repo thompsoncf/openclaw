@@ -1465,35 +1465,33 @@ def rodar(pool, agora: datetime | None = None) -> dict:
     ignorar o paciente."""
     agora = agora or datetime.now(timezone.utc)
     total = {"contas": 0, "enviadas": 0, "respostas": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "clinica_agenda", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
-                try:
-                    with c.transaction():
-                        ligadas = {r[0] for r in c.execute(
-                            "select conta_id from clinica_agenda_config where confirmacao_modo='ligado'").fetchall()}
-                        esperando = {r[0] for r in c.execute(
-                            """select distinct conta_id from eventos_agenda
-                                where situacao='agendado' and confirmacao_enviada_em is not null
-                                  and pede_remarcar_em is null and inicio > %s""", (agora,)).fetchall()}
-                except Exception:  # noqa: BLE001
-                    ligadas, esperando = set(), set()
-            for conta_id in sorted(ligadas | esperando):
-                try:
-                    with pool.connection() as c:
-                        if fr.perfil_da_conta(c, conta_id) != "clinica":
-                            continue
-                        total["respostas"] += ler_respostas(c, conta_id, agora)
-                        c.commit()
-                        if conta_id in ligadas:
-                            total["enviadas"] += mandar_vesperas(c, conta_id, agora, config(c, conta_id),
-                                                                 fr.config(c, conta_id))
-                        c.commit()
-                    total["contas"] += 1
-                except Exception:  # noqa: BLE001
-                    _log.warning("confirmação da véspera falhou na conta %s", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+        with pool.connection() as c:
+            try:
+                with c.transaction():
+                    ligadas = {r[0] for r in c.execute(
+                        "select conta_id from clinica_agenda_config where confirmacao_modo='ligado'").fetchall()}
+                    esperando = {r[0] for r in c.execute(
+                        """select distinct conta_id from eventos_agenda
+                            where situacao='agendado' and confirmacao_enviada_em is not null
+                              and pede_remarcar_em is null and inicio > %s""", (agora,)).fetchall()}
+            except Exception:  # noqa: BLE001
+                ligadas, esperando = set(), set()
+        for conta_id in sorted(ligadas | esperando):
+            try:
+                with pool.connection() as c:
+                    if fr.perfil_da_conta(c, conta_id) != "clinica":
+                        continue
+                    total["respostas"] += ler_respostas(c, conta_id, agora)
+                    c.commit()
+                    if conta_id in ligadas:
+                        total["enviadas"] += mandar_vesperas(c, conta_id, agora, config(c, conta_id),
+                                                             fr.config(c, conta_id))
+                    c.commit()
+                total["contas"] += 1
+            except Exception:  # noqa: BLE001
+                _log.warning("confirmação da véspera falhou na conta %s", conta_id, exc_info=True)
     return total

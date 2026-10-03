@@ -884,33 +884,31 @@ def passar_conta(c, conta_id: int, agora: datetime) -> dict:
 def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
     total = {"contas": 0, "novas": 0, "enviadas": 0, "respostas": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "clinica_vagas", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
+        with pool.connection() as c:
+            try:
+                with c.transaction():
+                    contas = [r[0] for r in c.execute(
+                        """select distinct conta_id from eventos_agenda
+                            where situacao is not null and inicio > %s - interval '1 day'""",
+                        (agora,)).fetchall()]
+                    c.execute("select 1 from clinica_vagas where conta_id = 0 limit 1")   # a 369 já rodou?
+            except Exception:  # noqa: BLE001 — migração 369 ainda não rodou
+                contas = []
+            from finance import clinica_agente as cla
+            for conta_id in contas:
                 try:
-                    with c.transaction():
-                        contas = [r[0] for r in c.execute(
-                            """select distinct conta_id from eventos_agenda
-                                where situacao is not null and inicio > %s - interval '1 day'""",
-                            (agora,)).fetchall()]
-                        c.execute("select 1 from clinica_vagas where conta_id = 0 limit 1")   # a 369 já rodou?
-                except Exception:  # noqa: BLE001 — migração 369 ainda não rodou
-                    contas = []
-                from finance import clinica_agente as cla
-                for conta_id in contas:
-                    try:
-                        if not cla.e_clinica(c, conta_id):
-                            continue
-                        r = passar_conta(c, conta_id, agora)
-                        c.commit()
-                        total["contas"] += 1
-                        for k in ("novas", "enviadas", "respostas"):
-                            total[k] += r[k]
-                    except Exception:  # noqa: BLE001 — uma conta não derruba as outras
-                        c.rollback()
-                        _log.warning("vagas: conta %s falhou", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                    if not cla.e_clinica(c, conta_id):
+                        continue
+                    r = passar_conta(c, conta_id, agora)
+                    c.commit()
+                    total["contas"] += 1
+                    for k in ("novas", "enviadas", "respostas"):
+                        total[k] += r[k]
+                except Exception:  # noqa: BLE001 — uma conta não derruba as outras
+                    c.rollback()
+                    _log.warning("vagas: conta %s falhou", conta_id, exc_info=True)
     return total

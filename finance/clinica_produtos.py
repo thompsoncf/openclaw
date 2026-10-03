@@ -238,87 +238,86 @@ def vender(pool, conta_id: int, *, evento_id: int | None = None, lead: int | Non
     hoje = hoje or ca.hoje_br()
     if pagamento not in PAGAMENTOS:
         return None, "Escolha a forma de pagamento."
-    with pool.connection() as lockc:
-        lockc.execute("select pg_advisory_lock(%s, %s)", (_LOCK, conta_id))
-        try:
-            with pool.connection() as c:
-                pac = _paciente(c, conta_id, evento_id, lead)
-                if not pac:
-                    return None, "Paciente não encontrado."
-                if pac["evento_id"] and pac["situacao"] not in SITUACOES_VENDA:
-                    return None, "A venda é no atendimento: marque o paciente como presente primeiro."
-                cat = {p["id"]: p for p in produtos(c, conta_id, hoje)}
-                linhas = []
-                for pid, q in itens:
-                    qtd = _qtd(q, hi=Decimal("99"))
-                    p = cat.get(int(pid)) if str(pid or "").isdigit() else None
-                    if not p or qtd is None:
-                        return None, "Escolha o produto e a quantidade (até 99)."
-                    if not p["preco_centavos"]:
-                        return None, f"{p['nome']} está sem preço de venda: cadastre em Produtos."
-                    linhas.append((p, qtd))
-                if not linhas:
-                    return None, "Escolha o produto."
-                for p, qtd in linhas:
-                    if c.execute("""select 1 from clinica_produto_vendas
-                                     where conta_id=%s and produto_id=%s and quantidade=%s
-                                       and coalesce(evento_id, 0) = coalesce(%s, 0)
-                                       and coalesce(prospeccao_id, 0) = coalesce(%s, 0)
-                                       and criado_em > now() - make_interval(secs => %s) limit 1""",
-                                 (conta_id, p["id"], qtd, pac["evento_id"], pac["lead"], REPETIDA_SEG)).fetchone():
-                        return None, f"{p['nome']} acabou de ser vendido para {pac['paciente']}: confira antes de repetir."
-                a = cas.do_paciente(c, conta_id, pac["lead"], pac["fone"], pac["paciente"], so_card=True)
-                pct = a["desconto_produto_pct"] if a and a["desconto_produto_pct"] else 0.0
-                brutos = [int((Decimal(p["preco_centavos"]) * q).quantize(Decimal("1"))) for p, q in linhas]
-                descontos = [round(b * pct / 100) for b in brutos]
-                ids = []
-                for (p, q), b, d in zip(linhas, brutos, descontos):
-                    rec = hoje + timedelta(days=int(p["recompra_dias"] * q)) if p["recompra_dias"] else None
-                    ids.append(c.execute(
-                        """insert into clinica_produto_vendas (conta_id, produto_id, evento_id, prospeccao_id,
-                                                              paciente_nome, paciente_fone, quantidade,
-                                                              valor_centavos, desconto_centavos, recompra_em,
-                                                              recompra_estado, criado_por)
-                           values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
-                        (conta_id, p["id"], pac["evento_id"], pac["lead"], pac["paciente"][:120],
-                         (pac["fone"] or "")[:40], q, b - d, d, rec, "aguardando" if rec else "sem",
-                         membro_id)).fetchone()[0])
+    from db import trava as _trava
+    with _trava.esperar(pool, f"produto_venda:{int(conta_id)}", (_LOCK, int(conta_id))) as a_vez:
+        if not a_vez:
+            return None, "Outra venda desta clínica está terminando agora. Tente de novo em alguns segundos."
+        with pool.connection() as c:
+            pac = _paciente(c, conta_id, evento_id, lead)
+            if not pac:
+                return None, "Paciente não encontrado."
+            if pac["evento_id"] and pac["situacao"] not in SITUACOES_VENDA:
+                return None, "A venda é no atendimento: marque o paciente como presente primeiro."
+            cat = {p["id"]: p for p in produtos(c, conta_id, hoje)}
+            linhas = []
+            for pid, q in itens:
+                qtd = _qtd(q, hi=Decimal("99"))
+                p = cat.get(int(pid)) if str(pid or "").isdigit() else None
+                if not p or qtd is None:
+                    return None, "Escolha o produto e a quantidade (até 99)."
+                if not p["preco_centavos"]:
+                    return None, f"{p['nome']} está sem preço de venda: cadastre em Produtos."
+                linhas.append((p, qtd))
+            if not linhas:
+                return None, "Escolha o produto."
+            for p, qtd in linhas:
+                if c.execute("""select 1 from clinica_produto_vendas
+                                 where conta_id=%s and produto_id=%s and quantidade=%s
+                                   and coalesce(evento_id, 0) = coalesce(%s, 0)
+                                   and coalesce(prospeccao_id, 0) = coalesce(%s, 0)
+                                   and criado_em > now() - make_interval(secs => %s) limit 1""",
+                             (conta_id, p["id"], qtd, pac["evento_id"], pac["lead"], REPETIDA_SEG)).fetchone():
+                    return None, f"{p['nome']} acabou de ser vendido para {pac['paciente']}: confira antes de repetir."
+            a = cas.do_paciente(c, conta_id, pac["lead"], pac["fone"], pac["paciente"], so_card=True)
+            pct = a["desconto_produto_pct"] if a and a["desconto_produto_pct"] else 0.0
+            brutos = [int((Decimal(p["preco_centavos"]) * q).quantize(Decimal("1"))) for p, q in linhas]
+            descontos = [round(b * pct / 100) for b in brutos]
+            ids = []
+            for (p, q), b, d in zip(linhas, brutos, descontos):
+                rec = hoje + timedelta(days=int(p["recompra_dias"] * q)) if p["recompra_dias"] else None
+                ids.append(c.execute(
+                    """insert into clinica_produto_vendas (conta_id, produto_id, evento_id, prospeccao_id,
+                                                          paciente_nome, paciente_fone, quantidade,
+                                                          valor_centavos, desconto_centavos, recompra_em,
+                                                          recompra_estado, criado_por)
+                       values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                    (conta_id, p["id"], pac["evento_id"], pac["lead"], pac["paciente"][:120],
+                     (pac["fone"] or "")[:40], q, b - d, d, rec, "aguardando" if rec else "sem",
+                     membro_id)).fetchone()[0])
+            c.commit()
+            from finance import clinica_pacientes as _cpa
+            cliente_id = _cpa.ficha_do_paciente(pool, conta_id, pac["lead"], pac["paciente"], pac["fone"])
+            try:
+                r = pdv.registrar_venda_balcao(
+                    pool, conta_id,
+                    [{"produto_id": p["id"], "quantidade": q, "preco_unit_centavos": p["preco_centavos"]}
+                     for p, q in linhas],
+                    cliente_id=cliente_id,
+                    cliente_nome=pac["paciente"], cliente_telefone=pac["fone"] or None, pagamento=pagamento,
+                    desconto_centavos=sum(descontos), membro_id=membro_id,
+                    vencimento=(hoje + timedelta(days=30)).isoformat() if pagamento == "fiado" else None)
+            except Exception as e:  # noqa: BLE001 — o balcão recusou (estoque) ou caiu: a venda não houve
+                c.execute("delete from clinica_produto_vendas where conta_id=%s and id = any(%s)", (conta_id, ids))
                 c.commit()
-                from finance import clinica_pacientes as _cpa
-                cliente_id = _cpa.ficha_do_paciente(pool, conta_id, pac["lead"], pac["paciente"], pac["fone"])
-                try:
-                    r = pdv.registrar_venda_balcao(
-                        pool, conta_id,
-                        [{"produto_id": p["id"], "quantidade": q, "preco_unit_centavos": p["preco_centavos"]}
-                         for p, q in linhas],
-                        cliente_id=cliente_id,
-                        cliente_nome=pac["paciente"], cliente_telefone=pac["fone"] or None, pagamento=pagamento,
-                        desconto_centavos=sum(descontos), membro_id=membro_id,
-                        vencimento=(hoje + timedelta(days=30)).isoformat() if pagamento == "fiado" else None)
-                except Exception as e:  # noqa: BLE001 — o balcão recusou (estoque) ou caiu: a venda não houve
-                    c.execute("delete from clinica_produto_vendas where conta_id=%s and id = any(%s)", (conta_id, ids))
-                    c.commit()
-                    if isinstance(e, ValueError):
-                        return None, f"Não deu pra vender: {e}"
-                    raise
-                # comprou de novo: a reposição que estava esperando está feita (pelo card, ou
-                # pelo celular quando o atendimento não tem card)
-                dig = ca._digitos(pac["fone"])[-8:]
-                for p, _q in linhas:
-                    c.execute(
-                        r"""update clinica_produto_vendas set recompra_estado='comprou'
-                             where conta_id=%s and produto_id=%s and recompra_estado in ('aguardando','lembrado')
-                               and id <> all(%s)
-                               and (prospeccao_id = %s
-                                    or (%s::bigint is null and length(%s) = 8
-                                        and right(regexp_replace(paciente_fone, '\D', '', 'g'), 8) = %s))""",
-                        (conta_id, p["id"], ids, pac["lead"], pac["lead"], dig, dig))
-                c.execute("""update clinica_produto_vendas set lancamento_id=%s, titulo_id=%s
-                              where conta_id=%s and id = any(%s)""",
-                          (r.get("lancamento_id"), r.get("titulo_id"), conta_id, ids))
-                c.commit()
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s, %s)", (_LOCK, conta_id))
+                if isinstance(e, ValueError):
+                    return None, f"Não deu pra vender: {e}"
+                raise
+            # comprou de novo: a reposição que estava esperando está feita (pelo card, ou
+            # pelo celular quando o atendimento não tem card)
+            dig = ca._digitos(pac["fone"])[-8:]
+            for p, _q in linhas:
+                c.execute(
+                    r"""update clinica_produto_vendas set recompra_estado='comprou'
+                         where conta_id=%s and produto_id=%s and recompra_estado in ('aguardando','lembrado')
+                           and id <> all(%s)
+                           and (prospeccao_id = %s
+                                or (%s::bigint is null and length(%s) = 8
+                                    and right(regexp_replace(paciente_fone, '\D', '', 'g'), 8) = %s))""",
+                    (conta_id, p["id"], ids, pac["lead"], pac["lead"], dig, dig))
+            c.execute("""update clinica_produto_vendas set lancamento_id=%s, titulo_id=%s
+                          where conta_id=%s and id = any(%s)""",
+                      (r.get("lancamento_id"), r.get("titulo_id"), conta_id, ids))
+            c.commit()
     return {"total": r.get("total_centavos"), "desconto": sum(descontos), "plano": a["nome"] if pct else ""}, None
 
 
@@ -462,26 +461,24 @@ def respondeu_recompra(c, conta_id: int, conversa_id: int) -> bool:
 def rodar(pool, agora: datetime | None = None) -> dict:
     agora = agora or datetime.now(timezone.utc)
     total = {"contas": 0, "recompra": 0}
-    with pool.connection() as lockc:
-        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+    from db import trava as _trava
+    with _trava.ciclo(pool, "clinica_produtos", _LOCK) as pegou:
+        if not pegou:
             return total
-        try:
-            with pool.connection() as c:
+        with pool.connection() as c:
+            try:
+                with c.transaction():
+                    contas = [r[0] for r in c.execute(
+                        """select distinct conta_id from clinica_produto_vendas
+                            where recompra_estado='aguardando' and recompra_em <= %s""",
+                        (ca.hoje_br(agora),)).fetchall()]
+            except Exception:  # noqa: BLE001 — sem a 386
+                contas = []
+            for conta_id in contas:
                 try:
-                    with c.transaction():
-                        contas = [r[0] for r in c.execute(
-                            """select distinct conta_id from clinica_produto_vendas
-                                where recompra_estado='aguardando' and recompra_em <= %s""",
-                            (ca.hoje_br(agora),)).fetchall()]
-                except Exception:  # noqa: BLE001 — sem a 386
-                    contas = []
-                for conta_id in contas:
-                    try:
-                        total["recompra"] += lembrar(c, conta_id, agora)
-                        total["contas"] += 1
-                    except Exception:  # noqa: BLE001
-                        c.rollback()
-                        _log.warning("produtos: conta %s falhou", conta_id, exc_info=True)
-        finally:
-            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+                    total["recompra"] += lembrar(c, conta_id, agora)
+                    total["contas"] += 1
+                except Exception:  # noqa: BLE001
+                    c.rollback()
+                    _log.warning("produtos: conta %s falhou", conta_id, exc_info=True)
     return total

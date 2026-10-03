@@ -109,6 +109,15 @@ Na prática, pra quem for rodar qualquer coisa contra um banco:
   vivas.
 * Ao adicionar um projeto Supabase novo, a referência dele entra em
   `REFS_PRODUCAO` no conftest **antes** de qualquer teste rodar.
+* **Migração nova: `python -m db.nova_migracao <nome>`**, que cria
+  `db/migracoes/AAAAMMDDHHMM_<nome>.sql` (data e hora UTC). Não se escolhe mais
+  "o próximo número": com várias frentes abertas, dois PRs pegavam o mesmo número
+  (a 610 das travas e a do funil da clínica, 03/10/2026), e cada colisão custava
+  renomear e mais uma rodada de CI. A data não depende de ninguém e cai sempre
+  depois dos números antigos, porque `aplicar_migracoes.ordem` ordena pelo
+  NÚMERO do prefixo (e não mais pela ordem alfabética, que poria "1000_" entre
+  "100_" e "101_"). Prefixo repetido não quebra: o rastreamento é pelo nome
+  inteiro, e o nome desempata.
 
 ### Consulta ao banco de produção: só avisar, sem pedir autorização
 
@@ -243,7 +252,8 @@ mudaram o quadro de todo mundo e a Fila do vendedor sem ninguém ser avisado. Fo
 o autor do sistema de avisos que esqueceu de usá-lo.
 
 **Então, todo PR que muda o que uma pessoa vê ou faz na tela leva o aviso no
-mesmo PR**, como migração `NNN_novidade_<chave>.sql`, seguindo a receita da 175:
+mesmo PR**, como migração `AAAAMMDDHHMM_novidade_<chave>.sql` (`python -m db.nova_migracao
+novidade_<chave>`), seguindo a receita da 175:
 
 1. Nomeie o portão que decide quem recebeu a mudança (`publico`). Se nenhum dos
    portões de `finance.novidades.PUBLICOS` descreve o alcance, crie o portão no

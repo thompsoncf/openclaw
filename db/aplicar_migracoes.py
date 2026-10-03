@@ -13,6 +13,24 @@ import time
 from pathlib import Path
 from psycopg_pool import ConnectionPool
 
+
+def ordem(nome: str) -> tuple:
+    """A posição de uma migração na fila: o NÚMERO do prefixo, e o nome desempata.
+
+    Até 03/10/2026 a fila era a ordem alfabética do nome, e isso só funcionava porque
+    todo prefixo tinha três dígitos. "1000_x" ficaria entre "100_" e "101_", e o
+    prefixo de data das migrações novas ("202610031530_x", ver db/nova_migracao.py)
+    ficaria entre "1xx" e "3xx". Pelo número, as duas caem no fim, onde devem.
+
+    Prefixo repetido não é problema: o rastreamento é pelo nome inteiro
+    (`schema_migrations.nome`), e já existem pares desde a 041. O nome desempata,
+    exatamente como a ordem alfabética fazia. Para os prefixos de três dígitos as
+    duas ordens são idênticas (tests/test_migracao_nova.py confere).
+    """
+    prefixo = nome.split("_", 1)[0]
+    return (int(prefixo) if prefixo.isdigit() else float("inf"), nome)
+
+
 def criar_tabela_rastreamento(pool):
     """Cria a tabela schema_migrations se não existir."""
     with pool.connection() as conn:
@@ -167,7 +185,7 @@ def _aplicar(pool, forcar: bool = False, diretorio: Path | None = None):
         print("Diretório de migrações não encontrado.")
         return 0
 
-    arquivos = sorted(migracoes_dir.glob("*.sql"))
+    arquivos = sorted(migracoes_dir.glob("*.sql"), key=lambda a: ordem(a.name))
     if not arquivos:
         print("Nenhuma migração encontrada.")
         return 0

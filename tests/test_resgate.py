@@ -1627,6 +1627,108 @@ def test_redigir_escreve_em_cima_do_resumo(pool, equipe, monkeypatch):
     assert "Quer: 15 anos pra 120" in pedidos[0]
 
 
+# ══════════════════════════════════════════════ a promessa sem ninguém por trás
+
+def _redigir_com(monkeypatch, resposta):
+    pedidos = []
+    _brain_fake(monkeypatch, resposta, pedidos)
+    monkeypatch.setattr(rg, "_resumo_antes", lambda pool, conta, lid: None)
+    monkeypatch.setattr(rg, "_valores_fora", lambda *a, **k: [])
+    from finance import ia_uso
+    monkeypatch.setattr(ia_uso, "registrar", lambda *a, **k: None)
+    return pedidos
+
+
+def test_redigir_devolve_a_pendencia_e_o_pedido_proibe_prometer(pool, equipe, monkeypatch):
+    """03/10/2026, Prime: a retomada do #1333 prometeu "vou confirmar com a equipe agora
+    mesmo" a disponibilidade de 14/11, e ninguém da equipe soube."""
+    pedidos = _redigir_com(monkeypatch, '{"mensagem": "Oi Carla! A data a equipe confere e te '
+                                        'responde por aqui. Quantos convidados?", '
+                                        '"pendencia": "confirmar se 14/11 está livre"}')
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10, ultimo="in")
+        lead = rg.fila(c, EMPRESA)[0]
+    r = rg.redigir(pool, EMPRESA, lead, None)
+    assert r["pendencia"] == "confirmar se 14/11 está livre"
+    assert "Nunca prometa prazo" in pedidos[0] and '"pendencia"' in pedidos[0]
+
+
+def test_a_promessa_que_escapa_vira_pendencia(pool, equipe, monkeypatch):
+    _redigir_com(monkeypatch, '{"mensagem": "Oi Luna! Sobre as fotos, vou pedir pra equipe '
+                              'te enviar agora. Que tal uma visita?"}')
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10)
+        lead = rg.fila(c, EMPRESA)[0]
+    r = rg.redigir(pool, EMPRESA, lead, None)
+    assert r["pendencia"].startswith("conferir o que a IA prometeu") and "fotos" in r["pendencia"]
+
+
+def test_a_retomada_com_pendencia_avisa_a_equipe(pool, equipe, duble, monkeypatch):
+    from finance import chip_regra
+    avisos = []
+    monkeypatch.setattr(chip_regra, "avisar", lambda pool, conta, r, motivo, **k: avisos.append(
+        (conta, r.get("resgate"), motivo, k)) or None)
+    monkeypatch.setattr(rg, "redigir", lambda pool, conta, lead, regra, agora=None: {
+        "texto": "Oi Carla! A data a equipe confere e te responde por aqui.",
+        "resumo_linha": "", "avisos": [], "pendencia": "confirmar se 14/11 está livre"})
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, cv = _lead(c, equipe["PEDRO"])
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1                               # a retomada saiu
+    assert len(avisos) == 1
+    conta, resgate, motivo, k = avisos[0]
+    assert (conta, resgate, motivo) == (EMPRESA, True, "fora_da_base")
+    assert k["prospeccao_id"] == lid and k["conversa_id"] == cv
+    assert "confirmar se 14/11 está livre" in k["resumo"]
+    with pool.connection() as c:
+        assert c.execute("select texto from resgate_envios where tipo='pendencia'").fetchone()[0] \
+            == "confirmar se 14/11 está livre"
+        txt = rg.resumo(c, EMPRESA, rg.config(c, EMPRESA), datetime.now(timezone.utc))
+    assert "1 com algo pra equipe conferir" in txt
+
+
+def test_retomada_sem_pendencia_nao_avisa(pool, equipe, duble, monkeypatch):
+    from finance import chip_regra
+    avisos = []
+    monkeypatch.setattr(chip_regra, "avisar", lambda *a, **k: avisos.append(a))
+    with pool.connection() as c:
+        _ligar(c, equipe, aviso_vendedor=False)
+        _lead(c, equipe["PEDRO"])
+    rg.rodar(pool)
+    assert len(duble["saiu"]) == 1 and avisos == []
+
+
+def test_a_previa_do_ensaio_mostra_a_pendencia(pool, equipe, duble, monkeypatch):
+    monkeypatch.setattr(rg, "redigir", lambda pool, conta, lead, regra, agora=None: {
+        "texto": "Oi Carla!", "resumo_linha": "", "avisos": [],
+        "pendencia": "mandar fotos do salão"})
+    with pool.connection() as c:
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"])
+    rg.rodar(pool)
+    assert "📌 Pra equipe: mandar fotos do salão" in duble["saiu"][0]["texto"]
+
+
+@pytest.mark.parametrize("txt", [
+    "a disponibilidade de 14/11 eu vou confirmar com a equipe agora mesmo",
+    "Sobre as fotos, vou pedir pra equipe te enviar agora.",
+    "Posso acionar a equipe agora pra adiantar esse envio?",
+    "Já te mando os valores!", "A equipe vai te enviar o contrato."])
+def test_promessa(txt):
+    assert rg.pendencia_da(txt)
+
+
+@pytest.mark.parametrize("txt", [
+    "A data a equipe confere e te responde por aqui. Quantos convidados?",
+    "Os pacotes partem de R$ 5.760 e variam conforme o dia da semana.",
+    "Você já tem uma data em mente?", "Que tal marcar uma visita ao espaço?"])
+def test_nao_e_promessa(txt):
+    assert not rg.pendencia_da(txt)
+
+
 def test_redigir_devolve_nao_chamar(pool, equipe, monkeypatch):
     _brain_fake(monkeypatch, '{"nao_chamar": true, "motivo": "fechou com outro"}', [])
     monkeypatch.setattr(rg, "_resumo_antes", lambda *a: None)

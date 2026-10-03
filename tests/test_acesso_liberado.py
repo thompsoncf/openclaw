@@ -7,6 +7,8 @@ Função pura: sem banco.
 """
 from datetime import timedelta
 
+import pytest
+
 from contas.contas import Conta, acesso_liberado
 from tests.relogio_fixo import HOJE
 
@@ -19,10 +21,11 @@ def _conta(status, vencimento):
     )
 
 
-# Do `HOJE` de Brasília (tests/relogio_fixo.py), e não do `date.today()` do
-# import: das 21h à meia-noite o "ontem" do servidor é o hoje de Brasília, e a
-# conta "vencida" deixa de estar vencida no dia em que a regra passar a ler o
-# `relogio.hoje()`. Contado daqui, o dia de folga vale nos dois relógios.
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Era `date.today()` no import: das 21h à
+# meia-noite o "ontem" do servidor é o hoje de Brasília, e a conta vencida
+# deixava de estar vencida.
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 ONTEM = HOJE - timedelta(days=1)
 AMANHA = HOJE + timedelta(days=1)
 

@@ -20,40 +20,22 @@ DUAS COISAS QUE ESTE ARQUIVO GUARDA, e que são fáceis de quebrar sem perceber:
 
 `_plano_aviso` é pura: a decisão inteira é testada sem banco e sem tela.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 
 from contas.contas import Conta, acesso_liberado
 from tests.relogio_fixo import HOJE
-from web import portal
 from web.portal import _plano_aviso
 
-# As datas saem do `HOJE` de tests/relogio_fixo.py, e o "hoje" do `_plano_aviso`
-# fica parado nele (`_hoje_parado`, abaixo). Eram `date.today()` calculado no
-# IMPORT contra o `date.today()` que a função lê na EXECUÇÃO: no CI do #961 a
-# suíte começou às 23:59 UTC, este arquivo rodou às 00:08 e o "vence em 3 dias"
-# saiu 2.
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Eram `date.today()` calculado no IMPORT
+# contra o dia que o `_plano_aviso` lê na EXECUÇÃO: no CI do #961 a suíte começou
+# às 23:59 UTC, este arquivo rodou às 00:08 e o "vence em 3 dias" saiu 2.
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
 ONTEM = HOJE - timedelta(days=1)
 DAQUI_3 = HOJE + timedelta(days=3)
 DAQUI_60 = HOJE + timedelta(days=60)
-
-
-class _DataParada(date):
-    @classmethod
-    def today(cls):
-        return HOJE
-
-
-@pytest.fixture(autouse=True)
-def _hoje_parado(monkeypatch, servidor_as_23h):
-    """O `_plano_aviso` enxerga `HOJE`, rode o teste na hora que rodar.
-
-    `servidor_as_23h` para o `relogio.hoje()`. O `_plano_aviso` ainda lê o dia do
-    servidor pelo `_date` do portal, e a fixture só troca o nome `date` — por isso
-    o `_date` é parado aqui, no mesmo dia. Quando a função passar para o
-    `relogio.hoje()`, esta linha fica sem efeito e pode sair."""
-    monkeypatch.setattr(portal, "_date", _DataParada)
 
 
 def conta(status="ativa", vencimento=None):

@@ -341,3 +341,19 @@ carimbar o relógio real (`now()` do banco, `datetime.now()`): no dia em que o
 calendário passa do cenário, o teste quebra sem nada ter mudado (#917:
 `visita_rotinas`, `clinica_numeros`, `resgate`). Função que recebe `agora` usa o
 `agora` até no carimbo.
+
+## 8. Toda resposta ao dono é em português
+
+Regra do dono, dada em 03/10/2026, depois de pedir "em português" quatro vezes
+seguidas na mesma conversa:
+
+> "todas as respostas você joga em português, já anota aí"
+
+* **Toda mensagem ao dono é em português do Brasil** — resposta, resumo,
+  pergunta, aviso de "está no ar", relato de erro. Sem exceção pra mensagem curta
+  nem pra resposta a notificação automática (CI, merge, deploy).
+* Vale também pro que ele repassa: o texto pro grupo do financeiro, o aviso da
+  novidade, o corpo do PR e a mensagem de commit — este repositório já é todo
+  em português.
+* Nome de código (função, tabela, coluna, arquivo) fica como está no código; o
+  que se escreve em volta dele é em português.

@@ -1435,6 +1435,105 @@ def test_a_ia_le_que_acabou_e_nao_chama(pool, equipe, duble, monkeypatch):
         assert c.execute("select texto from resgate_envios where tipo='descartado'").fetchone()[0] \
             == "ele disse que fechou com outro buffet"
         assert rg.fila(c, EMPRESA) == []                     # descartado pra sempre
+        assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "perdido"
+
+
+# ══════════════════════════════════════════════ o descarte vai pra Perdido
+
+def _motivos(c):
+    c.execute("""create table if not exists funil_motivos_perda (id bigserial primary key,
+                   conta_id bigint, chave text, rotulo text, ordem int default 0,
+                   ativo boolean default true, exige_descricao boolean default false,
+                   semeado_de text, unique (conta_id, chave))""")
+    for i, (k, v) in enumerate((("nao_respondeu", "Não respondeu"),
+                                ("desistiu_evento", "Desistiu / cancelou o evento"),
+                                ("fechou_concorrente", "Fechou com concorrente"),
+                                ("outro", "Outro"))):
+        c.execute("insert into funil_motivos_perda (conta_id, chave, rotulo, ordem) values (%s,%s,%s,%s)",
+                  (EMPRESA, k, v, i))
+    c.commit()
+
+
+def _descartar(monkeypatch, motivo, motivo_perda):
+    monkeypatch.setattr(rg, "redigir", lambda *a, **k: {"nao_chamar": True, "motivo": motivo,
+                                                        "motivo_perda": motivo_perda})
+
+
+def test_o_descartado_vai_pra_perdido_com_o_motivo_que_a_ia_leu(pool, equipe, duble, monkeypatch):
+    """03/10/2026, Prime: o #1355 cancelou o evento e o #1352 era número errado — a IA
+    não chamou, mas os dois ficaram parados na coluna da Jacqueline."""
+    _descartar(monkeypatch, "cancelou o evento por problemas pessoais", "desistiu_evento")
+    with pool.connection() as c:
+        _motivos(c)
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("""select status, vendedor_id, perda_motivo, perda_etapa, perda_descricao
+                              from prospeccao where id=%s""", (lid,)).fetchone() == (
+            "perdido", equipe["PEDRO"], "desistiu_evento", "contatado",
+            "Resgate da IA: cancelou o evento por problemas pessoais")
+        assert c.execute("""select de, para, motivo from funil_movimentos where prospeccao_id=%s""",
+                         (lid,)).fetchall() == [("contatado", "perdido", "resgate_descartou")]
+    assert "Movi pra Perdido (Desistiu / cancelou o evento)." in duble["saiu"][0]["texto"]
+
+
+def test_motivo_que_nao_existe_vira_outro(pool, equipe, duble, monkeypatch):
+    _descartar(monkeypatch, "número errado, é de uma empresa", "numero_errado")
+    with pool.connection() as c:
+        _motivos(c)
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select status, perda_motivo from prospeccao where id=%s",
+                         (lid,)).fetchone() == ("perdido", "outro")
+
+
+def test_quem_ja_e_cliente_nao_vai_pra_perdido(pool, equipe, duble, monkeypatch):
+    """03/10/2026, Prime, #881: o pai de um cliente com a festa paga."""
+    _descartar(monkeypatch, "a festa já está paga", rg.JA_CLIENTE)
+    with pool.connection() as c:
+        _motivos(c)
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10)
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "contatado"
+        assert c.execute("select count(*) from funil_movimentos").fetchone()[0] == 0
+    assert "Não mexi no card: ele já é cliente." in duble["saiu"][0]["texto"]
+
+
+def test_quem_ja_estava_perdido_fica_com_o_motivo_do_vendedor(pool, equipe, duble, monkeypatch):
+    _descartar(monkeypatch, "pediu pra não ser chamado", "outro")
+    with pool.connection() as c:
+        _motivos(c)
+        _ligar(c, equipe, aviso_vendedor=False)
+        lid, _ = _lead(c, equipe["PEDRO"], dias=10, status="perdido")
+        c.execute("update prospeccao set perda_motivo='achou_caro' where id=%s", (lid,))
+        c.commit()
+    rg.rodar(pool)
+    with pool.connection() as c:
+        assert c.execute("select status, perda_motivo from prospeccao where id=%s",
+                         (lid,)).fetchone() == ("perdido", "achou_caro")
+    assert "O card já estava em Perdido." in duble["saiu"][0]["texto"]
+
+
+def test_o_pedido_leva_os_motivos_da_empresa(pool, equipe, monkeypatch):
+    pedidos = []
+    _brain_fake(monkeypatch, '{"mensagem": "Oi Carla!"}', pedidos)
+    monkeypatch.setattr(rg, "_resumo_antes", lambda *a: None)
+    monkeypatch.setattr(rg, "_valores_fora", lambda *a, **k: [])
+    from finance import ia_uso
+    monkeypatch.setattr(ia_uso, "registrar", lambda *a, **k: None)
+    with pool.connection() as c:
+        _motivos(c)
+        _cfg(c, equipe)
+        _lead(c, equipe["PEDRO"], dias=10)
+        lead = rg.fila(c, EMPRESA)[0]
+    rg.redigir(pool, EMPRESA, lead, None)
+    assert "desistiu_evento = Desistiu / cancelou o evento" in pedidos[0]
+    assert rg.JA_CLIENTE in pedidos[0]
 
 
 def test_no_ensaio_a_previa_diz_que_nao_chamaria(pool, equipe, duble, monkeypatch):
@@ -1774,7 +1873,8 @@ def test_nao_e_promessa(txt):
 
 
 def test_redigir_devolve_nao_chamar(pool, equipe, monkeypatch):
-    _brain_fake(monkeypatch, '{"nao_chamar": true, "motivo": "fechou com outro"}', [])
+    _brain_fake(monkeypatch, '{"nao_chamar": true, "motivo": "fechou com outro", '
+                             '"motivo_perda": "fechou_concorrente"}', [])
     monkeypatch.setattr(rg, "_resumo_antes", lambda *a: None)
     from finance import ia_uso
     monkeypatch.setattr(ia_uso, "registrar", lambda *a, **k: None)
@@ -1782,7 +1882,8 @@ def test_redigir_devolve_nao_chamar(pool, equipe, monkeypatch):
         _cfg(c, equipe)
         _lead(c, equipe["PEDRO"], dias=10)
         lead = rg.fila(c, EMPRESA)[0]
-    assert rg.redigir(pool, EMPRESA, lead, None) == {"nao_chamar": True, "motivo": "fechou com outro"}
+    assert rg.redigir(pool, EMPRESA, lead, None) == {"nao_chamar": True, "motivo": "fechou com outro",
+                                                     "motivo_perda": "fechou_concorrente"}
 
 
 # ══════════════════════════════════════════════ o "Testar comigo" marca a visita

@@ -126,3 +126,96 @@ def variaveis(com_base: bool = True) -> str:
     a cor virou e a fonte continuou a de sistema.
     """
     return ":root{" + _TOKENS + "}" + (_BASE if com_base else "")
+
+
+# ---------------------------------------------------------------------------
+# TEMAS: escuro, claro, misto e automático
+# (docs/mockups/zaq_temas.html, aprovado pelo dono em 03/10/2026; fase 1)
+#
+# O escuro é o `_TOKENS` acima, sem nenhuma mudança: quem não escolhe tema
+# recebe o HTML e o CSS de antes, byte a byte. Os outros temas só valem quando
+# o servidor escreve `<html data-tema="...">` (web/portal.py, `_BASE`), e isso
+# só acontece pra conta marcada como piloto (contas/aparencia.py).
+#
+# **Por que os apelidos se repetem dentro do misto.** Variável CSS que aponta
+# pra outra (`--card:var(--surface)`) é resolvida no elemento ONDE FOI DECLARADA
+# e herdada já resolvida. Declarada só no `:root`, o `--card` do menu herdaria
+# o valor claro da página, mesmo com o `--surface` do menu escuro. Por isso o
+# bloco do menu redeclara os apelidos junto: ali eles resolvem com os valores
+# escuros. No `<html>` não precisa (é o mesmo elemento do `:root`), mas repetir
+# não custa e deixa os três blocos iguais de ler.
+# ---------------------------------------------------------------------------
+
+#: As cores do escuro, recortadas do próprio `_TOKENS` pra não existir uma
+#: segunda cópia que poderia divergir. Vão do `color-scheme` até a tipografia.
+_ESCURO_CORES = _TOKENS[_TOKENS.index("color-scheme"):_TOKENS.index("/* ---- tipografia")]
+
+#: Os apelidos (`--card`, `--txt`, `--verde`...), também recortados do `_TOKENS`.
+_APELIDOS = _TOKENS[_TOKENS.index("/* ---- apelidos"):]
+
+# O claro. Mesmos nomes do escuro, outros valores. Contraste conferido (WCAG,
+# sobre `--bg-2`, que é o fundo mais escuro onde texto aparece): `--text` 16,0 ·
+# `--text-dim` 6,1 · `--neon` 4,7 · `--ambar` 5,0 · `--coral` 5,1 · `--azul` 5,2.
+#
+# O verde muda de tom: o #25D366 da marca dá 1,9 como texto sobre branco e some.
+# O #0B7A3E é o mesmo verde mais escuro, e por isso a tinta do botão verde vira
+# branca (5,4 sobre ele); a tinta escura de antes daria 3,2.
+_CLARO = """
+  color-scheme: light;
+
+  /* ---- superfícies ---- */
+  --bg:#F3F6F4; --bg-2:#E9EFEB; --surface:#FFFFFF; --line:#D7E0DA;
+
+  /* ---- texto ---- */
+  --text:#101A14; --text-dim:#4D5E54; --text-faint:#7B8B82;
+
+  /* ---- verde da marca, no tom que se lê sobre branco ---- */
+  --neon:#0B7A3E; --neon-bright:#096B36; --neon-deep:#075C2E;
+  --neon-fraco:rgba(11,122,62,.10); --neon-borda:#A9D9BC; --neon-fundo:#E2F3E8;
+  --sobre-verde:#FFFFFF;
+
+  /* ---- semânticos ---- */
+  --ambar:#8F6200; --coral:#B3372F; --azul:#17689F; --roxo:#7A4AA0; --zap:#0B7A3E;
+  --ambar-borda:#E6CD8F; --ambar-fundo:#FBF1DA;
+  --coral-borda:#EBB9B4; --coral-fundo:#FBE8E6;
+  --azul-borda:#B4D2E7;  --azul-fundo:#E4F0F8;
+"""
+
+#: Os temas que existem. `escuro` é o padrão e não escreve nada no `<html>`.
+TEMAS = ("escuro", "claro", "misto", "auto")
+
+#: O que fica escuro no misto: o menu lateral, a barra de baixo do celular e a
+#: folha do "Mais", que é o menu do celular aberto.
+_MENU = (".side", ".btmnav", ".mais-sheet")
+
+# A logo tem a cor escrita no próprio SVG (#3ee0a6, um verde-água claro), que
+# some sobre fundo claro. Regra de CSS ganha de atributo de SVG, então dá pra
+# trocar só onde o fundo é claro, sem mexer na logo de quem está no escuro.
+_LOGO = ('.logo svg path[stroke="#3ee0a6"]{stroke:var(--neon)}'
+         '.logo svg path[fill="#3ee0a6"]{fill:var(--neon)}')
+
+
+def _logo_em(prefixos: list[str]) -> str:
+    regras = []
+    for regra in _LOGO.split("}")[:-1]:
+        seletor, corpo = regra.split("{")
+        regras.append(",".join(f"{p} {seletor}" for p in prefixos) + "{" + corpo + "}")
+    return "".join(regras)
+
+
+def temas() -> str:
+    """O CSS dos temas claro, misto e automático, pra concatenar depois de
+    `variaveis()`. Sem `data-tema` no `<html>`, nada aqui se aplica."""
+    claro = _CLARO + _APELIDOS
+    escuro = _ESCURO_CORES + _APELIDOS
+    claro_sel = 'html[data-tema="claro"],html[data-tema="misto"]'
+    menu_sel = ",".join(f'html[data-tema="misto"] {m}' for m in _MENU)
+    return (
+        claro_sel + "{" + claro + "}"
+        + menu_sel + "{" + escuro + "}"
+        # o automático segue o aparelho: claro se ele estiver claro, senão o escuro de sempre
+        + '@media (prefers-color-scheme: light){html[data-tema="auto"]{' + claro + "}"
+        + _logo_em(['html[data-tema="auto"]']) + "}"
+        # a logo da barra de cima do celular fica sobre a página, que no misto é clara
+        + _logo_em(['html[data-tema="claro"]', 'html[data-tema="misto"] .topo-mob'])
+    )

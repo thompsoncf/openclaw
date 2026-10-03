@@ -180,12 +180,13 @@ def _n2(v) -> str:
 
 # ---------- paginas (templates embutidos: 1 arquivo so') ----------
 
-_BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+_BASE = """<!doctype html><html lang="pt-br"{% if tema and tema != 'escuro' %} data-tema="{{ tema }}"{% endif %}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{ titulo }} - Zaq</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 """ + _tema.FONTES + """<style>
 """ + _tema.variaveis() + """
+""" + "{% if tema and tema != 'escuro' %}" + _tema.temas() + "{% endif %}" + """
 body{margin:0;min-height:100vh;font-family:var(--body);
  background:var(--bg);color:var(--txt);display:flex;flex-direction:column;align-items:center}
 .topo{width:100%;max-width:960px;display:flex;justify-content:space-between;
@@ -392,7 +393,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
     </form>
   </span>
 </div>{% endif %}
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol><symbol id="ic-mapa" viewBox="0 0 24 24"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></symbol><symbol id="ic-deposito" viewBox="0 0 24 24"><path d="M3 9.5L12 4l9 5.5V20H3z"/><path d="M7 20v-6h10v6M7 17h10"/></symbol><symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol></defs></svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol><symbol id="ic-mapa" viewBox="0 0 24 24"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></symbol><symbol id="ic-deposito" viewBox="0 0 24 24"><path d="M3 9.5L12 4l9 5.5V20H3z"/><path d="M7 20v-6h10v6M7 17h10"/></symbol><symbol id="ic-aparencia" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M12 7.5h6.5M12 12h8.5M12 16.5h6.5"/></symbol><symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol></defs></svg>
 <div id="navprog"></div>
 {% macro navi(sec, href, ic, label) -%}
 <a href="{{ href }}" class="nav-i{% if secao_ativa==sec and sec %} on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-{{ ic }}"/></svg><span>{{ label }}</span></a>
@@ -470,7 +471,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {# Novidades é de quem MANDA na conta — dono ou gestor (contas.equipe.recebe_novidades).
      De propósito não é `caps.gerir`: gerir é só do dono, e deixaria de fora o gestor,
      que é justamente quem opera a tela todo dia. #}
-  {% if ve_novidades %}<div class="side-grp">Sistema</div>{{ navi_n() }}{% endif %}
+  {% if ve_novidades or aparencia_ok %}<div class="side-grp">Sistema</div>{% endif %}{% if ve_novidades %}{{ navi_n() }}{% endif %}
+  {%- if aparencia_ok %}{{ navi('aparencia','/painel/aparencia','aparencia','Aparência') }}{% endif %}
   <div style="flex:1"></div>
   {{ navi('','/sair','sair','Sair') }}
 </nav>
@@ -533,7 +535,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
   {% if _dono and _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
   {% if n_contextos > 1 %}{{ navi('trocar','/trocar','fornecedor','Trocar empresa') }}{% endif %}
-  {% if ve_novidades %}<div class="side-grp">Sistema</div>{{ navi_n() }}{% endif %}
+  {% if ve_novidades or aparencia_ok %}<div class="side-grp">Sistema</div>{% endif %}{% if ve_novidades %}{{ navi_n() }}{% endif %}
+  {%- if aparencia_ok %}{{ navi('aparencia','/painel/aparencia','aparencia','Aparência') }}{% endif %}
   {{ navi('','/sair','sair','Sair') }}
 </div>
 <script>
@@ -8750,6 +8753,19 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                     ctx["tem_estandes"] = bool(_es.obter_config(get_pool(), _c[0]))
                 except Exception:
                     pass
+    # O TEMA (contas/aparencia.py, docs/mockups/zaq_temas.html). Fora da conta
+    # piloto é sempre "escuro", e o `base` então escreve o <html> e o CSS de
+    # antes. `aparencia_ok` acende o item Aparência no menu.
+    if "tema" not in ctx:
+        ctx["tema"], ctx["aparencia_ok"] = "escuro", False
+        if request.session.get("conta_id"):
+            try:
+                from contas import aparencia as _apar
+                _ap = _apar.ler(get_pool(), request.session["conta_id"],
+                                request.session.get("membro_id"))
+                ctx["tema"], ctx["aparencia_ok"] = _ap["tema"], _ap["piloto"]
+            except Exception:  # noqa: BLE001 — o tema nunca derruba a tela
+                pass
     if "beta_gratis" not in ctx:
         try:
             from finance import config_app as _cfg

@@ -240,3 +240,12 @@ def test_o_ensaio_mostra_quantos_andam_de_uma_vez_ao_ligar(pool):
             c.execute("insert into mensagens (conversa_id, direcao, criado_em) values (%s,'out',%s)",
                       (cv, AGORA - timedelta(days=30)))
         assert cfu.ensaio(c, CONTA, AGORA)["ao_ligar"] == 2     # Agendado já passou de Em conversa
+        c.execute("update prospeccao set status='sumiu' where id=%s", (ids[3],))
+        assert cfu.ensaio(c, CONTA, AGORA)["ao_ligar"] == 3     # status sem etapa: o motor também move
+
+
+def test_antes_de_aplicar_a_regra_da_regua_vem_mantida(pool):
+    with pool.connection() as c:
+        c.execute("""update funil_etapas set gatilho='preco_enviado', gatilho_ativo=true
+                      where conta_id=%s and chave='contatado'""", (CONTA,))
+        assert cfu.estado(c, CONTA)["marcado"] == {"resposta": "outro", "prazo": "observando", "reabre": "ligado"}

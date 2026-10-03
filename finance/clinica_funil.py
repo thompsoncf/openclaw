@@ -134,15 +134,15 @@ def ensaio(c, conta_id: int, agora: datetime | None = None) -> dict:
     try:
         with c.transaction():
             out["ao_ligar"] = c.execute(
-                """select count(distinct p.id)
-                     from prospeccao p
-                     join conversas cv on cv.prospeccao_id = p.id and cv.conta_id = p.conta_id
-                     join mensagens m on m.conversa_id = cv.id and m.direcao = 'out'
+                """select count(*) from prospeccao p
                     where p.conta_id=%(c)s and p.estagio='lead'
-                      and p.status in (select chave from funil_etapas
-                                        where conta_id=%(c)s and fase='venda'
-                                          and ordem < (select ordem from funil_etapas
-                                                        where conta_id=%(c)s and chave='contatado'))""",
+                      -- como o motor: status sem etapa conta como antes de tudo (-1)
+                      and coalesce((select e.ordem from funil_etapas e
+                                     where e.conta_id=p.conta_id and e.chave=p.status), -1)
+                          < (select ordem from funil_etapas where conta_id=%(c)s and chave='contatado')
+                      and exists (select 1 from conversas cv join mensagens m on m.conversa_id = cv.id
+                                   where cv.conta_id=p.conta_id and cv.prospeccao_id=p.id
+                                     and m.direcao='out')""",
                 {"c": conta_id}).fetchone()[0]
     except Exception:  # noqa: BLE001 — banco sem as conversas
         pass
@@ -164,7 +164,9 @@ def estado(c, conta_id: int, agora: datetime | None = None) -> dict:
         reg = _regua(c, conta_id)
         marcado = {"resposta": reg["gatilhos_modo"] if outras["gatilho"] else "observando",
                    "prazo": reg["teto_modo"] if outras["prazo"] else "observando",
-                   "reabre": "ligado" if atual["reabre"] != OUTRO else OUTRO}
+                   "reabre": "ligado"}
+        # a regra que o dono já montou na Régua fica como está, a não ser que ele troque
+        marcado = {k: OUTRO if atual[k] == OUTRO else v for k, v in marcado.items()}
     return {"aplicado": feito, "itens": itens, "modos": atual, "marcado": marcado,
             "ensaio": ensaio(c, conta_id, agora), "cards": dict(cards), "outras": outras}
 

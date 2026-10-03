@@ -55,6 +55,11 @@ _TOKENS = """
      hover, que é um véu e por isso serve em cima de qualquer superfície. */
   --text-2:#BAC7BF; --line-2:#2F3F36; --hover:rgba(234,242,237,.05);
 
+  /* tinta de botão âmbar/roxo (como o --sobre-verde) e a bolha da mensagem que
+     sai no Cockpit, o verde do WhatsApp. No claro o âmbar e o roxo escurecem pra
+     ler como texto, e a tinta escura de cima deles sumiria. */
+  --sobre-ambar:#1C1408; --sobre-roxo:#1A0F2A; --bolha-sai:#0A5C49;
+
   /* ---- tipografia ---- */
   --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -191,6 +196,7 @@ _CLARO = """
 
   /* ---- tons de apoio ---- */
   --text-2:#2E3B34; --line-2:#C3CEC7; --hover:rgba(16,26,20,.05);
+  --sobre-ambar:#FFFFFF; --sobre-roxo:#FFFFFF; --bolha-sai:#D6EEDF;
 """
 
 #: Os temas que existem. `escuro` é o padrão e não escreve nada no `<html>`.
@@ -215,16 +221,22 @@ def _logo_em(prefixos: list[str]) -> str:
     return "".join(regras)
 
 
-def temas() -> str:
+def temas(menu: tuple = _MENU) -> str:
     """O CSS dos temas claro, misto e automático, pra concatenar depois de
-    `variaveis()`. Sem `data-tema` no `<html>`, nada aqui se aplica."""
+    `variaveis()`. Sem `data-tema` no `<html>`, nada aqui se aplica.
+
+    `menu`: o que fica escuro no misto. O painel passa o padrão (menu lateral,
+    barra e folha do celular); o Cockpit passa o cabeçalho e a barra de abas."""
     claro = _CLARO + _APELIDOS
     escuro = _ESCURO_CORES + _APELIDOS
     claro_sel = 'html[data-tema="claro"],html[data-tema="misto"]'
-    menu_sel = ",".join(f'html[data-tema="misto"] {m}' for m in _MENU)
+    menu_sel = ",".join(f'html[data-tema="misto"] {m}' for m in menu)
     return (
         claro_sel + "{" + claro + "}"
-        + menu_sel + "{" + escuro + "}"
+        # `color` junto: cor de texto é herdada JÁ CALCULADA do <body> (escuro, no
+        # misto), e redefinir a variável no menu não muda o que foi herdado. Sem
+        # isto o título do cabeçalho do Cockpit saía escuro sobre o fundo escuro.
+        + (menu_sel + "{" + escuro + "color:var(--text);}" if menu_sel else "")
         # o automático segue o aparelho: claro se ele estiver claro, senão o escuro de sempre
         + '@media (prefers-color-scheme: light){html[data-tema="auto"]{' + claro + "}"
         + _logo_em(['html[data-tema="auto"]']) + "}"

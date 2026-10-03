@@ -62,6 +62,14 @@ def test_botao_verde_do_claro_se_le():
     assert _contraste(c["--sobre-verde"], c["--neon"]) >= 4.5
 
 
+@pytest.mark.parametrize("tinta,botao", [("--sobre-verde", "--neon"), ("--sobre-ambar", "--ambar"),
+                                         ("--sobre-roxo", "--roxo"), ("--text", "--bolha-sai")])
+@pytest.mark.parametrize("bloco", ["_ESCURO_CORES", "_CLARO"])
+def test_tinta_de_botao_e_bolha_se_leem_nos_dois_temas(tinta, botao, bloco):
+    c = _tokens(getattr(tema, bloco))
+    assert _contraste(c[tinta], c[botao]) >= 4.5, f"{tinta} sobre {botao} no {bloco}"
+
+
 @pytest.mark.parametrize("cor,fundo", [("--ambar", "--ambar-fundo"), ("--coral", "--coral-fundo"),
                                        ("--azul", "--azul-fundo"), ("--neon", "--neon-fundo"),
                                        ("--roxo", "--roxo-fundo")])
@@ -86,6 +94,9 @@ def test_o_misto_redeclara_os_apelidos_no_menu():
         assert apelido in menu, f"sem {apelido} o menu do misto herda o valor claro"
     for parte in tema._MENU:
         assert f'html[data-tema="misto"] {parte}' in css
+    # a cor do texto herdada vem calculada do <body> (escura no misto): o menu
+    # precisa declarar a dele, senão texto sem cor própria some no fundo escuro
+    assert menu.rstrip().endswith("color:var(--text);") or "color:var(--text);" in css.split('html[data-tema="misto"] .side', 1)[1].split("}", 1)[0]
 
 
 def test_o_automatico_so_vale_com_o_aparelho_claro():
@@ -316,3 +327,62 @@ def test_texto_do_escuro_se_le(texto):
     e = _tokens(tema._ESCURO_CORES)
     for fundo in ("--bg", "--bg-2", "--surface"):
         assert _contraste(e[texto], e[fundo]) >= 4.5, f"{texto} sobre {fundo}"
+
+
+# ---------- o Cockpit (app do vendedor) ----------
+
+def test_cockpit_sem_tema_e_o_documento_de_antes():
+    from web import painel_cockpit as pc
+    pc._TEMA.set("escuro")
+    html = pc._page("Fila", "<p>x</p>").body.decode()
+    assert html.startswith("<!doctype html><html lang=pt-br><head>")
+    assert "<meta name=theme-color content='#0A0F0C'>" in html and "data-tema" not in html
+
+
+@pytest.mark.parametrize("t,barra", [("claro", "#F3F6F4"), ("misto", "#0A0F0C")])
+def test_cockpit_com_tema_marca_o_html_e_a_barra(t, barra):
+    from web import painel_cockpit as pc
+    pc._TEMA.set(t)
+    try:
+        html = pc._page("Fila", "<p>x</p>").body.decode()
+    finally:
+        pc._TEMA.set("escuro")
+    assert html.startswith(f"<!doctype html><html lang=pt-br data-tema={t}><head>")
+    assert f"<meta name=theme-color content='{barra}'>" in html
+
+
+def test_cockpit_automatico_tem_as_duas_barras():
+    from web import painel_cockpit as pc
+    pc._TEMA.set("auto")
+    try:
+        html = pc._page("Fila", "<p>x</p>").body.decode()
+    finally:
+        pc._TEMA.set("escuro")
+    assert "media='(prefers-color-scheme: light)' content='#F3F6F4'" in html
+    assert "media='(prefers-color-scheme: dark)' content='#0A0F0C'" in html
+
+
+def test_a_folha_do_cockpit_tem_os_temas_e_o_misto_escurece_cabecalho_e_abas():
+    """No Cockpit o "menu" do misto é o cabeçalho e a barra de abas: ficam escuros,
+    o conteúdo fica claro (o painel faz o mesmo com o menu lateral)."""
+    from web import painel_cockpit as pc
+    assert 'html[data-tema="claro"],html[data-tema="misto"]{' in pc._CSS_TEXTO
+    assert 'html[data-tema="misto"] .hdr,html[data-tema="misto"] .tabs{' in pc._CSS_TEXTO
+    assert 'html[data-tema="misto"] .side' not in pc._CSS_TEXTO
+
+
+def test_o_cabecalho_e_as_abas_do_cockpit_seguem_o_fundo_do_tema():
+    """Eram rgba(10,15,12,…) fixos: no claro, faixa escura com título escuro (1,1 de
+    contraste). O color-mix com --bg dá a MESMA cor no escuro; o rgba de antes fica
+    na frente pra navegador antigo, que ignora o color-mix."""
+    from web import painel_cockpit as pc
+    for pct in ("72%", "92%"):
+        assert f"color-mix(in srgb,var(--bg) {pct},transparent)" in pc._CSS_TEXTO
+
+
+def test_o_cockpit_liga_o_tema_onde_liga_o_vocabulario():
+    from web import painel_cockpit as pc
+    for f in (pc._sessao, pc._gerencia):
+        fonte = inspect.getsource(f)
+        assert fonte.count("_ligar_tema(") == fonte.count("_ligar_voc("), f.__name__
+    assert "o tema nunca derruba o app" in inspect.getsource(pc._ligar_tema)

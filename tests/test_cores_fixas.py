@@ -54,7 +54,7 @@ TETO = {
     "painel_apolices.py": 18,
     "painel_clinica_pacientes.py": 1,   # o QR do balcão, que precisa de fundo branco
     "painel_clinica_planos.py": 17,   # a página pública do plano, que o paciente abre
-    "painel_cockpit.py": 283,
+    "painel_cockpit.py": 55,   # fase 3: ícone e manifesto do app, mapa de stands, página offline
     "painel_conteudo.py": 17,
     "painel_deposito.py": 4,
     "painel_equipe.py": 3,   # o botão do WhatsApp

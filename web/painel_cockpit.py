@@ -89,6 +89,40 @@ def _ligar_voc(conta_id) -> None:
     _rxp_voc.ligar_voc(conta_id)
 
 
+# O TEMA (contas/aparencia.py, docs/mockups/zaq_temas.html). Mesmo caminho do
+# vocabulário: a conta liga o tema ao entrar (`_sessao`, `_gerencia`) e o `_page`
+# lê. Fora da conta piloto é sempre "escuro", e o documento sai igual ao de antes.
+import contextvars as _cv
+
+_TEMA = _cv.ContextVar("tema_do_cockpit", default="escuro")
+
+#: A cor da barra do celular (meta theme-color) de cada tema: o fundo da página.
+_COR_BARRA = {"escuro": "#0A0F0C", "claro": "#F3F6F4"}
+
+
+def _ligar_tema(conta_id, membro_id) -> None:
+    try:
+        from contas import aparencia as _ap
+        _TEMA.set(_ap.ler(get_pool(), conta_id, membro_id)["tema"])
+    except Exception:  # noqa: BLE001 — o tema nunca derruba o app
+        _TEMA.set("escuro")
+
+
+def _cabeca_do_tema() -> str:
+    """O atributo do <html> e a cor da barra do celular, conforme o tema."""
+    t = _TEMA.get()
+    if t == "escuro":
+        return "", f"<meta name=theme-color content='{_COR_BARRA['escuro']}'>"
+    if t == "auto":
+        barra = (f"<meta name=theme-color media='(prefers-color-scheme: light)' content='{_COR_BARRA['claro']}'>"
+                 f"<meta name=theme-color media='(prefers-color-scheme: dark)' content='{_COR_BARRA['escuro']}'>")
+    elif t == "misto":   # o cabeçalho e as abas ficam escuros: a barra do celular encosta no cabeçalho
+        barra = f"<meta name=theme-color content='{_COR_BARRA['escuro']}'>"
+    else:
+        barra = f"<meta name=theme-color content='{_COR_BARRA['claro']}'>"
+    return f" data-tema={t}", barra
+
+
 def _voc_js() -> str:
     """O vocabulário pro JS da página: VOC.cliente, VOC.Cliente, VOC.leads…"""
     d = {}
@@ -123,10 +157,12 @@ def _sessao(request: Request):
     papel = request.session.get("papel", "dono")
     if mid and cid and papel in _PAPEIS_OK:
         _ligar_voc(cid)
+        _ligar_tema(cid, mid)
         return cid, mid
     r = _sessao_do_lembrete(request)
     if r:
         _ligar_voc(r[0])
+        _ligar_tema(r[0], r[1])
     return r
 
 
@@ -166,6 +202,7 @@ def _gerencia(request: Request):
         if not cid or papel not in ("dono", "gestor"):
             return None
     _ligar_voc(cid)
+    _ligar_tema(cid, request.session.get("membro_id"))
     return cid, request.session.get("membro_id")
 
 
@@ -215,7 +252,7 @@ b,strong{font-weight:600}
 
 /* ---------- header ---------- */
 .hdr{display:flex;align-items:center;gap:.7rem;padding:.85rem 1.1rem;flex-shrink:0;
-  border-bottom:1px solid var(--line);background:rgba(10,15,12,.72);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);background:rgba(10,15,12,.72);background:color-mix(in srgb,var(--bg) 72%,transparent);backdrop-filter:blur(12px);
   position:relative;z-index:2}
 .hdr .tt{flex:1;min-width:0}
 .hdr .tt b{font-family:var(--display);font-weight:700;font-size:1.05rem;letter-spacing:-.02em;
@@ -250,7 +287,7 @@ b,strong{font-weight:600}
 .kpi .v{font-family:var(--mono);font-weight:700;font-size:1.5rem;letter-spacing:-.03em;line-height:1.1}
 .kpi .l{font-size:.8rem;margin-top:.15rem}
 .kpi .d{font-size:.7rem;color:var(--text-faint);margin-top:.1rem}
-.kpi.hero{grid-column:1/-1;background:linear-gradient(150deg,#0E2018,#0b1612);border-color:#20342a}
+.kpi.hero{grid-column:1/-1;background:linear-gradient(150deg,var(--neon-fundo),var(--neon-fundo));border-color:var(--neon-borda)}
 .kpi.hero .v{font-size:2.1rem;color:var(--neon)}
 
 /* ---------- seg (Hoje/Semana/Mês) ---------- */
@@ -272,7 +309,7 @@ b,strong{font-weight:600}
    estado: um diz DE QUEM é a vez, o outro diz QUANTO está esperando. Números
    redondos (min-width = height) e 9+ acima de nove, pra não esticar o card. */
 .lead .pend{flex-shrink:0;min-width:20px;height:20px;padding:0 .32rem;border-radius:999px;
-  background:var(--coral);color:#fff;font-family:var(--mono);font-size:.7rem;font-weight:700;
+  background:var(--coral);color:var(--text);font-family:var(--mono);font-size:.7rem;font-weight:700;
   display:inline-flex;align-items:center;justify-content:center;line-height:1}
 /* A COLUNA DA DIREITA do card, no desenho do WhatsApp: quando foi em cima, quantas
    esperam embaixo. `align-items:flex-start` no .lead pra ela colar no topo — com o
@@ -285,16 +322,16 @@ b,strong{font-weight:600}
 .lead .dir .h.novo{color:var(--neon)}
 .chip{font-size:.66rem;padding:.14rem .5rem;border-radius:999px;border:1px solid var(--line);
   color:var(--text-dim);flex-shrink:0;white-space:nowrap}
-.chip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
-.chip.voce{color:var(--ambar);border-color:#5a4520;background:#241c0f}
-.chip.neon{color:var(--neon);border-color:#1e4a3a;background:rgba(37,211,102,.10)}
+.chip.ia{color:var(--roxo);border-color:var(--roxo-borda);background:var(--roxo-fundo)}
+.chip.voce{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.chip.neon{color:var(--neon);border-color:var(--neon-borda);background:rgba(37,211,102,.10)}
 /* "aberto, sem resposta": entre o âmbar de "sua vez" e o verde de "respondido".
    Apagado de propósito — ele informa, não cobra; quem cobra é a bolinha. */
 .chip.aberto{color:var(--txt-mut);border-color:var(--line);background:transparent}
-.chip.err{color:var(--coral);border-color:#5a2b2b;background:#241313}
+.chip.err{color:var(--coral);border-color:var(--coral-borda);background:var(--coral-fundo)}
 /* de fora do mês (mockup cockpit_mes_atual): o mês em que entrou */
-.chip.entrou{color:#F0DCA6;border-color:#5a4520;background:#241c0f}
-.lead.fora{background:rgba(224,163,46,.05);box-shadow:inset 3px 0 0 #5a4520}
+.chip.entrou{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.lead.fora{background:rgba(224,163,46,.05);box-shadow:inset 3px 0 0 var(--ambar-borda)}
 /* a barra de foco: período e as pílulas do que ficou de fora, rolando pro lado */
 .foco{display:flex;gap:.35rem;padding:.35rem 1.1rem .55rem;overflow-x:auto;align-items:center;scrollbar-width:none}
 .foco::-webkit-scrollbar{display:none}
@@ -303,10 +340,10 @@ b,strong{font-weight:600}
 .foco .pil b{font-family:var(--mono);font-weight:500;font-size:.7rem;color:var(--text)}
 .foco .pil.on{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}
 .foco .pil.on b{color:var(--ink)}
-.foco .pil.fora{border-color:#5a4520;background:#241c0f;color:#F0DCA6}
-.foco .pil.fora b{color:#F0DCA6}
-.foco .pil.fora.on{background:var(--ambar);border-color:var(--ambar);color:#1c1408}
-.foco .pil.fora.on b{color:#1c1408}
+.foco .pil.fora{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+.foco .pil.fora b{color:var(--ambar)}
+.foco .pil.fora.on{background:var(--ambar);border-color:var(--ambar);color:var(--sobre-ambar)}
+.foco .pil.fora.on b{color:var(--sobre-ambar)}
 .foco .sep{flex:none;width:1px;height:18px;background:var(--line);margin:0 .2rem}
 /* o seletor das duas ordens da Fila (mockup fila_ordem_de_conversa). Segmentado, e
    não pílula: pílula é filtro (liga e desliga), isto é uma escolha entre dois
@@ -338,7 +375,7 @@ b,strong{font-weight:600}
 .busca .bq{flex:none;font-size:.85rem;line-height:1}
 .busca .lm{flex:none;color:var(--text-faint);text-decoration:none;font-size:1rem;padding:0 .15rem}
 /* a proposta do lead no card: é o que o cliente cobra ao telefone */
-.chip.prop{color:var(--neon);border-color:#1e5c48;background:#0e2620}
+.chip.prop{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
 /* os grupos da fila e a dobra dos parados */
 .grp{display:flex;align-items:center;gap:.4rem;padding:.6rem 1.1rem .25rem;font-size:.66rem;text-transform:uppercase;
   letter-spacing:.07em;color:var(--text-faint);font-weight:600}
@@ -346,19 +383,19 @@ b,strong{font-weight:600}
 .grp .ln{flex:1;height:1px;background:var(--line)}
 .dobra>summary{list-style:none;cursor:pointer}
 .dobra>summary::-webkit-details-marker{display:none}
-.dobra>summary .grp{color:#F0DCA6}
+.dobra>summary .grp{color:var(--ambar)}
 .dobra>summary .grp::after{content:'▸';color:var(--text-faint)}
 .dobra[open]>summary .grp::after{content:'▾'}
 /* a linha do evento no card */
 .lead .ev{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;font-size:.72rem;color:var(--text-dim);margin-top:.1rem}
 .lead .ev b{color:var(--text)} .lead .ev .d{font-style:normal;font-family:var(--mono);color:var(--neon)}
-.lead .ev .src{font-style:normal;font-size:.56rem;color:#7bb8e6;border:1px solid #1f3a4d;background:#122029;border-radius:999px;padding:0 .32rem}
-.lead .ev.sem{color:#F0DCA6}
-.lead .ev .perg{margin-left:auto;font-size:.68rem;font-weight:600;color:#F0DCA6;border:1px solid #5a4520;background:#241c0f;border-radius:999px;padding:.06rem .5rem}
-.aviso.pista{text-align:left;margin:.6rem 1.1rem 0;border:1px solid #5a4520;background:#241c0f;color:#F0DCA6;border-radius:12px;padding:.55rem 2.3rem .55rem .7rem;font-size:.8rem;display:flex;flex-direction:column;gap:.35rem;position:relative}
+.lead .ev .src{font-style:normal;font-size:.56rem;color:var(--azul);border:1px solid var(--azul-borda);background:var(--azul-fundo);border-radius:999px;padding:0 .32rem}
+.lead .ev.sem{color:var(--ambar)}
+.lead .ev .perg{margin-left:auto;font-size:.68rem;font-weight:600;color:var(--ambar);border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:999px;padding:.06rem .5rem}
+.aviso.pista{text-align:left;margin:.6rem 1.1rem 0;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar);border-radius:12px;padding:.55rem 2.3rem .55rem .7rem;font-size:.8rem;display:flex;flex-direction:column;gap:.35rem;position:relative}
 .aviso.pista .bts{display:flex;gap:.4rem}
-.aviso.pista .bt{font-size:.72rem;font-weight:600;padding:.3rem .6rem;border-radius:8px;border:1px solid #5a4520;color:#F0DCA6;text-decoration:none}
-.aviso.pista .bt.ok{background:var(--ambar);color:#1c1408;border-color:var(--ambar)}
+.aviso.pista .bt{font-size:.72rem;font-weight:600;padding:.3rem .6rem;border-radius:8px;border:1px solid var(--ambar-borda);color:var(--ambar);text-decoration:none}
+.aviso.pista .bt.ok{background:var(--ambar);color:var(--sobre-ambar);border-color:var(--ambar)}
 /* O ✕ que faltava nos avisos acima do chat (espera, pista, dupla): eles ficavam
    presos na tela, empilhando até esconder o campo de escrever — o vendedor da
    Martha achou que a IA tinha travado. Fecha só NESTA tela (não marca nada no
@@ -397,12 +434,12 @@ b,strong{font-weight:600}
 .dica b{color:var(--text)}
 /* convite de notificação: nasce escondido e só aparece se o navegador ainda pode
    perguntar (nem concedido, nem negado) — quem já decidiu não vê nada */
-.pushcard{display:none;margin:.8rem 1.1rem;border:1px solid #3a2b52;background:#160f22;
+.pushcard{display:none;margin:.8rem 1.1rem;border:1px solid var(--roxo-borda);background:var(--roxo-fundo);
   border-radius:13px;padding:.85rem}
 .pushcard.show{display:block}
 .pushcard b{display:block;font-size:.92rem;margin-bottom:.2rem}
 .pushcard p{margin:.1rem 0 .65rem;color:var(--text-dim);font-size:.8rem;line-height:1.45}
-.pushcard .go{width:100%;background:var(--roxo);color:#1a0f2a;border:0;border-radius:10px;
+.pushcard .go{width:100%;background:var(--roxo);color:var(--sobre-roxo);border:0;border-radius:10px;
   padding:.55rem .8rem;font-family:inherit;font-weight:700;font-size:.84rem;cursor:pointer}
 
 /* ---------- fechar contrato (dois toques, porque mexe em dinheiro) ---------- */
@@ -410,7 +447,7 @@ b,strong{font-weight:600}
 .fechar summary{list-style:none;cursor:pointer;padding:.65rem 0;font-family:var(--display);
   font-weight:700;font-size:.95rem;color:var(--neon);text-align:center}
 .fechar summary::-webkit-details-marker{display:none}
-.fechar[open]{border-color:#1e4a3a;background:rgba(37,211,102,.06)}
+.fechar[open]{border-color:var(--neon-borda);background:rgba(37,211,102,.06)}
 .fechar[open] summary{border-bottom:1px solid var(--line);margin-bottom:.7rem}
 .fechar p{font-size:.82rem;color:var(--text-dim);margin:0 0 .6rem;line-height:1.5}
 .fechar p b{color:var(--text)}
@@ -445,16 +482,16 @@ b,strong{font-weight:600}
 .fr .sl{flex-basis:100%;color:var(--text-faint);font-size:.68rem;margin-top:-.15rem}
 .fr.fech .bar i{background:linear-gradient(90deg,#1f7a45,#3fbf6f)}
 .fr.perd .nm,.fr.perd .qt b{color:var(--text-faint)}
-.fr.perd .bar i{background:#3a3f45}
+.fr.perd .bar i{background:var(--line)}
 
 /* ---------- atenção ---------- */
 .aten{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin:0 1.1rem .9rem}
 .at{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:.7rem .8rem}
 .at .n{font-family:var(--mono);font-weight:700;font-size:1.3rem;line-height:1.1}
 .at .t{font-size:.74rem;color:var(--text-dim);margin-top:.1rem}
-.at.hot{border-color:#5a2b2b;background:#241313}.at.hot .n{color:var(--coral)}
-.at.warn{border-color:#5a4520;background:#241c0f}.at.warn .n{color:var(--ambar)}
-.at.info{border-color:#1b3a4a;background:#0d1b23}.at.info .n{color:var(--azul)}
+.at.hot{border-color:var(--coral-borda);background:var(--coral-fundo)}.at.hot .n{color:var(--coral)}
+.at.warn{border-color:var(--ambar-borda);background:var(--ambar-fundo)}.at.warn .n{color:var(--ambar)}
+.at.info{border-color:var(--azul-borda);background:var(--azul-fundo)}.at.info .n{color:var(--azul)}
 
 /* ---------- visão: período, leads por dia, barras (24/09/2026) ---------- */
 .perpainel{margin:-.3rem 1.1rem .9rem;background:var(--surface);border:1px solid var(--line);
@@ -470,7 +507,7 @@ b,strong{font-weight:600}
 .dias .d b{font-family:var(--mono);font-size:.56rem;color:var(--text-dim);margin-bottom:2px}
 .dias .d i{width:100%;display:block;border-radius:3px 3px 0 0;min-height:2px;
   background:linear-gradient(0deg,var(--neon-deep),var(--neon))}
-.dias .d.fds i{background:#2c4a3a}
+.dias .d.fds i{background:var(--neon-fundo)}
 .dias .d.ult i{background:var(--neon);box-shadow:0 0 10px rgba(37,211,102,.35)}
 .rotd{display:grid;gap:2px;text-align:center;font-size:.52rem;line-height:1.2;color:var(--text-faint);margin-top:3px}
 .rotd .fds{opacity:.6}
@@ -483,10 +520,10 @@ b,strong{font-weight:600}
 .hb div{display:grid;grid-template-columns:104px 1fr 30px;gap:.45rem;align-items:center;padding:.18rem 0}
 .hb span{color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hb i{display:block;height:8px;border-radius:99px;background:linear-gradient(90deg,var(--neon-deep),var(--neon))}
-.hb i.ci,.hb i.apagado{background:#3a3f45}
+.hb i.ci,.hb i.apagado{background:var(--line)}
 .hb i.alerta{background:var(--ambar)}
 .hb b{font-family:var(--mono);text-align:right}
-.alerta{margin-top:.6rem;background:#241c0f;border:1px solid #5a4520;color:#f0cf85;border-radius:11px;
+.alerta{margin-top:.6rem;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:var(--ambar);border-radius:11px;
   padding:.55rem .65rem;font-size:.74rem;line-height:1.4}
 .eyebrow .lidos{color:var(--text-faint);letter-spacing:.04em;text-transform:none}
 /* "Por que perdemos" com link (24/09/2026): cada motivo abre os leads dele */
@@ -509,19 +546,19 @@ b,strong{font-weight:600}
 .ad{background:var(--surface);border:1px solid var(--line);border-radius:14px;margin-bottom:.5rem}
 .ad>summary{list-style:none;padding:.65rem .75rem;cursor:pointer}
 .ad>summary::-webkit-details-marker{display:none}
-.ad.ruim{border-color:#6b3530}
+.ad.ruim{border-color:var(--coral-borda)}
 .ad .l1{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
 .cod{font-family:var(--mono);font-size:.74rem;background:var(--neon-fraco);color:var(--neon);
   border:1px solid var(--neon-deep);border-radius:5px;padding:.05rem .4rem}
-.cod.sem{background:transparent;color:var(--ambar);border-color:#5a4520;font-style:italic;font-family:inherit}
+.cod.sem{background:transparent;color:var(--ambar);border-color:var(--ambar-borda);font-style:italic;font-family:inherit}
 .ad .rs{font-family:var(--mono);font-size:.8rem;font-weight:700;color:var(--neon);white-space:nowrap}
 .ad .rs.zero{color:var(--text-faint);font-weight:500}
 .ad .l2{font-size:.74rem;color:var(--text-dim);margin-top:.3rem}
 .ad .l2 b{color:var(--text);font-weight:600}
 .an-chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.45rem}
 .an-chip{font-size:.64rem;padding:.12rem .5rem;border-radius:999px;border:1px solid var(--line);color:var(--text-dim);white-space:nowrap}
-.an-chip.ruim{background:#2e1715;border-color:#6b3530;color:#f0a79c}
-.an-chip.am{background:#241c0f;border-color:#5a4520;color:#f0cf85}
+.an-chip.ruim{background:var(--coral-fundo);border-color:var(--coral-borda);color:var(--coral)}
+.an-chip.am{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:var(--ambar)}
 .ad .abre{border-top:1px solid var(--line);padding:.55rem .75rem .7rem}
 .ad .abre .t{font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-faint);margin:.55rem 0 .3rem}
 .ad .abre .t:first-child{margin-top:0}
@@ -536,8 +573,8 @@ b,strong{font-weight:600}
 .pd-tit{padding:0 1.1rem;font-size:1.05rem;font-weight:700}
 .pd-tit small{display:block;font-size:.72rem;color:var(--text-faint);font-weight:400;margin-top:.1rem}
 .datas{display:flex;flex-wrap:wrap;gap:.3rem}
-.dt{font-family:var(--mono);font-size:.72rem;padding:.2rem .45rem;border-radius:8px;background:#241c0f;
-  border:1px solid #5a4520;color:#f0cf85}
+.dt{font-family:var(--mono);font-size:.72rem;padding:.2rem .45rem;border-radius:8px;background:var(--ambar-fundo);
+  border:1px solid var(--ambar-borda);color:var(--ambar)}
 .dt.passou{opacity:.45}
 .dt.abriu{background:var(--neon-fraco);border-color:var(--neon-deep);color:var(--neon)}
 .pl{background:var(--surface);border:1px solid var(--line);border-radius:13px;margin:0 1.1rem .5rem;padding:.6rem .7rem}
@@ -577,7 +614,7 @@ b,strong{font-weight:600}
   border:1px solid var(--line);border-bottom:0;display:grid;place-items:center;
   font-family:var(--display);font-weight:800;font-size:.9rem;color:var(--text-faint)}
 .pod.p1 .base{height:62px;background:linear-gradient(180deg,rgba(37,211,102,.18),transparent);
-  border-color:#1e4a3a;color:var(--neon)}
+  border-color:var(--neon-borda);color:var(--neon)}
 .pod.p1 .av{width:46px;height:46px;font-size:1.05rem;box-shadow:0 0 18px rgba(37,211,102,.4)}
 .pod.p2 .base{height:44px}.pod.p3 .base{height:32px}
 .linha{display:flex;align-items:center;gap:.7rem;padding:.75rem 1.1rem;border-bottom:1px solid var(--line)}
@@ -589,17 +626,17 @@ b,strong{font-weight:600}
 .linha .rt{text-align:right;flex-shrink:0}
 .linha .rt .g{font-family:var(--mono);font-weight:700;color:var(--neon);font-size:.9rem}
 .linha .rt small{display:block;color:var(--text-faint);font-size:.66rem}
-.pausado{color:var(--ambar);border:1px solid #5a4520;background:#241c0f;border-radius:999px;
+.pausado{color:var(--ambar);border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:999px;
   padding:0 .35rem;font-size:.62rem}
 
 /* ---------- feed ---------- */
 .ev{display:flex;gap:.7rem;align-items:flex-start;padding:.7rem 1.1rem;border-bottom:1px solid var(--line)}
 .ev .ic{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:grid;place-items:center;
   background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
-.ev.ganho .ic{background:rgba(37,211,102,.12);border-color:#1e4a3a;color:var(--neon)}
-.ev.perdido .ic{background:#241313;border-color:#5a2b2b;color:var(--coral)}
-.ev.visita .ic{background:#0d1b23;border-color:#1b3a4a;color:var(--azul)}
-.ev.prop .ic{background:#1a1226;border-color:#3a2b52;color:var(--roxo)}
+.ev.ganho .ic{background:rgba(37,211,102,.12);border-color:var(--neon-borda);color:var(--neon)}
+.ev.perdido .ic{background:var(--coral-fundo);border-color:var(--coral-borda);color:var(--coral)}
+.ev.visita .ic{background:var(--azul-fundo);border-color:var(--azul-borda);color:var(--azul)}
+.ev.prop .ic{background:var(--roxo-fundo);border-color:var(--roxo-borda);color:var(--roxo)}
 .ev .tx{flex:1;font-size:.85rem;padding-top:.15rem}
 
 /* ---------- filtros ---------- */
@@ -626,7 +663,7 @@ b,strong{font-weight:600}
 .vis .mid b{font-size:.9rem;display:block}
 .vis .mid .loc{font-size:.76rem;color:var(--text-dim);margin-top:.1rem}
 /* o cartão da visita que a IA combinou (migração 259) */
-.vp{border:1px solid var(--azul-borda,#1B3A4A);background:var(--azul-fundo,#0D1B23);
+.vp{border:1px solid var(--azul-borda,var(--azul-borda));background:var(--azul-fundo,var(--azul-fundo));
   border-radius:12px;padding:.7rem .8rem;margin:.6rem 0}
 .vp-tt{font-size:.84rem;font-weight:600}
 .vp-q{font-size:.8rem;color:var(--text-dim);margin-top:.25rem}
@@ -637,7 +674,7 @@ b,strong{font-weight:600}
 .vp-b{font:inherit;font-size:.78rem;padding:.35rem .7rem;border-radius:9px;margin:0;width:auto;
   border:1px solid var(--line);background:transparent;color:var(--text-dim);cursor:pointer;
   text-decoration:none;display:inline-flex;align-items:center}
-.vp-b.ok{background:var(--neon);color:var(--sobre-verde,#04150C);border-color:var(--neon);font-weight:700}
+.vp-b.ok{background:var(--neon);color:var(--sobre-verde,var(--sobre-verde));border-color:var(--neon);font-weight:700}
 .vp-b:disabled{opacity:.5}
 .acoes{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
 .acoes a{font-size:.74rem;padding:.3rem .65rem;border-radius:9px;border:1px solid var(--line);
@@ -646,7 +683,7 @@ b,strong{font-weight:600}
 .acoes a.acao-forte{border-color:var(--neon-borda);background:var(--neon-fundo);
   color:var(--neon);font-weight:600}
 .acoes a.acao-apagar{border-color:var(--coral-borda);background:var(--coral-fundo);
-  color:#f0b8b8;font-weight:600}
+  color:var(--coral);font-weight:600}
 /* "hoje está marcada pra" — o de-para tem que estar à vista na hora de escolher a
    data nova, senão a pessoa remarca sem lembrar de quando era. */
 .agora-e{background:var(--bg-2);border:1px solid var(--line);border-radius:11px;
@@ -668,14 +705,14 @@ b,strong{font-weight:600}
   box-shadow:0 8px 30px rgba(37,211,102,.32)}
 .btn:active{transform:translateY(1px)}
 .btn.ghost{background:transparent;color:var(--text-dim);border:1px solid var(--line);box-shadow:none;font-weight:600}
-.btn.perigo{background:transparent;color:var(--coral);border:1px solid #5a2b2b;box-shadow:none}
+.btn.perigo{background:transparent;color:var(--coral);border:1px solid var(--coral-borda);box-shadow:none}
 /* tela de Pagamentos: o estado de cada parcela, e o anexo.
    `.arq` é um <label> vestido de botão porque o <input type=file> não se estiliza
    — o input fica escondido dentro dele e o toque no label é que o abre. */
 .pill{align-self:flex-start;font-family:var(--mono);font-size:.68rem;letter-spacing:.04em;
   text-transform:uppercase;padding:.16rem .5rem;border-radius:999px;border:1px solid}
 .pill.ok{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fraco)}
-.pill.falta{color:var(--coral);border-color:#5a2b2b;background:rgba(224,122,95,.1)}
+.pill.falta{color:var(--coral);border-color:var(--coral-borda);background:rgba(224,122,95,.1)}
 .pill.esp{color:var(--text-faint);border-color:var(--line);background:transparent}
 .btn.arq{font-size:.86rem;padding:.6rem;box-shadow:none}
 .btn.arq.on{opacity:.6}
@@ -689,19 +726,19 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
    RESOLVER, não consultar. Some no instante em que ele responde. */
 .pend-tit{display:flex;align-items:center;gap:.4rem;font-size:.7rem;text-transform:uppercase;
   letter-spacing:.06em;color:var(--coral);font-weight:700;padding:.2rem .2rem .55rem}
-.pend-tit .cnt{font-family:var(--mono);background:var(--coral-fundo);color:#F0B8B8;
+.pend-tit .cnt{font-family:var(--mono);background:var(--coral-fundo);color:var(--coral);
   border:1px solid var(--coral-borda);border-radius:99px;padding:0 .38rem;font-size:.7rem}
 .pend{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:12px;
   padding:.7rem .8rem;display:flex;flex-direction:column;gap:.55rem;margin-bottom:.5rem}
 .pend-top{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem}
-.pend-top b{font-size:.9rem;color:#F6D3D0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pend-top span{font-family:var(--mono);font-size:.7rem;color:#D9AEAA;flex-shrink:0}
-.pend-q{font-size:.82rem;color:#E8C4C1}
+.pend-top b{font-size:.9rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pend-top span{font-family:var(--mono);font-size:.7rem;color:var(--coral);flex-shrink:0}
+.pend-q{font-size:.82rem;color:var(--text-2)}
 .pend-bts{display:grid;grid-template-columns:1fr 1fr;gap:.45rem}
 .pb{padding:.55rem;border-radius:9px;font-size:.82rem;font-weight:600;border:1px solid;
   font-family:inherit;cursor:pointer}
 .pb.sim{background:var(--neon-fundo);color:var(--neon-bright);border-color:var(--neon-borda)}
-.pb.nao{background:#241313;color:#F0B8B8;border-color:var(--coral-borda)}
+.pb.nao{background:var(--coral-fundo);color:var(--coral);border-color:var(--coral-borda)}
 .pb:disabled{opacity:.5}
 /* O par de APOIO (Remarcar / Abrir o lead). Sem preenchimento de propósito: o cartão
    existe pra arrancar a RESPOSTA, e o comparecimento é o número que o relatório do
@@ -712,18 +749,18 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   text-align:center;text-decoration:none;display:block;font-family:inherit}
 .pend.feito{border-color:var(--line);background:var(--surface)}
 .pend.feito .pend-top b,.pend.feito .pend-q{color:var(--text-dim)}
-.pend .rea{grid-column:1/-1;background:var(--ambar-fundo);color:#F0DCA6;
+.pend .rea{grid-column:1/-1;background:var(--ambar-fundo);color:var(--ambar);
   border-color:var(--ambar-borda);text-align:center;display:block;text-decoration:none;
   padding:.55rem;border-radius:9px;font-size:.82rem;font-weight:600;border:1px solid}
 
 /* ---------- chat (tela do lead) ---------- */
 .chat{flex:1;overflow-y:auto;padding:.9rem 1.1rem;display:flex;flex-direction:column;gap:.5rem;
-  background:#0B141A;position:relative;z-index:1}
+  background:var(--azul-fundo);position:relative;z-index:1}
 .bub{max-width:82%;padding:.5rem .75rem;border-radius:13px;font-size:.87rem;white-space:pre-wrap;
   word-break:break-word}
-.bub.in{align-self:flex-start;background:#1F2C25;border-bottom-left-radius:4px}
-.bub.out{align-self:flex-end;background:#0A5C49;border-bottom-right-radius:4px}
-.bub.ia{align-self:flex-end;background:#1a1226;border:1px solid #3a2b52;border-bottom-right-radius:4px}
+.bub.in{align-self:flex-start;background:var(--neon-fundo);border-bottom-left-radius:4px}
+.bub.out{align-self:flex-end;background:var(--bolha-sai);border-bottom-right-radius:4px}
+.bub.ia{align-self:flex-end;background:var(--roxo-fundo);border:1px solid var(--roxo-borda);border-bottom-right-radius:4px}
 .bub .who{font-size:.64rem;color:var(--text-faint);margin-bottom:.15rem}
 /* A HORA, como no WhatsApp: pequena, no rodapé da bolha, alinhada à direita.
    `float:right` e não flex porque a bolha é `white-space:pre-wrap` com texto
@@ -737,7 +774,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
    mostrava: o vendedor abria o WhatsApp do celular só pra saber se chegou.
    O azul é o mesmo do WhatsApp; fora do lido, o tom segue o da hora. */
 .bub .hora .ck{font-style:normal;margin-left:.2rem;letter-spacing:-.08em}
-.bub .hora .ck.lido{color:#53BDEB;opacity:1}
+.bub .hora .ck.lido{color:var(--azul);opacity:1}
 /* A TARJA DO DIA. Fica fora das bolhas, centralizada, e é o que impede a conversa
    de virar uma fila sem tempo: sem ela "20:28" pode ser hoje ou de três semanas
    atrás, e o vendedor abriria o WhatsApp do celular só pra saber. */
@@ -797,12 +834,12 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .lupa[hidden]{display:none}
 .lupa img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
 .lupa .fechar{position:absolute;top:calc(env(safe-area-inset-top) + 10px);right:14px;
-  width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.14);color:#fff;
+  width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.14);color:var(--text);
   border:0;font-size:1.1rem;line-height:1;display:grid;place-items:center}
 /* o original abre no visualizador do próprio celular — é lá que existe pinça pra
    ampliar de verdade e "salvar imagem", que a gente não vai reimplementar */
 .lupa .abrir{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 14px);
-  left:50%;transform:translateX(-50%);font-size:.78rem;color:#fff;opacity:.85;
+  left:50%;transform:translateX(-50%);font-size:.78rem;color:var(--text);opacity:.85;
   text-decoration:underline;text-underline-offset:3px}
 /* a mensagem que já está na tela mas ainda não voltou do servidor */
 /* A BOLHA QUE ESTÁ SUBINDO. Não é `.voando` (aquela é do texto, que recarrega a
@@ -914,7 +951,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 /* LISTA DE ESPERA POR DATA (finance/lista_espera): a data pedida já tem festa.
    A pílula diz o problema; as datas livres são a resposta pronta pro cliente. */
 .le{margin:.35rem .8rem 0;border:1px solid var(--coral-borda);background:var(--coral-fundo);
-  border-radius:11px;padding:.5rem 2.3rem .5rem .65rem;font-size:.76rem;color:#F2BDB9;display:flex;
+  border-radius:11px;padding:.5rem 2.3rem .5rem .65rem;font-size:.76rem;color:var(--coral);display:flex;
   flex-direction:column;gap:.35rem;position:relative}
 .le.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
 .le b{font-weight:600}
@@ -994,7 +1031,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .rx-meta .bar i{display:block;height:100%;background:var(--neon)}
 .rx-meta.ok b,.rx-meta.ok em{color:var(--neon-bright)}
 .rx-meta.amb b,.rx-meta.amb em{color:var(--ambar)}.rx-meta.amb .bar i{background:var(--ambar)}
-.rx-meta.ruim b,.rx-meta.ruim em{color:#F2BDB9}.rx-meta.ruim .bar i{background:var(--coral)}
+.rx-meta.ruim b,.rx-meta.ruim em{color:var(--coral)}.rx-meta.ruim .bar i{background:var(--coral)}
 .rx-ey{padding:.6rem 1.1rem .2rem;font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);font-weight:600;display:flex;justify-content:space-between}
 .rx-lead{display:flex;gap:.6rem;padding:.6rem 1.1rem;border-bottom:1px solid var(--line);font-size:.8rem;align-items:flex-start;color:inherit;text-decoration:none}
 .rx-lead .dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:.4rem;background:var(--text-faint)}
@@ -1004,21 +1041,21 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .rx-lead .emp{font-weight:600;font-size:.88rem}
 .rx-lead .por{color:var(--text-dim);font-size:.74rem;overflow-wrap:anywhere}
 .rx-lead .acao{flex:none;font-family:var(--mono);font-size:.66rem;font-weight:600;color:var(--neon-bright);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:999px;padding:.2rem .55rem;white-space:nowrap}
-.rx-lead.festa .acao,.rx-lead.toque .acao{color:#F0DCA6;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.rx-lead.festa .acao,.rx-lead.toque .acao{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
 .rx-fecha{margin:.3rem 1.1rem;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.6rem .7rem;font-size:.78rem;display:block;color:inherit;text-decoration:none}
 .rx-fecha .t{display:flex;justify-content:space-between;gap:.5rem;font-weight:600}
 .rx-fecha .t small{font-family:var(--mono);font-size:.64rem;color:var(--text-faint);font-weight:500;white-space:nowrap}
 .rx-fecha p{margin:.2rem 0 0;color:var(--text-dim);font-size:.72rem}
 .rx-fecha.ok{border-left:3px solid var(--neon)}.rx-fecha.amb{border-left:3px solid var(--ambar)}.rx-fecha.ruim{border-left:3px solid var(--coral)}
 .rx-fecha .bt{display:inline-block;margin-top:.4rem;font-family:var(--mono);font-size:.64rem;font-weight:600;color:var(--neon-bright);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:999px;padding:.18rem .55rem}
-.rx-dado{margin:.5rem 1.1rem .3rem;padding:.5rem .65rem;border-radius:10px;background:#122029;border:1px solid #1f3a4d;font-family:var(--mono);font-size:.62rem;line-height:1.45;color:#7bb8e6}
+.rx-dado{margin:.5rem 1.1rem .3rem;padding:.5rem .65rem;border-radius:10px;background:var(--azul-fundo);border:1px solid var(--azul-borda);font-family:var(--mono);font-size:.62rem;line-height:1.45;color:var(--azul)}
 .rx-vazio{margin:.3rem 1.1rem;font-size:.78rem;color:var(--text-dim)}
 .rx-dobra{margin:.4rem 1.1rem;border:1px dashed var(--line);border-radius:10px;padding:.45rem .6rem;font-size:.72rem;color:var(--text-dim);display:flex;justify-content:space-between;background:var(--bg-2)}
 /* "este número tem outra conversa". Fica FORA do .chat de propósito: a conversa
    nasce rolada no fim (ver o script do rodapé), então um aviso no topo do
    histórico nunca seria lido por ninguém. */
 .dupla{margin:.35rem 1.1rem 0;padding:.5rem 2.3rem .5rem .7rem;border-radius:11px;font-size:.76rem;
-  background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6;position:relative}
+  background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:var(--ambar);position:relative}
 .dupla b{color:var(--text)}
 .dupla a{color:var(--ambar);text-decoration:underline}
 /* a campanha rodando nos dois chips não é defeito: mesma faixa, tom neutro */
@@ -1064,8 +1101,8 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
    entrega tudo pelo Zaq. Em vez de inventar um quarto botão só pra emparelhar, o
    último ocupa a linha inteira. */
 .grade a:last-child:nth-child(odd),.grade .off:last-child:nth-child(odd){grid-column:1/-1}
-.grade a.orc{border-color:#1e4a3a;color:var(--neon);background:rgba(37,211,102,.08);font-weight:600}
-.grade a.vis2{border-color:#1b3a4a;color:var(--azul);background:#0d1b23;font-weight:600}
+.grade a.orc{border-color:var(--neon-borda);color:var(--neon);background:rgba(37,211,102,.08);font-weight:600}
+.grade a.vis2{border-color:var(--azul-borda);color:var(--azul);background:var(--azul-fundo);font-weight:600}
 /* AS RESPOSTAS RÁPIDAS (migração 301): a folha que sobe do rodapé com o que o
    vendedor manda o dia inteiro. Abre por JS, não por `:target` — o salto de
    âncora rola o `.wrap` e empurra a tela (foi o defeito do #759). */
@@ -1088,8 +1125,8 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
    no cabeçalho da conversa — visível sempre, até com o agente atendendo — e abre
    uma folha no molde da .resp. Lilás é o que a IA escreveu; verde é fato do
    sistema. A linha do [hidden] é obrigatória pelo mesmo motivo da .resp. */
-.iabtn{flex-shrink:0;font:600 .72rem var(--body);color:var(--roxo);border:1px solid #3a2b52;
-  background:#1a1226;border-radius:999px;padding:.28rem .6rem;cursor:pointer;white-space:nowrap}
+.iabtn{flex-shrink:0;font:600 .72rem var(--body);color:var(--roxo);border:1px solid var(--roxo-borda);
+  background:var(--roxo-fundo);border-radius:999px;padding:.28rem .6rem;cursor:pointer;white-space:nowrap}
 .iafundo{position:fixed;inset:0;z-index:29;background:rgba(0,0,0,.5)}
 .iafolha{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:520px;
   z-index:30;background:var(--bg-2);border-top:1px solid var(--line);border-radius:18px 18px 0 0;
@@ -1100,17 +1137,17 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
   font-size:.84rem;line-height:1.45}
 .iafatos{display:flex;flex-wrap:wrap;gap:.3rem}
 .iachip{font-size:.68rem;border-radius:999px;padding:.1rem .5rem;border:1px solid var(--line);color:var(--text-dim)}
-.iachip.bola{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F2C66E}
+.iachip.bola{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
 .iachip.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
 .iarot{font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--roxo);margin-bottom:.15rem}
 .iabl ul{margin:0;padding-left:1.05rem}
 .iabl li::marker{color:var(--roxo)}
-.iapasso{border:1px solid #4a3163;background:#1c1428;border-radius:10px;padding:.5rem .65rem;color:#E3CCF2;font-weight:600}
-.ianaosei{border:1px dashed var(--ambar-borda);border-radius:10px;padding:.45rem .6rem;font-size:.78rem;color:#F2C66E}
+.iapasso{border:1px solid var(--roxo-borda);background:var(--roxo-fundo);border-radius:10px;padding:.5rem .65rem;color:var(--text-2);font-weight:600}
+.ianaosei{border:1px dashed var(--ambar-borda);border-radius:10px;padding:.45rem .6rem;font-size:.78rem;color:var(--ambar)}
 .iacaixa{width:100%;min-height:6rem;resize:vertical;background:var(--bg);border:1px solid var(--line);border-radius:10px;
   color:var(--text);padding:.55rem .6rem;font-family:inherit;font-size:.84rem;line-height:1.45}
-.iafaixa{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#F2C66E;border-radius:8px;padding:.4rem .55rem;font-size:.76rem}
-.iaerro{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:#F5C9C4;border-radius:8px;padding:.4rem .55rem;font-size:.76rem}
+.iafaixa{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar);border-radius:8px;padding:.4rem .55rem;font-size:.76rem}
+.iaerro{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral);border-radius:8px;padding:.4rem .55rem;font-size:.76rem}
 .iask{height:9px;border-radius:5px;background:linear-gradient(90deg,var(--surface),var(--line),var(--surface));
   background-size:200% 100%;animation:iask 1.4s linear infinite}
 @keyframes iask{to{background-position:-200% 0}}
@@ -1118,7 +1155,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .iape{display:flex;gap:.45rem}
 .iape .btn{flex:1;margin:0}
 .iadica{font-size:.7rem;color:var(--text-dim)}
-.iatag{font-size:.7rem;color:#E3CCF2;display:flex;gap:.45rem;align-items:center;padding:0 .2rem .35rem}
+.iatag{font-size:.7rem;color:var(--text-2);display:flex;gap:.45rem;align-items:center;padding:0 .2rem .35rem}
 .iatag button{background:none;border:0;color:var(--text-dim);text-decoration:underline;font:inherit;cursor:pointer;padding:0}
 /* o aviso de quem é o quê: a folha mistura as da empresa com as do vendedor, e
    sem uma linha explicando ele lê a diferença (umas com ✕, outras com 🔒) como
@@ -1136,7 +1173,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
   border-radius:11px;padding:.5rem .7rem;color:var(--text);cursor:pointer;display:block}
 .respusar:active{background:var(--bg)}
 .respt{display:block;font-size:.82rem;font-weight:600;margin-bottom:.1rem}
-.respt em{font-style:normal;font-size:.6rem;color:var(--neon);border:1px solid #1e4a3a;
+.respt em{font-style:normal;font-size:.6rem;color:var(--neon);border:1px solid var(--neon-borda);
   border-radius:999px;padding:0 .35rem;margin-left:.3rem;vertical-align:middle}
 .respx{display:block;font-size:.74rem;color:var(--text-dim);line-height:1.35;
   overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
@@ -1207,7 +1244,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 }
 
 /* ---------- abas de baixo ---------- */
-.tabs{display:flex;flex-shrink:0;border-top:1px solid var(--line);background:rgba(10,15,12,.92);
+.tabs{display:flex;flex-shrink:0;border-top:1px solid var(--line);background:rgba(10,15,12,.92);background:color-mix(in srgb,var(--bg) 92%,transparent);
   backdrop-filter:blur(12px);padding-bottom:var(--fundo-seguro);position:relative;z-index:2}
 .tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:.5rem 0 .45rem;
   color:var(--text-faint);font-size:.62rem;position:relative}
@@ -1226,9 +1263,9 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
    de badge do ícone do app não existe — e serve de reforço no iOS. Fica absoluto
    pra não empurrar o ícone nem mudar a altura da barra. */
 .tabs .tsel{position:absolute;top:.16rem;left:50%;margin-left:.28rem;min-width:15px;height:15px;
-  padding:0 .22rem;border-radius:999px;background:var(--coral);color:#fff;font-family:var(--mono);
+  padding:0 .22rem;border-radius:999px;background:var(--coral);color:var(--text);font-family:var(--mono);
   font-size:.58rem;font-weight:700;line-height:15px;text-align:center;
-  box-shadow:0 0 0 2px rgba(10,15,12,.92)}
+  box-shadow:0 0 0 2px rgba(10,15,12,.92);box-shadow:0 0 0 2px color-mix(in srgb,var(--bg) 92%,transparent)}
 .tabs a.on .ic{filter:drop-shadow(0 0 6px rgba(37,211,102,.5))}
 .ic{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
   stroke-linecap:round;stroke-linejoin:round}
@@ -1266,7 +1303,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 /* botão de novo lead: flutua acima das abas. Fixo e não no cabeçalho porque lá o
    `direita` já é o selo da conta — e o polegar alcança melhor embaixo à direita. */
 .fab{position:fixed;right:16px;bottom:84px;z-index:40;width:52px;height:52px;
-  border-radius:50%;background:var(--neon);color:#04150c;display:flex;align-items:center;
+  border-radius:50%;background:var(--neon);color:var(--sobre-verde);display:flex;align-items:center;
   justify-content:center;font-size:1.7rem;font-weight:400;line-height:1;text-decoration:none;
   box-shadow:0 6px 20px rgba(0,0,0,.45);touch-action:manipulation}
 .fab:active{transform:scale(.94)}
@@ -1428,7 +1465,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 /* a pílula de escape: as 14 de sempre são só os próximos dias — pra visita
    marcada mais adiante (o cliente pediu "daqui a três semanas"), esta abre um
    campo de data de verdade, sem limite nenhum. */
-.esc.outra{border-style:dashed;border-color:#3a4a42}
+.esc.outra{border-style:dashed;border-color:var(--neon-borda)}
 .esc.outra.on{border-style:solid}
 #dia-outro{display:none;width:100%;margin-top:.5rem;background:var(--bg-2);
   border:1px solid var(--line);border-radius:9px;color:var(--text);
@@ -1452,8 +1489,8 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 
 /* ---------- recado da última ação ---------- */
 .flash{margin:.7rem 1.1rem 0;padding:.6rem .8rem;border-radius:12px;font-size:.84rem}
-.flash.ok{background:rgba(37,211,102,.12);border:1px solid #1e4a3a;color:var(--neon)}
-.flash.err{background:#241313;border:1px solid #5a2b2b;color:var(--coral)}
+.flash.ok{background:rgba(37,211,102,.12);border:1px solid var(--neon-borda);color:var(--neon)}
+.flash.err{background:var(--coral-fundo);border:1px solid var(--coral-borda);color:var(--coral)}
 
 /* ---------- entrar (senha + link) ---------- */
 .login{flex:1;display:flex;flex-direction:column;justify-content:center;padding:2.4rem 1.6rem;
@@ -1479,7 +1516,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .login .chk{display:flex;align-items:center;gap:.5rem;justify-content:center;
   color:var(--text-dim);font-size:.85rem;margin-top:.7rem;cursor:pointer}
 .login .chk input{width:auto;accent-color:var(--neon);margin:0}
-.login .erro{background:#2A1613;border:1px solid #5A2A22;color:#E8705C;border-radius:10px;
+.login .erro{background:var(--coral-fundo);border:1px solid var(--coral-borda);color:var(--coral);border-radius:10px;
   padding:.6rem .75rem;font-size:.82rem;margin-bottom:.4rem}
 .login .nota{background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--neon);
   border-radius:10px;padding:.6rem .75rem;font-size:.82rem;margin-bottom:.4rem}
@@ -1559,7 +1596,14 @@ def _ic(nome: str, cls: str = "ic") -> str:
 #
 # A versão sai do CONTEÚDO: mudou o CSS, muda a URL, e o navegador busca a nova
 # sem ninguém precisar lembrar de virar um número à mão.
-_CSS_TEXTO = _CSS[len(_tema.FONTES):].replace("<style>", "", 1).rsplit("</style>", 1)[0]
+# Os TEMAS (claro, misto, automático: web/tema.py) entram no FIM da folha servida,
+# não no `_CSS`: só valem com `data-tema` no <html>, e os seletores deles são mais
+# específicos que as regras do app, então a ordem não muda nada na tela. No fim,
+# a primeira `.tabs{` da folha continua sendo a regra do app, que é o que os testes
+# de layout procuram (tests/test_cockpit_rodape_android.py). No misto, o "menu" do
+# Cockpit é o cabeçalho e a barra de abas.
+_CSS_TEXTO = (_CSS[len(_tema.FONTES):].replace("<style>", "", 1).rsplit("</style>", 1)[0]
+              + _tema.temas(menu=(".hdr", ".tabs")))
 _CSS_VER = _hashlib.sha1(_CSS_TEXTO.encode()).hexdigest()[:10]
 
 
@@ -1616,11 +1660,12 @@ def cockpit_css():
 def _page(title: str, corpo: str) -> HTMLResponse:
     """O documento. Leva manifest + service worker porque este app é pra instalar
     na tela inicial do celular do vendedor — é o caminho normal de uso dele."""
+    attr_tema, barra = _cabeca_do_tema()
     return HTMLResponse(
-        "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
+        f"<!doctype html><html lang=pt-br{attr_tema}><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover"
         ",interactive-widget=resizes-content'>"
-        "<meta name=theme-color content='#0A0F0C'><meta name=robots content=noindex>"
+        + barra + "<meta name=robots content=noindex>"
         "<link rel=manifest href='/cockpit/manifest.webmanifest'>"
         "<link rel='apple-touch-icon' href='/cockpit/icon.svg'>"
         "<meta name='apple-mobile-web-app-capable' content=yes>"
@@ -2519,12 +2564,12 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
             stands_atalho = (
                 f"<a href='{_BASE}/stands' style=\"display:flex;align-items:center;"
                 "gap:.6rem;margin:.6rem .8rem 0;padding:.6rem .8rem;border:1px solid "
-                "var(--line,#1E2A23);border-radius:12px;background:var(--surface,#121A16);"
+                "var(--line,#1E2A23);border-radius:12px;background:var(--surface,var(--surface));"
                 "text-decoration:none;color:inherit\">🗺️<span style='flex:1;min-width:0'>"
                 "<b style='display:block;font-size:.9rem'>Mapa de stands</b>"
                 f"<span style='font-size:.76rem;color:var(--text-dim,#8FA197)'>{_livres} "
                 "livres agora — toca pra ver a planta e copiar seu link de vendas</span></span>"
-                "<span style='color:var(--neon,#25D366);font-weight:700'>→</span></a>")
+                "<span style='color:var(--neon,var(--neon));font-weight:700'>→</span></a>")
     except Exception:  # noqa: BLE001 — atalho é enfeite; a fila abre sem ele
         pass
 
@@ -3076,9 +3121,9 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
     except Exception:  # noqa: BLE001
         conf_on, selo_lead = False, {}
 
-    _TAG = {"visita": ("visita", "var(--azul)", "var(--azul-borda)", "#0d1b23"),
-            "pre": ("pré-reserva", "var(--ambar)", "#5a4520", "#241c0f"),
-            "reservado": ("reservado", "var(--neon)", "#1e4a3a", "#10241a")}
+    _TAG = {"visita": ("visita", "var(--azul)", "var(--azul-borda)", "var(--azul-fundo)"),
+            "pre": ("pré-reserva", "var(--ambar)", "var(--ambar-borda)", "var(--ambar-fundo)"),
+            "reservado": ("reservado", "var(--neon)", "var(--neon-borda)", "var(--neon-fundo)")}
 
     def bloco(v):
         acoes = []
@@ -5246,7 +5291,7 @@ def cockpit_orcamento(request: Request, orc_id: int):
 
     aprovada = ""
     if o["aprovada_em"]:
-        aprovada = ("<div class=bloco><div class='card' style='border-color:#1e4a3a;"
+        aprovada = ("<div class=bloco><div class='card' style='border-color:var(--neon-borda);"
                     "background:rgba(37,211,102,.08)'><b style='color:var(--neon)'>" + _P('cliente') + " aprovou</b>"
                     f"<div class=mut style='font-size:.8rem'>{esc(o['aprovada_por'])}"
                     f" · {esc(_data(o['aprovada_em']))}</div></div></div>")
@@ -9479,7 +9524,7 @@ _SW_OFFLINE = ("<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
                "<meta name=viewport content='width=device-width,initial-scale=1'>"
                "<title>Sem conexão · Zaq</title></head>"
                "<body style='margin:0;min-height:100vh;display:grid;place-items:center;"
-               "background:#0A0F0C;color:#E8EFEA;font:16px system-ui,sans-serif;text-align:center'>"
+               "background:var(--bg);color:var(--text);font:16px system-ui,sans-serif;text-align:center'>"
                "<div style='padding:2rem'><div style='font-size:2rem'>📶</div>"
                "<p style='margin:.6rem 0 1.2rem'>Sem conexão agora.<br>"
                "Assim que a internet voltar, a tela abre.</p>"
@@ -9635,29 +9680,29 @@ def painel_equipe_cockpit_link(request: Request, membro_id: int = Form(...)):
 
 _STANDS_CSS = """<style>
 .stmeu{display:flex;align-items:center;gap:.7rem;margin:.7rem .8rem 0;padding:.7rem .8rem;
-  border:1px solid var(--neon,#25D366);border-radius:12px;background:rgba(37,211,102,.08)}
+  border:1px solid var(--neon,var(--neon));border-radius:12px;background:rgba(37,211,102,.08)}
 .stmeu-t{flex:1;min-width:0}
 .stmeu-t b{display:block;font-size:.88rem}
-.stmeu-t span{display:block;font-size:.74rem;color:var(--text-dim,#8FA197);line-height:1.4;margin-top:2px}
+.stmeu-t span{display:block;font-size:.74rem;color:var(--text-dim,var(--text-dim));line-height:1.4;margin-top:2px}
 .stmeu button{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem;
-  padding:9px 14px;border-radius:9px;border:1px solid var(--neon,#25D366);width:auto;min-height:0;margin:0;
-  background:var(--neon,#25D366);color:#04150C;flex:0 0 auto}
+  padding:9px 14px;border-radius:9px;border:1px solid var(--neon,var(--neon));width:auto;min-height:0;margin:0;
+  background:var(--neon,#25D366);color:var(--sobre-verde);flex:0 0 auto}
 .stpav{display:flex;gap:8px;flex-wrap:wrap;padding:.7rem .8rem 0}
 .stpav button{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem;
-  padding:8px 12px;border-radius:999px;border:1px solid var(--line,#1E2A23);
-  background:var(--surface,#121A16);color:var(--text-dim,#8FA197);width:auto;min-height:0;margin:0}
-.stpav button.on{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
-.stleg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:.6rem .9rem;font-size:.74rem;color:var(--text-dim,#8FA197)}
+  padding:8px 12px;border-radius:999px;border:1px solid var(--line,var(--line));
+  background:var(--surface,var(--surface));color:var(--text-dim,var(--text-dim));width:auto;min-height:0;margin:0}
+.stpav button.on{background:var(--neon,#25D366);border-color:var(--neon,var(--neon));color:var(--sobre-verde)}
+.stleg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:.6rem .9rem;font-size:.74rem;color:var(--text-dim,var(--text-dim))}
 .stleg span{display:inline-flex;align-items:center;gap:5px}
 .stleg i{width:18px;height:13px;box-sizing:border-box;border:1px solid transparent;border-radius:4px;display:inline-block;flex:0 0 auto}
-.stleg b{color:var(--text,#EAF2ED);font-family:var(--mono,monospace)}
+.stleg b{color:var(--text,var(--text));font-family:var(--mono,monospace)}
 .stouter{overflow:hidden;padding:.2rem .4rem 0}
 .ststage{display:flex;justify-content:flex-start}
 .stzoom{transform-origin:0 0}
 .stgrid{position:relative;padding:14px;border-radius:14px;
-  background:#0D120F;box-shadow:inset 0 0 0 1px var(--line,#1E2A23);
+  background:var(--bg-2);box-shadow:inset 0 0 0 1px var(--line,var(--line));
   --pl-dim:var(--text-dim,#8FA197);--pl-line:rgba(234,242,237,.2);--pl-surf:var(--surface,#121A16)}
-.stgrid .std{appearance:none;cursor:pointer;border:1px solid var(--line,#1E2A23);border-radius:5px;
+.stgrid .std{appearance:none;cursor:pointer;border:1px solid var(--line,var(--line));border-radius:5px;
   width:auto;min-height:0;margin:0;font-family:var(--mono,monospace);font-size:8.6px;font-weight:700;
   line-height:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;flex:0 0 auto}
 /* status — mesmo vocabulário do painel e da página pública: LIVRE = cheio e liso ·
@@ -9673,109 +9718,109 @@ _STANDS_CSS = """<style>
 /* a legenda não é encolhida: hachura na metade do passo, pra bater com o tile na tela */
 .stleg i.reservado{background:repeating-linear-gradient(135deg, rgba(26,16,0,.24) 0 2px, rgba(26,16,0,0) 2px 4px), #E0A32E}
 /* o anel cabe no vão entre os stands (2px) e fica por cima dos vizinhos */
-.stgrid .std.sel,.stgrid .std:focus-visible{outline:3px solid var(--text,#EAF2ED);outline-offset:0;z-index:3}
-.stdet{margin:.7rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);
-  border-radius:12px;background:var(--surface,#121A16)}
+.stgrid .std.sel,.stgrid .std:focus-visible{outline:3px solid var(--text,var(--text));outline-offset:0;z-index:3}
+.stdet{margin:.7rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--line,var(--line));
+  border-radius:12px;background:var(--surface,var(--surface))}
 .stdet .cod{font-family:var(--mono,monospace);font-weight:800;font-size:1.05rem;margin-right:.5rem}
 .stdet .bdg{font-size:.68rem;font-weight:700;padding:3px 9px;border-radius:999px;vertical-align:2px}
-.stdet .bdg.livre{background:var(--neon,#25D366);color:#04150C}
+.stdet .bdg.livre{background:var(--neon,#25D366);color:var(--sobre-verde)}
 .stdet .bdg.reservado{background:#E0A32E;color:#2B1D00}
 .stdet .bdg.vendido{background:#E0574F;color:#fff}
-.stdet .inf{font-size:.78rem;color:var(--text-dim,#8FA197);margin-top:.35rem;line-height:1.5}
-.stdet .inf b{color:var(--text,#EAF2ED)}
+.stdet .inf{font-size:.78rem;color:var(--text-dim,var(--text-dim));margin-top:.35rem;line-height:1.5}
+.stdet .inf b{color:var(--text,var(--text))}
 .stdet .ac{display:flex;gap:8px;flex-wrap:wrap;margin-top:.6rem}
 .stdet .ac a,.stdet .ac button{appearance:none;cursor:pointer;text-decoration:none;font-family:inherit;
-  font-weight:700;font-size:.78rem;padding:8px 13px;border-radius:8px;border:1px solid var(--line,#1E2A23);
-  background:var(--surface-2,#16201B);color:var(--text,#EAF2ED);width:auto;min-height:0;margin:0;display:inline-flex}
-.stdet .ac .prim{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
-.stcad{margin-top:.75rem;padding-top:.7rem;border-top:1px solid var(--line,#1E2A23)}
-.stcad .stbar{height:7px;border-radius:4px;background:var(--surface-2,#16201B);overflow:hidden}
+  font-weight:700;font-size:.78rem;padding:8px 13px;border-radius:8px;border:1px solid var(--line,var(--line));
+  background:var(--surface-2,var(--neon-fundo));color:var(--text,var(--text));width:auto;min-height:0;margin:0;display:inline-flex}
+.stdet .ac .prim{background:var(--neon,#25D366);border-color:var(--neon,var(--neon));color:var(--sobre-verde)}
+.stcad{margin-top:.75rem;padding-top:.7rem;border-top:1px solid var(--line,var(--line))}
+.stcad .stbar{height:7px;border-radius:4px;background:var(--surface-2,var(--neon-fundo));overflow:hidden}
 .stcad .stbar span{display:block;height:100%;background:var(--neon,#25D366)}
 .stcad.inc .stbar span{background:#E0A32E}
-.stcad .stcadt{font-size:.74rem;color:var(--text-dim,#8FA197);margin:.4rem 0 .6rem;line-height:1.45}
-.stcad .stcadt b{color:var(--text,#EAF2ED);font-family:var(--mono,monospace)}
+.stcad .stcadt{font-size:.74rem;color:var(--text-dim,var(--text-dim));margin:.4rem 0 .6rem;line-height:1.45}
+.stcad .stcadt b{color:var(--text,var(--text));font-family:var(--mono,monospace)}
 .stcad .stbtn,.stcad .stsalvar,.stcad .strec{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;
-  font-size:.8rem;padding:10px 14px;border-radius:9px;border:1px solid var(--line,#1E2A23);
-  background:var(--surface-2,#16201B);color:var(--text,#EAF2ED);width:auto;min-height:0;margin:0}
-.stcad .stsalvar{background:var(--neon,#25D366);border-color:var(--neon,#25D366);color:#04150C}
+  font-size:.8rem;padding:10px 14px;border-radius:9px;border:1px solid var(--line,var(--line));
+  background:var(--surface-2,var(--neon-fundo));color:var(--text,var(--text));width:auto;min-height:0;margin:0}
+.stcad .stsalvar{background:var(--neon,#25D366);border-color:var(--neon,var(--neon));color:var(--sobre-verde)}
 .stcad .stfld{display:block;margin-top:.55rem}
 .stcad .stfld>span{display:block;font-size:.66rem;font-weight:700;text-transform:uppercase;
-  letter-spacing:.03em;color:var(--text-dim,#8FA197);margin-bottom:3px}
-.stcad .stfld>span i{font-style:normal;color:#E0A32E}
-.stcad .stfld input{width:100%;box-sizing:border-box;background:var(--surface-2,#16201B);
-  border:1px solid var(--line,#1E2A23);border-radius:8px;color:var(--text,#EAF2ED);font-family:inherit;
+  letter-spacing:.03em;color:var(--text-dim,var(--text-dim));margin-bottom:3px}
+.stcad .stfld>span i{font-style:normal;color:var(--ambar)}
+.stcad .stfld input{width:100%;box-sizing:border-box;background:var(--surface-2,var(--neon-fundo));
+  border:1px solid var(--line,var(--line));border-radius:8px;color:var(--text,var(--text));font-family:inherit;
   font-size:16px;padding:10px 11px;margin:0;min-height:0}
-.stcad .stfld.falta input{border-color:#E0A32E}
+.stcad .stfld.falta input{border-color:var(--ambar)}
 .stcad .stlin{display:flex;gap:8px;align-items:flex-end}
 .stcad .stlin .stfld{flex:1;min-width:0}
 .stcad .stac{display:flex;gap:8px;flex-wrap:wrap;margin-top:.8rem}
-.stcad .stnota{font-size:.7rem;color:var(--text-dim,#8FA197);margin-top:.5rem;line-height:1.45}
-.stcad .stok{font-size:.76rem;color:var(--neon,#25D366);font-weight:700;margin-top:.5rem}
-.stcad .sterr{font-size:.76rem;color:#E0574F;font-weight:700;margin-top:.5rem}
-.stmin{margin:.7rem .8rem 0;padding:.7rem .8rem;border:1px solid var(--line,#1E2A23);border-radius:12px;
-  background:var(--surface,#121A16)}
+.stcad .stnota{font-size:.7rem;color:var(--text-dim,var(--text-dim));margin-top:.5rem;line-height:1.45}
+.stcad .stok{font-size:.76rem;color:var(--neon,var(--neon));font-weight:700;margin-top:.5rem}
+.stcad .sterr{font-size:.76rem;color:var(--coral);font-weight:700;margin-top:.5rem}
+.stmin{margin:.7rem .8rem 0;padding:.7rem .8rem;border:1px solid var(--line,var(--line));border-radius:12px;
+  background:var(--surface,var(--surface))}
 .stmin>b{display:block;font-size:.88rem;margin-bottom:.15rem}
-.stmin>span{display:block;font-size:.72rem;color:var(--text-dim,#8FA197);margin-bottom:.5rem}
+.stmin>span{display:block;font-size:.72rem;color:var(--text-dim,var(--text-dim));margin-bottom:.5rem}
 .stmin .lin{appearance:none;cursor:pointer;font-family:inherit;text-align:left;width:100%;min-height:0;margin:0;
-  display:flex;align-items:center;gap:.6rem;padding:.55rem 0;border:0;border-top:1px solid var(--line,#1E2A23);
-  background:none;color:var(--text,#EAF2ED)}
+  display:flex;align-items:center;gap:.6rem;padding:.55rem 0;border:0;border-top:1px solid var(--line,var(--line));
+  background:none;color:var(--text,var(--text))}
 .stmin .lin .cod{font-family:var(--mono,monospace);font-weight:800;font-size:.85rem;min-width:2.6rem}
 .stmin .lin .nm{flex:1;min-width:0;font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.stmin .lin .nm small{display:block;font-size:.68rem;font-weight:500;color:var(--text-dim,#8FA197)}
+.stmin .lin .nm small{display:block;font-size:.68rem;font-weight:500;color:var(--text-dim,var(--text-dim))}
 .stmin .chip{font-size:.66rem;font-weight:800;padding:3px 8px;border-radius:999px;white-space:nowrap}
-.stmin .chip.amb{background:rgba(224,163,46,.22);color:#E0A32E}
-.stmin .chip.ok{background:rgba(37,211,102,.2);color:var(--neon,#25D366)}
-.cvd{display:block;margin:.7rem .8rem 0;padding:.75rem .85rem;border:1px solid var(--line,#1E2A23);
-  border-radius:12px;background:var(--surface,#121A16);color:inherit;text-decoration:none}
+.stmin .chip.amb{background:rgba(224,163,46,.22);color:var(--ambar)}
+.stmin .chip.ok{background:rgba(37,211,102,.2);color:var(--neon,var(--neon))}
+.cvd{display:block;margin:.7rem .8rem 0;padding:.75rem .85rem;border:1px solid var(--line,var(--line));
+  border-radius:12px;background:var(--surface,var(--surface));color:inherit;text-decoration:none}
 .cvd .topo{display:flex;align-items:center;gap:.6rem}
 .cvd .cod{font-family:var(--mono,monospace);font-weight:800;font-size:.95rem}
 .cvd .nm{flex:1;min-width:0;font-weight:700;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cvd .sub{font-size:.76rem;color:var(--text-dim,#8FA197);margin-top:.35rem;line-height:1.45}
+.cvd .sub{font-size:.76rem;color:var(--text-dim,var(--text-dim));margin-top:.35rem;line-height:1.45}
 .cvd .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:.5rem}
 .cvd .chip{font-size:.66rem;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap}
-.cvd .chip.amb{background:rgba(224,163,46,.22);color:#E0A32E}
-.cvd .chip.ok{background:rgba(37,211,102,.2);color:var(--neon,#25D366)}
-.cvd .chip.az{background:rgba(91,157,255,.2);color:#9DBFFF}
-.cvd .ir{color:var(--neon,#25D366);font-weight:700}
+.cvd .chip.amb{background:rgba(224,163,46,.22);color:var(--ambar)}
+.cvd .chip.ok{background:rgba(37,211,102,.2);color:var(--neon,var(--neon))}
+.cvd .chip.az{background:rgba(91,157,255,.2);color:var(--azul)}
+.cvd .ir{color:var(--neon,var(--neon));font-weight:700}
 .cvd .abrirv{display:block;color:inherit;text-decoration:none}
 .cvd a.chip{text-decoration:none}
 .cvres{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:.7rem .8rem 0}
-.cvres div{background:var(--surface,#121A16);border:1px solid var(--line,#1E2A23);border-radius:12px;padding:.6rem .7rem}
-.cvres span{display:block;font-size:.66rem;color:var(--text-dim,#8FA197);line-height:1.3}
+.cvres div{background:var(--surface,var(--surface));border:1px solid var(--line,var(--line));border-radius:12px;padding:.6rem .7rem}
+.cvres span{display:block;font-size:.66rem;color:var(--text-dim,var(--text-dim));line-height:1.3}
 .cvres b{display:block;font-family:var(--mono,monospace);font-size:.98rem;margin-top:.15rem}
 .stbusca{padding:.7rem .8rem 0}
-.stbusca input{width:100%;box-sizing:border-box;background:var(--surface,#121A16);border:1px solid var(--line,#1E2A23);
-  border-radius:10px;color:var(--text,#EAF2ED);font-size:16px;padding:10px 12px;margin:0}
+.stbusca input{width:100%;box-sizing:border-box;background:var(--surface,var(--surface));border:1px solid var(--line,var(--line));
+  border-radius:10px;color:var(--text,var(--text));font-size:16px;padding:10px 12px;margin:0}
 .stfil{display:flex;gap:6px;flex-wrap:wrap;margin-top:.5rem}
 .stfil button{appearance:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:.72rem;padding:6px 11px;
-  border-radius:999px;border:1px solid var(--line,#1E2A23);background:var(--surface,#121A16);
-  color:var(--text-dim,#8FA197);width:auto;min-height:0;margin:0}
-.stfil button.on{background:var(--surface-2,#16201B);border-color:var(--neon,#25D366);color:var(--text,#EAF2ED)}
-.stqmsg{font-size:.75rem;color:#E0A32E;margin-top:.4rem}
+  border-radius:999px;border:1px solid var(--line,var(--line));background:var(--surface,var(--surface));
+  color:var(--text-dim,var(--text-dim));width:auto;min-height:0;margin:0}
+.stfil button.on{background:var(--surface-2,var(--neon-fundo));border-color:var(--neon,var(--neon));color:var(--text,var(--text))}
+.stqmsg{font-size:.75rem;color:var(--ambar);margin-top:.4rem}
 .stgrid .std.apaga{opacity:.18}
-.stdet .ac .zap{background:rgba(37,211,102,.12);border-color:var(--neon,#25D366);color:var(--neon,#25D366)}
-.stdet .sts{display:block;font-size:.78rem;color:var(--text-dim,#8FA197);margin-top:.5rem;line-height:1.45}
-.stdet .sts b{color:var(--text,#EAF2ED)}
-.stvazio{margin:1.2rem .8rem;padding:1rem;border:1px dashed var(--line,#1E2A23);border-radius:12px;
-  color:var(--text-dim,#8FA197);font-size:.85rem;line-height:1.5}
-.stdica{margin:.1rem 0 .6rem;background:#10241A;border:1px solid #1E4A3A;border-radius:10px;
-  padding:.6rem .7rem;font-size:.8rem;line-height:1.45;color:#CFEFDC}
-.stdica b{color:#46F58A}
+.stdet .ac .zap{background:rgba(37,211,102,.12);border-color:var(--neon,var(--neon));color:var(--neon,var(--neon))}
+.stdet .sts{display:block;font-size:.78rem;color:var(--text-dim,var(--text-dim));margin-top:.5rem;line-height:1.45}
+.stdet .sts b{color:var(--text,var(--text))}
+.stvazio{margin:1.2rem .8rem;padding:1rem;border:1px dashed var(--line,var(--line));border-radius:12px;
+  color:var(--text-dim,var(--text-dim));font-size:.85rem;line-height:1.5}
+.stdica{margin:.1rem 0 .6rem;background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:10px;
+  padding:.6rem .7rem;font-size:.8rem;line-height:1.45;color:var(--text)}
+.stdica b{color:var(--neon-bright)}
 .clitopo{display:flex;gap:8px;padding:.7rem .8rem 0}
-.clitopo input{flex:1;min-width:0;box-sizing:border-box;background:var(--surface,#121A16);
-  border:1px solid var(--line,#1E2A23);border-radius:10px;color:var(--text,#EAF2ED);font-size:16px;
+.clitopo input{flex:1;min-width:0;box-sizing:border-box;background:var(--surface,var(--surface));
+  border:1px solid var(--line,var(--line));border-radius:10px;color:var(--text,var(--text));font-size:16px;
   padding:10px 12px;margin:0}
 .clinovo{display:inline-flex;align-items:center;gap:6px;min-height:44px;box-sizing:border-box;
-  padding:0 14px;border-radius:10px;background:var(--neon,#25D366);color:#04150C;font-weight:800;
+  padding:0 14px;border-radius:10px;background:var(--neon,#25D366);color:var(--sobre-verde);font-weight:800;
   font-size:.88rem;text-decoration:none;white-space:nowrap}
-.cvd.novo{border:1.5px solid #1E4A3A}
+.cvd.novo{border:1.5px solid var(--neon-borda)}
 .cvd .tag{font-size:.66rem;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap;
-  background:var(--surface-2,#16201B);border:1px solid var(--line,#1E2A23);color:var(--text-dim,#8FA197)}
+  background:var(--surface-2,var(--neon-fundo));border:1px solid var(--line,var(--line));color:var(--text-dim,var(--text-dim))}
 .cvd .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:.6rem}
 .cvd .acts a{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;padding:0 14px;
   border-radius:10px;font-weight:700;font-size:.85rem;text-decoration:none}
-.cvd .acts .zap{border:1.5px solid var(--neon,#25D366);background:rgba(37,211,102,.12);color:var(--neon,#25D366)}
-.cvd .acts .gh{border:1px solid var(--line,#1E2A23);background:var(--surface-2,#16201B);color:var(--text,#EAF2ED)}
+.cvd .acts .zap{border:1.5px solid var(--neon,var(--neon));background:rgba(37,211,102,.12);color:var(--neon,var(--neon))}
+.cvd .acts .gh{border:1px solid var(--line,var(--line));background:var(--surface-2,var(--neon-fundo));color:var(--text,var(--text))}
 </style>"""
 
 _STANDS_JS = r"""

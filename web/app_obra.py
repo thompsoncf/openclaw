@@ -390,6 +390,8 @@ def _blocos_do_cd(pool, conta_id: int, o: dict) -> tuple[str, str]:
                    if p["status"] in ("pedido", "separando", "saiu")]
         no_cd = [r for r in om.deposito(pool, conta_id) if r["saldo"] > 0]
         saldo_obra = [r for r in om.quadro_da_obra(pool, conta_id, o["id"]) if r["saldo"] > 0]
+        from finance import obra_ferramentas as fer
+        ferr = fer.listar(pool, conta_id, obra_id=o["id"])
     except Exception:  # noqa: BLE001 — sem a 670
         return "", ""
     topo = ""
@@ -409,11 +411,13 @@ def _blocos_do_cd(pool, conta_id: int, o: dict) -> tuple[str, str]:
                  f"<input type=file name=foto accept='image/*' capture=environment>"
                  f"<button class=bt>✓ Recebi</button></form>")
     pronta = o["pct"] == 100 or o["status"] in ("pronta", "vendida", "entregue")
-    if pronta and saldo_obra:
-        lista = " · ".join(f"{om.rotulo(r['saldo'], r['unidade'])} de {esc(r['nome'])}" for r in saldo_obra)
+    if pronta and (saldo_obra or ferr):
+        # a sobra volta inteira: o material E as ferramentas (PR 2 do CD)
+        lista = " · ".join([f"{om.rotulo(r['saldo'], r['unidade'])} de {esc(r['nome'])}" for r in saldo_obra]
+                           + [f"🔧 {esc(f['nome'])} ({esc(f['codigo'])})" for f in ferr])
         topo += (f"<form method=post action='{_BASE}/{o['id']}/devolver' class=card style='border-color:var(--verde2)'>"
                  f"<div class=nm>🏁 A casa ficou pronta</div>"
-                 f"<div class=mut>Ainda tem material dela aqui: {lista}. Volta pro CD?</div>"
+                 f"<div class=mut>Ainda tem coisa dela aqui: {lista}. Volta pro CD?</div>"
                  f"<button class=bt>Devolver ao CD</button></form>")
     opc = "".join('<option value="' + esc(r["nome"]) + '">' for r in no_cd)
     linhas = "".join(
@@ -432,7 +436,33 @@ def _blocos_do_cd(pool, conta_id: int, o: dict) -> tuple[str, str]:
              f"<button class=bt>Pedir ao CD</button>"
              f"<p class=mut style='margin:.6rem 0 0'>O pedido cai no quadro do depósito. Quando chegar, "
              f"confirme aqui em cima com o \u201crecebi\u201d e a foto.</p></form>")
+    if ferr and not pronta:
+        # as ferramentas que estão com esta obra: um toque devolve ao CD
+        pedir += ("<h2 id=ferramentas>🔧 Ferramentas nesta obra</h2><div class=card>" + "".join(
+            f"<div class=feito><span><b>{esc(f['nome'])}</b> <span class=mut>{esc(f['codigo'])} · "
+            f"{'chegou hoje' if f['ha'] == 'hoje' else 'há ' + f['ha']}</span></span>"
+            f"<form method=post action='{_BASE}/{o['id']}/ferramenta/{f['id']}/devolver'>"
+            f"<button>devolver ao CD</button></form></div>" for f in ferr) + "</div>")
     return topo, pedir
+
+
+@router.post("/obra/{obra_id:int}/ferramenta/{ferramenta_id:int}/devolver")
+def devolver_ferramenta(request: Request, obra_id: int, ferramenta_id: int):
+    ac, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta, papel, membro_id = ac
+    pool = get_pool()
+    if not oc.pode(pool, conta[0], papel, membro_id, obra_id):
+        return _volta("/obra", erro="Essa obra não está com você.")
+    from finance import obra_ferramentas as fer
+    if not any(f["id"] == ferramenta_id for f in fer.listar(pool, conta[0], obra_id=obra_id)):
+        return _volta(f"/obra/{obra_id}", erro="Essa ferramenta não está nesta obra.")
+    try:
+        txt = fer.devolver(pool, conta[0], ferramenta_id, por=membro_id)
+    except ValueError as e:
+        return _volta(f"/obra/{obra_id}", erro=str(e))
+    return _volta(f"/obra/{obra_id}", ok=txt)
 
 
 @router.post("/obra/{obra_id:int}/pedido")
@@ -491,9 +521,9 @@ def devolver_sobra(request: Request, obra_id: int):
     pool = get_pool()
     if not oc.pode(pool, conta[0], papel, membro_id, obra_id):
         return _volta("/obra", erro="Essa obra não está com você.")
-    from finance import obra_pedidos as op
+    from finance import obra_ferramentas as fer
     try:
-        txt = op.devolver(pool, conta[0], obra_id, membro_id)
+        txt = fer.devolver_tudo(pool, conta[0], obra_id, por=membro_id)
     except ValueError as e:
         return _volta(f"/obra/{obra_id}", erro=str(e))
     return _volta(f"/obra/{obra_id}", ok=txt)

@@ -722,7 +722,8 @@ _CSS = r"""<style>
 
 /* ---- lista completa (o cadastro, stand a stand) ---- */
 .es-pag .lst-filtros{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
-.es-pag .lst-filtros input[type=text]{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;color:var(--fg);font-family:inherit;font-size:12px;padding:7px 13px;width:150px;min-height:0;margin:0}
+.es-pag .lst-filtros input[type=text],.es-pag .lst-filtros select{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;color:var(--fg);font-family:inherit;font-size:12px;padding:7px 13px;width:220px;max-width:100%;min-height:0;margin:0}
+.es-pag .lst-filtros select{width:auto;cursor:pointer}
 .es-pag .tbl-wrap{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:4px 10px 8px;margin-bottom:18px;max-height:60vh}
 .es-pag table.es-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
 .es-pag .es-tbl th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--fg-dim);padding:9px 10px 6px;position:sticky;top:0;background:var(--surface)}
@@ -889,7 +890,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 {% set zap = wa_num(cad.get('whats') or cli.get('whatsapp')) %}
 {% set pend = d.get('pend') or [] %}
 {% set rotulo = {'livre':'Livre','pre_reservado':'Reservado','vendido':'Vendido'}[d.status] %}
-<div class="oc-hist"{% if grupo %} data-grupo="{{ grupo }}"{% endif %} data-st="{{ d.status }}" data-cod="{{ d.codigo|lower }}"{% if escondido %} hidden{% endif %}>
+{% set doc_dig = (cad.get('doc') or '')|replace('.','')|replace('/','')|replace('-','') %}
+<div class="oc-hist"{% if grupo %} data-grupo="{{ grupo }}"{% endif %} data-st="{{ d.status }}" data-cod="{{ d.codigo|lower }}" data-busca="{{ (d.codigo ~ ' ' ~ (cad.get('fantasia') or '') ~ ' ' ~ (cli.get('empresa') or '') ~ ' ' ~ (cad.get('razao') or '') ~ ' ' ~ (cad.get('doc') or ''))|lower }}" data-doc="{{ doc_dig }}" data-vend="{{ cli.get('vendedor_id') or '' }}"{% if escondido %} hidden{% endif %}>
   <div class="oc-hist-top">
     <div class="oc-open" title="{% if d.status == 'livre' %}Abrir opções{% else %}Ver comprovante, contrato e cliente{% endif %}" onclick="ocToggle(this)">
       <div class="oc-stand-badge" style="background:{{ cor[0] }};color:{{ cor[1] }}"><div class="c">{{ d.codigo }}</div><div class="z">{% if d.get('g_n', 1) > 1 %}{{ d.g_n }} stands{% else %}{{ tam_label.get(d.tamanho, d.tamanho) }}{% endif %}</div></div>
@@ -1193,7 +1195,15 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   <button class="fn-tab" data-f="livre" onclick="lstStatus(this)"><span class="pt" style="background:var(--mint)"></span>Livres <span class="n">{{ kpis.get('livre',0) }}</span></button>
   <button class="fn-tab" data-f="pre_reservado" onclick="lstStatus(this)"><span class="pt" style="background:var(--gold)"></span>Reservados <span class="n">{{ kpis.get('pre_reservado',0) }}</span></button>
   <button class="fn-tab" data-f="vendido" onclick="lstStatus(this)"><span class="pt" style="background:var(--coral)"></span>Vendidos <span class="n">{{ kpis.get('vendido',0) }}</span></button>
-  <input type="text" id="lst-busca" placeholder="Buscar código…" oninput="lstFiltra()">
+  <input type="text" id="lst-busca" placeholder="Buscar código, loja ou CNPJ…" oninput="lstFiltra()">
+  {% if vendedores %}
+  {#- só a lista de UMA vendedora (pedido do dono, 03/10/2026) -#}
+  <select id="lst-vend" onchange="lstFiltra()" aria-label="Vendedor">
+    <option value="">Todos os vendedores</option>
+    {% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}
+    <option value="0">Sem vendedor</option>
+  </select>
+  {% endif %}
 </div>
 <div class="oc-list" id="lista-stands">
 {% for s in stands %}{{ linha_stand(vinculos.get(s.codigo, s)) }}{% endfor %}
@@ -1467,11 +1477,18 @@ function lstStatus(btn){
   document.querySelectorAll('.lst-filtros .fn-tab').forEach(function(b){ b.classList.toggle('on', b === btn); });
   lstFiltra();
 }
+// BUSCA E VENDEDOR (03/10/2026, pedido do dono): o campo acha pelo código, pelo nome
+// da loja (marca ou razão social) e pelo CNPJ/CPF — com ou sem pontuação; o seletor
+// deixa só os stands da lista de uma vendedora ("Sem vendedor": os ocupados que não têm)
 function lstFiltra(){
   var q = (document.getElementById('lst-busca').value || '').trim().toLowerCase();
+  var qd = q.replace(/[^0-9]/g, '');
+  var sv = document.getElementById('lst-vend'), v = sv ? sv.value : '';
   document.querySelectorAll('#lista-stands .oc-hist').forEach(function(el){
-    var ok = (!lstF || el.dataset.st === lstF) && (!q || el.dataset.cod.indexOf(q) !== -1);
-    el.hidden = !ok;
+    var achou = !q || (el.dataset.busca || el.dataset.cod).indexOf(q) !== -1 ||
+                (qd.length >= 3 && (el.dataset.doc || '').indexOf(qd) !== -1);
+    var dele = !v || (v === '0' ? (!el.dataset.vend && el.dataset.st !== 'livre') : el.dataset.vend === v);
+    el.hidden = !((!lstF || el.dataset.st === lstF) && achou && dele);
   });
 }
 </script>

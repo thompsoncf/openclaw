@@ -100,7 +100,8 @@ def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int
                   coalesce(e.paciente_nome, e.titulo), e.paciente_fone, e.servico_id,
                   s.nome, s.cor, s.categoria, e.clinica_local_id, e.encaixe, e.origem,
                   e.confirmacao_enviada_em, e.confirmado_em, e.pede_remarcar_em, e.prospeccao_id,
-                  coalesce(e.observacao_interna, ''), coalesce(e.marcado_por, ''), coalesce(s.setup_centavos, 0)
+                  coalesce(e.observacao_interna, ''), coalesce(e.marcado_por, ''), coalesce(s.setup_centavos, 0),
+                  (to_jsonb(e) ->> 'desmarcou')
              from eventos_agenda e
              left join servicos_catalogo s on s.id = e.servico_id and s.conta_id = e.conta_id
             where e.conta_id = %s and e.situacao is not null
@@ -112,7 +113,7 @@ def _eventos(c, conta_id: int, de: datetime, ate: datetime, profissional_id: int
              "tipo": r[8] or "Atendimento", "cor": r[9] or cc.CORES[0], "categoria": r[10] or "",
              "local_id": r[11], "encaixe": r[12], "origem": r[13] or "",
              "confirmacao_enviada_em": r[14], "confirmado_em": r[15], "pede_remarcar_em": r[16],
-             "lead": r[17], "observacao": r[18], "marcado_por": r[19], "preco": r[20],
+             "lead": r[17], "observacao": r[18], "marcado_por": r[19], "preco": r[20], "desmarcou": r[21],
              "hora": hora_txt(r[2]), "fim_txt": hora_txt(r[3]),
              "sit_txt": SIT_D.get(r[4], r[4])} for r in rows]
 
@@ -308,6 +309,159 @@ def ligar(c, conta_id: int, evento_id: int, resultado: str, membro_id: int | Non
     return None
 
 
+def proxima_passagem(c, conta_id: int, profissional_id: int, local_id: int | None, depois: date) -> date | None:
+    """O próximo dia (depois de `depois`) em que o profissional atende neste lugar."""
+    grade = cc.listar_grade(c, conta_id)
+    bloqueios = cc.listar_bloqueios(c, conta_id, depois)
+    for i in range(1, 121):
+        dia = depois + timedelta(days=i)
+        if any(f["local_id"] == local_id for f in cc.faixas_do_dia(grade, bloqueios, profissional_id, dia)):
+            return dia
+    return None
+
+
+def texto_desmarcou(c, conta_id: int, ev: dict, proxima: date | None) -> str:
+    """A mensagem pronta de "a clínica desmarcou" (não diz o procedimento)."""
+    n, de = quem_recebe(c, conta_id, ev)
+    loc = next((x for x in cc.listar_locais(c, conta_id, so_ativos=False) if x["id"] == ev.get("local_id")), None)
+    cidade = (loc or {}).get("cidade") or (loc or {}).get("nome") or "sua cidade"
+    sede = next((x for x in cc.listar_locais(c, conta_id) if x["tipo"] == "sede"), None)
+    alternativa = (f" Se preferir antes, dá pra ser na nossa sede em {sede.get('cidade') or sede['nome']}."
+                   if sede and sede["id"] != ev.get("local_id") else "")
+    return (f"Oi{', ' + n if n else ''}! Precisamos remarcar {'o atendimento de ' + de if de else 'seu atendimento'} "
+            f"com {_prof_nome(c, conta_id, ev)} em {cidade} no dia {dia_txt(ev['inicio'])}: a ida foi cancelada "
+            "pela clínica, sem nenhum custo pra você."
+            + (f" A próxima passagem por {cidade} é {dia_txt(utc(proxima, time(12)))}." if proxima else "")
+            + alternativa + " Qual fica melhor? É só responder por aqui 😊")
+
+
+def passagens_do_dia(c, conta_id: int, profissional_id: int, dia: date) -> list[dict]:
+    """Os lugares em que o profissional atende neste dia, cada um com as suas faixas
+    (um dia pode ter a sede de manhã e uma cidade à tarde). [{local_id, faixas}]."""
+    out: dict = {}
+    for f in cc.faixas_do_dia(cc.listar_grade(c, conta_id), cc.listar_bloqueios(c, conta_id, dia),
+                              profissional_id, dia):
+        out.setdefault(f["local_id"], []).append(f)
+    return [{"local_id": k, "faixas": v} for k, v in out.items()]
+
+
+def _hhmm(t) -> str:
+    """A hora da faixa ("08:00") pro bloqueio: a faixa vem em time (ou em minutos)."""
+    return t.strftime("%H:%M") if hasattr(t, "strftime") else f"{t // 60:02d}:{t % 60:02d}"
+
+
+def cancelar_passagem(c, conta_id: int, profissional_id: int, dia: date, local_id: int | None,
+                      membro_id: int | None, agora: datetime | None = None) -> tuple[list[dict], str | None]:
+    """"CANCELAR ESTA PASSAGEM" (desenho de 01/10/2026, seção 04; decisão C do dono em
+    02/10/2026). A clínica cancela a ida do profissional a UM LUGAR num dia:
+      - as faixas daquele lugar no dia são bloqueadas (só elas: a sede da manhã segue
+        aberta quando a cidade da tarde é cancelada), e a vaga liberada não as oferece;
+      - os marcados nelas ficam "a remarcar", com o selo "a clínica desmarcou"
+        (desmarcou = 'clinica'): não conta como falta, e o card que estava em Agendado
+        vai pra Follow-up com a nota "remarcar";
+      - o retorno sem custo do paciente com este profissional vale até a próxima
+        passagem por ali (inclusive o retorno que estava marcado justo nesse dia);
+    Devolve ([{evento, texto}], None): a mensagem pronta de cada um, pra recepção mandar."""
+    agora = agora or datetime.now(timezone.utc)
+    # uma marcação por vez nesta agenda: nem o agente marca no meio do cancelamento
+    c.execute("select pg_advisory_xact_lock(%s::int, %s::int)", (_LOCK_MARCAR, int(profissional_id)))
+    faixas = next((p["faixas"] for p in passagens_do_dia(c, conta_id, profissional_id, dia)
+                   if p["local_id"] == local_id), None)
+    if not faixas:
+        return [], "Esse profissional não atende nesse lugar nesse dia (ou a passagem já foi cancelada)."
+
+    def _na_faixa(e):
+        h = local(e["inicio"]).time().replace(tzinfo=None)
+        return any(_hhmm(f["inicio"]) <= h.strftime("%H:%M") < _hhmm(f["fim"]) for f in faixas)
+    evs = [e for e in _eventos(c, conta_id, utc(dia, time(0)), utc(dia + timedelta(days=1), time(0)),
+                               profissional_id)
+           if e["situacao"] in ("agendado", "confirmado")
+           and (e["local_id"] == local_id or (e["local_id"] is None and _na_faixa(e)))]
+    for f in faixas:
+        erro = cc.salvar_bloqueio(c, conta_id, profissional_id=profissional_id, de=dia, ate=dia,
+                                  inicio=_hhmm(f["inicio"]), fim=_hhmm(f["fim"]), motivo="a clínica cancelou a ida")
+        if erro:
+            return [], erro
+    proxima = proxima_passagem(c, conta_id, profissional_id, local_id, dia)
+    chaves = _chaves_do_funil(c, conta_id)
+    out = []
+    for e in evs:
+        if not c.execute("""update eventos_agenda set situacao='cancelou', situacao_em=%s, status='cancelado',
+                                   desmarcou='clinica'
+                             where id=%s and conta_id=%s and situacao in ('agendado','confirmado') and status='ativo'
+                             returning id""", (agora, e["id"], conta_id)).fetchone():
+            continue
+        if e["lead"]:
+            r = c.execute("select status from prospeccao where id=%s and conta_id=%s for update",
+                          (e["lead"], conta_id)).fetchone()
+            if r and r[0] == "qualificado" and "follow_up" in chaves and not _outra_marcada(c, conta_id, e["lead"], e["id"]):
+                c.execute("update prospeccao set status='follow_up', atualizado_em=now() where id=%s and conta_id=%s",
+                          (e["lead"], conta_id))
+                fr.registrar_movimento(c, conta_id, e["lead"], "qualificado", "follow_up", "agenda", membro_id)
+            _nota(c, e["lead"], membro_id, f"A clínica desmarcou o horário de {dia_txt(e['inicio'])} {e['hora']}: "
+                                            "remarcar (não é falta).")
+            if proxima:
+                try:
+                    with c.transaction():
+                        # o retorno sem custo vale até a próxima passagem (decisão C): o deste
+                        # profissional e deste paciente, a marcar ou marcado justo neste horário
+                        c.execute("""update clinica_retornos
+                                        set vence_em = greatest(vence_em, %s), estado='aguardando',
+                                            marcado_evento_id = null, atualizado_em=now()
+                                      where conta_id=%s and prospeccao_id=%s and profissional_id=%s
+                                        and (marcado_evento_id = %s
+                                             or (estado='aguardando' and lower(paciente_nome) = lower(%s)))""",
+                                  (proxima, conta_id, e["lead"], profissional_id, e["id"], e["paciente"]))
+                except Exception:  # noqa: BLE001 — sem a 381
+                    pass
+        out.append({"evento": dict(e, desmarcou="clinica"), "texto": texto_desmarcou(c, conta_id, e, proxima)})
+    return out, None
+
+
+def desmarcados_pela_clinica(c, conta_id: int, profissional_id: int, dia: date) -> list[dict]:
+    """Os agendamentos do dia que a clínica desmarcou (a lista das mensagens prontas:
+    vem do banco, e não da sessão, pra não se perder num segundo clique)."""
+    return [e for e in _eventos(c, conta_id, utc(dia, time(0)), utc(dia + timedelta(days=1), time(0)),
+                                profissional_id) if e.get("desmarcou") == "clinica"]
+
+
+def saiu_sem_atendimento(c, conta_id: int, evento_id: int, membro_id: int | None,
+                         agora: datetime | None = None) -> str | None:
+    """"SAIU SEM SER ATENDIDO" (desenho de 01/10/2026, seção 05): chegou e foi embora. O
+    horário fica livre; não é falta; o card que estava em Consulta por causa deste
+    atendimento volta pra Follow-up, pra remarcar."""
+    agora = agora or datetime.now(timezone.utc)
+    r = c.execute("""select situacao, prospeccao_id, inicio from eventos_agenda
+                      where id=%s and conta_id=%s and situacao is not null for update""",
+                  (evento_id, conta_id)).fetchone()
+    if not r:
+        return "Agendamento não encontrado."
+    if r[0] not in ("presente", "atendimento"):
+        return "Só dá pra marcar quem chegou e ainda não foi atendido."
+    try:
+        with c.transaction():
+            pago = c.execute("select 1 from clinica_recebimentos where conta_id=%s and evento_id=%s",
+                             (conta_id, evento_id)).fetchone()
+    except Exception:  # noqa: BLE001 — sem a 495
+        pago = None
+    if pago:
+        return ("Esse atendimento já tem pagamento registrado. Acerte o pagamento no Financeiro "
+                "antes de marcar que saiu sem ser atendido.")
+    c.execute("""update eventos_agenda set situacao='cancelou', situacao_em=%s, status='cancelado', desmarcou='saiu'
+                  where id=%s and conta_id=%s""", (agora, evento_id, conta_id))
+    lead = r[1]
+    if lead:
+        st = c.execute("select status from prospeccao where id=%s and conta_id=%s for update", (lead, conta_id)).fetchone()
+        chaves = _chaves_do_funil(c, conta_id)
+        fica = _segura_em_consulta(c, conta_id, lead, evento_id) or _outra_marcada(c, conta_id, lead, evento_id)
+        if st and st[0] == "consulta" and "follow_up" in chaves and not fica:
+            c.execute("update prospeccao set status='follow_up', atualizado_em=now() where id=%s and conta_id=%s",
+                      (lead, conta_id))
+            fr.registrar_movimento(c, conta_id, lead, "consulta", "follow_up", "agenda", membro_id)
+        _nota(c, lead, membro_id, f"Saiu sem ser atendido em {dia_txt(r[2])}: remarcar (não é falta).")
+    return None
+
+
 def pediram_remarcar(c, conta_id: int, agora: datetime) -> list[dict]:
     """Quem respondeu 2 na confirmação, de hoje em diante — em qualquer dia. A resposta
     chega na véspera; se só aparecesse no dia da consulta, a recepção veria tarde."""
@@ -417,6 +571,23 @@ def _mover_card(c, conta_id: int, lead_id: int, membro_id: int | None, categoria
             _nota(c, lead_id, membro_id, "Consulta nova marcada: o card voltou para Agendado.")
 
 
+def encaixe_chegou(c, conta_id: int, *, profissional_id: int, servico_id: int, nome: str, fone: str,
+                   membro_id: int | None, agora: datetime | None = None) -> tuple[int | None, str | None]:
+    """"+ ENCAIXE (CHEGOU SEM MARCAR)" (desenho de 01/10/2026, seção 04): o paciente está na
+    recepção. Marca agora, como encaixe, dentro do horário de atendimento de hoje (o limite
+    de encaixes do dia é pra marcar adiante: quem já está aqui entra), e marca Presente:
+    o card vai pra Consulta, se o horário é de consulta."""
+    agora = agora or datetime.now(timezone.utc)
+    inicio = agora.replace(second=0, microsecond=0)
+    inicio -= timedelta(minutes=inicio.minute % 5)
+    eid, erro = agendar(c, conta_id, profissional_id=profissional_id, servico_id=servico_id, inicio=inicio,
+                        nome=nome, fone=fone, encaixe=True, membro_id=membro_id, agora=agora, chegou=True)
+    if erro:
+        return None, erro
+    erro = mudar_situacao(c, conta_id, eid, "presente", membro_id=membro_id, agora=agora)
+    return (None, erro) if erro else (eid, None)
+
+
 def _faixa_do_horario(c, conta_id: int, profissional_id: int, inicio: datetime) -> dict | None:
     loc = local(inicio)
     for f in cc.faixas_do_dia(cc.listar_grade(c, conta_id), cc.listar_bloqueios(c, conta_id, loc.date()),
@@ -430,7 +601,8 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
             lead_id: int | None = None, nome: str = "", fone: str = "", origem: str = "",
             observacao: str = "", encaixe: bool = False, membro_id: int | None = None,
             agora: datetime | None = None, paciente: str = "",
-            marcado_por: str = "recepcao", cliente_id: int | None = None) -> tuple[int | None, str | None]:
+            marcado_por: str = "recepcao", cliente_id: int | None = None,
+            chegou: bool = False) -> tuple[int | None, str | None]:
     """Marca. Devolve (evento_id, None) ou (None, erro pra tela). Não faz commit.
 
     `paciente` é quem vai ser atendido quando não é o dono do card (a mãe marca pro
@@ -444,7 +616,7 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
     tipo = next((t for t in cc.listar_tipos(c, conta_id) if t["id"] == servico_id), None)
     if not tipo:
         return None, "Atendimento não encontrado."
-    if inicio <= agora:
+    if inicio <= agora and not chegou:
         return None, "Esse horário já passou."
     fim = inicio + timedelta(minutes=tipo["duracao_min"])
     # uma marcação por vez nesta agenda: a segunda espera e reconfere
@@ -458,6 +630,7 @@ def agendar(c, conta_id: int, *, profissional_id: int, servico_id: int, inicio: 
             return None, "Esse horário não está livre. Escolha outro, ou marque como encaixe."
         if not faixa:
             return None, "Encaixe só dentro do horário de atendimento do profissional."
+    if not livre and not chegou:
         usados = c.execute(
             """select count(*) from eventos_agenda where conta_id=%s and profissional_id=%s and encaixe
                   and situacao not in ('cancelou','faltou') and inicio >= %s and inicio < %s""",

@@ -50,7 +50,7 @@ def pool():
         for m in ("360_clinica_agenda.sql", "363_clinica_repasses.sql", "369_clinica_vagas.sql",
                   "379_clinica_planos.sql", "381_clinica_pacotes.sql", "471_clinica_tratamento_proposto.sql",
                   "474_clinica_plano_pago_e_nao_fechou.sql", "490_clinica_resultados.sql",
-                  "495_clinica_recebimentos.sql"):
+                  "495_clinica_recebimentos.sql", "580_clinica_desmarcou.sql"):
             c.execute((BASE / m).read_text(encoding="utf-8"))
         c.execute((BASE / next(BASE.glob("346_*.sql")).name).read_text(encoding="utf-8"))
         c.execute("""update servicos_catalogo set setup_centavos=80000, volta_dias=null
@@ -307,6 +307,60 @@ def test_sessao_coberta_pelo_pacote_nao_tem_receber(pool, zap):
         ev = ca.evento(c, CLINICA, eid)
         crb.anotar(c, CLINICA, [ev])
         assert ev["pgto"] == "pacote"                           # finalizado: pelo que baixou
+
+
+def test_cancelar_passagem_estende_o_retorno_sem_custo(pool, zap):
+    """Decisão C do dono (02/10/2026): o retorno sem custo vale até a próxima passagem."""
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=1)
+        volta = _sessao(c, lead, SEG + timedelta(days=7), tipo="Consulta")
+        ev = ca.evento(c, CLINICA, volta)
+        antes = c.execute("select vence_em from clinica_retornos where prospeccao_id=%s", (lead,)).fetchone()[0]
+        avisos, erro = ca.cancelar_passagem(c, CLINICA, _manoel(c), ca.local(ev["inicio"]).date(), ev["local_id"], 51,
+                                            agora=AGORA)
+        assert erro is None and [a["evento"]["id"] for a in avisos] == [volta]
+        prox = ca.proxima_passagem(c, CLINICA, _manoel(c), ev["local_id"], ca.local(ev["inicio"]).date())
+        depois = c.execute("select vence_em from clinica_retornos where prospeccao_id=%s", (lead,)).fetchone()[0]
+        assert prox and depois == max(antes, prox) and depois > antes
+
+
+def test_cancelar_passagem_devolve_o_retorno_marcado_nela_e_nao_mexe_no_de_outro(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c, nome="Rui Retorno", fone="+5599911110003")
+        _finalizar(c, _sessao(c, lead, SEG, tipo="Consulta"), tratamento="nao", retorno_dias=1)
+        volta = _sessao(c, lead, SEG + timedelta(days=7), tipo="Retorno")
+        c.commit()
+        ckp.fechar_retornos(c, CLINICA, _br(SEG + timedelta(days=1)))
+        c.commit()
+        rid = _retorno_id(c, lead)
+        assert c.execute("select estado from clinica_retornos where id=%s", (rid,)).fetchone()[0] == "marcado"
+        # um retorno do mesmo card com outra profissional (a Juliana) não é dela
+        juliana = c.execute("select id from clinica_profissionais where conta_id=39 and nome='Juliana'").fetchone()[0]
+        outro = c.execute("""insert into clinica_retornos (conta_id, prospeccao_id, evento_id, profissional_id,
+                                                           paciente_nome, vence_em)
+                             values (39,%s,999999,%s,'Rui Retorno',%s) returning id""",
+                          (lead, juliana, SEG + timedelta(days=2))).fetchone()[0]
+        ev = ca.evento(c, CLINICA, volta)
+        avisos, erro = ca.cancelar_passagem(c, CLINICA, _manoel(c), ca.local(ev["inicio"]).date(), ev["local_id"], 51,
+                                            agora=AGORA)
+        assert erro is None
+        estado, vence = c.execute("select estado, vence_em from clinica_retornos where id=%s", (rid,)).fetchone()
+        prox = ca.proxima_passagem(c, CLINICA, _manoel(c), ev["local_id"], ca.local(ev["inicio"]).date())
+        assert estado == "aguardando" and vence >= prox                  # volta pra fila, valendo até a próxima
+        assert c.execute("select vence_em from clinica_retornos where id=%s", (outro,)).fetchone()[0] == SEG + timedelta(days=2)
+
+
+def test_saiu_sem_atendimento_com_pagamento_registrado_e_recusado(pool, zap):
+    with pool.connection() as c:
+        lead, _conv = _paciente(c)
+        eid = _sessao(c, lead, SEG, tipo="Consulta")
+        for s in ("confirmado", "presente"):
+            assert ca.mudar_situacao(c, CLINICA, eid, s) is None
+        c.execute("""insert into clinica_recebimentos (conta_id, evento_id, prospeccao_id, valor_centavos, forma)
+                     values (39,%s,%s,50000,'pix')""", (eid, lead))
+        assert "pagamento registrado" in ca.saiu_sem_atendimento(c, CLINICA, eid, 51)
+        assert ca.evento(c, CLINICA, eid)["situacao"] == "presente"
 
 
 def test_consulta_que_nao_e_do_pacote_nao_baixa(pool, zap):

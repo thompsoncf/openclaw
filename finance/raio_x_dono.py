@@ -86,7 +86,9 @@ COMERCIAL = (8, 18)
 
 
 def rotulo_origem(chave: str | None) -> str:
-    return (dict(ORIGENS) | dict(ORIGENS_CLINICA)).get(chave or "", "")
+    # a lista geral vence nas chaves em comum ("WhatsApp", e não "WhatsApp direto",
+    # para as outras contas); a da clínica só completa as chaves que só ela tem
+    return (dict(ORIGENS_CLINICA) | dict(ORIGENS)).get(chave or "", "")
 
 
 # ---------------------------------------------------------------- os filtros

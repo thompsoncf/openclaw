@@ -26,7 +26,7 @@ from datetime import date, datetime
 from finance import clinica_config as ccfg
 from finance import funil_regua as fr
 from finance import validadoc
-from finance.raio_x_dono import ORIGENS_CLINICA
+from finance.raio_x_dono import ORIGENS, ORIGENS_CLINICA, rotulo_origem
 
 PERFIL = "clinica"
 TIPOS = (
@@ -130,12 +130,19 @@ def contexto(c, conta_id: int, alvo: dict) -> dict:
     na_lista = next((x for x in lista if x.casefold() == cidade.casefold()), None)
     nasc = alvo.get("nascimento")
     tipos, parentescos, origens = dict(TIPOS), dict(PARENTESCOS), dict(ORIGENS_CLINICA)
+    origem = alvo.get("origem_cliente") or ""
+    cpf = alvo.get("cpf") or ""
     return {
         **extra,
         "outra_pessoa": bool(extra["responsavel_nome"]),
         "parentesco_rot": parentescos.get(extra["responsavel_parentesco"] or "", ""),
         "tipo_rot": tipos.get(extra["tipo_atendimento"] or "", ""),
-        "origem_rot": origens.get(alvo.get("origem_cliente") or "", ""),
+        "origem_rot": origens.get(origem, "") or rotulo_origem(origem),
+        # a origem gravada que não está na lista da clínica ("Manual", da ficha do
+        # app ou do formulário antigo) aparece como mais uma opção, marcada: some da
+        # tela e o próximo salvar a perderia
+        "origem_extra": (origem, rotulo_origem(origem) or origem) if origem and origem not in origens else None,
+        "cpf_fmt": f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}" if len(cpf) == 11 else cpf,
         "cidades": lista,
         # a cidade gravada fora da lista (escrita antes da lista existir, ou "outra")
         # continua aparecendo: o select abre em "outra" com ela escrita
@@ -170,8 +177,10 @@ def _data(s: str) -> date | None | str:
 
 def salvar(c, conta_id: int, lead_id: int, f: dict) -> str | None:
     """Grava a ficha da clínica. Devolve o erro, ou None. Só as colunas desta tela
-    mudam; em branco limpa (o campo está na tela), menos o nome, que em branco
-    fica como está."""
+    mudam. Em branco limpa o que é campo de escrever (está na tela); o nome, o tipo
+    de atendimento e a origem em branco ficam como estão: os dois últimos são
+    botões de escolha, que não têm como "desmarcar", e em branco só quer dizer que
+    ninguém escolheu."""
     nome = (f.get("empresa") or "").strip()
     # o documento da clínica é o CPF do paciente
     achado, digitos = validadoc.classificar((f.get("documento") or "").strip())
@@ -197,22 +206,27 @@ def salvar(c, conta_id: int, lead_id: int, f: dict) -> str | None:
     cidade = (f.get("cidade_outra") or "").strip() if cid_sel == OUTRA_CIDADE else cid_sel
     tipo = f.get("tipo_atendimento") or ""
     tipo = tipo if tipo in dict(TIPOS) else None
+    # as duas listas valem: a da clínica e a geral (a origem antiga que a tela mostra
+    # como opção extra); a checagem do banco aceita as duas
     origem = f.get("origem_cliente") or ""
-    origem = origem if origem in dict(ORIGENS_CLINICA) else None
-    # o paciente é pessoa física; um cartão antigo com CNPJ (cadastro de empresa) só
-    # vira PF quando ganha um CPF, para o CNPJ não ficar escondido numa ficha de PF
+    origem = origem if origem in (dict(ORIGENS_CLINICA) | dict(ORIGENS)) else None
+    valor = f.get("valor_centavos")
+    # o paciente é pessoa física. Um cartão com CNPJ (cadastro de empresa) continua
+    # PJ: virar PF esconderia o CNPJ, que segue gravado e ocupando o índice único
     c.execute(
         """update prospeccao
               set empresa = coalesce(nullif(%s, ''), empresa),
-                  tipo = case when %s::text is not null or cnpj is null then 'pf' else tipo end,
+                  tipo = case when cnpj is null then 'pf' else tipo end,
                   cpf=%s, nascimento=%s, responsavel_nome=%s, responsavel_parentesco=%s,
-                  whatsapp=%s, telefone=%s, email=%s, instagram=%s,
-                  cidade=%s, tipo_atendimento=%s, origem_cliente=%s, obs=%s,
+                  whatsapp=%s, telefone=%s, email=%s, instagram=%s, cidade=%s,
+                  tipo_atendimento = coalesce(%s, tipo_atendimento),
+                  origem_cliente = coalesce(%s, origem_cliente), obs=%s,
+                  valor_estimado_centavos = coalesce(%s, valor_estimado_centavos),
                   atualizado_em=now()
             where id=%s and conta_id=%s""",
-        (nome, digitos or None, digitos or None, nasc, resp or None, parent or None,
+        (nome, digitos or None, nasc, resp or None, parent or None,
          (f.get("whatsapp") or "").strip() or None, (f.get("telefone") or "").strip() or None,
          (f.get("email") or "").strip().lower() or None, (f.get("instagram") or "").strip() or None,
          cidade[:80] or None, tipo, origem, (f.get("obs") or "").strip() or None,
-         lead_id, conta_id))
+         valor if isinstance(valor, int) else None, lead_id, conta_id))
     return None

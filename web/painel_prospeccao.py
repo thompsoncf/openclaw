@@ -10053,7 +10053,9 @@ def prospeccao_editar_clinica(request: Request, alvo_id: int, empresa: str = For
                               telefone: str = Form(""), email: str = Form(""),
                               instagram: str = Form(""), cidade: str = Form(""),
                               cidade_outra: str = Form(""), tipo_atendimento: str = Form(""),
-                              origem_cliente: str = Form(""), obs: str = Form("")):
+                              origem_cliente: str = Form(""), obs: str = Form(""),
+                              valor: str = Form(""), perda_motivo: str = Form(""),
+                              perda_descricao: str = Form("")):
     """A ficha do cartão de clínica (finance/clinica_cartao.py). Rota própria, e não a
     `/editar` geral: aquela grava todos os campos e limpa o que vem em branco, e a
     ficha da clínica não mostra os de festa e de empresa. Aqui só as colunas da tela
@@ -10070,12 +10072,23 @@ def prospeccao_editar_clinica(request: Request, alvo_id: int, empresa: str = For
               "responsavel_parentesco": responsavel_parentesco, "whatsapp": whatsapp,
               "telefone": telefone, "email": email, "instagram": instagram, "cidade": cidade,
               "cidade_outra": cidade_outra, "tipo_atendimento": tipo_atendimento,
-              "origem_cliente": origem_cliente, "obs": obs}
+              "origem_cliente": origem_cliente, "obs": obs,
+              "valor_centavos": _reais_para_centavos(valor)}
     try:
         with pool.connection() as c:
             if not _cc.e_clinica(c, ctx["conta_id"]):
                 return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
             erro = _cc.salvar(c, ctx["conta_id"], alvo_id, campos)
+            if not erro:
+                # por que perdeu: o mesmo caminho da ficha geral (em branco não mexe)
+                _gravar_origem_e_motivo(c, ctx["conta_id"], alvo_id, "", perda_motivo)
+                if perda_descricao.strip():
+                    try:
+                        with c.transaction():
+                            c.execute("update prospeccao set perda_descricao=%s where id=%s and conta_id=%s",
+                                      (perda_descricao.strip()[:1000], alvo_id, ctx["conta_id"]))
+                    except Exception:  # noqa: BLE001 — coluna da 235
+                        pass
             (c.rollback if erro else c.commit)()
     except UniqueViolation:
         cpf = _validadoc.classificar(documento.strip())[1]
@@ -14183,17 +14196,20 @@ function perdaDesc(sel){
         {% if clinica %}
         {# O CARTÃO DE CLÍNICA (entrega 3a, desenho "Cartão de clínica" de 03/10/2026):
            o paciente, quem fala por ele, a cidade, o tipo de atendimento e como chegou. #}
-        {% if clinica.outra_pessoa %}<div class="drow"><span class="ic">🧑‍🤝‍🧑</span><span class="lb">Responsável</span><span>{{ clinica.responsavel_nome }}{% if clinica.parentesco_rot %} ({{ clinica.parentesco_rot|lower }}){% endif %} · fala pelo WhatsApp</span></div>{% endif %}
+        {# |e em tudo que vem do cadastro: o ambiente do painel só escapa sozinho
+           template com nome .html, e o nome do cartão vem do perfil do WhatsApp #}
+        {% if clinica.outra_pessoa %}<div class="drow"><span class="ic">🧑‍🤝‍🧑</span><span class="lb">Responsável</span><span>{{ clinica.responsavel_nome|e }}{% if clinica.parentesco_rot %} ({{ clinica.parentesco_rot|lower }}){% endif %} · fala pelo WhatsApp</span></div>{% endif %}
+        {% if a.cpf and not a.eh_pf %}<div class="drow"><span class="ic">🪪</span><span class="lb">CPF</span><span>{{ clinica.cpf_fmt|e }}</span></div>{% endif %}
         {% if clinica.nascimento_iso %}<div class="drow"><span class="ic">🎂</span><span class="lb">Nascimento</span><span>{{ a.nascimento.strftime('%d/%m/%Y') }}{% if clinica.idade is not none %} · {{ clinica.idade }} {{ 'ano' if clinica.idade == 1 else 'anos' }}{% endif %}</span></div>{% endif %}
-        <div class="drow"><span class="ic">📍</span><span class="lb">Cidade</span><span>{{ a.cidade or '—' }}</span></div>
+        <div class="drow"><span class="ic">📍</span><span class="lb">Cidade</span><span>{{ (a.cidade or '—')|e }}</span></div>
         <div class="drow"><span class="ic">🩺</span><span class="lb">Atendimento</span><span>{{ clinica.tipo_rot or '—' }}</span></div>
-        <div class="drow"><span class="ic">🧭</span><span class="lb">Como chegou</span><span>{{ clinica.origem_rot or '—' }}</span></div>
+        <div class="drow"><span class="ic">🧭</span><span class="lb">Como chegou</span><span>{{ (clinica.origem_rot or '—')|e }}</span></div>
         {% if clinica.falta %}
         <div id="cl-falta" style="margin:.6rem 0;border:1px solid var(--borda);border-radius:10px;padding:.55rem .7rem;font-size:.82rem">
           <b style="font-size:.84rem">Para sair de Em conversa</b>
           {% for l in clinica.falta.linhas %}<div style="display:flex;justify-content:space-between;gap:.6rem;margin-top:.25rem"><span>{{ l.rotulo }}</span><span style="font-weight:700;color:{{ 'var(--verde)' if l.ok else 'var(--coral)' }}">{{ 'ok' if l.ok else 'falta' }}</span></div>{% endfor %}
           <div style="display:flex;justify-content:space-between;gap:.6rem;margin-top:.25rem"><span>Preço passado</span><span style="font-weight:700;color:{{ 'var(--verde)' if clinica.falta.preco_em else 'var(--txt-mut)' }}">{% if clinica.falta.preco_em %}por escrito {{ clinica.falta.preco_fmt }}{% else %}ainda não{% endif %}</span></div>
-          <div style="display:flex;justify-content:space-between;gap:.6rem;margin-top:.25rem"><span>Próxima ação</span><span style="font-weight:700">{{ clinica.falta.proxima }}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:.6rem;margin-top:.25rem"><span>Próxima ação</span><span style="font-weight:700">{{ clinica.falta.proxima|e }}</span></div>
           {% if not clinica.falta.completo %}<div class="mut" style="font-size:.74rem;margin-top:.35rem">É um aviso: o cartão anda mesmo assim. Preencha em <b>editar</b>.</div>{% endif %}
         </div>
         {% endif %}
@@ -14313,22 +14329,29 @@ function perdaDesc(sel){
                 <label class="rcpill {% if not clinica.outra_pessoa %}on{% endif %}"><input type="radio" name="quem" value="eu" {% if not clinica.outra_pessoa %}checked{% endif %} onchange="clQuem(this)" style="display:none">quem está falando</label>
                 <label class="rcpill {% if clinica.outra_pessoa %}on{% endif %}"><input type="radio" name="quem" value="outro" {% if clinica.outra_pessoa %}checked{% endif %} onchange="clQuem(this)" style="display:none">outra pessoa</label>
               </div></div>
-            <div class="full"><label class="lbl">Nome do paciente</label><input class="fld" name="empresa" value="{{ a.empresa or '' }}"></div>
-            <div data-cl-outro{% if not clinica.outra_pessoa %} style="display:none"{% endif %}><label class="lbl">Responsável (quem fala pelo WhatsApp)</label><input class="fld" name="responsavel_nome" value="{{ clinica.responsavel_nome or '' }}"></div>
+            <div class="full"><label class="lbl">Nome do paciente</label><input class="fld" name="empresa" value="{{ (a.empresa or '')|e }}"></div>
+            <div data-cl-outro{% if not clinica.outra_pessoa %} style="display:none"{% endif %}><label class="lbl">Responsável (quem fala pelo WhatsApp)</label><input class="fld" name="responsavel_nome" value="{{ (clinica.responsavel_nome or '')|e }}"></div>
+            <div class="full mut" id="cl-dados-paciente" style="display:none;font-size:.76rem">CPF e nascimento agora são do paciente: os de quem fala foram tirados deste cartão.</div>
             <div data-cl-outro{% if not clinica.outra_pessoa %} style="display:none"{% endif %}><label class="lbl">Parentesco</label><select class="fld" name="responsavel_parentesco"><option value="">—</option>{% for k, r in clinica.parentescos %}<option value="{{ k }}" {% if clinica.responsavel_parentesco==k %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
             <div><label class="lbl">Nascimento</label><input class="fld" type="date" name="nascimento" value="{{ clinica.nascimento_iso }}"></div>
-            <div><label class="lbl">CPF</label><input class="fld" name="documento" inputmode="numeric" placeholder="000.000.000-00" value="{{ a.doc_fmt if a.eh_pf else '' }}"></div>
-            <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp" value="{{ a.whatsapp or '' }}"></div>
-            <div><label class="lbl">Telefone</label><input class="fld" name="telefone" value="{{ a.telefone or '' }}"></div>
-            <div><label class="lbl">E-mail</label><input class="fld" name="email" value="{{ a.email or '' }}"></div>
-            <div><label class="lbl">Instagram</label><input class="fld" name="instagram" value="{{ a.instagram or '' }}"></div>
-            <div><label class="lbl">Cidade</label><select class="fld" name="cidade" onchange="clCidade(this)"><option value="">—</option>{% for cid in clinica.cidades %}<option value="{{ cid }}" {% if clinica.cidade_sel==cid %}selected{% endif %}>{{ cid }}</option>{% endfor %}<option value="{{ clinica.outra_cidade }}" {% if clinica.cidade_sel==clinica.outra_cidade %}selected{% endif %}>outra…</option></select></div>
-            <div id="cl-cidade-outra"{% if clinica.cidade_sel != clinica.outra_cidade %} style="display:none"{% endif %}><label class="lbl">Qual cidade</label><input class="fld" name="cidade_outra" value="{{ clinica.cidade_outra }}"></div>
+            <div><label class="lbl">CPF</label><input class="fld" name="documento" inputmode="numeric" placeholder="000.000.000-00" value="{{ clinica.cpf_fmt|e }}"></div>
+            <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp" value="{{ (a.whatsapp or '')|e }}"></div>
+            <div><label class="lbl">Telefone</label><input class="fld" name="telefone" value="{{ (a.telefone or '')|e }}"></div>
+            <div><label class="lbl">E-mail</label><input class="fld" name="email" value="{{ (a.email or '')|e }}"></div>
+            <div><label class="lbl">Instagram</label><input class="fld" name="instagram" value="{{ (a.instagram or '')|e }}"></div>
+            <div><label class="lbl">Cidade</label><select class="fld" name="cidade" onchange="clCidade(this)"><option value="">—</option>{% for cid in clinica.cidades %}<option value="{{ cid|e }}" {% if clinica.cidade_sel==cid %}selected{% endif %}>{{ cid|e }}</option>{% endfor %}<option value="{{ clinica.outra_cidade }}" {% if clinica.cidade_sel==clinica.outra_cidade %}selected{% endif %}>outra…</option></select></div>
+            <div id="cl-cidade-outra"{% if clinica.cidade_sel != clinica.outra_cidade %} style="display:none"{% endif %}><label class="lbl">Qual cidade</label><input class="fld" name="cidade_outra" value="{{ clinica.cidade_outra|e }}"></div>
             <div class="full"><label class="lbl">Tipo de atendimento</label>
               <div class="rcpills" data-cl-grupo>{% for k, r in clinica.tipos %}<label class="rcpill {% if clinica.tipo_atendimento==k %}on{% endif %}"><input type="radio" name="tipo_atendimento" value="{{ k }}" {% if clinica.tipo_atendimento==k %}checked{% endif %} onchange="clPill(this)" style="display:none">{{ r }}</label>{% endfor %}</div></div>
             <div class="full"><label class="lbl">Como chegou</label>
-              <div class="rcpills" data-cl-grupo>{% for k, r in clinica.origens %}<label class="rcpill {% if a.origem_cliente==k %}on{% endif %}"><input type="radio" name="origem_cliente" value="{{ k }}" {% if a.origem_cliente==k %}checked{% endif %} onchange="clPill(this)" style="display:none">{{ r }}</label>{% endfor %}</div></div>
-            <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs" value="{{ a.obs or '' }}"></div>
+              <div class="rcpills" data-cl-grupo>{% for k, r in clinica.origens %}<label class="rcpill {% if a.origem_cliente==k %}on{% endif %}"><input type="radio" name="origem_cliente" value="{{ k }}" {% if a.origem_cliente==k %}checked{% endif %} onchange="clPill(this)" style="display:none">{{ r }}</label>{% endfor %}{% if clinica.origem_extra %}<label class="rcpill on"><input type="radio" name="origem_cliente" value="{{ clinica.origem_extra[0]|e }}" checked onchange="clPill(this)" style="display:none">{{ clinica.origem_extra[1]|e }}</label>{% endif %}</div></div>
+            <div><label class="lbl">Valor est. (R$)</label><input class="fld" name="valor" inputmode="decimal" value="{{ (a.valor/100)|n2 if a.valor else '' }}"></div>
+            <div><label class="lbl">Por que perdeu</label><select class="fld" name="perda_motivo" onchange="perdaDesc(this)">
+              <option value="">—</option>{% for m in (motivos_conta or motivos_perda_compat) %}<option value="{{ m.chave }}" data-desc="{{ 1 if m.exige_descricao else 0 }}" {% if a.perda_motivo==m.chave %}selected{% endif %}>{{ m.rotulo|e }}</option>{% endfor %}</select></div>
+            <div class="full" id="perda-desc-campo" style="display:{{ 'block' if a.perda_descricao else 'none' }}">
+              <label class="lbl">Conte o que aconteceu</label>
+              <input class="fld" name="perda_descricao" value="{{ (a.perda_descricao or '')|e }}" placeholder="Obrigatório para este motivo"></div>
+            <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs" value="{{ (a.obs or '')|e }}"></div>
           </div>
           <div style="display:flex;gap:.5rem;margin-top:.7rem"><button class="pbtn" style="margin:0">Salvar dados</button><button type="button" class="pbtn ghost" onclick="prospToggle('edit-dados')">Cancelar</button></div>
         </form>
@@ -14336,12 +14359,21 @@ function perdaDesc(sel){
         function clPill(r){var g=r.closest('[data-cl-grupo]');if(!g)return;g.querySelectorAll('input').forEach(function(x){x.parentNode.classList.toggle('on',x.checked);});}
         function clQuem(r){
           clPill(r);
-          var f=r.form,outro=(r.value==='outro');
+          var f=r.form,el=f.elements,outro=(r.value==='outro'),aviso=document.getElementById('cl-dados-paciente');
           f.querySelectorAll('[data-cl-outro]').forEach(function(d){d.style.display=outro?'':'none';});
-          if(outro&&!f.elements.responsavel_nome.value){
-            f.elements.responsavel_nome.value=f.elements.empresa.value;
-            f.elements.empresa.value='';
-            f.elements.empresa.focus();
+          if(outro&&!el.responsavel_nome.value){
+            el.responsavel_nome.value=el.empresa.value;
+            el.empresa.value='';
+            // o CPF e o nascimento que estavam eram de quem fala, não do paciente
+            if(el.documento.value||el.nascimento.value){
+              el.documento.value='';el.nascimento.value='';
+              if(aviso)aviso.style.display='';
+            }
+            el.empresa.focus();
+          }
+          if(!outro){
+            if(!el.empresa.value)el.empresa.value=el.responsavel_nome.value;
+            if(aviso)aviso.style.display='none';
           }
         }
         function clCidade(s){var d=document.getElementById('cl-cidade-outra');if(d)d.style.display=(s.value==='{{ clinica.outra_cidade }}')?'':'none';}

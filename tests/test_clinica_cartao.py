@@ -133,7 +133,8 @@ def _ficha(lid) -> str:
 def _salvar(lid, **campos):
     kw = {k: "" for k in ("empresa", "documento", "nascimento", "quem", "responsavel_nome",
                           "responsavel_parentesco", "whatsapp", "telefone", "email", "instagram",
-                          "cidade", "cidade_outra", "tipo_atendimento", "origem_cliente", "obs")}
+                          "cidade", "cidade_outra", "tipo_atendimento", "origem_cliente", "obs",
+                          "valor", "perda_motivo", "perda_descricao")}
     kw.update(campos)
     req = _req()
     r = pp.prospeccao_editar_clinica(req, lid, **kw)
@@ -191,9 +192,11 @@ def test_salvar_so_mexe_no_que_esta_na_tela(clinica):
     lid = _lead(clinica, evento_tipo="Casamento", evento_convidados=150, segmento="Estética",
                 socio="Fulano", site_url="https://exemplo.com", valor_estimado_centavos=30000,
                 perda_motivo="outro")
+    # a tela manda o valor que mostra (300,00) e o motivo em branco
     aviso = _salvar(lid, empresa="Marina Costa Lima", whatsapp="86999990001", cidade="Codó",
                     tipo_atendimento="procedimento", origem_cliente="radio", quem="eu",
-                    nascimento="1990-05-02", documento="529.982.247-25", obs="prefere à tarde")
+                    nascimento="1990-05-02", documento="529.982.247-25", obs="prefere à tarde",
+                    valor="300,00")
     assert aviso == "Dados atualizados."
     assert _linha(clinica, lid, "empresa", "cidade", "tipo_atendimento", "origem_cliente",
                   "nascimento", "cpf", "tipo", "obs") == (
@@ -250,11 +253,65 @@ def test_cpf_de_outro_cartao_avisa_em_vez_de_quebrar(clinica):
     assert _linha(clinica, lid, "cpf") == (None,)
 
 
-def test_a_rota_da_clinica_nao_grava_em_outra_conta(monkeypatch, clinica):
+def test_a_rota_da_clinica_nao_grava_em_conta_de_outro_nicho(monkeypatch, clinica):
     monkeypatch.setattr(pp._fr, "perfil_da_conta", lambda c, conta: "eventos")
     lid = _lead(clinica, evento_tipo="Casamento")
     _salvar(lid, cidade="Codó", tipo_atendimento="consulta")
     assert _linha(clinica, lid, "cidade", "tipo_atendimento", "evento_tipo") == (None, None, "Casamento")
+
+
+def test_a_rota_nao_grava_cartao_de_outra_conta_nem_de_outro_vendedor(monkeypatch, clinica):
+    with clinica.connection() as c:
+        de_fora = c.execute("""insert into prospeccao (conta_id, empresa, status) values (40, 'Outra conta', 'novo')
+                               returning id""").fetchone()[0]
+        c.commit()
+    _salvar(de_fora, cidade="Codó")
+    assert _linha(clinica, de_fora, "cidade") == (None,)
+    lid = _lead(clinica, vendedor_id=3)
+    monkeypatch.setattr(pp, "_acesso", lambda req: (
+        {"conta_id": CONTA, "membro_id": 7, "gerencia": False, "pode_atribuir": False}, None))
+    _salvar(lid, cidade="Codó")
+    assert _linha(clinica, lid, "cidade") == (None,)
+
+
+def test_origem_fora_da_lista_da_clinica_fica(clinica):
+    lid = _lead(clinica, origem_cliente="manual", tipo_atendimento="consulta")
+    html = _ficha(lid)
+    assert 'value="manual" checked' in html and "Manual" in html
+    # a tela manda a opção marcada; e em branco (ninguém escolheu) não apaga
+    _salvar(lid, cidade="Codó", origem_cliente="manual")
+    assert _linha(clinica, lid, "origem_cliente", "cidade") == ("manual", "Codó")
+    _salvar(lid, cidade="Codó", origem_cliente="", tipo_atendimento="")
+    assert _linha(clinica, lid, "origem_cliente", "tipo_atendimento") == ("manual", "consulta")
+    assert rxd.rotulo_origem("whatsapp") == "WhatsApp"      # as outras contas não mudam
+
+
+def test_cartao_com_cnpj_continua_pj_e_mostra_o_cpf(clinica):
+    lid = _lead(clinica, tipo="pj", cnpj="11222333000181")
+    _salvar(lid, documento="529.982.247-25", cidade="Codó")
+    assert _linha(clinica, lid, "tipo", "cnpj", "cpf") == ("pj", "11222333000181", "52998224725")
+    html = _ficha(lid)
+    assert 'value="529.982.247-25"' in html
+    # salvar de novo com o CPF que a tela mostra não perde o CPF
+    _salvar(lid, documento="529.982.247-25", cidade="Bacabal")
+    assert _linha(clinica, lid, "cpf", "cidade") == ("52998224725", "Bacabal")
+
+
+def test_valor_e_motivo_da_perda_tambem_na_ficha_da_clinica(clinica):
+    lid = _lead(clinica, status="perdido", perda_motivo="outro")
+    _salvar(lid, valor="1.500,00", perda_motivo="achou_caro")
+    assert _linha(clinica, lid, "valor_estimado_centavos", "perda_motivo") == (150000, "achou_caro")
+    _salvar(lid, valor="1.500,00", perda_motivo="")
+    assert _linha(clinica, lid, "perda_motivo") == ("achou_caro",)
+
+
+def test_nome_com_aspas_e_tags_sai_escapado(clinica):
+    lid = _lead(clinica, empresa='Maria "Nena" <b>Souza</b>', responsavel_nome='Ana <i>mãe</i>',
+                obs='prefere "manhã"')
+    html = _ficha(lid)
+    assert 'value="Maria &#34;Nena&#34; &lt;b&gt;Souza&lt;/b&gt;"' in html
+    assert "Ana &lt;i&gt;mãe&lt;/i&gt; · fala pelo WhatsApp" in html
+    assert 'value="prefere &#34;manhã&#34;"' in html
 
 
 def test_o_que_falta_e_a_proxima_acao():

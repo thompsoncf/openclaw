@@ -79,19 +79,19 @@ def mapa(request: Request):
 
 
 def _arquivo(planta) -> tuple[bytes, str, str] | None:
-    """(conteúdo, tipo, nome) do arquivo do formulário — None quando não
-    escolheram nenhum (o campo vazio chega sem nome, ou vazio)."""
+    """(conteúdo, tipo, nome) do arquivo do formulário — None só quando não
+    escolheram nenhum (o campo vazio do navegador chega SEM NOME). Com nome e 0
+    byte (download que falhou), segue: o `guardar_planta` diz "veio vazio"."""
     if planta is None or isinstance(planta, str) or not (planta.filename or "").strip():
         return None
-    dados = planta.file.read()
-    return (dados, planta.content_type or "", planta.filename) if dados else None
+    return planta.file.read(), planta.content_type or "", planta.filename
 
 
 def _pagina(txt: str) -> int:
     t = (txt or "").strip()
     if not t:
         return 1
-    if not t.isdigit() or int(t) < 1:
+    if not (t.isascii() and t.isdigit()) or int(t) < 1:
         raise ValueError("Página do PDF inválida — use 1, 2, 3…")
     return int(t)
 
@@ -423,7 +423,7 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + _MACRO
     <div class="emp-sel">
       {% for x in mapas %}<a class="emp{{ ' on' if v and not exemplo and v.mapa.id == x.id }}" href="/painel/obras/mapa?m={{ x.id }}">{{ x.nome|e }}</a>{% endfor %}
       {% if exemplo %}<a class="emp on" href="/painel/obras/mapa?exemplo=1">👀 Residencial Exemplo</a>
-      {% else %}<a class="emp mais" href="#nova-area">+ nova área</a><a class="emp mais" href="/painel/obras/mapa?exemplo=1">👀 exemplo</a>{% endif %}
+      {% else %}<a class="emp mais" href="#nova-area" onclick="document.getElementById('nova-area').open=true">+ nova área</a><a class="emp mais" href="/painel/obras/mapa?exemplo=1">👀 exemplo</a>{% endif %}
     </div>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
       <button class="mb" id="bt2d" onclick="setVista('2d')">Planta</button>
@@ -474,7 +474,7 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + _MACRO
 
 {% if v and not exemplo %}
 <details class="om-box" id="importar"{{ ' open' if not v.mapa.tem_planta }}>
-<script>if (location.hash === '#importar') document.getElementById('importar').open = true;</script>
+<script>if (location.hash === '#importar' || location.hash === '#nova-area') document.getElementById(location.hash.slice(1)).open = true;</script>
   <summary>📎 {{ 'Trocar a planta, o croqui ou o desenho' if v.mapa.tem_planta else 'Importar a planta, o croqui ou o desenho' }} · {{ v.mapa.nome|e }}{% if v.mapa.planta_nome %} <span class="om-mut">· arquivo atual: {{ v.mapa.planta_nome|e }}</span>{% endif %}</summary>
   {% if v.mapa.planta_obs %}<p class="om-mut om-obs" style="margin:.5rem 0 0">📎 <b>O que tem no arquivo:</b> {{ v.mapa.planta_obs|e }}</p>{% endif %}
   {{ como_mandar(not v.mapa.tem_planta) }}
@@ -484,7 +484,17 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + _MACRO
   </form>
 </details>
 
-<details class="om-box" id="nova-area"><summary>Dados da área · {{ v.mapa.nome|e }}</summary>
+<details class="om-box" id="nova-area"><summary>➕ Nova área — outro loteamento, quadra ou condomínio</summary>
+  {{ como_mandar(false) }}
+  <form method="post" action="/painel/obras/mapa/nova" enctype="multipart/form-data" class="om-grid">
+    <div><label>Nome</label><input name="nome" placeholder="Santa Marina 3" required></div>
+    <div><label>Cidade (opcional)</label><input name="cidade"></div>
+    {{ campos_arquivo('', false) }}
+    <div><button class="om-bt prim">Criar a área e riscar os lotes</button></div>
+  </form>
+</details>
+
+<details class="om-box" id="dados-area"><summary>Dados da área · {{ v.mapa.nome|e }}</summary>
   <form method="post" action="/painel/obras/mapa/{{ v.mapa.id }}/dados" class="om-grid" style="margin-top:.5rem">
     <div><label>Nome</label><input name="nome" value="{{ v.mapa.nome|e }}" required></div>
     <div><label>Cidade</label><input name="cidade" value="{{ v.mapa.cidade|e }}"></div>
@@ -493,12 +503,6 @@ _TPL_MAPA = r"""{% extends "base" %}{% block conteudo %}""" + _CSS_MAPA + _MACRO
   <form method="post" action="/painel/obras/mapa/{{ v.mapa.id }}/dados" onsubmit="return confirm('Apagar esta área e os riscos dela? As obras ligadas não são tocadas.')" style="margin-top:.4rem">
     <input type="hidden" name="nome" value="{{ v.mapa.nome|e }}"><input type="hidden" name="apagar" value="1">
     <button class="om-bt">Apagar a área</button></form>
-  <hr style="border:none;border-top:1px solid var(--borda);margin:.8rem 0">
-  <form method="post" action="/painel/obras/mapa/nova" class="om-grid">
-    <div><label>Nova área</label><input name="nome" placeholder="Santa Marina 3"></div>
-    <div><label>Cidade</label><input name="cidade"></div>
-    <div><label>&nbsp;</label><button class="om-bt">Criar outra área</button></div>
-  </form>
 </details>
 {% endif %}
 {% endif %}

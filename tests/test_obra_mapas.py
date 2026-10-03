@@ -494,3 +494,41 @@ def test_painel_importar_trocar_e_a_obs_sozinha(pool, conta, monkeypatch):
     # sem arquivo e sem o campo da obs: pede o arquivo
     r = c.post(f"/painel/obras/mapa/{m['id']}/planta", files={"planta": ("", b"", "application/octet-stream")})
     assert "erro=" in r.headers["location"]
+
+
+# ── os achados da verificação independente do #1011 ──────────────────────
+def test_arquivo_vazio_com_nome_avisa_e_pdf_com_senha_explica(pool, conta, monkeypatch):
+    import pymupdf
+    _com_bucket(monkeypatch)
+    c = _painel(pool, conta, monkeypatch)
+    m = om.criar(pool, conta, "Área Achados")
+    r = c.post(f"/painel/obras/mapa/{m['id']}/planta", data={"com_obs": "1", "obs": "", "pagina": "1"},
+               files={"planta": ("planta.pdf", b"", "application/pdf")})          # download que falhou
+    assert "erro=" in r.headers["location"] and not om.obter(pool, conta, m["id"])["tem_planta"]
+    doc = pymupdf.open()
+    doc.new_page(width=200, height=100)
+    try:
+        trancado = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="abc", owner_pw="dono")
+    finally:
+        doc.close()
+    with pytest.raises(ValueError, match="tem senha"):
+        om.guardar_planta(pool, conta, m["id"], trancado, "application/pdf", subir=lambda *a: None)
+    r = c.post(f"/painel/obras/mapa/{m['id']}/planta", data={"com_obs": "1", "obs": "", "pagina": "²"},
+               files={"planta": ("p.png", _png(), "image/png")})
+    from urllib.parse import unquote
+    assert "Página do PDF inválida" in unquote(r.headers["location"])
+
+
+def test_nova_area_tambem_leva_o_arquivo(pool, conta, monkeypatch):
+    _com_bucket(monkeypatch)
+    c = _painel(pool, conta, monkeypatch)
+    m = om.criar(pool, conta, "Área Primeira")
+    html = c.get(f"/painel/obras/mapa?m={m['id']}").text
+    bloco = html.split('id="nova-area"')[1].split('id="dados-area"')[0]
+    assert 'enctype="multipart/form-data"' in bloco and 'name="planta"' in bloco and 'name="obs"' in bloco
+    assert 'id="dados-area"' in html
+    r = c.post("/painel/obras/mapa/nova", data={"nome": "Área Segunda", "pagina": "1", "obs": "Quadra 7"},
+               files={"planta": ("q7.png", _png(), "image/png")})
+    assert r.headers["location"].endswith("/editar")
+    d = om.obter(pool, conta, next(x["id"] for x in om.listar(pool, conta) if x["nome"] == "Área Segunda"))
+    assert d["tem_planta"] and d["planta_obs"] == "Quadra 7" and d["planta_nome"] == "q7.png"

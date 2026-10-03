@@ -142,6 +142,9 @@ def _pdf_pra_png(conteudo: bytes, pagina: int = 1) -> tuple[bytes, int, int]:
         import pymupdf
         doc = pymupdf.open(stream=conteudo, filetype="pdf")
         try:
+            if doc.needs_pass:
+                raise ValueError("Esse PDF tem senha — salve uma cópia sem senha (ou imprima em PDF) "
+                                 "e mande de novo.")
             n = doc.page_count
             if not 1 <= pagina <= n:
                 raise ValueError(f"Esse PDF tem {n} página{'s' if n != 1 else ''} — "

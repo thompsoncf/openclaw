@@ -97,7 +97,10 @@ def quantidade_br(txt) -> Decimal:
         raise ValueError("Quantidade não pode ser negativa.")
     if d >= Decimal("1e9"):
         raise ValueError("Quantidade grande demais.")
-    return d.quantize(Decimal("0.001"))
+    d = d.quantize(Decimal("0.001"))
+    if d >= Decimal("1e9"):                   # 999999999,9996 arredonda pra 1 bilhão
+        raise ValueError("Quantidade grande demais.")
+    return d
 
 
 def rotulo(qtd, unidade: str) -> str:

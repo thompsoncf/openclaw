@@ -281,7 +281,8 @@ def test_quantidade_como_se_digita_no_brasil(pool, conta):
     assert omat.quantidade_br("1.000") == 1000 and omat.quantidade_br("1,5") == Decimal("1.5")
     assert omat.quantidade_br("1.250,5") == Decimal("1250.5") and omat.quantidade_br("1.5") == Decimal("1.5")
     assert omat.quantidade_br("0.500") == Decimal("0.5") and omat.quantidade_br("10.0004") == 10
-    for ruim in ("nan", "snan", "inf", "-inf", "1e12", "99999999999", "", "trinta", "-1"):
+    for ruim in ("nan", "snan", "inf", "-inf", "1e12", "99999999999", "", "trinta", "-1",
+                 "999999999,9999", "999999999.9996"):
         with pytest.raises(ValueError):
             omat.quantidade_br(ruim)
     lid = _nota(pool, conta, [("TIJOLO 8 FUROS", 1000, "un"), ("CONCRETO USINADO", Decimal("1.125"), "m3")])

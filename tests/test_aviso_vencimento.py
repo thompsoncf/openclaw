@@ -20,16 +20,22 @@ DUAS COISAS QUE ESTE ARQUIVO GUARDA, e que são fáceis de quebrar sem perceber:
 
 `_plano_aviso` é pura: a decisão inteira é testada sem banco e sem tela.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 
 from contas.contas import Conta, acesso_liberado
+from tests.relogio_fixo import HOJE
 from web.portal import _plano_aviso
 
-ONTEM = date.today() - timedelta(days=1)
-DAQUI_3 = date.today() + timedelta(days=3)
-DAQUI_60 = date.today() + timedelta(days=60)
+# O "hoje" é o de Brasília, com o processo parado às 23h (02h UTC do dia
+# seguinte) — ver tests/relogio_fixo.py. Eram `date.today()` calculado no IMPORT
+# contra o dia que o `_plano_aviso` lê na EXECUÇÃO: no CI do #961 a suíte começou
+# às 23:59 UTC, este arquivo rodou às 00:08 e o "vence em 3 dias" saiu 2.
+pytestmark = pytest.mark.usefixtures("servidor_as_23h")
+ONTEM = HOJE - timedelta(days=1)
+DAQUI_3 = HOJE + timedelta(days=3)
+DAQUI_60 = HOJE + timedelta(days=60)
 
 
 def conta(status="ativa", vencimento=None):

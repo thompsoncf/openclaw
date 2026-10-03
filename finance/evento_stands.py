@@ -350,10 +350,17 @@ def _registrar_reserva_do_stand(pool, conta_id: int, stand: dict, nome: str, wha
             "values (%s,%s,%s,'novo','pagina_stands',%s) returning id",
             (conta_id, nome[:200], (whatsapp or "").strip()[:40] or None,
              int(vendedor_id) if vendedor_id else None)).fetchone()[0]
-        c.execute("update evento_stands set prospeccao_id=%s, atualizado_em=now() "
-                  "where conta_id=%s and prospeccao_id is null and (codigo=%s or "
-                  "(%s::bigint is not null and orcamento_id=%s::bigint))",
-                  (pid, conta_id, stand["codigo"], oid, oid))
+        cur = c.execute("update evento_stands set prospeccao_id=%s, atualizado_em=now() "
+                        "where conta_id=%s and prospeccao_id is null and (codigo=%s or "
+                        "(%s::bigint is not null and orcamento_id=%s::bigint))",
+                        (pid, conta_id, stand["codigo"], oid, oid))
+        if cur.rowcount == 0:
+            # outro salvar (clique duplo, duas abas) registrou a reserva no meio tempo:
+            # a prospecção nova não fica órfã — vale a que já está no stand
+            c.rollback()
+            r = c.execute("select prospeccao_id from evento_stands where conta_id=%s and codigo=%s",
+                          (conta_id, stand["codigo"])).fetchone()
+            return int(r[0]) if r and r[0] else None
         c.commit()
     return int(pid)
 

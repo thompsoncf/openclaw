@@ -46,6 +46,14 @@ _TOKENS = """
   --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
   --coral-borda:#5A2B2B; --coral-fundo:#241313;
   --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --roxo-borda:#45375A;  --roxo-fundo:#1D1724;
+
+  /* ---- tons de apoio (temas, fase 2: docs/mockups/zaq_temas.html) ----
+     Entraram pra receber as cores soltas das telas antigas sem inventar uma por
+     tela: um texto entre o principal e o apagado (os #ccc/#b4b2a9 de antes), uma
+     borda de campo mais visível que a linha (os #333/#444/#555) e o fundo de
+     hover, que é um véu e por isso serve em cima de qualquer superfície. */
+  --text-2:#BAC7BF; --line-2:#2F3F36; --hover:rgba(234,242,237,.05);
 
   /* ---- tipografia ---- */
   --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -179,6 +187,10 @@ _CLARO = """
   --ambar-borda:#E6CD8F; --ambar-fundo:#FBF1DA;
   --coral-borda:#EBB9B4; --coral-fundo:#FBE8E6;
   --azul-borda:#B4D2E7;  --azul-fundo:#E4F0F8;
+  --roxo-borda:#D9C8E8;  --roxo-fundo:#F3ECF8;
+
+  /* ---- tons de apoio ---- */
+  --text-2:#2E3B34; --line-2:#C3CEC7; --hover:rgba(16,26,20,.05);
 """
 
 #: Os temas que existem. `escuro` é o padrão e não escreve nada no `<html>`.

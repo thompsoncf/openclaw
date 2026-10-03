@@ -104,7 +104,8 @@ def test_a_conferencia_e_um_template_so():
 
 def test_o_visto_da_conferencia_nao_herda_a_caixa_verde_global():
     """`.ok` existe no portal como caixa de status; sem zerar, cada ✓ vira quadrado."""
-    assert ".ok{background:#15301f;border:1px solid var(--verde)" in PORTAL
+    # a cor virou token na fase 2a dos temas; o que importa é a caixa (fundo + borda)
+    assert ".ok{background:var(--neon-fundo);border:1px solid var(--verde)" in PORTAL
     assert ".rn-conf .ok,.rn-conf .no{background:none;border:0" in PA
 
 

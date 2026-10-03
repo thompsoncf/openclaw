@@ -151,6 +151,20 @@ def so_robo_sem_resposta(c, conversa_id: int) -> bool:
         (conversa_id, conversa_id)).fetchall()
     return bool(rows) and all(e_robo(t) for (t,) in rows)
 
+#: A PROMESSA SEM NINGUÉM POR TRÁS (03/10/2026, Prime): a retomada do lead #1333 disse
+#: "a disponibilidade de 14/11 eu vou confirmar com a equipe agora mesmo" e a do #1354
+#: "vou pedir pra equipe te enviar [as fotos] agora" — e ninguém da equipe soube. O
+#: pedido agora manda a IA não prometer e devolver a `pendencia`; isto é a rede: a
+#: promessa que escapar ainda vira aviso pra equipe. Falso positivo custa um aviso a
+#: mais, nunca uma mensagem a menos.
+RE_PROMESSA = re.compile(
+    r"(?<!\w)(agora mesmo|j[aá] (te )?(mando|envio|passo|confirmo|retorno)|"
+    r"vou (pedir|acionar|confirmar|verificar|checar|consultar|conferir|ver)[^.!?\n]{0,50}"
+    r"(equipe|time|pessoal|agenda)|"
+    r"(acionar|chamar|avisar) (a |o )?(equipe|time|pessoal)|"
+    r"(equipe|time|pessoal)[^.!?\n]{0,30}(vai|v[aã]o) (te )?(enviar|mandar|confirmar|retornar|responder))(?!\w)",
+    re.I)
+
 FAIXAS = {1: "Cliente esperando resposta", 2: "Festa com data por vir",
           3: "Aberto", 4: "Perdido"}
 
@@ -579,17 +593,38 @@ def _resumo_linha(resumo: dict | None) -> str:
     return " · ".join(p for p in partes if p)[:200]
 
 
+#: o "não chamar" de quem JÁ É CLIENTE da empresa (03/10/2026, Prime, lead #881: o pai
+#: de um cliente com a festa paga): esse não vai pra Perdido
+JA_CLIENTE = "ja_e_cliente"
+#: o motivo do movimento no histórico do funil, quando o descarte leva o card a Perdido
+MOTIVO_MOV_DESCARTE = "resgate_descartou"
+
+
+def _motivos_perda(c, conta_id: int) -> list[tuple[str, str]]:
+    """Os motivos de perda ATIVOS desta empresa (chave, rótulo), só lendo — nunca
+    semeia. Vazio sem a tabela."""
+    try:
+        with c.transaction():
+            return [(r[0], r[1]) for r in c.execute(
+                """select chave, rotulo from funil_motivos_perda
+                    where conta_id=%s and ativo order by ordem, id""", (conta_id,)).fetchall()]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _pedido_retomada(lead: dict, regra: dict | None, festa: bool, historico: str,
                      dias_parado: int, *, resumo: dict | None = None,
-                     perda: tuple | None = None) -> str:
+                     perda: tuple | None = None, motivos: list | None = None) -> str:
     apres = ((regra or {}).get("ia_apresentacao") or "").strip()
     passo = ("convidar pra conhecer o espaço (a visita)" if festa
              else "convidar pra uma conversa rápida com a equipe")
     faixa = lead["faixa"]
     situacao = {
         1: "O CLIENTE FEZ A ÚLTIMA PERGUNTA E FICOU SEM RESPOSTA. Peça desculpa pela demora "
-           "em uma frase e responda o que ele perguntou (só com o que está na base; o que não "
-           "estiver, diga que confirma).",
+           "em uma frase e responda o que ele perguntou, só com o que está na base. O que NÃO "
+           "estiver na base (se uma data está livre, fotos, um valor que não está no "
+           "catálogo): diga que a equipe confere e responde por aqui, e escreva em "
+           "\"pendencia\" o que a equipe precisa fazer.",
         2: "O cliente tem uma data em vista. Lembre o que ele queria (a data, o tipo, quantas "
            "pessoas, se estiver na conversa) sem afirmar que a data está livre.",
         3: "A conversa esfriou. Retome lembrando o que ele procurava.",
@@ -614,10 +649,19 @@ def _pedido_retomada(lead: dict, regra: dict | None, festa: bool, historico: str
         "- Até 4 linhas, sem lista, sem link, no máximo 1 emoji. Use o primeiro nome dele "
         "se souber.\n"
         "- Nunca cite o vendedor anterior nem diga que alguém esqueceu ou saiu.\n"
+        "- Nunca prometa prazo nem ação sua ou da equipe (\"agora mesmo\", \"já te mando\", "
+        "\"vou pedir pra equipe\"): você não envia foto nem consulta a agenda. O que depender "
+        "da equipe vai em \"pendencia\" — é ela que avisa a equipe.\n"
         "- Se a conversa ou o resumo mostram que ele JÁ FECHOU com outro, desistiu, ou "
         "pediu pra não ser chamado, NÃO escreva: retorne "
-        '{"nao_chamar": true, "motivo": "uma frase dizendo por quê"}.\n'
-        'Senão, retorne APENAS JSON: {"mensagem":"texto pra mandar ao cliente"}')
+        '{"nao_chamar": true, "motivo": "uma frase dizendo por quê", '
+        '"motivo_perda": "a chave da lista abaixo que melhor explica — ou '
+        f'\\"{JA_CLIENTE}\\" se ele JÁ FECHOU COM A EMPRESA (é cliente)"}}.\n'
+        + ("  Motivos de perda: " + "; ".join(f"{k} = {v}" for k, v in motivos) + ".\n"
+           if motivos else "")
+        + 'Senão, retorne APENAS JSON: {"mensagem":"texto pra mandar ao cliente", '
+        '"pendencia":"o que a equipe precisa fazer por este cliente, numa frase (ex.: '
+        'confirmar se 14/11 está livre; mandar fotos do salão) — ou vazio"}')
 
 
 def _resumo_antes(pool, conta_id: int, lead_id: int) -> dict | None:
@@ -683,8 +727,29 @@ def rascunho(r) -> dict | None:
     if r is None or r == "":
         return None
     if isinstance(r, str):
-        return {"texto": r, "resumo_linha": "", "avisos": []}
+        return {"texto": r, "resumo_linha": "", "avisos": [], "pendencia": pendencia_da(r)}
     return r
+
+
+def _avisar_pendencia(pool, conta_id: int, regra, lead: dict, pendencia: str) -> None:
+    """A retomada saiu dizendo que a equipe confere algo: a equipe fica sabendo, pelo
+    mesmo caminho de "a IA precisa de você" (o aviso da regra do membro IA + o
+    supervisor, porque o lead é do resgate). Fica anotado pro resumo do dia. Nunca
+    levanta: a mensagem já saiu, e o aviso não pode desfazê-la."""
+    from finance import chip_regra as _cr
+    try:
+        with pool.connection() as c:
+            _registrar(c, conta_id, "pendencia", lead=lead["id"], ref_em=lead.get("desde"),
+                       texto=pendencia)
+            c.commit()
+        _cr.avisar(pool, conta_id, dict(regra or {}, resgate=True), "fora_da_base",
+                   prospeccao_id=lead["id"], conversa_id=lead.get("conversa_id"),
+                   lead=lead.get("quem") or "",
+                   resumo=f"Resgate: {pendencia}. A IA disse ao cliente que a equipe confere "
+                          "e responde pela conversa.")
+    except Exception as e:  # noqa: BLE001
+        _log.warning("resgate: aviso da pendência falhou (conta=%s lead=%s): %s",
+                     conta_id, lead.get("id"), e)
 
 
 def redigir(pool, conta_id: int, lead: dict, regra: dict | None,
@@ -709,7 +774,8 @@ def redigir(pool, conta_id: int, lead: dict, regra: dict | None,
             festa = _perfil_eventos(c, conta_id)
             system = _system(pool, c, conta_id, festa)
             pedido = _pedido_retomada(lead, regra, festa, _historico(c, lead["conversa_id"]),
-                                      dias_parado, resumo=resumo, perda=_perda(c, conta_id, lead))
+                                      dias_parado, resumo=resumo, perda=_perda(c, conta_id, lead),
+                                      motivos=_motivos_perda(c, conta_id))
             c.commit()
         brain = Brain()
         resp = brain.chamar(system=system, mensagens=[{"role": "user", "content": pedido}])
@@ -722,8 +788,10 @@ def redigir(pool, conta_id: int, lead: dict, regra: dict | None,
         d = ag._extrair_json(txt)
         if d.get("nao_chamar") is True:
             return {"nao_chamar": True,
-                    "motivo": (str(d.get("motivo") or "").strip() or "a conversa diz que acabou")[:240]}
+                    "motivo": (str(d.get("motivo") or "").strip() or "a conversa diz que acabou")[:240],
+                    "motivo_perda": str(d.get("motivo_perda") or "").strip()[:40]}
         msg = (d.get("mensagem") or "").strip()
+        pendencia = str(d.get("pendencia") or "").strip()
         from finance import calendario as _cal
         msg = _cal.corrigir(msg)
     except Exception as e:  # noqa: BLE001
@@ -733,7 +801,20 @@ def redigir(pool, conta_id: int, lead: dict, regra: dict | None,
     if not msg:
         return None
     return {"texto": msg, "resumo_linha": _resumo_linha(resumo),
+            "pendencia": pendencia_da(msg, pendencia),
             "avisos": _valores_fora(pool, conta_id, lead["id"], festa, msg)}
+
+
+def pendencia_da(msg: str, pendencia: str = "") -> str:
+    """O que a equipe precisa fazer depois desta mensagem: a `pendencia` que a IA
+    devolveu, ou — se ela prometeu sem devolver (RE_PROMESSA) — a própria promessa,
+    pra equipe ler e cumprir. Vazio quando não há nada."""
+    pendencia = (pendencia or "").strip()
+    if pendencia.lower() in ("vazio", "nenhuma", "nada", "-", "null", "none"):
+        pendencia = ""
+    if not pendencia and RE_PROMESSA.search(msg or ""):
+        pendencia = f"conferir o que a IA prometeu ao cliente: “{(msg or '').strip()[:240]}”"
+    return pendencia[:300]
 
 
 # ══════════════════════════════════════════════════════════════════ os envios
@@ -1019,7 +1100,8 @@ def _mandar_retomada(pool, conta_id: int, cfg: dict, lead: dict, texto: str) -> 
 
 
 def _previa(lead: dict, vendedor: str, texto: str, n: int, teto: int, dias: int, *,
-            resumo_linha: str = "", avisos: list | None = None, nao_chamar: str = "") -> str:
+            resumo_linha: str = "", avisos: list | None = None, nao_chamar: str = "",
+            pendencia: str = "") -> str:
     festa = (f"\nFesta {lead['evento_em'].strftime('%d/%m')}" if lead.get("evento_em") else "")
     origem = ORIGENS.get(lead.get("origem") or "", "")
     cab = (f"🧪 Ensaio do resgate · {n} de {teto} hoje\n"
@@ -1033,6 +1115,8 @@ def _previa(lead: dict, vendedor: str, texto: str, n: int, teto: int, dias: int,
         return cab + f"\nEu NÃO chamaria: {nao_chamar}\n\nNada foi enviado pra cliente."
     aviso = ("\n⚠️ " + " ".join(avisos) + " No Ligado, esta não sairia sozinha: viria pra você."
              if avisos else "")
+    if pendencia:
+        aviso += f"\n📌 Pra equipe: {pendencia}"
     return cab + f"\nEu mandaria:\n“{texto}”{aviso}\n\nNada foi enviado pra cliente."
 
 
@@ -1292,6 +1376,9 @@ def resumo(c, conta_id: int, cfg: dict, agora: datetime) -> str:
                              and estado='pausado'""", (conta_id,)).fetchone()[0]
     if pausados:
         linhas.append(f"{pausados} com alguém da equipe falando com o cliente (eu saí)")
+    pend = _contagem_hoje(c, conta_id, ("pendencia",), agora)
+    if pend:
+        linhas.append(f"{pend} com algo pra equipe conferir (avisei)")
     robos = _contagem_hoje(c, conta_id, ("robo",), agora)
     if robos:
         linhas.append(f"{robos} era atendimento automático, não gente (não respondi)" if robos == 1
@@ -1561,6 +1648,60 @@ def _perder_sem_resposta(pool, conta_id: int, agora: datetime) -> int:
     return n
 
 
+def _perder_descartado(pool, conta_id: int, lead_id: int, motivo_perda: str,
+                       motivo: str) -> str:
+    """O DESCARTE VAI PRA PERDIDO (pedido do dono em 03/10/2026, Prime: o #1355 cancelou
+    o evento e o #1352 era número errado, e os dois ficaram parados na coluna da
+    vendedora, com o follow-up dela cobrando). Pela mesma porta do perdido automático
+    (`funil_perdido.fechar`): status, histórico do funil e motivo de perda — o motivo
+    que a IA escolheu da lista da empresa, e a frase dela na descrição. O DONO NÃO
+    MUDA: o lead nunca passou pra IA.
+
+    Não mexe em quem já é cliente (`JA_CLIENTE`), no card que já está em Perdido, nem
+    no fechado ou que espera a empresa (lista de espera, data segurada). Devolve a
+    frase pro supervisor; vazio se não mexeu por corrida. Nunca levanta."""
+    from finance import funil_perda as _fpe
+    from finance import funil_regua as fr
+    if motivo_perda == JA_CLIENTE:
+        return "Não mexi no card: ele já é cliente."
+    try:
+        with pool.connection() as c:
+            row = c.execute(
+                f"""select p.status, (p.status in {fr.sql_fechadas('p')} or not {fr.sql_nao_cobra('p')})
+                      from prospeccao p where p.id=%s and p.conta_id=%s""",
+                (lead_id, conta_id)).fetchone()
+            if not row:
+                c.commit()
+                return ""
+            status, fechado = row
+            if status == "perdido":
+                c.commit()
+                return "O card já estava em Perdido."
+            if fechado:
+                c.commit()
+                return "Não mexi no card (fechado ou esperando a empresa)."
+            validos = dict(_motivos_perda(c, conta_id))
+            chave = (motivo_perda if motivo_perda in validos
+                     else "outro" if "outro" in validos else "")
+            with c.transaction():
+                movido = c.execute(
+                    """update prospeccao set status='perdido', atualizado_em=now()
+                        where id=%s and conta_id=%s and status=%s""",
+                    (lead_id, conta_id, status)).rowcount
+                if movido:
+                    fr.registrar_movimento(c, conta_id, lead_id, status, "perdido",
+                                           MOTIVO_MOV_DESCARTE)
+                    _fpe.registrar(c, conta_id, lead_id, motivo=chave,
+                                   descricao=f"Resgate da IA: {motivo}", etapa_origem=status)
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("resgate: não levei o descartado %s pra Perdido: %s", lead_id, e)
+        return ""
+    if not movido:
+        return ""
+    return f"Movi pra Perdido ({validos.get(chave) or chave or 'sem motivo'})."
+
+
 def _um_envio(pool, conta_id: int, cfg: dict, regra, todos: list[dict], agora: datetime,
               out: dict) -> None:
     ligado = cfg["modo"] == "ligado"
@@ -1629,9 +1770,12 @@ def _um_envio(pool, conta_id: int, cfg: dict, regra, todos: list[dict], agora: d
                 _registrar(c, conta_id, "descartado", lead=candidato["id"],
                            ref_em=candidato["desde"], texto=r["motivo"])
                 c.commit()
+            card = _perder_descartado(pool, conta_id, candidato["id"], r.get("motivo_perda") or "",
+                                      r["motivo"])
             supervisor(pool, conta_id, f"🗑 Resgate · lead #{candidato['id']} "
                                        f"({_primeiro(candidato['quem'])}): não chamei. "
-                                       f"{r['motivo']}", lead=candidato["id"], cfg=cfg)
+                                       f"{r['motivo']}" + (f"\n{card}" if card else ""),
+                       lead=candidato["id"], cfg=cfg)
         elif supervisor(pool, conta_id, _previa(candidato, vendedor, "", n_hoje, teto, dias,
                                                 nao_chamar=r["motivo"]),
                         tipo="previa", lead=candidato["id"], ref_em=candidato["desde"], cfg=cfg):
@@ -1653,9 +1797,12 @@ def _um_envio(pool, conta_id: int, cfg: dict, regra, todos: list[dict], agora: d
             return
         if _mandar_retomada(pool, conta_id, cfg, candidato, r["texto"]):
             out["retomadas"] += 1
+            if r.get("pendencia"):
+                _avisar_pendencia(pool, conta_id, regra, candidato, r["pendencia"])
     elif supervisor(pool, conta_id, _previa(candidato, vendedor, r["texto"], n_hoje, teto, dias,
                                             resumo_linha=candidato["resumo_linha"],
-                                            avisos=r.get("avisos")),
+                                            avisos=r.get("avisos"),
+                                            pendencia=r.get("pendencia") or ""),
                     tipo="previa", lead=candidato["id"], ref_em=candidato["desde"], cfg=cfg):
         out["previas"] += 1
 

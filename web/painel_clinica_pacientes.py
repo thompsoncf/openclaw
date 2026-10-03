@@ -274,7 +274,7 @@ _CSS = r"""<style>
 .pc-t th{font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut)}
 .pc-t a.nm{font-weight:600;color:var(--txt);text-decoration:none}.pc-m{font-size:.78rem;color:var(--txt-mut)}
 .pc-tag{display:inline-block;font-size:.68rem;padding:.05rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut);margin:0 .2rem .15rem 0}
-.pc-tag.g{border-color:#2C6E52;color:#7EE7B8}.pc-tag.y{border-color:var(--ambar-borda);color:#F0DCA6;background:var(--ambar-fundo)}
+.pc-tag.g{border-color:var(--neon-borda);color:var(--neon)}.pc-tag.y{border-color:var(--ambar-borda);color:var(--ambar);background:var(--ambar-fundo)}
 .pc-acoes{display:flex;gap:.35rem;flex-wrap:wrap}.pc-acoes a,.pc-acoes button{width:auto;margin:0;min-height:32px;padding:.2rem .6rem;font-size:.78rem;border-radius:8px;background:transparent;border:1px solid var(--borda);color:var(--txt);text-decoration:none;display:inline-flex;align-items:center}
 .pc-cx{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.8rem .9rem;margin-top:1rem}
 .pc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.6rem}

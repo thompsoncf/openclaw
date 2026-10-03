@@ -9087,6 +9087,7 @@ def regua_pagina(request: Request):
                    secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
                    esc=esc, teto=teto, fup=fup, janela_herda=janela_herda, rot_ramo=rot_ramo,
+                   e_clinica=(perfil_chave == "clinica"),
                    motivos_conta=motivos_conta, modelo=modelo,
                    modelo_motivos=modelo_motivos,
                    escolhidas_tpl=escolhidas, padrao_tpl=padrao,
@@ -18350,6 +18351,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <!-- ---------------- etapas ---------------- -->
   <div class="fsec" id="etapas" style="margin-top:1rem">
+    {% if e_clinica %}<div class="ok" style="margin-bottom:.6rem">Clínica: o funil aprovado (Consulta, Em tratamento, Retorno) e o que anda sozinho se ligam numa tela só, em <a href="/painel/clinica/funil">Funil da clínica</a>.</div>{% endif %}
     <div class="sh"><b>As etapas do funil</b><span class="mut" style="font-size:.76rem">{% if not modelo.itens %}<span id="modelo" title="{{ modelo.colunas|join(' · ') }}">igual ao modelo de {{ rot_ramo }} ✓</span> · {% endif %}cada linha salva sozinha · ligue um gatilho de cada vez</span></div>
 
     <!-- o modelo do ramo: as colunas que o RAMO usa (finance.raio_x_perfil.etapas_padrao).

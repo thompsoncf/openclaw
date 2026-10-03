@@ -141,6 +141,7 @@ from web.app_obra import router as app_obra_router
 from web.painel_clinica_agenda import router as clinica_agenda_router
 from web.painel_clinica_vagas import router as clinica_vagas_router
 from web.painel_clinica_planos import router as clinica_planos_router
+from web.painel_clinica_funil import router as clinica_funil_router
 from web.painel_clinica_pacotes import router as clinica_pacotes_router
 from web.painel_clinica_numeros import router as clinica_numeros_router
 from web.painel_clinica_assinaturas import router as clinica_assinaturas_router
@@ -347,6 +348,7 @@ app.include_router(obras_router)
 app.include_router(clinica_agenda_router)
 app.include_router(clinica_vagas_router)
 app.include_router(clinica_planos_router)
+app.include_router(clinica_funil_router)
 app.include_router(clinica_pacotes_router)
 app.include_router(clinica_numeros_router)
 app.include_router(clinica_assinaturas_router)
